@@ -248,5 +248,67 @@ export function cleanupDataDir(dir: string): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Synthetic client helper
+// ---------------------------------------------------------------------------
+// Spawns tests/integration/harness/synth_client.py under `uv run python`,
+// which connects to the running server and emits one session worth of
+// spans (INVOCATION + LLM_CALL + TOOL_CALL) then exits. The golden-path
+// spec uses this to populate the UI with deterministic content before
+// it starts asserting against the rendered Gantt.
+
+export interface SyntheticAgentOptions {
+  serverGrpcPort: number;
+  sessionTitle?: string;
+  timeoutMs?: number;
+}
+
+export async function startSyntheticAgent(
+  opts: SyntheticAgentOptions,
+): Promise<void> {
+  const sessionTitle = opts.sessionTitle ?? "smoke-golden-path";
+  const timeoutMs = opts.timeoutMs ?? 30_000;
+  const script = join(HARNESS_DIR, "synth_client.py");
+
+  const child = spawn(
+    "uv",
+    [
+      "run",
+      "python",
+      script,
+      "--server-addr",
+      `127.0.0.1:${opts.serverGrpcPort}`,
+      "--session-title",
+      sessionTitle,
+    ],
+    {
+      cwd: REPO_ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env },
+    },
+  );
+  attachLog(child, "[synth]");
+
+  await new Promise<void>((resolveDone, rejectDone) => {
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // ignore
+      }
+      rejectDone(new Error(`synthetic client timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolveDone();
+      else rejectDone(new Error(`synthetic client exited with code ${code}`));
+    });
+    child.once("error", (err) => {
+      clearTimeout(timer);
+      rejectDone(err);
+    });
+  });
+}
+
 export type { ChildProcess };
 export { spawn };

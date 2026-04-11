@@ -1,4 +1,5 @@
 import { test, expect } from "../harness/fixtures.js";
+import { startSyntheticAgent } from "../harness/processes.js";
 
 // ===========================================================================
 // Golden-path cross-component smoke (task #11)
@@ -82,43 +83,51 @@ import { test, expect } from "../harness/fixtures.js";
 // ===========================================================================
 
 test.describe("golden path", () => {
-  test.skip(
-    true,
-    "scaffold only — unblocks when tasks #4, #5, #6 land and selectors exist",
-  );
-
   test("client emits -> server fans in -> frontend renders -> operator acts", async ({
     page,
     stack,
   }) => {
-    await page.goto("/");
-
+    // Step 1–2: stack is already up via the worker fixture.
+    await page.goto(stack.frontendUrl);
     await expect(page.getByTestId("app-bar")).toBeVisible();
     await expect(page.getByTestId("nav-rail")).toBeVisible();
 
-    // Step 3: synthetic client emits. Left as TODO — will reuse the
-    // ADK happy-path harness that e2e/test_adk_hello.py sets up.
-    //
-    // const synth = await startSyntheticAgent({
-    //   serverPort: stack.serverPort,
-    //   sessionId: "smoke-golden-path",
-    // });
+    // Step 3: drive a synthetic agent through the Python client. The
+    // helper exits cleanly after flushing, leaving the server with a
+    // single session `smoke-golden-path` carrying 3 spans.
+    await startSyntheticAgent({ serverGrpcPort: stack.serverGrpcPort });
 
-    // Step 4–6: session + gantt + inspector.
+    // Step 4: session picker shows the live session. The picker polls
+    // ListSessions every 5s, so we let the toBeVisible expect ride out
+    // a poll cycle if the synthetic landed between ticks.
     await page.getByTestId("session-picker").click();
-    await page.getByTestId("session-picker-item").getByText("smoke-golden-path").click();
+    await expect(page.getByTestId("session-picker-menu")).toBeVisible();
+    const row = page
+      .getByTestId("session-picker-item")
+      .filter({ hasText: "smoke-golden-path" });
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    await row.first().click();
 
+    // Step 5: one agent row, three span blocks.
     const rows = page.getByTestId("gantt-agent-row");
     await expect(rows).toHaveCount(1);
-
     const blocks = page.getByTestId("gantt-span-block");
     await expect(blocks).toHaveCount(3);
 
-    await blocks.filter({ has: page.locator('[data-span-kind="LLM_CALL"]') }).first().click();
+    // Step 6: drill into the LLM_CALL span and assert the inspector. The
+    // GanttDomProxy overlay carries pointer-events:none so clicks fall
+    // through to the canvas hit-tester underneath; force the click so
+    // Playwright doesn't reject the proxy as "intercepted".
+    await page
+      .locator(
+        '[data-testid="gantt-span-block"][data-span-kind="LLM_CALL"]',
+      )
+      .first()
+      .click({ force: true });
     await expect(page.getByTestId("inspector-drawer")).toBeVisible();
     await expect(page.getByTestId("inspector-span-name")).toContainText("llm");
 
-    // Step 7: payload tab.
+    // Step 7: payload tab — lazy GetPayload round-trip.
     await page.getByTestId("inspector-tab-payload").click();
     await expect(page.getByTestId("payload-content")).not.toBeEmpty();
 
@@ -128,9 +137,8 @@ test.describe("golden path", () => {
     await page.getByTestId("annotation-submit").click();
     await expect(page.getByTestId("pin").first()).toBeVisible();
 
-    // Step 9 + 10: steering + HITL. Full wiring lands when the
-    // harness spawns a synthetic that keeps a span RUNNING / enters
-    // AWAITING_HUMAN on cue.
-    void stack;
+    // Step 9 + 10: steering + HITL are still deferred — they need a
+    // synthetic that keeps a span RUNNING / enters AWAITING_HUMAN on
+    // cue. Tracked separately from the golden-path scaffold.
   });
 });
