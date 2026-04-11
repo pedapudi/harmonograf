@@ -1,30 +1,555 @@
-"""gRPC bidirectional transport — SKELETON.
+"""gRPC bidi transport for the harmonograf client.
 
-This file is a placeholder. The real implementation is wired up after
-task #2 (proto codegen) lands so we can import ``harmonograf.v1`` and
-its ``HarmonografStub``.
+The :class:`Transport` runs on a daemon thread that owns its own asyncio
+event loop. Agent code calls :meth:`Transport.notify` (a thread-safe,
+non-blocking poke) whenever new envelopes are pushed into the event
+ring buffer; the loop drains the buffer onto the ``StreamTelemetry``
+bidi RPC. A second coroutine subscribes to ``SubscribeControl`` and
+dispatches ``ControlEvent``\\s to user-registered handlers, with acks
+fed back onto the telemetry upstream.
 
-Planned shape:
+Reconnect is exponential backoff with jitter (100ms → 30s). On
+reconnect the resume token = last server-acked span id is sent in the
+new Hello so the server can dedup replays.
 
-* ``Transport`` owns a background thread running an asyncio loop, a
-  ``Connect`` bidi stream, an exponential-backoff reconnect, a
-  ``resume_token`` kept in sync with the last server-ack'd envelope,
-  and a periodic heartbeat timer.
-* ``Transport.enqueue_envelope(env)`` is a non-blocking hop into the
-  EventRingBuffer. The thread drains the buffer and writes pb messages
-  onto the stream.
-* Control events arriving on the downstream half are dispatched to a
-  caller-registered callback (``on_control``); the callback typically
-  lives in the ADK adapter.
+The public surface is deliberately small:
+
+* ``start()`` — spin up the thread + loop
+* ``notify()`` — wake the send loop (called under the buffer lock)
+* ``enqueue_payload(digest, data, mime)`` — add bytes to the payload
+  staging buffer and schedule chunked upload
+* ``register_control_handler(kind, cb)``
+* ``shutdown(timeout)`` — flush + send Goodbye + join
+
+No grpc import happens at module load: importing ``transport`` in a
+test that never starts it (e.g., a unit test for :class:`Client`) does
+not pull grpc in.
 """
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
+import logging
+import random
+import threading
+import time
+from typing import Any, Callable, Optional
+
+from .buffer import (
+    BufferStats,
+    EnvelopeKind,
+    EventRingBuffer,
+    PayloadBuffer,
+    SpanEnvelope,
+)
+
+log = logging.getLogger("harmonograf_client.transport")
+
+
+HEARTBEAT_INTERVAL_S = 5.0
+RECONNECT_INITIAL_MS = 100
+RECONNECT_MAX_MS = 30_000
+SEND_BATCH_MAX = 64
+PAYLOAD_CHUNK_INTERLEAVE = 10  # one chunk per N span messages
+
+
+@dataclasses.dataclass
+class TransportConfig:
+    server_addr: str = "127.0.0.1:50431"
+    heartbeat_interval_s: float = HEARTBEAT_INTERVAL_S
+    reconnect_initial_ms: int = RECONNECT_INITIAL_MS
+    reconnect_max_ms: int = RECONNECT_MAX_MS
+    payload_chunk_bytes: int = 256 * 1024
+
+
+ControlHandler = Callable[[Any], "ControlAckSpec"]
+
+
+@dataclasses.dataclass
+class ControlAckSpec:
+    """What a control handler returns. Translated to a pb ControlAck by
+    the transport before it goes upstream.
+    """
+
+    result: str = "success"  # "success" | "failure" | "unsupported"
+    detail: str = ""
+
 
 class Transport:
-    def __init__(self, *args, **kwargs) -> None:
-        raise NotImplementedError(
-            "transport.py is blocked on task #2 (proto codegen); "
-            "the pure-python pieces (buffer, identity, heartbeat) "
-            "are ready."
+    def __init__(
+        self,
+        *,
+        events: EventRingBuffer,
+        payloads: PayloadBuffer,
+        agent_id: str,
+        session_id: str,
+        name: str,
+        framework: str,
+        framework_version: str,
+        capabilities: list[str],
+        metadata: dict[str, str] | None = None,
+        session_title: str = "",
+        config: TransportConfig | None = None,
+        channel_factory: Optional[Callable[[str], Any]] = None,
+    ) -> None:
+        self._events = events
+        self._payloads = payloads
+        self._agent_id = agent_id
+        self._session_id = session_id
+        self._name = name
+        self._framework = framework
+        self._framework_version = framework_version
+        self._capabilities = list(capabilities)
+        self._metadata = dict(metadata or {})
+        self._session_title = session_title
+        self._config = config or TransportConfig()
+        self._channel_factory = channel_factory
+
+        self._handlers: dict[str, ControlHandler] = {}
+        self._handlers_lock = threading.Lock()
+
+        self._thread: Optional[threading.Thread] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop_ready = threading.Event()
+        self._stop = threading.Event()
+        self._wake: Optional[asyncio.Event] = None
+        self._connected = threading.Event()
+
+        # Last span id the server acked (via any downstream message or
+        # resume tracking). Used as the resume token on reconnect.
+        self._resume_token: str = ""
+
+        # Pending PayloadUpload chunks queued for interleave. Each item
+        # is a tuple (digest, mime, total_size, offset, last).
+        self._chunk_queue: list[tuple[str, str, int, int, bool]] = []
+        self._chunk_lock = threading.Lock()
+
+        # Heartbeat drop counters that the buffer itself does not track.
+        self._payloads_evicted = 0
+
+        self._assigned_session_id: str = session_id
+        self._assigned_stream_id: str = ""
+
+    # ------------------------------------------------------------------
+    # Public (called from the agent thread)
+    # ------------------------------------------------------------------
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(
+            target=self._thread_main, name="harmonograf-transport", daemon=True
         )
+        self._thread.start()
+        self._loop_ready.wait(timeout=2.0)
+
+    def notify(self) -> None:
+        """Non-blocking wake. Safe to call from any thread, even before
+        the loop is ready (a later tick will pick up the buffer state).
+        """
+        loop = self._loop
+        wake = self._wake
+        if loop is None or wake is None:
+            return
+        try:
+            loop.call_soon_threadsafe(wake.set)
+        except RuntimeError:
+            pass
+
+    def enqueue_payload(self, digest: str, data: bytes, mime: str) -> bool:
+        """Stage payload bytes for chunked upload. Returns False if the
+        blob was too large or evicted immediately; the caller should
+        mark its ``payload_ref.evicted`` accordingly.
+        """
+        if not self._payloads.put(digest, data):
+            self._payloads_evicted += 1
+            return False
+        total = len(data)
+        chunks = max(1, (total + self._config.payload_chunk_bytes - 1) // self._config.payload_chunk_bytes)
+        with self._chunk_lock:
+            for i in range(chunks):
+                offset = i * self._config.payload_chunk_bytes
+                last = i == chunks - 1
+                self._chunk_queue.append((digest, mime, total, offset, last))
+        self.notify()
+        return True
+
+    def register_control_handler(self, kind: str, cb: ControlHandler) -> None:
+        with self._handlers_lock:
+            self._handlers[kind] = cb
+
+    def shutdown(self, timeout: float = 5.0) -> None:
+        self._stop.set()
+        self.notify()
+        t = self._thread
+        if t is not None:
+            t.join(timeout=timeout)
+
+    @property
+    def connected(self) -> bool:
+        return self._connected.is_set()
+
+    @property
+    def assigned_session_id(self) -> str:
+        return self._assigned_session_id
+
+    @property
+    def assigned_stream_id(self) -> str:
+        return self._assigned_stream_id
+
+    # ------------------------------------------------------------------
+    # Thread + loop plumbing
+    # ------------------------------------------------------------------
+
+    def _thread_main(self) -> None:
+        loop = asyncio.new_event_loop()
+        self._loop = loop
+        asyncio.set_event_loop(loop)
+        self._wake = asyncio.Event()
+        self._loop_ready.set()
+        try:
+            loop.run_until_complete(self._run())
+        except Exception:
+            log.exception("transport loop crashed")
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                pass
+
+    async def _run(self) -> None:
+        backoff_ms = self._config.reconnect_initial_ms
+        while not self._stop.is_set():
+            try:
+                await self._connect_and_serve()
+                backoff_ms = self._config.reconnect_initial_ms
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                log.warning("transport disconnected: %s", e)
+                self._connected.clear()
+                if self._stop.is_set():
+                    break
+                jitter = random.uniform(0, backoff_ms / 2)
+                delay = (backoff_ms + jitter) / 1000.0
+                try:
+                    await asyncio.sleep(delay)
+                except asyncio.CancelledError:
+                    return
+                backoff_ms = min(backoff_ms * 2, self._config.reconnect_max_ms)
+
+    async def _connect_and_serve(self) -> None:
+        # Lazy import of grpc + pb so the module is cheap to import in
+        # unit tests that don't start a transport.
+        import grpc  # noqa: F401
+        from .pb import service_pb2_grpc  # noqa: F401
+
+        channel = self._open_channel()
+        try:
+            stub = self._make_stub(channel)
+            await self._serve(stub)
+        finally:
+            close = getattr(channel, "close", None)
+            if close is not None:
+                try:
+                    res = close()
+                    if asyncio.iscoroutine(res):
+                        await res
+                except Exception:
+                    pass
+
+    def _open_channel(self) -> Any:
+        if self._channel_factory is not None:
+            return self._channel_factory(self._config.server_addr)
+        import grpc
+
+        return grpc.aio.insecure_channel(self._config.server_addr)
+
+    def _make_stub(self, channel: Any) -> Any:
+        from .pb import service_pb2_grpc
+
+        return service_pb2_grpc.HarmonografStub(channel)
+
+    async def _serve(self, stub: Any) -> None:
+        from .pb import control_pb2, telemetry_pb2
+
+        hello = self._build_hello(telemetry_pb2)
+        send_queue: asyncio.Queue = asyncio.Queue()
+        await send_queue.put(telemetry_pb2.TelemetryUp(hello=hello))
+
+        async def request_iter():
+            while True:
+                item = await send_queue.get()
+                if item is None:
+                    return
+                yield item
+
+        call = stub.StreamTelemetry(request_iter())
+
+        welcome_received = asyncio.Event()
+
+        async def recv_loop():
+            async for msg in call:
+                which = msg.WhichOneof("msg")
+                if which == "welcome":
+                    self._assigned_session_id = msg.welcome.assigned_session_id
+                    self._assigned_stream_id = msg.welcome.assigned_stream_id
+                    welcome_received.set()
+                    self._connected.set()
+                elif which == "payload_request":
+                    self._handle_payload_request(msg.payload_request.digest)
+                elif which == "flow_control":
+                    pass  # v0: ignore
+                elif which == "server_goodbye":
+                    return
+
+        recv_task = asyncio.create_task(recv_loop())
+
+        # Wait briefly for welcome so session/stream ids are set before
+        # the control subscriber opens.
+        try:
+            await asyncio.wait_for(welcome_received.wait(), timeout=10.0)
+        except asyncio.TimeoutError:
+            recv_task.cancel()
+            raise RuntimeError("no welcome from server")
+
+        control_task = asyncio.create_task(self._control_loop(stub, send_queue))
+        send_task = asyncio.create_task(self._send_loop(send_queue))
+
+        done, pending = await asyncio.wait(
+            {recv_task, control_task, send_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for t in pending:
+            t.cancel()
+        for t in pending:
+            try:
+                await t
+            except Exception:
+                pass
+        # If the stop flag is set, send a Goodbye and close the queue.
+        if self._stop.is_set():
+            try:
+                await send_queue.put(
+                    telemetry_pb2.TelemetryUp(goodbye=telemetry_pb2.Goodbye(reason="shutdown"))
+                )
+            except Exception:
+                pass
+            await send_queue.put(None)
+        for t in done:
+            exc = t.exception()
+            if exc is not None and not isinstance(exc, asyncio.CancelledError):
+                raise exc
+
+    # ------------------------------------------------------------------
+    # Send loop
+    # ------------------------------------------------------------------
+
+    async def _send_loop(self, send_queue: asyncio.Queue) -> None:
+        from .pb import telemetry_pb2
+
+        last_hb = time.monotonic()
+        while not self._stop.is_set():
+            try:
+                await asyncio.wait_for(self._wake.wait(), timeout=self._config.heartbeat_interval_s)
+            except asyncio.TimeoutError:
+                pass
+            self._wake.clear()
+
+            # Drain envelopes in small batches, interleaving payload chunks.
+            sent_since_chunk = 0
+            batch = self._events.pop_batch(SEND_BATCH_MAX)
+            for env in batch:
+                up = self._envelope_to_up(env, telemetry_pb2)
+                if up is not None:
+                    # Track resume token: server will ack via normal
+                    # downstream, but we also keep the last span id we
+                    # sent so reconnect can resume from there.
+                    self._resume_token = env.span_id or self._resume_token
+                    await send_queue.put(up)
+                    sent_since_chunk += 1
+                if sent_since_chunk >= PAYLOAD_CHUNK_INTERLEAVE:
+                    await self._maybe_send_chunk(send_queue, telemetry_pb2)
+                    sent_since_chunk = 0
+
+            # Flush any leftover payload chunks if we weren't busy.
+            while True:
+                pushed = await self._maybe_send_chunk(send_queue, telemetry_pb2)
+                if not pushed:
+                    break
+
+            # Heartbeat tick.
+            now = time.monotonic()
+            if now - last_hb >= self._config.heartbeat_interval_s:
+                last_hb = now
+                hb = self._build_heartbeat(telemetry_pb2)
+                await send_queue.put(telemetry_pb2.TelemetryUp(heartbeat=hb))
+
+    async def _maybe_send_chunk(self, send_queue: asyncio.Queue, telemetry_pb2: Any) -> bool:
+        with self._chunk_lock:
+            if not self._chunk_queue:
+                return False
+            digest, mime, total, offset, last = self._chunk_queue.pop(0)
+        data = self._payloads.take(digest) if last else self._peek_payload(digest)
+        if data is None:
+            up = telemetry_pb2.TelemetryUp(
+                payload=telemetry_pb2.PayloadUpload(
+                    digest=digest,
+                    total_size=total,
+                    mime=mime,
+                    chunk=b"",
+                    last=True,
+                    evicted=True,
+                )
+            )
+            await send_queue.put(up)
+            return True
+        end = min(offset + self._config.payload_chunk_bytes, total)
+        chunk = data[offset:end]
+        up = telemetry_pb2.TelemetryUp(
+            payload=telemetry_pb2.PayloadUpload(
+                digest=digest,
+                total_size=total,
+                mime=mime,
+                chunk=chunk,
+                last=last,
+            )
+        )
+        await send_queue.put(up)
+        return True
+
+    def _peek_payload(self, digest: str) -> Optional[bytes]:
+        # PayloadBuffer.take removes; we need non-destructive access for
+        # mid-stream chunking. Re-put after peek is safe since dedup key
+        # is the digest.
+        data = self._payloads.take(digest)
+        if data is not None:
+            self._payloads.put(digest, data)
+        return data
+
+    def _envelope_to_up(self, env: SpanEnvelope, telemetry_pb2: Any) -> Any:
+        payload = env.payload
+        if env.kind is EnvelopeKind.SPAN_START:
+            return telemetry_pb2.TelemetryUp(span_start=payload)
+        if env.kind is EnvelopeKind.SPAN_UPDATE:
+            return telemetry_pb2.TelemetryUp(span_update=payload)
+        if env.kind is EnvelopeKind.SPAN_END:
+            return telemetry_pb2.TelemetryUp(span_end=payload)
+        return None
+
+    def _build_hello(self, telemetry_pb2: Any) -> Any:
+        from .pb import types_pb2
+
+        framework_enum = getattr(
+            types_pb2, f"FRAMEWORK_{self._framework.upper()}", types_pb2.FRAMEWORK_CUSTOM
+        )
+        caps = []
+        for c in self._capabilities:
+            val = getattr(types_pb2, f"CAPABILITY_{c.upper()}", None)
+            if val is not None:
+                caps.append(val)
+        return telemetry_pb2.Hello(
+            agent_id=self._agent_id,
+            session_id=self._session_id,
+            name=self._name,
+            framework=framework_enum,
+            framework_version=self._framework_version,
+            capabilities=caps,
+            metadata=self._metadata,
+            resume_token=self._resume_token,
+            session_title=self._session_title,
+        )
+
+    def _build_heartbeat(self, telemetry_pb2: Any) -> Any:
+        stats: BufferStats = self._events.stats_snapshot()
+        return telemetry_pb2.Heartbeat(
+            buffered_events=stats.buffered_events,
+            dropped_events=stats.dropped_total,
+            dropped_spans_critical=stats.dropped_spans,
+            buffered_payload_bytes=self._payloads.buffered_bytes(),
+            payloads_evicted=self._payloads_evicted,
+            cpu_self_pct=0.0,
+        )
+
+    # ------------------------------------------------------------------
+    # Control subscribe loop
+    # ------------------------------------------------------------------
+
+    async def _control_loop(self, stub: Any, send_queue: asyncio.Queue) -> None:
+        from .pb import control_pb2, telemetry_pb2, types_pb2
+
+        req = control_pb2.SubscribeControlRequest(
+            session_id=self._assigned_session_id,
+            agent_id=self._agent_id,
+            stream_id=self._assigned_stream_id,
+        )
+        try:
+            call = stub.SubscribeControl(req)
+            async for event in call:
+                ack = self._dispatch_control(event, types_pb2)
+                await send_queue.put(
+                    telemetry_pb2.TelemetryUp(control_ack=ack)
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.warning("control subscription ended: %s", e)
+
+    def _dispatch_control(self, event: Any, types_pb2: Any) -> Any:
+        kind_name = _control_kind_name(event.kind, types_pb2)
+        with self._handlers_lock:
+            handler = self._handlers.get(kind_name)
+        result = "unsupported"
+        detail = ""
+        if handler is not None:
+            try:
+                spec = handler(event)
+                if spec is None:
+                    result = "success"
+                else:
+                    result = spec.result
+                    detail = spec.detail
+            except Exception as e:
+                result = "failure"
+                detail = repr(e)
+        result_enum = {
+            "success": types_pb2.CONTROL_ACK_RESULT_SUCCESS,
+            "failure": types_pb2.CONTROL_ACK_RESULT_FAILURE,
+            "unsupported": types_pb2.CONTROL_ACK_RESULT_UNSUPPORTED,
+        }.get(result, types_pb2.CONTROL_ACK_RESULT_UNSUPPORTED)
+        return types_pb2.ControlAck(
+            control_id=event.id,
+            result=result_enum,
+            detail=detail,
+        )
+
+    # ------------------------------------------------------------------
+    # Misc
+    # ------------------------------------------------------------------
+
+    def _handle_payload_request(self, digest: str) -> None:
+        data = self._payloads.take(digest)
+        if data is None:
+            with self._chunk_lock:
+                self._chunk_queue.append((digest, "application/octet-stream", 0, 0, True))
+            self.notify()
+            return
+        # Put back and schedule re-upload.
+        self._payloads.put(digest, data)
+        total = len(data)
+        chunks = max(1, (total + self._config.payload_chunk_bytes - 1) // self._config.payload_chunk_bytes)
+        with self._chunk_lock:
+            for i in range(chunks):
+                offset = i * self._config.payload_chunk_bytes
+                last = i == chunks - 1
+                self._chunk_queue.append((digest, "application/octet-stream", total, offset, last))
+        self.notify()
+
+
+def _control_kind_name(kind_value: int, types_pb2: Any) -> str:
+    try:
+        raw = types_pb2.ControlKind.Name(kind_value)
+    except Exception:
+        return "UNSPECIFIED"
+    return raw.removeprefix("CONTROL_KIND_")
