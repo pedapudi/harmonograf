@@ -16,8 +16,10 @@ import {
   convertAttribute,
   convertPayloadRef,
   convertError,
+  convertAnnotation,
   type SessionOrigin,
 } from './convert';
+import { useAnnotationStore } from '../state/annotationStore';
 import { packLanes } from '../gantt/layout';
 import type { ListSessionsResponse } from '../pb/harmonograf/v1/frontend_pb.js';
 
@@ -248,6 +250,29 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
               }
               break;
             }
+            case 'initialAnnotation': {
+              if (!origin) origin = { startMs: 0 };
+              const span = kind.value.target?.target.case === 'spanId'
+                ? store.spans.get(kind.value.target.target.value)
+                : undefined;
+              useAnnotationStore
+                .getState()
+                .upsert(convertAnnotation(kind.value, origin, span?.startMs));
+              break;
+            }
+            case 'newAnnotation': {
+              if (!origin) origin = { startMs: 0 };
+              if (kind.value.annotation) {
+                const ann = kind.value.annotation;
+                const span = ann.target?.target.case === 'spanId'
+                  ? store.spans.get(ann.target.target.value)
+                  : undefined;
+                useAnnotationStore
+                  .getState()
+                  .upsert(convertAnnotation(ann, origin, span?.startMs));
+              }
+              break;
+            }
             case 'agentJoined': {
               if (kind.value.agent) {
                 store.agents.upsert(convertAgent(kind.value.agent));
@@ -418,13 +443,47 @@ export function usePostAnnotation(): (args: PostAnnotationArgs) => Promise<void>
           : kind === 'HUMAN_RESPONSE'
             ? AnnotationKind.HUMAN_RESPONSE
             : AnnotationKind.COMMENT;
-      await client.postAnnotation({
+
+      // Optimistic insert. The store keys by id; on server ack we update the
+      // same id with the canonical record; on failure we mark error so the
+      // caller can retry or the pin can render in a failure state.
+      const store = useAnnotationStore.getState();
+      const tempId = `pending-${crypto.randomUUID?.() ?? Date.now().toString(36)}`;
+      const span = getSessionStore(sessionId)?.spans.get(spanId);
+      const atMs = span?.startMs ?? 0;
+      store.upsert({
+        id: tempId,
         sessionId,
-        target: { target: { case: 'spanId', value: spanId } },
-        kind: kindEnum,
-        body,
+        spanId,
+        agentId: span?.agentId ?? null,
+        atMs,
         author,
+        kind,
+        body,
+        createdAtMs: Date.now(),
+        deliveredAtMs: null,
+        pending: true,
+        error: null,
       });
+
+      try {
+        const resp = await client.postAnnotation({
+          sessionId,
+          target: { target: { case: 'spanId', value: spanId } },
+          kind: kindEnum,
+          body,
+          author,
+        });
+        // Replace the temp row with the canonical server-assigned row.
+        store.remove(sessionId, tempId);
+        if (resp.annotation) {
+          const origin = originCache.get(sessionId) ?? { startMs: 0 };
+          store.upsert(convertAnnotation(resp.annotation, origin, atMs));
+        }
+      } catch (e) {
+        store.markError(sessionId, tempId, String(e));
+        throw e;
+      }
     };
   }, []);
 }

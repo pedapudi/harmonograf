@@ -10,13 +10,16 @@ import {
   SpanStatus as PbSpanStatus,
   Capability as PbCapability,
   LinkRelation as PbLinkRelation,
+  AnnotationKind as PbAnnotationKind,
   type Agent as PbAgent,
   type Span as PbSpan,
   type SpanLink as PbSpanLink,
   type AttributeValue as PbAttributeValue,
   type PayloadRef as PbPayloadRef,
   type ErrorInfo as PbErrorInfo,
+  type Annotation as PbAnnotation,
 } from '../pb/harmonograf/v1/types_pb.js';
+import type { Annotation as UiAnnotation } from '../state/annotationStore';
 import type {
   Agent as UiAgent,
   Capability as UiCapability,
@@ -152,6 +155,47 @@ export function convertPayloadRef(p: PbPayloadRef): UiPayloadRef {
 
 export function convertError(e: PbErrorInfo): UiErrorInfo {
   return { message: e.message, type: e.type, stack: e.stack };
+}
+
+export function convertAnnotation(
+  a: PbAnnotation,
+  origin: SessionOrigin,
+  spanStartMs?: number,
+): UiAnnotation {
+  const kind =
+    a.kind === PbAnnotationKind.STEERING
+      ? 'STEERING'
+      : a.kind === PbAnnotationKind.HUMAN_RESPONSE
+        ? 'HUMAN_RESPONSE'
+        : 'COMMENT';
+  let spanId: string | null = null;
+  let agentId: string | null = null;
+  let atMs = spanStartMs ?? 0;
+  const target = a.target?.target;
+  if (target?.case === 'spanId') {
+    spanId = target.value;
+  } else if (target?.case === 'agentTime') {
+    agentId = target.value.agentId;
+    if (target.value.at) {
+      atMs = tsToMs(target.value.at) - origin.startMs;
+    }
+  }
+  const createdAbs = a.createdAt ? tsToMs(a.createdAt) : 0;
+  const deliveredAbs = a.deliveredAt ? tsToMs(a.deliveredAt) : null;
+  return {
+    id: a.id,
+    sessionId: a.sessionId,
+    spanId,
+    agentId,
+    atMs,
+    author: a.author,
+    kind,
+    body: a.body,
+    createdAtMs: createdAbs,
+    deliveredAtMs: deliveredAbs,
+    pending: false,
+    error: null,
+  };
 }
 
 export function convertSpan(s: PbSpan, origin: SessionOrigin): UiSpan {
