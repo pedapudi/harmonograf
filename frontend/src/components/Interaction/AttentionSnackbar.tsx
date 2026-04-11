@@ -104,7 +104,9 @@ export function AttentionSnackbar({ store, sessionId }: Props) {
       style={{
         position: 'fixed',
         left: '50%',
-        bottom: 24,
+        // Sits above the transport bar (44px) with a 16px gap so the
+        // approval banner never covers the clock or zoom controls.
+        bottom: 'calc(var(--hg-transport-height, 44px) + 16px)',
         transform: 'translateX(-50%)',
         minWidth: 420,
         maxWidth: 600,
