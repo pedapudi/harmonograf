@@ -24,6 +24,8 @@ from typing import Optional
 import grpc
 from hypercorn.asyncio import serve
 from hypercorn.config import Config as HypercornConfig
+
+from harmonograf_server import _sonora_shim  # noqa: F401  # patches sonora.asgi
 from sonora.asgi import grpcASGI
 
 from harmonograf_server.auth import BearerTokenInterceptor, asgi_bearer_guard
