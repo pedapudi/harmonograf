@@ -579,6 +579,15 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
         updated.status = _SPAN_STATUS_TO_PB.get(span.status, types_pb2.SPAN_STATUS_RUNNING)
         for k, v in (span.attributes or {}).items():
             updated.attributes[k].CopyFrom(py_to_attr_value(v))
+        if span.payload_digest:
+            updated.payload_refs.add(
+                digest=span.payload_digest,
+                size=span.payload_size,
+                mime=span.payload_mime,
+                summary=span.payload_summary,
+                role=span.payload_role,
+                evicted=span.payload_evicted,
+            )
         return frontend_pb2.SessionUpdate(updated_span=updated)
     if delta.kind == DELTA_SPAN_END:
         span = delta.payload
@@ -594,6 +603,15 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
             ended.error.type = span.error.get("type", "")
             ended.error.message = span.error.get("message", "")
             ended.error.stack = span.error.get("stack", "")
+        if span.payload_digest:
+            ended.payload_refs.add(
+                digest=span.payload_digest,
+                size=span.payload_size,
+                mime=span.payload_mime,
+                summary=span.payload_summary,
+                role=span.payload_role,
+                evicted=span.payload_evicted,
+            )
         return frontend_pb2.SessionUpdate(ended_span=ended)
     if delta.kind == DELTA_ANNOTATION:
         ann: Annotation = delta.payload

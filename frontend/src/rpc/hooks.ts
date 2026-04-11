@@ -246,6 +246,9 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
                 if (kind.value.error) {
                   existing.error = convertError(kind.value.error);
                 }
+                if (kind.value.payloadRefs.length > 0) {
+                  existing.payloadRefs = kind.value.payloadRefs.map(convertPayloadRef);
+                }
                 store.spans.update(existing);
               }
               break;

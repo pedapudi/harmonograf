@@ -233,7 +233,20 @@ def pb_span_to_storage(pb: types_pb2.Span, *, agent_id: str, session_id: str) ->
     if pb.HasField("end_time"):
         end_time = ts_to_float(pb.end_time)
     start_time = ts_to_float(pb.start_time) if pb.HasField("start_time") else 0.0
-    payload_digest = pb.payload_refs[0].digest if len(pb.payload_refs) else None
+    payload_digest: Optional[str] = None
+    payload_mime = ""
+    payload_size = 0
+    payload_summary = ""
+    payload_role = ""
+    payload_evicted = False
+    if len(pb.payload_refs):
+        ref = pb.payload_refs[0]
+        payload_digest = ref.digest
+        payload_mime = ref.mime
+        payload_size = ref.size
+        payload_summary = ref.summary
+        payload_role = ref.role
+        payload_evicted = ref.evicted
     error = None
     if pb.HasField("error"):
         error = {"type": pb.error.type, "message": pb.error.message, "stack": pb.error.stack}
@@ -250,6 +263,11 @@ def pb_span_to_storage(pb: types_pb2.Span, *, agent_id: str, session_id: str) ->
         end_time=end_time,
         attributes=attr_map_to_dict(pb.attributes),
         payload_digest=payload_digest,
+        payload_mime=payload_mime,
+        payload_size=payload_size,
+        payload_summary=payload_summary,
+        payload_role=payload_role,
+        payload_evicted=payload_evicted,
         links=links,
         error=error,
     )
@@ -282,7 +300,14 @@ def storage_span_to_pb(span: Span) -> types_pb2.Span:
             relation=_LINK_RELATION_TO_PB.get(ln.relation, types_pb2.LINK_RELATION_FOLLOWS),
         )
     if span.payload_digest:
-        pb.payload_refs.add(digest=span.payload_digest)
+        pb.payload_refs.add(
+            digest=span.payload_digest,
+            size=span.payload_size,
+            mime=span.payload_mime,
+            summary=span.payload_summary,
+            role=span.payload_role,
+            evicted=span.payload_evicted,
+        )
     if span.error:
         pb.error.type = span.error.get("type", "")
         pb.error.message = span.error.get("message", "")

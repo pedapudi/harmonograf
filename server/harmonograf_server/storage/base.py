@@ -124,6 +124,11 @@ class Span:
     end_time: Optional[float] = None
     attributes: dict[str, Any] = field(default_factory=dict)
     payload_digest: Optional[str] = None
+    payload_mime: str = ""
+    payload_size: int = 0
+    payload_summary: str = ""
+    payload_role: str = ""
+    payload_evicted: bool = False
     links: list[SpanLink] = field(default_factory=list)
     error: Optional[dict[str, Any]] = None
     kind_string: Optional[str] = None  # for CUSTOM, the framework label
@@ -249,6 +254,11 @@ class Store(ABC):
         status: Optional[SpanStatus] = None,
         attributes: Optional[dict[str, Any]] = None,
         payload_digest: Optional[str] = None,
+        payload_mime: Optional[str] = None,
+        payload_size: Optional[int] = None,
+        payload_summary: Optional[str] = None,
+        payload_role: Optional[str] = None,
+        payload_evicted: Optional[bool] = None,
         error: Optional[dict[str, Any]] = None,
     ) -> Optional[Span]: ...
 

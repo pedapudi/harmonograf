@@ -453,6 +453,28 @@ class TestPresentationAgentHarmonograf:
                 f"names={[getattr(s, 'name', None) for s in llm_spans]}"
             )
 
+            # Task #7: at least one span must carry retrievable payload
+            # metadata end-to-end. Regression guard for the Drawer's
+            # Payload tab rendering blank mime/size/summary because the
+            # server was dropping PayloadRef metadata on the round trip.
+            payload_spans = [
+                s
+                for s in spans
+                if getattr(s, "payload_digest", None)
+                and getattr(s, "payload_mime", "")
+                and getattr(s, "payload_size", 0) > 0
+            ]
+            assert payload_spans, (
+                "no span carries payload_digest + mime + size > 0; "
+                "server is dropping PayloadRef metadata"
+            )
+            sample = payload_spans[0]
+            rec = await store.get_payload(sample.payload_digest)
+            assert rec is not None and rec.bytes_, (
+                f"payload {sample.payload_digest} is referenced by span "
+                f"{sample.id} but cannot be fetched from the store"
+            )
+
             # At least one TOOL_CALL must be the write_webpage FunctionTool;
             # the others will be AgentTool sub-dispatches.
             tool_names = [getattr(s, "name", "") for s in tool_spans]

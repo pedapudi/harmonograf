@@ -390,12 +390,12 @@ class IngestPipeline:
         if msg.status != types_pb2.SPAN_STATUS_UNSPECIFIED:
             status = span_status_from_pb(msg.status)
         attrs = attr_map_to_dict(msg.attributes) if msg.attributes else None
-        payload_digest = msg.payload_refs[0].digest if len(msg.payload_refs) else None
+        payload_kwargs = _payload_ref_kwargs(msg.payload_refs)
         updated = await self._store.update_span(
             msg.span_id,
             status=status,
             attributes=attrs,
-            payload_digest=payload_digest,
+            **payload_kwargs,
         )
         if updated is not None:
             self._bus.publish_span_update(updated)
@@ -417,9 +417,9 @@ class IngestPipeline:
             return
         if msg.attributes or len(msg.payload_refs):
             attrs = attr_map_to_dict(msg.attributes) if msg.attributes else None
-            payload_digest = msg.payload_refs[0].digest if len(msg.payload_refs) else None
+            payload_kwargs = _payload_ref_kwargs(msg.payload_refs)
             ended = await self._store.update_span(
-                msg.span_id, attributes=attrs, payload_digest=payload_digest
+                msg.span_id, attributes=attrs, **payload_kwargs
             ) or ended
         self._bus.publish_span_end(ended)
 
@@ -487,6 +487,25 @@ class IngestPipeline:
         self, ctx: StreamContext, msg: telemetry_pb2.Goodbye
     ) -> None:
         await self.close_stream(ctx, reason=msg.reason or "goodbye")
+
+
+def _payload_ref_kwargs(refs) -> dict:
+    """Extract the first PayloadRef's metadata as update_span kwargs.
+
+    Returns an empty dict when no refs are present so the caller can splat it
+    without triggering a spurious digest clear.
+    """
+    if not len(refs):
+        return {}
+    ref = refs[0]
+    return {
+        "payload_digest": ref.digest,
+        "payload_mime": ref.mime,
+        "payload_size": ref.size,
+        "payload_summary": ref.summary,
+        "payload_role": ref.role,
+        "payload_evicted": ref.evicted,
+    }
 
 
 def _summarize(data: bytes, mime: str) -> str:

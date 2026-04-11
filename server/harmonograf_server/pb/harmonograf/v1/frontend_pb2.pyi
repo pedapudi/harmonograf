@@ -126,16 +126,18 @@ class UpdatedSpan(_message.Message):
     def __init__(self, span_id: _Optional[str] = ..., status: _Optional[_Union[_types_pb2.SpanStatus, str]] = ..., attributes: _Optional[_Mapping[str, _types_pb2.AttributeValue]] = ..., payload_refs: _Optional[_Iterable[_Union[_types_pb2.PayloadRef, _Mapping]]] = ...) -> None: ...
 
 class EndedSpan(_message.Message):
-    __slots__ = ("span_id", "end_time", "status", "error")
+    __slots__ = ("span_id", "end_time", "status", "error", "payload_refs")
     SPAN_ID_FIELD_NUMBER: _ClassVar[int]
     END_TIME_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
     ERROR_FIELD_NUMBER: _ClassVar[int]
+    PAYLOAD_REFS_FIELD_NUMBER: _ClassVar[int]
     span_id: str
     end_time: _timestamp_pb2.Timestamp
     status: _types_pb2.SpanStatus
     error: _types_pb2.ErrorInfo
-    def __init__(self, span_id: _Optional[str] = ..., end_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., status: _Optional[_Union[_types_pb2.SpanStatus, str]] = ..., error: _Optional[_Union[_types_pb2.ErrorInfo, _Mapping]] = ...) -> None: ...
+    payload_refs: _containers.RepeatedCompositeFieldContainer[_types_pb2.PayloadRef]
+    def __init__(self, span_id: _Optional[str] = ..., end_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., status: _Optional[_Union[_types_pb2.SpanStatus, str]] = ..., error: _Optional[_Union[_types_pb2.ErrorInfo, _Mapping]] = ..., payload_refs: _Optional[_Iterable[_Union[_types_pb2.PayloadRef, _Mapping]]] = ...) -> None: ...
 
 class NewAnnotation(_message.Message):
     __slots__ = ("annotation",)

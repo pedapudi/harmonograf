@@ -102,6 +102,9 @@ export class SpanIndex {
     existing.name = span.name;
     existing.links = span.links;
     existing.replaced = span.replaced;
+    existing.payloadRefs = span.payloadRefs;
+    existing.attributes = span.attributes;
+    existing.error = span.error;
     const endMs = existing.endMs ?? existing.startMs;
     if (endMs > this.globalMaxEndMs) this.globalMaxEndMs = endMs;
     const b = this.agents.get(existing.agentId);

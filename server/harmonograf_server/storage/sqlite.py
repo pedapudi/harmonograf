@@ -75,6 +75,11 @@ CREATE TABLE IF NOT EXISTS spans (
     end_time REAL,
     attributes TEXT NOT NULL DEFAULT '{}',
     payload_digest TEXT,
+    payload_mime TEXT NOT NULL DEFAULT '',
+    payload_size INTEGER NOT NULL DEFAULT 0,
+    payload_summary TEXT NOT NULL DEFAULT '',
+    payload_role TEXT NOT NULL DEFAULT '',
+    payload_evicted INTEGER NOT NULL DEFAULT 0,
     error TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_spans_sa_time
@@ -135,6 +140,18 @@ class SqliteStore(Store):
         await self._db.executescript(SCHEMA)
         await self._db.execute("PRAGMA foreign_keys = ON")
         await self._db.execute("PRAGMA journal_mode = WAL")
+        # Backfill payload_* columns on pre-existing DBs created before task #7.
+        async with self._db.execute("PRAGMA table_info(spans)") as cur:
+            cols = {row[1] for row in await cur.fetchall()}
+        for name, ddl in (
+            ("payload_mime", "ALTER TABLE spans ADD COLUMN payload_mime TEXT NOT NULL DEFAULT ''"),
+            ("payload_size", "ALTER TABLE spans ADD COLUMN payload_size INTEGER NOT NULL DEFAULT 0"),
+            ("payload_summary", "ALTER TABLE spans ADD COLUMN payload_summary TEXT NOT NULL DEFAULT ''"),
+            ("payload_role", "ALTER TABLE spans ADD COLUMN payload_role TEXT NOT NULL DEFAULT ''"),
+            ("payload_evicted", "ALTER TABLE spans ADD COLUMN payload_evicted INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if name not in cols:
+                await self._db.execute(ddl)
         await self._db.commit()
 
     async def close(self) -> None:
@@ -403,8 +420,9 @@ class SqliteStore(Store):
             await self.db.execute(
                 """
                 INSERT INTO spans (id, session_id, agent_id, parent_span_id, kind, kind_string,
-                                   status, name, start_time, end_time, attributes, payload_digest, error)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                   status, name, start_time, end_time, attributes, payload_digest,
+                                   payload_mime, payload_size, payload_summary, payload_role, payload_evicted, error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     span.id,
@@ -419,6 +437,11 @@ class SqliteStore(Store):
                     span.end_time,
                     json.dumps(span.attributes),
                     span.payload_digest,
+                    span.payload_mime,
+                    span.payload_size,
+                    span.payload_summary,
+                    span.payload_role,
+                    1 if span.payload_evicted else 0,
                     json.dumps(span.error) if span.error is not None else None,
                 ),
             )
@@ -454,6 +477,11 @@ class SqliteStore(Store):
             end_time=row["end_time"],
             attributes=json.loads(row["attributes"]),
             payload_digest=row["payload_digest"],
+            payload_mime=row["payload_mime"] or "",
+            payload_size=row["payload_size"] or 0,
+            payload_summary=row["payload_summary"] or "",
+            payload_role=row["payload_role"] or "",
+            payload_evicted=bool(row["payload_evicted"]),
             error=json.loads(row["error"]) if row["error"] else None,
             links=[
                 SpanLink(
@@ -472,6 +500,11 @@ class SqliteStore(Store):
         status: Optional[SpanStatus] = None,
         attributes: Optional[dict] = None,
         payload_digest: Optional[str] = None,
+        payload_mime: Optional[str] = None,
+        payload_size: Optional[int] = None,
+        payload_summary: Optional[str] = None,
+        payload_role: Optional[str] = None,
+        payload_evicted: Optional[bool] = None,
         error: Optional[dict] = None,
     ) -> Optional[Span]:
         async with self._lock:
@@ -483,13 +516,28 @@ class SqliteStore(Store):
             if attributes:
                 new_attrs.update(attributes)
             new_payload = payload_digest if payload_digest is not None else current.payload_digest
+            new_mime = payload_mime if payload_mime is not None else current.payload_mime
+            new_size = payload_size if payload_size is not None else current.payload_size
+            new_summary = payload_summary if payload_summary is not None else current.payload_summary
+            new_role = payload_role if payload_role is not None else current.payload_role
+            new_evicted = payload_evicted if payload_evicted is not None else current.payload_evicted
             new_error = error if error is not None else current.error
             await self.db.execute(
-                "UPDATE spans SET status=?, attributes=?, payload_digest=?, error=? WHERE id=?",
+                """
+                UPDATE spans SET status=?, attributes=?, payload_digest=?,
+                                 payload_mime=?, payload_size=?, payload_summary=?,
+                                 payload_role=?, payload_evicted=?, error=?
+                WHERE id=?
+                """,
                 (
                     new_status,
                     json.dumps(new_attrs),
                     new_payload,
+                    new_mime,
+                    new_size,
+                    new_summary,
+                    new_role,
+                    1 if new_evicted else 0,
                     json.dumps(new_error) if new_error is not None else None,
                     span_id,
                 ),

@@ -202,6 +202,11 @@ class InMemoryStore(Store):
         status: Optional[SpanStatus] = None,
         attributes: Optional[dict] = None,
         payload_digest: Optional[str] = None,
+        payload_mime: Optional[str] = None,
+        payload_size: Optional[int] = None,
+        payload_summary: Optional[str] = None,
+        payload_role: Optional[str] = None,
+        payload_evicted: Optional[bool] = None,
         error: Optional[dict] = None,
     ) -> Optional[Span]:
         async with self._lock:
@@ -220,6 +225,16 @@ class InMemoryStore(Store):
                     self._payload_refcount[payload_digest] = (
                         self._payload_refcount.get(payload_digest, 0) + 1
                     )
+            if payload_mime is not None:
+                sp.payload_mime = payload_mime
+            if payload_size is not None:
+                sp.payload_size = payload_size
+            if payload_summary is not None:
+                sp.payload_summary = payload_summary
+            if payload_role is not None:
+                sp.payload_role = payload_role
+            if payload_evicted is not None:
+                sp.payload_evicted = payload_evicted
             if error is not None:
                 sp.error = error
             return copy.deepcopy(sp)

@@ -116,6 +116,10 @@ message EndedSpan {
   google.protobuf.Timestamp end_time = 2;
   SpanStatus status = 3;
   ErrorInfo error = 4;
+  // Final payload snapshot — the drawer relies on this to populate the
+  // Payload tab metadata (mime/size/summary) without re-fetching the span.
+  // See task #7.
+  repeated PayloadRef payload_refs = 5;
 }
 
 message NewAnnotation {
