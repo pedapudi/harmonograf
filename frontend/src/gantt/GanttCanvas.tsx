@@ -3,17 +3,32 @@ import { GanttRenderer, type HoverState } from './renderer';
 import type { SessionStore } from './index';
 import { useThemeStore } from '../theme/store';
 import { useUiStore } from '../state/uiStore';
+import { SpanContextMenu, type ContextMenuState } from '../components/Interaction/SpanContextMenu';
 
 interface Props {
   store: SessionStore;
   // Height in CSS pixels. Width is taken from the container.
   height?: number;
+  // Overlay layer mounted above the canvas (pins, drag selection, approval
+  // editor). Receives the live renderer so children can project session-ms to
+  // pixels and re-render on viewport ticks. Task #5.
+  renderOverlay?: (ctx: OverlayContext) => React.ReactNode;
+}
+
+export interface OverlayContext {
+  renderer: GanttRenderer;
+  store: SessionStore;
+  widthCss: number;
+  heightCss: number;
+  // Monotonic counter bumped on every viewport change or resize — used as a
+  // React dep by overlay children to recompute layout.
+  tick: number;
 }
 
 // Wraps the three canvas layers and mounts a GanttRenderer bound to `store`.
 // React only rerenders on chrome state changes (hover tooltip, live FAB); the
 // hot render loop runs outside React entirely.
-export function GanttCanvas({ store, height }: Props) {
+export function GanttCanvas({ store, height, renderOverlay }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const bgRef = useRef<HTMLCanvasElement | null>(null);
   const blocksRef = useRef<HTMLCanvasElement | null>(null);
@@ -21,6 +36,9 @@ export function GanttCanvas({ store, height }: Props) {
 
   const [hover, setHover] = useState<HoverState | null>(null);
   const [liveBroken, setLiveBroken] = useState(false);
+  const [menu, setMenu] = useState<ContextMenuState | null>(null);
+  const [overlayTick, setOverlayTick] = useState(0);
+  const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
   const selectSpan = useUiStore((s) => s.selectSpan);
   const themeBase = useThemeStore((s) => s.base);
   const colorBlind = useThemeStore((s) => s.colorBlind);
@@ -30,7 +48,10 @@ export function GanttCanvas({ store, height }: Props) {
       new GanttRenderer(store, {
         onSelect: (id) => selectSpan(id),
         onHoverChange: (h) => setHover(h),
-        onViewportChange: (v) => setLiveBroken(!v.liveFollow),
+        onViewportChange: (v) => {
+          setLiveBroken(!v.liveFollow);
+          setOverlayTick((n) => (n + 1) | 0);
+        },
       }),
     [store, selectSpan],
   );
@@ -46,10 +67,13 @@ export function GanttCanvas({ store, height }: Props) {
     const ro = new ResizeObserver(() => {
       const rect = container.getBoundingClientRect();
       renderer.resize(rect.width, rect.height, window.devicePixelRatio || 1);
+      setCanvasSize({ w: rect.width, h: rect.height });
+      setOverlayTick((n) => (n + 1) | 0);
     });
     ro.observe(container);
     const rect = container.getBoundingClientRect();
     renderer.resize(rect.width, rect.height, window.devicePixelRatio || 1);
+    setCanvasSize({ w: rect.width, h: rect.height });
     return () => {
       ro.disconnect();
       renderer.detach();
@@ -78,6 +102,16 @@ export function GanttCanvas({ store, height }: Props) {
     renderer.handlePointerLeave();
     setHover(null);
   };
+  const onContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const r = e.currentTarget.getBoundingClientRect();
+    const spanId = renderer.spanAt(e.clientX - r.left, e.clientY - r.top);
+    if (!spanId) {
+      setMenu(null);
+      return;
+    }
+    setMenu({ spanId, x: e.clientX, y: e.clientY });
+  };
 
   const span = hover ? store.spans.get(hover.spanId) : undefined;
 
@@ -95,6 +129,7 @@ export function GanttCanvas({ store, height }: Props) {
       }}
       onWheel={onWheel}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       onMouseMove={onMove}
       onMouseLeave={onLeave}
     >
@@ -154,6 +189,16 @@ export function GanttCanvas({ store, height }: Props) {
           ⟳ Return to live
         </button>
       )}
+      {menu && <SpanContextMenu state={menu} onClose={() => setMenu(null)} />}
+      {renderOverlay &&
+        canvasSize.w > 0 &&
+        renderOverlay({
+          renderer,
+          store,
+          widthCss: canvasSize.w,
+          heightCss: canvasSize.h,
+          tick: overlayTick,
+        })}
     </div>
   );
 }

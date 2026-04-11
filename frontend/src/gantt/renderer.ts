@@ -211,6 +211,12 @@ export class GanttRenderer {
     this.cb.onSelect?.(hit);
   }
 
+  // Public hit-test for DOM overlays that need to know what span sits under
+  // the pointer (right-click context menu, annotation pin targeting).
+  spanAt(x: number, y: number): string | null {
+    return this.hitTest(x, y);
+  }
+
   handlePointerMove(x: number, y: number): void {
     const hit = this.hitTest(x, y);
     if (hit !== this.hoveredSpanId) {

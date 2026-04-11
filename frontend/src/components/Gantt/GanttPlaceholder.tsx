@@ -4,6 +4,10 @@ import { SessionStore } from '../../gantt/index';
 import { seedDemoSession } from '../../gantt/mockData';
 import { useUiStore } from '../../state/uiStore';
 import { useSessionWatch } from '../../rpc/hooks';
+import { PinStrip } from '../Interaction/PinStrip';
+import { RangeSelectionLayer } from '../Interaction/RangeSelectionLayer';
+import { ApprovalEditor } from '../Interaction/ApprovalEditor';
+import { AttentionSnackbar } from '../Interaction/AttentionSnackbar';
 
 // When the server is reachable, the Gantt reads from the WatchSession-backed
 // SessionStore owned by the rpc hooks module. When the server isn't reachable
@@ -69,5 +73,19 @@ export function GanttPlaceholder() {
     );
   }
 
-  return <GanttCanvas store={store} />;
+  return (
+    <>
+      <GanttCanvas
+        store={store}
+        renderOverlay={(ctx) => (
+          <>
+            <RangeSelectionLayer ctx={ctx} sessionId={sessionId} />
+            <PinStrip ctx={ctx} sessionId={sessionId} />
+            <ApprovalEditor ctx={ctx} sessionId={sessionId} />
+          </>
+        )}
+      />
+      <AttentionSnackbar store={store} sessionId={sessionId} />
+    </>
+  );
 }
