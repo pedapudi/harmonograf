@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 
 import sonora.asgi as _sonora_asgi
+import sonora.protocol as _sonora_protocol
 
 logger = logging.getLogger("harmonograf_server")
 
@@ -45,4 +46,31 @@ async def _do_cors_preflight(self, scope, receive, send):
 
 
 _sonora_asgi.grpcASGI._do_cors_preflight = _do_cors_preflight
-logger.info("sonora CORS preflight shim active (bytes/str host header fix)")
+
+
+def _pack_trailers(trailers):
+    """Replacement for sonora.protocol.pack_trailers that handles bytes.
+
+    Upstream uses ``f"{k}: {v}"`` which calls ``repr()`` on bytes inputs,
+    producing literal ``b'grpc-status': b'0'`` text in the trailer
+    frame. asgi._do_unary_response builds trailers as bytes pairs, so
+    every unary gRPC-Web response from sonora ships malformed trailers
+    that Connect-Web rejects as "server unreachable". Decode bytes
+    inputs to ascii before formatting.
+    """
+
+    def _to_str(x):
+        return x.decode("ascii") if isinstance(x, (bytes, bytearray)) else x
+
+    parts = []
+    for k, v in trailers:
+        parts.append(f"{_to_str(k).lower()}: {_to_str(v)}\r\n".encode("ascii"))
+    return b"".join(parts)
+
+
+_sonora_protocol.pack_trailers = _pack_trailers
+_sonora_asgi.protocol.pack_trailers = _pack_trailers
+
+logger.info(
+    "sonora shim active: CORS preflight bytes/str fix + trailer encoding fix"
+)

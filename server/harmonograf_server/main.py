@@ -26,6 +26,7 @@ from hypercorn.asyncio import serve
 from hypercorn.config import Config as HypercornConfig
 
 from harmonograf_server import _sonora_shim  # noqa: F401  # patches sonora.asgi
+from harmonograf_server._cors import asgi_cors
 from sonora.asgi import grpcASGI
 
 from harmonograf_server.auth import BearerTokenInterceptor, asgi_bearer_guard
@@ -154,6 +155,9 @@ class Harmonograf:
         # /readyz remain unauthenticated so orchestrators can probe.
         if self.cfg.auth_token:
             grpc_web_app = asgi_bearer_guard(grpc_web_app, self.cfg.auth_token)
+        # CORS middleware sits outside auth so preflights succeed even
+        # before the browser attaches the bearer token.
+        grpc_web_app = asgi_cors(grpc_web_app)
         self._web_app = build_health_router(self.store, grpc_web_app)
         self._web_shutdown = asyncio.Event()
         hc = HypercornConfig()
