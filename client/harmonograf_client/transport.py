@@ -101,6 +101,7 @@ class Transport:
         session_title: str = "",
         config: TransportConfig | None = None,
         channel_factory: Optional[Callable[[str], Any]] = None,
+        auth_token: str | None = None,
     ) -> None:
         self._events = events
         self._payloads = payloads
@@ -111,6 +112,7 @@ class Transport:
         self._framework_version = framework_version
         self._capabilities = list(capabilities)
         self._metadata = dict(metadata or {})
+        self._auth_token = auth_token or None
         self._session_title = session_title
         self._config = config or TransportConfig()
         self._channel_factory = channel_factory
@@ -403,7 +405,12 @@ class Transport:
                     return
                 yield item
 
-        call = stub.StreamTelemetry(request_iter())
+        call_kwargs = {}
+        if self._auth_token:
+            call_kwargs["metadata"] = (
+                ("authorization", f"bearer {self._auth_token}"),
+            )
+        call = stub.StreamTelemetry(request_iter(), **call_kwargs)
 
         welcome_received = asyncio.Event()
 
@@ -604,8 +611,13 @@ class Transport:
             agent_id=self._agent_id,
             stream_id=self._assigned_stream_id,
         )
+        sub_kwargs = {}
+        if self._auth_token:
+            sub_kwargs["metadata"] = (
+                ("authorization", f"bearer {self._auth_token}"),
+            )
         try:
-            call = stub.SubscribeControl(req)
+            call = stub.SubscribeControl(req, **sub_kwargs)
             async for event in call:
                 ack = self._dispatch_control(event, types_pb2)
                 await send_queue.put(

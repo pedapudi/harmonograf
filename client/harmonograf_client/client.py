@@ -86,6 +86,7 @@ class Client:
         metadata: Optional[Mapping[str, str]] = None,
         identity_root: Optional[str] = None,
         autostart: bool = True,
+        token: Optional[str] = None,
         _transport_factory: Optional[Callable[..., Transport]] = None,
     ) -> None:
         from .pb import telemetry_pb2, types_pb2
@@ -135,6 +136,7 @@ class Client:
             metadata=dict(metadata or {}),
             session_title=session_title,
             config=cfg,
+            auth_token=token,
         )
         self._shutdown_called = False
         if autostart:
