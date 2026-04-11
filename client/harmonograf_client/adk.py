@@ -81,13 +81,17 @@ class AdkAdapter:
             pass
 
 
-def attach_adk(runner: Any, client: Client) -> AdkAdapter:
-    """Install a harmonograf plugin on the ADK runner and return the
-    adapter handle. Also wires up STEER / INJECT_MESSAGE control
-    handlers that write into ADK session state under known keys.
+def make_adk_plugin(client: Client) -> Any:
+    """Build a harmonograf ADK ``BasePlugin`` bound to ``client``.
+
+    This is the same plugin that :func:`attach_adk` installs, but
+    returned standalone so callers who own an ADK ``App`` — for example
+    the ``adk web`` CLI, which constructs its own ``Runner`` — can pass
+    the plugin to the ``App(plugins=...)`` constructor and have it
+    attached automatically. Also wires the STEER / INJECT_MESSAGE
+    control handlers on ``client``.
     """
     from google.adk.plugins.base_plugin import BasePlugin
-    from google.adk.events.event import Event
 
     state: "_AdkState" = _AdkState(client=client)
 
@@ -129,11 +133,6 @@ def attach_adk(runner: Any, client: Client) -> AdkAdapter:
 
     plugin = HarmonografAdkPlugin()
 
-    try:
-        runner.plugin_manager.plugins.append(plugin)
-    except Exception as e:
-        raise RuntimeError(f"attach_adk: could not install plugin on runner: {e}") from e
-
     def _handle_steer(event: Any) -> ControlAckSpec:
         body = event.payload.decode("utf-8", errors="replace") if event.payload else ""
         state.queue_session_mutation(STEERING_STATE_KEY, body)
@@ -147,6 +146,19 @@ def attach_adk(runner: Any, client: Client) -> AdkAdapter:
     client.on_control("STEER", _handle_steer)
     client.on_control("INJECT_MESSAGE", _handle_inject)
 
+    return plugin
+
+
+def attach_adk(runner: Any, client: Client) -> AdkAdapter:
+    """Install a harmonograf plugin on the ADK runner and return the
+    adapter handle. Equivalent to :func:`make_adk_plugin` followed by
+    appending the plugin to ``runner.plugin_manager.plugins``.
+    """
+    plugin = make_adk_plugin(client)
+    try:
+        runner.plugin_manager.plugins.append(plugin)
+    except Exception as e:
+        raise RuntimeError(f"attach_adk: could not install plugin on runner: {e}") from e
     return AdkAdapter(runner=runner, client=client, plugin=plugin)
 
 

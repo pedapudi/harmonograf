@@ -3,8 +3,10 @@
 Drives the full coordinator → research_agent → web_developer_agent
 pipeline with a deterministic mock LLM so the spans land in the
 in-process harmonograf server fixture and can be asserted on. This is
-the smoke-test sibling of the CLI entry point at
-``presentation_agent/run_harmonograf.py``.
+the smoke-test sibling of the canonical ``adk web presentation_agent``
+entry point — the ``App`` exported by ``presentation_agent.agent``
+attaches a harmonograf plugin automatically, and
+``TestPresentationAppExport`` below verifies that wiring.
 
 The scenario:
   1. coordinator_agent's LLM issues an AgentTool call to research_agent
@@ -404,3 +406,105 @@ class TestPresentationAgentHarmonograf:
         finally:
             handle.detach()
             client.shutdown(flush_timeout=5.0)
+
+
+# ---------------------------------------------------------------------------
+# Canonical `adk web` path: module-level `app` attaches the harmonograf
+# plugin automatically. This test imports presentation_agent.agent under a
+# fixture-scoped HARMONOGRAF_SERVER env, drives one invocation via an
+# InMemoryRunner constructed around ``app``, and asserts spans land in
+# the server — proving that a user running `adk web presentation_agent`
+# gets telemetry without any glue code in their runner.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestPresentationAppExport:
+    async def test_module_app_attaches_harmonograf_plugin(
+        self, harmonograf_server, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("HARMONOGRAF_HOME", str(tmp_path))
+        monkeypatch.setenv("HARMONOGRAF_SERVER", harmonograf_server["addr"])
+
+        import importlib
+        import sys
+        from pathlib import Path
+
+        # presentation_agent lives at repo root and has no pyproject.toml
+        # of its own, so ensure the repo root is on sys.path when this
+        # test runs under `uv run pytest` from any working directory.
+        repo_root = Path(__file__).resolve().parents[2]
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
+
+        import presentation_agent.agent as agent_mod
+
+        # Drop any cached Client/App from a prior test so we rebind to
+        # the fixture's server addr.
+        agent_mod._reset_for_testing()
+        importlib.reload(agent_mod)
+
+        app = agent_mod.app
+        assert app is not None, "presentation_agent.agent.app failed to build"
+
+        plugin_names = [getattr(p, "name", "") for p in app.plugins]
+        assert "harmonograf" in plugin_names, (
+            f"expected harmonograf plugin in app.plugins; got {plugin_names}"
+        )
+
+        # Swap every agent model for the scripted mock so we don't call
+        # a real LLM. LlmAgent.model is a pydantic field — reassigning
+        # is supported because the config isn't frozen.
+        scripted = _build_scripted_model()
+        agent_mod.research_agent.model = scripted
+        agent_mod.web_developer_agent.model = scripted
+        agent_mod.root_agent.model = scripted
+
+        from google.adk.runners import InMemoryRunner
+
+        runner = InMemoryRunner(app=app, app_name="presentation_agent")
+        try:
+            await _drive_invocation(
+                runner, "Create a presentation about Python programming"
+            )
+
+            client = agent_mod._CLIENT
+            assert client is not None, (
+                "agent module did not construct a harmonograf client"
+            )
+            assert await _wait_for(
+                lambda: client.session_id != "" and client._transport.connected,
+                timeout=5.0,
+            ), "transport never connected"
+
+            store = harmonograf_server["store"]
+            session_id = client.session_id
+
+            async def _have_core_kinds() -> bool:
+                spans = await _spans_in_store(store, session_id)
+                kinds = {str(getattr(s, "kind", "")) for s in spans}
+                return (
+                    any("INVOCATION" in k for k in kinds)
+                    and any("LLM_CALL" in k for k in kinds)
+                    and any("TOOL_CALL" in k for k in kinds)
+                )
+
+            assert await _wait_for_async(
+                _have_core_kinds, timeout=10.0
+            ), "core spans never reached the store via the app-exported plugin"
+
+            spans = await _spans_in_store(store, session_id)
+            by_kind: dict[str, list[Any]] = {}
+            for s in spans:
+                by_kind.setdefault(str(getattr(s, "kind", None)), []).append(s)
+            tool_names = [
+                getattr(s, "name", "")
+                for k, g in by_kind.items()
+                if "TOOL_CALL" in k
+                for s in g
+            ]
+            assert any(n == "write_webpage" for n in tool_names), (
+                f"write_webpage TOOL_CALL missing; saw {tool_names}"
+            )
+        finally:
+            agent_mod._reset_for_testing()

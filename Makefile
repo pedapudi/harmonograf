@@ -8,7 +8,7 @@ FRONTEND_PB := $(ROOT)/frontend/src/pb
 
 .PHONY: help proto proto-python proto-ts \
         server-install client-install frontend-install install \
-        server-run frontend-dev demo-presentation \
+        server-run frontend-dev demo demo-presentation \
         test server-test client-test frontend-test e2e \
         lint format clean stats
 
@@ -90,13 +90,65 @@ server-run:
 frontend-dev:
 	@cd $(ROOT)/frontend && pnpm dev
 
-# Run the presentation_agent sample wired to a Harmonograf server.
-# Override TOPIC / HARMONOGRAF_SERVER as needed:
-#   make demo-presentation TOPIC="Rust memory model" HARMONOGRAF_SERVER=127.0.0.1:7531
-TOPIC ?= Python programming
+# Run the presentation_agent sample under the canonical `adk web` CLI
+# with a harmonograf server at $(HARMONOGRAF_SERVER). Instrumentation
+# lives inside presentation_agent/agent.py (the exported `app` attaches
+# a harmonograf plugin), so simply running the agent under adk web is
+# enough to emit spans.
+#
+# adk web expects an AGENTS_DIR where each subdirectory is one agent.
+# We stage a dedicated .demo-agents/ dir containing only a symlink to
+# presentation_agent/ so the adk web UI doesn't show our monorepo's
+# other top-level dirs (server/, client/, etc.) as broken agents.
+#
+# Override HARMONOGRAF_SERVER / ADK_WEB_PORT as needed:
+#   make demo-presentation ADK_WEB_PORT=8080 HARMONOGRAF_SERVER=127.0.0.1:7531
 HARMONOGRAF_SERVER ?= 127.0.0.1:7531
+ADK_WEB_PORT ?= 8080
+SERVER_PORT ?= 7531
+FRONTEND_PORT ?= 5173
+
 demo-presentation:
-	@cd $(ROOT) && HARMONOGRAF_SERVER=$(HARMONOGRAF_SERVER) uv run --extra e2e python -m presentation_agent.run_harmonograf --topic "$(TOPIC)" --server $(HARMONOGRAF_SERVER)
+	@mkdir -p $(ROOT)/.demo-agents
+	@ln -sfn ../presentation_agent $(ROOT)/.demo-agents/presentation_agent
+	@cd $(ROOT) && HARMONOGRAF_SERVER=$(HARMONOGRAF_SERVER) \
+		uv run --extra e2e adk web --host 127.0.0.1 --port $(ADK_WEB_PORT) .demo-agents
+
+# Boot the full Harmonograf demo stack: backend server + Vite frontend +
+# adk web presentation_agent. Prints both URLs on startup and kills all
+# three children when you Ctrl-C out of the foreground target.
+demo:
+	@mkdir -p $(ROOT)/.demo-agents
+	@ln -sfn ../presentation_agent $(ROOT)/.demo-agents/presentation_agent
+	@bash -eu -c '\
+		cleanup() { \
+			echo; \
+			echo "[demo] shutting down..."; \
+			kill $$SERVER_PID $$FRONTEND_PID $$ADK_PID 2>/dev/null || true; \
+			wait 2>/dev/null || true; \
+			exit 0; \
+		}; \
+		trap cleanup INT TERM EXIT; \
+		echo "[demo] starting harmonograf-server on :$(SERVER_PORT) ..."; \
+		( cd $(ROOT)/server && uv run python -m harmonograf_server \
+			--store sqlite --data-dir $(ROOT)/data \
+			--grpc-port $(SERVER_PORT) ) & SERVER_PID=$$!; \
+		echo "[demo] starting frontend Vite dev server on :$(FRONTEND_PORT) ..."; \
+		( cd $(ROOT)/frontend && pnpm dev --port $(FRONTEND_PORT) --strictPort ) & FRONTEND_PID=$$!; \
+		echo "[demo] starting adk web presentation_agent on :$(ADK_WEB_PORT) ..."; \
+		( cd $(ROOT) && HARMONOGRAF_SERVER=127.0.0.1:$(SERVER_PORT) \
+			uv run --extra e2e adk web --host 127.0.0.1 --port $(ADK_WEB_PORT) .demo-agents ) & ADK_PID=$$!; \
+		sleep 2; \
+		echo ""; \
+		echo "=================================================================="; \
+		echo "  Harmonograf UI     : http://127.0.0.1:$(FRONTEND_PORT)"; \
+		echo "  ADK web (agent UI) : http://127.0.0.1:$(ADK_WEB_PORT)"; \
+		echo "  harmonograf-server : 127.0.0.1:$(SERVER_PORT) (gRPC)"; \
+		echo "=================================================================="; \
+		echo "  Press Ctrl-C to stop all three."; \
+		echo ""; \
+		wait \
+	'
 
 # ---------------------------------------------------------------------------
 # Tests
