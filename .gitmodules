@@ -1,0 +1,3 @@
+[submodule "third_party/adk-python"]
+	path = third_party/adk-python
+	url = https://github.com/google/adk-python.git
