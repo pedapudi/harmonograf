@@ -58,10 +58,10 @@ proto-python:
 # placeholder so `make proto` does not silently no-op.
 proto-ts:
 	@if [ -f $(ROOT)/frontend/buf.gen.yaml ]; then \
-		cd $(ROOT)/frontend && pnpm exec buf generate $(PROTO_DIR); \
+		cd $(ROOT)/frontend && pnpm exec buf generate; \
+		echo "TypeScript proto stubs regenerated under frontend/src/pb/."; \
 	else \
 		echo "proto-ts: frontend/buf.gen.yaml not present yet — skipping."; \
-		echo "  Frontend engineer will wire this up in task #12."; \
 	fi
 
 # ---------------------------------------------------------------------------

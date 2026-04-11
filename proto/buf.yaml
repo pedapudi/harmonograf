@@ -1,0 +1,14 @@
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+  except:
+    # Our package is harmonograf.v1 and files live under harmonograf/v1/; the
+    # PACKAGE_DIRECTORY_MATCH rule is satisfied. Most of these are opt-outs we
+    # do not need yet.
+    - FIELD_NOT_REQUIRED
+breaking:
+  use:
+    - FILE

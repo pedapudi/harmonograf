@@ -1,0 +1,13 @@
+version: v2
+clean: true
+plugins:
+  # @bufbuild/protoc-gen-es v2 emits both messages and service descriptors;
+  # Connect-ES v2 consumes those descriptors directly via createClient — no
+  # separate protoc-gen-connect-es plugin needed (that plugin stayed on v1).
+  - local: protoc-gen-es
+    out: src/pb
+    opt:
+      - target=ts
+      - import_extension=js
+inputs:
+  - directory: ../proto
