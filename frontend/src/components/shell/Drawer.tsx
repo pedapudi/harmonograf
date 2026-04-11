@@ -23,13 +23,13 @@ type TabId =
   | 'annotations'
   | 'control';
 
-const TABS: { id: TabId; label: string }[] = [
-  { id: 'summary', label: 'Summary' },
-  { id: 'payload', label: 'Payload' },
-  { id: 'timeline', label: 'Timeline' },
-  { id: 'links', label: 'Links' },
-  { id: 'annotations', label: 'Annotations' },
-  { id: 'control', label: 'Control' },
+const TABS: { id: TabId; label: string; testId: string }[] = [
+  { id: 'summary', label: 'Summary', testId: 'inspector-tab-overview' },
+  { id: 'payload', label: 'Payload', testId: 'inspector-tab-payload' },
+  { id: 'timeline', label: 'Timeline', testId: 'inspector-tab-timeline' },
+  { id: 'links', label: 'Links', testId: 'inspector-tab-links' },
+  { id: 'annotations', label: 'Annotations', testId: 'inspector-tab-annotations' },
+  { id: 'control', label: 'Control', testId: 'inspector-tab-control' },
 ];
 
 export function Drawer() {
@@ -50,10 +50,14 @@ export function Drawer() {
   }, [sessionId, selected]);
 
   return (
-    <aside className={`hg-drawer${open ? ' hg-drawer--open' : ''}`} aria-hidden={!open}>
+    <aside
+      className={`hg-drawer${open ? ' hg-drawer--open' : ''}`}
+      aria-hidden={!open}
+      data-testid="inspector-drawer"
+    >
       <div className="hg-drawer__inner">
         <div className="hg-drawer__header">
-          <div className="hg-drawer__title">
+          <div className="hg-drawer__title" data-testid="inspector-span-name">
             {span ? `${span.kind} · ${span.name}` : (selected ?? 'Inspector')}
           </div>
           <button
@@ -88,6 +92,7 @@ function DrawerTabs({ span, sessionId }: { span: Span; sessionId: string | null 
             aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
             className={`hg-drawer__tab${tab === t.id ? ' hg-drawer__tab--active' : ''}`}
+            data-testid={t.testId}
           >
             {t.label}
           </button>
@@ -222,7 +227,7 @@ function PayloadBody({ payloadRef }: { payloadRef: PayloadRef }) {
   }
 
   return (
-    <div>
+    <div data-testid="payload-content">
       <div className="hg-drawer__payload-header">
         <code>{payloadRef.digest.slice(0, 12)}…</code>
         <span>{payloadRef.mime}</span>
@@ -434,9 +439,14 @@ function AnnotationsTab({
         placeholder="Write a comment…"
         rows={4}
         className="hg-drawer__textarea"
+        data-testid="annotation-compose-input"
       />
       <div className="hg-drawer__row">
-        <button onClick={submit} disabled={busy || !body.trim()}>
+        <button
+          onClick={submit}
+          disabled={busy || !body.trim()}
+          data-testid="annotation-submit"
+        >
           {busy ? 'Posting…' : 'Post comment'}
         </button>
         {error && <span className="hg-drawer__error">{error}</span>}
