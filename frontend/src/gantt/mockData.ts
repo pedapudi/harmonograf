@@ -55,6 +55,9 @@ export function randomSpan(
     startMs,
     endMs: status === 'RUNNING' ? null : startMs + durationMs,
     links: [],
+    attributes: {},
+    payloadRefs: [],
+    error: null,
     lane: -1,
     replaced: false,
   };

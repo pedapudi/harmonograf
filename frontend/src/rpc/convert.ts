@@ -13,6 +13,9 @@ import {
   type Agent as PbAgent,
   type Span as PbSpan,
   type SpanLink as PbSpanLink,
+  type AttributeValue as PbAttributeValue,
+  type PayloadRef as PbPayloadRef,
+  type ErrorInfo as PbErrorInfo,
 } from '../pb/harmonograf/v1/types_pb.js';
 import type {
   Agent as UiAgent,
@@ -24,6 +27,9 @@ import type {
   SpanStatus as UiSpanStatus,
   AgentFramework as UiAgentFramework,
   AgentConnection as UiAgentConnection,
+  AttributeValue as UiAttributeValue,
+  PayloadRef as UiPayloadRef,
+  ErrorInfo as UiErrorInfo,
 } from '../gantt/types';
 
 function tsToMs(t: Timestamp | undefined): number {
@@ -114,9 +120,47 @@ export function convertLink(l: PbSpanLink): UiSpanLink {
   };
 }
 
+export function convertAttribute(a: PbAttributeValue): UiAttributeValue {
+  switch (a.value.case) {
+    case 'stringValue':
+      return { kind: 'string', value: a.value.value };
+    case 'intValue':
+      return { kind: 'int', value: a.value.value };
+    case 'doubleValue':
+      return { kind: 'double', value: a.value.value };
+    case 'boolValue':
+      return { kind: 'bool', value: a.value.value };
+    case 'bytesValue':
+      return { kind: 'bytes', value: a.value.value };
+    case 'arrayValue':
+      return { kind: 'array', value: a.value.value.values.map(convertAttribute) };
+    default:
+      return { kind: 'string', value: '' };
+  }
+}
+
+export function convertPayloadRef(p: PbPayloadRef): UiPayloadRef {
+  return {
+    digest: p.digest,
+    size: Number(p.size),
+    mime: p.mime,
+    summary: p.summary,
+    role: p.role,
+    evicted: p.evicted,
+  };
+}
+
+export function convertError(e: PbErrorInfo): UiErrorInfo {
+  return { message: e.message, type: e.type, stack: e.stack };
+}
+
 export function convertSpan(s: PbSpan, origin: SessionOrigin): UiSpan {
   const startAbs = tsToMs(s.startTime);
   const endAbs = s.endTime ? tsToMs(s.endTime) : null;
+  const attributes: Record<string, UiAttributeValue> = {};
+  for (const [k, v] of Object.entries(s.attributes)) {
+    attributes[k] = convertAttribute(v);
+  }
   return {
     id: s.id,
     sessionId: s.sessionId,
@@ -128,6 +172,9 @@ export function convertSpan(s: PbSpan, origin: SessionOrigin): UiSpan {
     startMs: startAbs - origin.startMs,
     endMs: endAbs === null ? null : endAbs - origin.startMs,
     links: s.links.map(convertLink),
+    attributes,
+    payloadRefs: s.payloadRefs.map(convertPayloadRef),
+    error: s.error ? convertError(s.error) : null,
     lane: -1,
     replaced: false,
   };

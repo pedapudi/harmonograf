@@ -33,6 +33,29 @@ export interface SpanLink {
   relation: LinkRelation;
 }
 
+export type AttributeValue =
+  | { kind: 'string'; value: string }
+  | { kind: 'int'; value: bigint }
+  | { kind: 'double'; value: number }
+  | { kind: 'bool'; value: boolean }
+  | { kind: 'bytes'; value: Uint8Array }
+  | { kind: 'array'; value: AttributeValue[] };
+
+export interface PayloadRef {
+  digest: string;
+  size: number;
+  mime: string;
+  summary: string;
+  role: string;
+  evicted: boolean;
+}
+
+export interface ErrorInfo {
+  message: string;
+  type: string;
+  stack: string;
+}
+
 export interface Span {
   id: string;
   sessionId: string;
@@ -46,6 +69,9 @@ export interface Span {
   startMs: number;
   endMs: number | null; // null while RUNNING
   links: SpanLink[];
+  attributes: Record<string, AttributeValue>;
+  payloadRefs: PayloadRef[];
+  error: ErrorInfo | null;
   // Lane within the agent row assigned at layout time. -1 means unassigned.
   lane: number;
   // True if this span was replaced by another (REPLACES link). Renderer dims it.

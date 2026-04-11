@@ -10,7 +10,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ConnectError } from '@connectrpc/connect';
 import { getHarmonografClient } from './client';
 import { SessionStore } from '../gantt/index';
-import { convertAgent, convertSpan, type SessionOrigin } from './convert';
+import {
+  convertAgent,
+  convertSpan,
+  convertAttribute,
+  convertPayloadRef,
+  convertError,
+  type SessionOrigin,
+} from './convert';
 import { packLanes } from '../gantt/layout';
 import type { ListSessionsResponse } from '../pb/harmonograf/v1/frontend_pb.js';
 
@@ -83,6 +90,14 @@ function getOrCreateStore(sessionId: string): SessionStore {
     storeCache.set(sessionId, s);
   }
   return s;
+}
+
+// Lookup that other hooks/components can use to read the live store for a
+// session without holding a WatchSession subscription. Returns undefined if
+// no session is being watched.
+export function getSessionStore(sessionId: string | null): SessionStore | undefined {
+  if (!sessionId) return undefined;
+  return storeCache.get(sessionId);
 }
 
 export function useSessionWatch(sessionId: string | null): WatchSessionState {
@@ -197,6 +212,12 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
                   6: 'AWAITING_HUMAN',
                 };
                 existing.status = map[kind.value.status] ?? existing.status;
+                for (const [k, v] of Object.entries(kind.value.attributes)) {
+                  existing.attributes[k] = convertAttribute(v);
+                }
+                if (kind.value.payloadRefs.length > 0) {
+                  existing.payloadRefs = kind.value.payloadRefs.map(convertPayloadRef);
+                }
                 store.spans.update(existing);
               }
               break;
@@ -220,6 +241,9 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
                   6: 'AWAITING_HUMAN',
                 };
                 existing.status = map[kind.value.status] ?? existing.status;
+                if (kind.value.error) {
+                  existing.error = convertError(kind.value.error);
+                }
                 store.spans.update(existing);
               }
               break;
