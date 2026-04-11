@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useUiStore } from '../../state/uiStore';
 import { mockSessions } from '../SessionPicker/mockSessions';
+import { useSessionsStore } from '../../state/sessionsStore';
 import { useThemeStore } from '../../theme/store';
 import type { ColorBlindMode, ThemeBase } from '../../theme/themes';
 
@@ -22,15 +23,25 @@ export function AppBar() {
   const openPicker = useUiStore((s) => s.openSessionPicker);
   const toggleRail = useUiStore((s) => s.toggleNavRail);
   const sessionId = useUiStore((s) => s.currentSessionId);
+  const rpcSessions = useSessionsStore((s) => s.sessions);
+  const rpcError = useSessionsStore((s) => s.error);
   const [themeMenuOpen, setThemeMenuOpen] = useState(false);
   const themeBase = useThemeStore((s) => s.base);
   const colorBlind = useThemeStore((s) => s.colorBlind);
   const setBase = useThemeStore((s) => s.setBase);
   const setColorBlind = useThemeStore((s) => s.setColorBlind);
 
+  // Real sessions when the server is reachable; mock sessions only as a
+  // dev-mode fallback (same policy as SessionPicker).
+  const rpcTitle = rpcSessions.find((s) => s.id === sessionId)?.title;
+  const mockTitle = mockSessions.find((s) => s.id === sessionId)?.title;
   const sessionTitle =
-    mockSessions.find((s) => s.id === sessionId)?.title ?? 'Select session';
-  const attention = mockSessions.reduce((acc, s) => acc + s.attention, 0);
+    (rpcTitle && rpcTitle.length > 0 ? rpcTitle : undefined) ??
+    (rpcError ? mockTitle : undefined) ??
+    'Select session';
+  const attention = rpcError
+    ? mockSessions.reduce((acc, s) => acc + s.attention, 0)
+    : rpcSessions.reduce((acc, s) => acc + s.attentionCount, 0);
 
   return (
     <header className="hg-appbar" data-testid="app-bar">

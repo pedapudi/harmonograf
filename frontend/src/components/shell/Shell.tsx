@@ -6,12 +6,14 @@ import { Minimap } from '../Minimap/Minimap';
 import { TransportBar } from '../TransportBar/TransportBar';
 import { SessionPicker } from '../SessionPicker/SessionPicker';
 import { HelpOverlay } from './HelpOverlay';
+import { SessionsSyncer } from '../../rpc/SessionsSyncer';
 import { useGlobalShortcuts } from '../../lib/shortcuts';
 
 export function Shell() {
   useGlobalShortcuts();
   return (
     <div className="hg-shell">
+      <SessionsSyncer />
       <AppBar />
       <NavRail />
       <main className="hg-main">

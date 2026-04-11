@@ -2,14 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useUiStore } from '../../state/uiStore';
 import { formatDuration, formatRelativeTime } from '../../lib/format';
 import { bucketSessions, mockSessions, type MockSession } from './mockSessions';
-import { useSessions } from '../../rpc/hooks';
+import { useSessionsStore, type RpcSession } from '../../state/sessionsStore';
 import { SessionStatus as PbSessionStatus } from '../../pb/harmonograf/v1/types_pb.js';
 
 const ARCHIVE_PAGE = 50;
 
-function pbToMock(
-  s: ReturnType<typeof useSessions>['sessions'][number],
-): MockSession {
+function pbToMock(s: RpcSession): MockSession {
   const status =
     s.status === PbSessionStatus.LIVE
       ? 'LIVE'
@@ -40,7 +38,9 @@ export function SessionPicker() {
 
   // Real sessions from the server; falls back to mock data when the server
   // isn't reachable (e.g., during local frontend-only development).
-  const { sessions: rpcSessions, error: rpcError } = useSessions();
+  const rpcSessions = useSessionsStore((s) => s.sessions);
+  const rpcError = useSessionsStore((s) => s.error);
+  const rpcLoading = useSessionsStore((s) => s.loading);
 
   // Scope picker state to the current open-cycle: remounting via `key` resets
   // `query` and `showArchive` without a setState-in-effect anti-pattern.
@@ -51,6 +51,7 @@ export function SessionPicker() {
     inputRef={inputRef}
     rpcSessions={rpcSessions}
     rpcError={rpcError}
+    rpcLoading={rpcLoading}
   />;
 }
 
@@ -60,12 +61,14 @@ function SessionPickerBody({
   inputRef,
   rpcSessions,
   rpcError,
+  rpcLoading,
 }: {
   close: () => void;
   setSession: (id: string | null) => void;
   inputRef: React.RefObject<HTMLInputElement | null>;
-  rpcSessions: ReturnType<typeof useSessions>['sessions'];
+  rpcSessions: RpcSession[];
   rpcError: string | null;
+  rpcLoading: boolean;
 }) {
   const [query, setQuery] = useState('');
   const [showArchive, setShowArchive] = useState(false);
@@ -74,10 +77,16 @@ function SessionPickerBody({
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [inputRef]);
 
+  // When the server is unreachable (error from ListSessions), fall back to
+  // baked-in mock data so a frontend-only dev session is still navigable.
+  // When the server is reachable but has zero sessions, show the real
+  // empty state — we do NOT substitute mocks.
   const effectiveSessions: MockSession[] = useMemo(() => {
-    if (rpcError || rpcSessions.length === 0) return mockSessions;
+    if (rpcError) return mockSessions;
     return rpcSessions.map(pbToMock);
   }, [rpcSessions, rpcError]);
+
+  const serverEmpty = !rpcError && !rpcLoading && rpcSessions.length === 0;
 
   const buckets = useMemo(() => {
     const filtered = effectiveSessions.filter(
@@ -126,6 +135,15 @@ function SessionPickerBody({
           </div>
         )}
         <div className="hg-picker__list">
+          {serverEmpty && (
+            <div
+              className="hg-picker__empty"
+              data-testid="session-picker-empty"
+              style={{ padding: '16px', opacity: 0.7, textAlign: 'center' }}
+            >
+              Waiting for agents to connect…
+            </div>
+          )}
           {buckets.live.length > 0 && (
             <Section label="Live">
               {buckets.live.map((s) => (
