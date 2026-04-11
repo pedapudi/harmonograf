@@ -1,3 +1,4 @@
+import './views.css';
 import { useEffect, useState } from 'react';
 import { useUiStore } from '../../../state/uiStore';
 import { useSessionWatch } from '../../../rpc/hooks';

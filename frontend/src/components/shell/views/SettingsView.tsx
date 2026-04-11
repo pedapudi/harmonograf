@@ -1,3 +1,4 @@
+import './views.css';
 import { useUiStore } from '../../../state/uiStore';
 import { useThemeStore } from '../../../theme/store';
 import type { ThemeBase } from '../../../theme/themes';

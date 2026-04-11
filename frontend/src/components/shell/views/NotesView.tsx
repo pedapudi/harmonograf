@@ -1,3 +1,4 @@
+import './views.css';
 import { useUiStore } from '../../../state/uiStore';
 import { useAnnotationStore } from '../../../state/annotationStore';
 
