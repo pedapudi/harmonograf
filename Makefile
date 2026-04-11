@@ -145,7 +145,8 @@ FRONTEND_PORT ?= 5173
 
 demo-presentation: .demo-agents-stage
 	@cd $(ROOT) && HARMONOGRAF_SERVER=$(HARMONOGRAF_SERVER) \
-		uv run --extra e2e adk web --host 127.0.0.1 --port $(ADK_WEB_PORT) .demo-agents
+		OPENAI_API_KEY="$${OPENAI_API_KEY:-dummy}" \
+		uv run --extra demo adk web --host 127.0.0.1 --port $(ADK_WEB_PORT) .demo-agents
 
 # Boot the full Harmonograf demo stack: backend server + Vite frontend +
 # adk web presentation_agent. Prints both URLs on startup and kills all
@@ -168,7 +169,8 @@ demo: .demo-agents-stage
 		( cd $(ROOT)/frontend && pnpm dev --port $(FRONTEND_PORT) --strictPort ) & FRONTEND_PID=$$!; \
 		echo "[demo] starting adk web presentation_agent on :$(ADK_WEB_PORT) ..."; \
 		( cd $(ROOT) && HARMONOGRAF_SERVER=127.0.0.1:$(SERVER_PORT) \
-			uv run --extra e2e adk web --host 127.0.0.1 --port $(ADK_WEB_PORT) .demo-agents ) & ADK_PID=$$!; \
+			OPENAI_API_KEY="$${OPENAI_API_KEY:-dummy}" \
+			uv run --extra demo adk web --host 127.0.0.1 --port $(ADK_WEB_PORT) .demo-agents ) & ADK_PID=$$!; \
 		sleep 2; \
 		echo ""; \
 		echo "=================================================================="; \

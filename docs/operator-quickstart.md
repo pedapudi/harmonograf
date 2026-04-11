@@ -87,6 +87,20 @@ make demo-presentation TOPIC="Rust memory model" HARMONOGRAF_SERVER=127.0.0.1:75
 
 The demo prints `[harmonograf] session_id=<id>` as soon as the server assigns one — open the frontend and that session should materialize on the Gantt view while the coordinator → research → web_developer pipeline runs.
 
+### Using a local OpenAI-compatible endpoint
+
+`presentation_agent` defaults to `gemini-2.5-flash` (which routes through ADK's native Google models path and needs `GOOGLE_API_KEY` or ADC). To point it at a local OpenAI-compatible server (Ollama, vLLM, llama.cpp, LM Studio, anything that speaks `/v1/chat/completions`), set `USER_MODEL_NAME` to a LiteLLM provider-style identifier and export `OPENAI_API_BASE`:
+
+```bash
+export USER_MODEL_NAME="openai/qwen3.5:122b"
+export OPENAI_API_BASE="http://kikuchi.lan:8080/v1"
+# OPENAI_API_KEY is optional for local endpoints; the demo target defaults
+# it to "dummy" if unset so LiteLLM stops complaining.
+make demo
+```
+
+`presentation_agent/agent.py` detects provider-style strings (anything with a `/` before any `:`) and wraps them in `google.adk.models.lite_llm.LiteLlm`. Plain `gemini-*` names keep the native path and don't pull LiteLLM in. The `demo` / `demo-presentation` Makefile targets install LiteLLM via `uv run --extra demo …` — no extra steps required.
+
 ## 6. Health probes
 
 Both endpoints live on the gRPC-Web port (`7532` by default) and are **always unauthenticated** so orchestrators can probe without credentials:
