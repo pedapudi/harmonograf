@@ -12,6 +12,7 @@ interface UiState {
   sessionPickerOpen: boolean;
   helpOpen: boolean;
   focusedAgentId: string | null;
+  hiddenAgentIds: Set<string>;
   zoomSeconds: number; // visible time window in seconds
   liveFollow: boolean;
   paused: boolean;
@@ -32,6 +33,8 @@ interface UiState {
   toggleHelp: () => void;
   closeHelp: () => void;
   setFocusedAgent: (id: string | null) => void;
+  toggleAgentHidden: (id: string) => void;
+  showAllAgents: () => void;
   zoomIn: () => void;
   zoomOut: () => void;
   setZoom: (sec: number) => void;
@@ -55,6 +58,7 @@ export const useUiStore = create<UiState>((set) => ({
   sessionPickerOpen: false,
   helpOpen: false,
   focusedAgentId: null,
+  hiddenAgentIds: new Set<string>(),
   zoomSeconds: 300,
   liveFollow: true,
   paused: false,
@@ -70,6 +74,21 @@ export const useUiStore = create<UiState>((set) => ({
   toggleHelp: () => set((s) => ({ helpOpen: !s.helpOpen })),
   closeHelp: () => set({ helpOpen: false }),
   setFocusedAgent: (id) => set({ focusedAgentId: id }),
+  toggleAgentHidden: (id) =>
+    set((s) => {
+      const next = new Set(s.hiddenAgentIds);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      s.activeRenderer?.setHiddenAgents(next);
+      return { hiddenAgentIds: next };
+    }),
+  showAllAgents: () =>
+    set((s) => {
+      if (s.hiddenAgentIds.size === 0) return {};
+      const next = new Set<string>();
+      s.activeRenderer?.setHiddenAgents(next);
+      return { hiddenAgentIds: next };
+    }),
   zoomIn: () =>
     set((s) => {
       s.activeRenderer?.zoomBy(ZOOM_STEP);

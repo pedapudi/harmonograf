@@ -2,10 +2,7 @@ import { useEffect, useState } from 'react';
 import type { OverlayContext } from '../../gantt/GanttCanvas';
 import {
   GUTTER_WIDTH_PX,
-  ROW_HEIGHT_FOCUSED_PX,
-  ROW_HEIGHT_PX,
   SUB_LANE_HEIGHT_PX,
-  TOP_MARGIN_PX,
   msToPx,
   viewportStart,
 } from '../../gantt/viewport';
@@ -70,18 +67,12 @@ export function GanttDomProxy({ ctx }: Props) {
   const vs = viewportStart(viewport);
   const ve = viewport.endMs;
 
-  const rows: RowLayout[] = [];
-  {
-    let y = TOP_MARGIN_PX;
-    const focusedId =
-      (renderer as unknown as { focusedAgentId: string | null }).focusedAgentId ??
-      null;
-    for (const agent of store.agents.list) {
-      const h = agent.id === focusedId ? ROW_HEIGHT_FOCUSED_PX : ROW_HEIGHT_PX;
-      rows.push({ agentId: agent.id, top: y, height: h });
-      y += h;
-    }
-  }
+  // Mirror the renderer's row layout exactly — honoring focus expansion AND
+  // hidden-agent collapse (task #13 B5.2).
+  const rows: RowLayout[] = renderer
+    .getRowLayout()
+    .filter((r) => !r.hidden)
+    .map((r) => ({ agentId: r.agentId, top: r.top, height: r.height }));
 
   const proxies: SpanProxy[] = [];
   {

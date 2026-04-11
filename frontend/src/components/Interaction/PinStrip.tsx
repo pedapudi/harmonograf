@@ -1,13 +1,6 @@
 import { useMemo } from 'react';
 import type { OverlayContext } from '../../gantt/GanttCanvas';
-import {
-  GUTTER_WIDTH_PX,
-  ROW_HEIGHT_PX,
-  ROW_HEIGHT_FOCUSED_PX,
-  TOP_MARGIN_PX,
-  msToPx,
-  viewportStart,
-} from '../../gantt/viewport';
+import { GUTTER_WIDTH_PX, msToPx, viewportStart } from '../../gantt/viewport';
 import { useAnnotationStore, type Annotation } from '../../state/annotationStore';
 import { useUiStore } from '../../state/uiStore';
 import { usePostAnnotation } from '../../rpc/hooks';
@@ -41,19 +34,15 @@ export function PinStrip({ ctx, sessionId }: Props) {
   const post = usePostAnnotation();
 
   const rows = useMemo(() => {
-    const out: { agentId: string; top: number; height: number }[] = [];
-    let y = TOP_MARGIN_PX;
-    for (const agent of store.agents.list) {
-      const h =
-        agent.id === (renderer as unknown as { focusedAgentId: string | null }).focusedAgentId
-          ? ROW_HEIGHT_FOCUSED_PX
-          : ROW_HEIGHT_PX;
-      out.push({ agentId: agent.id, top: y, height: h });
-      y += h;
-    }
-    return out;
-    // tick forces recomputation on viewport/resize changes; renderer's
-    // focusedAgentId is read imperatively and not tracked by React.
+    // Delegate to the renderer so focus expansion and hidden-agent collapse
+    // (task #13 B5.2) stay in one place. Hidden rows are excluded because
+    // pin dots would have nothing to anchor to in a collapsed row.
+    return renderer
+      .getRowLayout()
+      .filter((r) => !r.hidden)
+      .map((r) => ({ agentId: r.agentId, top: r.top, height: r.height }));
+    // tick forces recomputation on viewport/resize changes; renderer state is
+    // read imperatively and not tracked by React.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, renderer, tick]);
 

@@ -1,12 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { OverlayContext } from '../../gantt/GanttCanvas';
-import {
-  GUTTER_WIDTH_PX,
-  TOP_MARGIN_PX,
-  ROW_HEIGHT_PX,
-  ROW_HEIGHT_FOCUSED_PX,
-  msToPx,
-} from '../../gantt/viewport';
+import { GUTTER_WIDTH_PX, msToPx } from '../../gantt/viewport';
 import { useUiStore } from '../../state/uiStore';
 import { useSendControl } from '../../rpc/hooks';
 import type { AttributeValue } from '../../gantt/types';
@@ -61,21 +55,11 @@ export function ApprovalEditor({ ctx, sessionId }: Props) {
 
   if (!visible || !span) return null;
 
-  // Row top for positioning — mirror renderer layout.
-  const rows: { agentId: string; top: number; height: number }[] = [];
-  {
-    let y = TOP_MARGIN_PX;
-    const focusedId =
-      (renderer as unknown as { focusedAgentId: string | null }).focusedAgentId ??
-      null;
-    for (const agent of store.agents.list) {
-      const h = agent.id === focusedId ? ROW_HEIGHT_FOCUSED_PX : ROW_HEIGHT_PX;
-      rows.push({ agentId: agent.id, top: y, height: h });
-      y += h;
-    }
-  }
-  const row = rows.find((r) => r.agentId === span.agentId);
-  if (!row) return null;
+  // Row top for positioning — delegate to the renderer so focus expansion and
+  // hidden-agent collapse (task #13 B5.2) are honored. If the span's agent is
+  // currently hidden, the approval editor has nowhere to anchor, so skip.
+  const row = renderer.getRowLayout().find((r) => r.agentId === span.agentId);
+  if (!row || row.hidden) return null;
 
   const viewport = renderer.getViewport();
   const anchorX = Math.max(

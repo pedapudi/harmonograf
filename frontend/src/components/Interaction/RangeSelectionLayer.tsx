@@ -1,12 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { OverlayContext } from '../../gantt/GanttCanvas';
-import {
-  GUTTER_WIDTH_PX,
-  ROW_HEIGHT_PX,
-  ROW_HEIGHT_FOCUSED_PX,
-  TOP_MARGIN_PX,
-  pxToMs,
-} from '../../gantt/viewport';
+import { GUTTER_WIDTH_PX, TOP_MARGIN_PX, pxToMs } from '../../gantt/viewport';
 import { usePostAnnotation } from '../../rpc/hooks';
 import { useAnnotationStore } from '../../state/annotationStore';
 
@@ -44,7 +38,7 @@ interface PendingDraft {
 }
 
 export function RangeSelectionLayer({ ctx, sessionId }: Props) {
-  const { renderer, store, widthCss, heightCss, tick } = ctx;
+  const { renderer, widthCss, heightCss, tick } = ctx;
   void tick;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -53,21 +47,13 @@ export function RangeSelectionLayer({ ctx, sessionId }: Props) {
   const [busy, setBusy] = useState(false);
   const post = usePostAnnotation();
 
-  // Build row metrics mirroring the renderer's layout. Read focusedAgentId via
-  // the renderer's public getter surface — falls back to default row height if
-  // the private field isn't accessible (e.g. after a refactor).
-  const rows: { agentId: string; top: number; height: number }[] = [];
-  {
-    let y = TOP_MARGIN_PX;
-    const focusedId =
-      (renderer as unknown as { focusedAgentId: string | null }).focusedAgentId ??
-      null;
-    for (const agent of store.agents.list) {
-      const h = agent.id === focusedId ? ROW_HEIGHT_FOCUSED_PX : ROW_HEIGHT_PX;
-      rows.push({ agentId: agent.id, top: y, height: h });
-      y += h;
-    }
-  }
+  // Row metrics come from the renderer so focus expansion and hidden-agent
+  // collapse (task #13 B5.2) are honored. Hidden rows are excluded — you
+  // can't start a range annotation against a collapsed agent.
+  const rows: { agentId: string; top: number; height: number }[] = renderer
+    .getRowLayout()
+    .filter((r) => !r.hidden)
+    .map((r) => ({ agentId: r.agentId, top: r.top, height: r.height }));
 
   const rowAt = (yPx: number): typeof rows[number] | null => {
     for (const r of rows) {

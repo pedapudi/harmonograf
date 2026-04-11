@@ -43,7 +43,15 @@ export interface RendererCallbacks {
   onSelect?: (spanId: string | null, clickX: number, clickY: number) => void;
   onHoverChange?: (hover: HoverState | null) => void;
   onViewportChange?: (v: ViewportState) => void;
+  // Fired when the user clicks inside the agent gutter on a specific agent
+  // row. Used by the DOM layer to toggle agent row visibility.
+  onGutterAgentClick?: (agentId: string) => void;
 }
+
+// Collapsed height used for hidden agents — tall enough to stay clickable and
+// readable (small italic "hidden" label) but short enough to reclaim vertical
+// space when many agents are filtered.
+const ROW_HEIGHT_COLLAPSED_PX = 18;
 
 export interface HoverState {
   spanId: string;
@@ -100,6 +108,7 @@ export class GanttRenderer {
 
   private viewport: ViewportState = defaultViewport();
   private focusedAgentId: string | null = null;
+  private hiddenAgentIds: Set<string> = new Set();
   private selectedSpanId: string | null = null;
   private hoveredSpanId: string | null = null;
   private edges: EdgeLayout[] = [];
@@ -220,10 +229,28 @@ export class GanttRenderer {
   }
 
   handleClick(x: number, y: number): void {
+    // Gutter clicks target the agent row header — forward to the DOM layer so
+    // it can toggle the agent's visibility through the UI store.
+    if (x < GUTTER_WIDTH_PX && y >= TOP_MARGIN_PX) {
+      const agentId = this.agentAtY(y);
+      if (agentId) this.cb.onGutterAgentClick?.(agentId);
+      return;
+    }
     const hit = this.hitTest(x, y);
     this.selectedSpanId = hit;
     this.overlayDirty = true;
     this.cb.onSelect?.(hit, x, y);
+  }
+
+  private agentAtY(py: number): string | null {
+    const agents = this.store.agents.list;
+    let y = TOP_MARGIN_PX;
+    for (const agent of agents) {
+      const rowH = this.rowHeight(agent.id);
+      if (py >= y && py < y + rowH) return agent.id;
+      y += rowH;
+    }
+    return null;
   }
 
   // Public hit-test for DOM overlays that need to know what span sits under
@@ -303,6 +330,39 @@ export class GanttRenderer {
     this.focusedAgentId = agentId;
     this.bgDirty = true;
     this.blocksDirty = true;
+  }
+
+  // Row layout the renderer currently uses. Exposed so DOM overlays
+  // (GanttDomProxy, PinStrip, RangeSelectionLayer, ApprovalEditor) can mirror
+  // the canvas exactly — honoring focus state AND hidden agent collapse — in
+  // a single place instead of each duplicating the math.
+  getRowLayout(): Array<{ agentId: string; top: number; height: number; hidden: boolean }> {
+    const out: Array<{ agentId: string; top: number; height: number; hidden: boolean }> = [];
+    let y = TOP_MARGIN_PX;
+    for (const agent of this.store.agents.list) {
+      const h = this.rowHeight(agent.id);
+      out.push({ agentId: agent.id, top: y, height: h, hidden: this.hiddenAgentIds.has(agent.id) });
+      y += h;
+    }
+    return out;
+  }
+
+  isAgentHidden(agentId: string): boolean {
+    return this.hiddenAgentIds.has(agentId);
+  }
+
+  setHiddenAgents(ids: Iterable<string>): void {
+    const next = new Set(ids);
+    if (
+      next.size === this.hiddenAgentIds.size &&
+      [...next].every((id) => this.hiddenAgentIds.has(id))
+    ) {
+      return;
+    }
+    this.hiddenAgentIds = next;
+    this.bgDirty = true;
+    this.blocksDirty = true;
+    this.overlayDirty = true;
   }
 
   // --- Frame loop --------------------------------------------------------
@@ -443,25 +503,40 @@ export class GanttRenderer {
     y: number,
     rowH: number,
   ): void {
-    // Color chip
+    const hidden = this.hiddenAgentIds.has(agent.id);
+
+    // Color chip — smaller and vertically centered in collapsed rows.
+    const chipSize = hidden ? 8 : 12;
     const chipX = 12;
-    const chipY = y + rowH / 2 - 6;
+    const chipY = y + rowH / 2 - chipSize / 2;
     ctx.fillStyle = colorForAgent(agent.id);
-    roundRectPath(ctx, chipX, chipY, 12, 12, 3);
+    roundRectPath(ctx, chipX, chipY, chipSize, chipSize, 3);
     ctx.fill();
 
-    // Name
-    ctx.fillStyle = cssVar('--md-sys-color-on-surface') || '#e2e2e9';
-    ctx.font = '600 13px system-ui, sans-serif';
-    ctx.textBaseline = 'middle';
-    const name = agent.name || agent.id;
+    const textX = chipX + 18;
     const maxNameW = GUTTER_WIDTH_PX - 80;
-    ctx.fillText(truncate(ctx, name, maxNameW), chipX + 18, y + rowH / 2 - 7);
 
-    // Framework badge
-    ctx.font = '10px system-ui, sans-serif';
-    ctx.fillStyle = cssVar('--md-sys-color-on-surface-variant') || '#c3c6cf';
-    ctx.fillText(agent.framework, chipX + 18, y + rowH / 2 + 8);
+    if (hidden) {
+      // Single-line collapsed layout.
+      ctx.fillStyle = cssVar('--md-sys-color-on-surface-variant') || '#c3c6cf';
+      ctx.font = 'italic 11px system-ui, sans-serif';
+      ctx.textBaseline = 'middle';
+      const name = agent.name || agent.id;
+      ctx.fillText(`${truncate(ctx, name, maxNameW - 36)} · hidden`, textX, y + rowH / 2);
+      // Status dot still rendered below.
+    } else {
+      // Name
+      ctx.fillStyle = cssVar('--md-sys-color-on-surface') || '#e2e2e9';
+      ctx.font = '600 13px system-ui, sans-serif';
+      ctx.textBaseline = 'middle';
+      const name = agent.name || agent.id;
+      ctx.fillText(truncate(ctx, name, maxNameW), textX, y + rowH / 2 - 7);
+
+      // Framework badge
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.fillStyle = cssVar('--md-sys-color-on-surface-variant') || '#c3c6cf';
+      ctx.fillText(agent.framework, textX, y + rowH / 2 + 8);
+    }
 
     // Connection status dot
     const dotX = GUTTER_WIDTH_PX - 18;
@@ -511,6 +586,10 @@ export class GanttRenderer {
     let visibleCount = 0;
     for (const agent of agents) {
       const rowH = this.rowHeight(agent.id);
+      if (this.hiddenAgentIds.has(agent.id)) {
+        y += rowH;
+        continue;
+      }
       const rowDataX = GUTTER_WIDTH_PX + 10; // skip color strip
       const scratch: Span[] = [];
       spanIndex.queryAgent(agent.id, vs, ve, scratch);
@@ -879,6 +958,10 @@ export class GanttRenderer {
     const scratch: Span[] = [];
     for (const agent of agents) {
       const rowH = this.rowHeight(agent.id);
+      if (this.hiddenAgentIds.has(agent.id)) {
+        y += rowH;
+        continue;
+      }
       if (py >= y && py < y + rowH) {
         const vs = viewportStart(this.viewport);
         const ve = this.viewport.endMs;
@@ -929,6 +1012,7 @@ export class GanttRenderer {
   }
 
   private rowHeight(agentId: string): number {
+    if (this.hiddenAgentIds.has(agentId)) return ROW_HEIGHT_COLLAPSED_PX;
     return agentId === this.focusedAgentId ? ROW_HEIGHT_FOCUSED_PX : ROW_HEIGHT_PX;
   }
 

@@ -43,6 +43,8 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
   const openPopover = usePopoverStore((s) => s.openForSpan);
   const closeUnpinnedPopovers = usePopoverStore((s) => s.closeUnpinned);
   const setActiveRenderer = useUiStore((s) => s.setActiveRenderer);
+  const showAllAgents = useUiStore((s) => s.showAllAgents);
+  const hiddenAgentIds = useUiStore((s) => s.hiddenAgentIds);
   const themeBase = useThemeStore((s) => s.base);
   const colorBlind = useThemeStore((s) => s.colorBlind);
 
@@ -60,6 +62,9 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
           }
         },
         onHoverChange: (h) => setHover(h),
+        onGutterAgentClick: (agentId) => {
+          useUiStore.getState().toggleAgentHidden(agentId);
+        },
         onViewportChange: (v) => {
           setLiveBroken(!v.liveFollow);
           setOverlayTick((n) => (n + 1) | 0);
@@ -83,6 +88,11 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
     setActiveRenderer(renderer);
     return () => setActiveRenderer(null);
   }, [renderer, setActiveRenderer]);
+
+  // Push hidden-agent set to the renderer whenever the UI store changes it.
+  useEffect(() => {
+    renderer.setHiddenAgents(hiddenAgentIds);
+  }, [renderer, hiddenAgentIds]);
 
   // Mount + resize observer.
   useLayoutEffect(() => {
@@ -216,6 +226,30 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
           }}
         >
           ⟳ Return to live
+        </button>
+      )}
+      {hiddenAgentIds.size > 0 && (
+        <button
+          onClick={showAllAgents}
+          data-testid="show-all-agents"
+          style={{
+            position: 'absolute',
+            left: 8,
+            top: 2,
+            zIndex: 9,
+            padding: '2px 8px',
+            fontSize: 10,
+            lineHeight: 1.4,
+            borderRadius: 999,
+            border: '1px solid var(--md-sys-color-outline-variant, #43474e)',
+            background: 'var(--md-sys-color-surface-container-high, #262931)',
+            color: 'var(--md-sys-color-on-surface, #e2e2e9)',
+            cursor: 'pointer',
+            pointerEvents: 'auto',
+          }}
+          title={`Show all ${hiddenAgentIds.size} hidden agent row${hiddenAgentIds.size === 1 ? '' : 's'}`}
+        >
+          Show all ({hiddenAgentIds.size})
         </button>
       )}
       {menu && <SpanContextMenu state={menu} onClose={() => setMenu(null)} />}
