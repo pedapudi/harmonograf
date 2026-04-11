@@ -1,0 +1,302 @@
+// Harmonograf v1 — frontend-facing RPC request/response messages.
+//
+// The UI talks to the server through these unary and server-streaming
+// RPCs. Requests here are issued by the Gantt console, not by agents.
+// The service declaration itself lives in service.proto so it can
+// aggregate telemetry, control, and these RPCs under one gRPC service.
+//
+// See docs/design/01 §4.6 for the per-RPC semantics and docs/design/04
+// §7 for the interactions that drive them.
+
+syntax = "proto3";
+
+package harmonograf.v1;
+
+import "google/protobuf/timestamp.proto";
+import "harmonograf/v1/types.proto";
+
+option go_package = "github.com/anthropics/harmonograf/gen/harmonograf/v1;harmonografv1";
+
+// ---------------------------------------------------------------------------
+// ListSessions
+// ---------------------------------------------------------------------------
+
+// Summary of a session for the picker. Cheap to build — does not load
+// any spans.
+message SessionSummary {
+  string id = 1;
+  string title = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp ended_at = 4;
+  SessionStatus status = 5;
+  int32 agent_count = 6;
+  // Number of spans currently in AWAITING_HUMAN state across all agents
+  // in this session. Drives the attention badge on the picker row.
+  int32 attention_count = 7;
+  google.protobuf.Timestamp last_activity = 8;
+}
+
+message ListSessionsRequest {
+  // Optional filter on status. Omit to include all.
+  SessionStatus status_filter = 1;
+  // Free-text search over title and metadata values. Empty = no filter.
+  string search = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+}
+
+message ListSessionsResponse {
+  repeated SessionSummary sessions = 1;
+  int32 total_count = 2;
+}
+
+// ---------------------------------------------------------------------------
+// WatchSession
+// ---------------------------------------------------------------------------
+
+// Initial burst + live deltas for a session. The first messages in the
+// stream carry the existing state (agents + spans in the requested
+// window); after that the server pushes deltas as they arrive from
+// telemetry.
+message WatchSessionRequest {
+  string session_id = 1;
+  // Optional time window for the initial burst. If absent, server
+  // picks a recent window (default: last 1 hour or the whole session,
+  // whichever is smaller).
+  google.protobuf.Timestamp window_start = 2;
+  google.protobuf.Timestamp window_end = 3;
+}
+
+message SessionUpdate {
+  oneof kind {
+    // Initial burst messages. Multiple of each may be sent before the
+    // first delta. A client knows the burst is done when it sees the
+    // first delta (NewSpan/UpdatedSpan/EndedSpan/etc) OR receives an
+    // explicit InitialBurstComplete.
+    Session session = 1;
+    Agent agent = 2;
+    Span initial_span = 3;
+    Annotation initial_annotation = 4;
+    InitialBurstComplete burst_complete = 5;
+
+    // Live deltas.
+    NewSpan new_span = 6;
+    UpdatedSpan updated_span = 7;
+    EndedSpan ended_span = 8;
+    NewAnnotation new_annotation = 9;
+    AgentJoined agent_joined = 10;
+    AgentLeft agent_left = 11;
+    AgentStatusChanged agent_status_changed = 12;
+    SessionEnded session_ended = 13;
+    // Hint that the client should call GetPayload for a digest whose
+    // summary was already delivered. Server emits these opportunistically
+    // when the drawer-less client explicitly subscribes to payloads.
+    PayloadAvailable payload_available = 14;
+  }
+}
+
+message InitialBurstComplete {
+  int32 spans_sent = 1;
+  int32 agents_sent = 2;
+}
+
+message NewSpan {
+  Span span = 1;
+}
+
+message UpdatedSpan {
+  string span_id = 1;
+  SpanStatus status = 2;
+  map<string, AttributeValue> attributes = 3;
+  repeated PayloadRef payload_refs = 4;
+}
+
+message EndedSpan {
+  string span_id = 1;
+  google.protobuf.Timestamp end_time = 2;
+  SpanStatus status = 3;
+  ErrorInfo error = 4;
+}
+
+message NewAnnotation {
+  Annotation annotation = 1;
+}
+
+message AgentJoined {
+  Agent agent = 1;
+}
+
+message AgentLeft {
+  string agent_id = 1;
+  string stream_id = 2;
+}
+
+message AgentStatusChanged {
+  string agent_id = 1;
+  AgentStatus status = 2;
+  int64 buffered_events = 3;
+  int64 dropped_events = 4;
+}
+
+message SessionEnded {
+  google.protobuf.Timestamp ended_at = 1;
+  SessionStatus final_status = 2;
+}
+
+message PayloadAvailable {
+  string digest = 1;
+}
+
+// ---------------------------------------------------------------------------
+// GetPayload
+// ---------------------------------------------------------------------------
+
+// GetPayload is server-streaming so that large payloads (multi-MiB LLM
+// completions, images) can be delivered in chunks and rendered
+// progressively in the inspector. Small payloads arrive in one chunk.
+message GetPayloadRequest {
+  string digest = 1;
+  // If true, the server returns only the PayloadRef summary, never the
+  // bytes. Used by tooltips that don't need the full body.
+  bool summary_only = 2;
+}
+
+message PayloadChunk {
+  // Echoed on every chunk so the client can correlate interleaved
+  // responses (not that GetPayload ever interleaves — defensive).
+  string digest = 1;
+  int64 total_size = 2;
+  string mime = 3;
+  // Echoed on the first chunk only; empty on subsequent chunks.
+  string summary = 4;
+  bytes chunk = 5;
+  bool last = 6;
+  // If true, the server does not have these bytes (evicted client-side
+  // and never reuploaded). The chunk field is empty.
+  bool not_found = 7;
+}
+
+// ---------------------------------------------------------------------------
+// GetSpanTree
+// ---------------------------------------------------------------------------
+
+message GetSpanTreeRequest {
+  string session_id = 1;
+  // Optional: only spans from these agents. Empty = all agents.
+  repeated string agent_ids = 2;
+  // Optional: time window. Empty start/end = unbounded on that side.
+  google.protobuf.Timestamp window_start = 3;
+  google.protobuf.Timestamp window_end = 4;
+  // Hard cap on returned spans to protect the server. Server may return
+  // fewer and set truncated = true in the response.
+  int32 limit = 5;
+}
+
+message GetSpanTreeResponse {
+  repeated Span spans = 1;
+  bool truncated = 2;
+}
+
+// ---------------------------------------------------------------------------
+// PostAnnotation
+// ---------------------------------------------------------------------------
+
+// When kind == STEERING or HUMAN_RESPONSE, the server routes the body
+// through the control path as a synthetic ControlEvent (STEER or
+// APPROVE respectively) and waits for the ack before returning.
+// COMMENT annotations return immediately.
+message PostAnnotationRequest {
+  string session_id = 1;
+  AnnotationTarget target = 2;
+  AnnotationKind kind = 3;
+  string body = 4;
+  string author = 5;
+  // For steering/human-response: how long to wait for ack. 0 = server
+  // default (10s).
+  int64 ack_timeout_ms = 6;
+}
+
+message PostAnnotationResponse {
+  Annotation annotation = 1;
+  // For steering/human-response: the ack result from the agent.
+  ControlAckResult delivery = 2;
+  string delivery_detail = 3;
+}
+
+// ---------------------------------------------------------------------------
+// SendControl
+// ---------------------------------------------------------------------------
+
+// Synchronous control issue. Server fans out to every active
+// SubscribeControl stream for the target agent and waits for the first
+// ack (or aggregates — see detail below).
+message SendControlRequest {
+  string session_id = 1;
+  ControlTarget target = 2;
+  ControlKind kind = 3;
+  bytes payload = 4;
+  // 0 = server default (10s).
+  int64 ack_timeout_ms = 5;
+  // If true and the agent has multiple concurrent streams, wait for all
+  // of them to ack (or timeout). Default (false) returns on the first ack.
+  bool require_all_acks = 6;
+}
+
+message SendControlResponse {
+  string control_id = 1;
+  ControlAckResult result = 2;
+  // Per-stream ack detail when require_all_acks = true; otherwise one
+  // entry for the stream that answered first.
+  repeated StreamAck acks = 3;
+}
+
+message StreamAck {
+  string stream_id = 1;
+  ControlAckResult result = 2;
+  string detail = 3;
+  google.protobuf.Timestamp acked_at = 4;
+}
+
+// ---------------------------------------------------------------------------
+// DeleteSession
+// ---------------------------------------------------------------------------
+
+message DeleteSessionRequest {
+  string session_id = 1;
+  // Force delete even if the session is LIVE. Default false — LIVE
+  // sessions are refused.
+  bool force = 2;
+}
+
+message DeleteSessionResponse {
+  bool deleted = 1;
+  string reason_if_not = 2;
+  // Counts of what was removed.
+  int32 spans_removed = 3;
+  int32 annotations_removed = 4;
+  int64 payload_bytes_freed = 5;
+}
+
+// ---------------------------------------------------------------------------
+// GetStats
+// ---------------------------------------------------------------------------
+
+// Retention stats. Harmonograf v0 does not evict automatically
+// (resolved decision F: unlimited retention, show stats). This RPC
+// backs the Settings page and is used by the CLI `make stats` target.
+message GetStatsRequest {}
+
+message GetStatsResponse {
+  int32 session_count = 1;
+  int32 live_session_count = 2;
+  int32 agent_count = 3;
+  int64 span_count = 4;
+  int64 annotation_count = 5;
+  int64 payload_count = 6;
+  int64 payload_bytes = 7;
+  int64 disk_bytes = 8;
+  string data_dir = 9;
+  // Active telemetry streams right now.
+  int32 active_telemetry_streams = 10;
+  int32 active_control_streams = 11;
+}

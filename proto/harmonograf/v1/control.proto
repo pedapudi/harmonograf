@@ -13,8 +13,6 @@ syntax = "proto3";
 
 package harmonograf.v1;
 
-import "harmonograf/v1/types.proto";
-
 option go_package = "github.com/anthropics/harmonograf/gen/harmonograf/v1;harmonografv1";
 
 // Subscribes to control events for one telemetry stream. The session_id,

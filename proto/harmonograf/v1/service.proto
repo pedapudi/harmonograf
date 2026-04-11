@@ -1,0 +1,75 @@
+// Harmonograf v1 — service aggregation.
+//
+// One gRPC service that hosts every RPC: the agent-facing telemetry
+// and control streams plus the frontend-facing UI RPCs. Splitting the
+// declaration into its own file (rather than scattering service{}
+// blocks across telemetry.proto, control.proto, frontend.proto) keeps
+// the wire contract legible in one place.
+//
+// Why a single service instead of separate services per concern?
+// - gRPC clients can share one channel across all RPCs.
+// - Auth metadata (when v1 hosted mode lands) applies uniformly.
+// - Version rollouts happen at the service level; one version knob is
+//   easier than three.
+//
+// See docs/design/01 §4 for the per-RPC semantics.
+
+syntax = "proto3";
+
+package harmonograf.v1;
+
+import "harmonograf/v1/telemetry.proto";
+import "harmonograf/v1/control.proto";
+import "harmonograf/v1/frontend.proto";
+import "harmonograf/v1/types.proto";
+
+option go_package = "github.com/anthropics/harmonograf/gen/harmonograf/v1;harmonografv1";
+
+service Harmonograf {
+  // --- Agent → server: high-volume telemetry ---------------------------
+
+  // Bidirectional. Agent sends Hello, SpanStart/Update/End, PayloadUpload
+  // chunks, Heartbeat, ControlAck, Goodbye. Server sends Welcome,
+  // PayloadRequest, FlowControl, ServerGoodbye.
+  rpc StreamTelemetry(stream TelemetryUp) returns (stream TelemetryDown);
+
+  // --- Server → agent: low-volume control delivery ---------------------
+
+  // Server-streaming. Agent opens this once after StreamTelemetry's
+  // Welcome. Server pushes ControlEvents. Agent ACKs travel back
+  // upstream on StreamTelemetry (not on this stream), preserving
+  // happens-before and avoiding a third RPC.
+  rpc SubscribeControl(SubscribeControlRequest) returns (stream ControlEvent);
+
+  // --- Frontend → server: UI RPCs ---------------------------------------
+
+  // List sessions for the picker. Unary.
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+
+  // Subscribe to one session's existing state + live deltas.
+  // Server-streaming.
+  rpc WatchSession(WatchSessionRequest) returns (stream SessionUpdate);
+
+  // Lazy payload fetch for the inspector drawer. Server-streaming so
+  // large payloads can deliver in chunks.
+  rpc GetPayload(GetPayloadRequest) returns (stream PayloadChunk);
+
+  // Snapshot query for a time window on a session. Used on initial
+  // session open and large viewport jumps. Unary.
+  rpc GetSpanTree(GetSpanTreeRequest) returns (GetSpanTreeResponse);
+
+  // Post an annotation. For STEERING and HUMAN_RESPONSE, the server
+  // routes the body as a control event and waits for ack before
+  // returning. Unary.
+  rpc PostAnnotation(PostAnnotationRequest) returns (PostAnnotationResponse);
+
+  // Issue a control event to an agent and wait for ack. Unary.
+  rpc SendControl(SendControlRequest) returns (SendControlResponse);
+
+  // Delete a session and its spans, annotations, and payloads. Refuses
+  // LIVE sessions unless force = true. Unary.
+  rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
+
+  // Retention / storage stats for the Settings page. Unary.
+  rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
+}
