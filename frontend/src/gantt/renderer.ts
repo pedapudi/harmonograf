@@ -40,7 +40,7 @@ import {
 const MIN_BLOCK_WIDTH_PX = 2;
 
 export interface RendererCallbacks {
-  onSelect?: (spanId: string | null) => void;
+  onSelect?: (spanId: string | null, clickX: number, clickY: number) => void;
   onHoverChange?: (hover: HoverState | null) => void;
   onViewportChange?: (v: ViewportState) => void;
 }
@@ -50,6 +50,19 @@ export interface HoverState {
   // Tooltip anchor in CSS pixels, relative to the canvas container.
   x: number;
   y: number;
+}
+
+// Cached layout for a single LINK_INVOKED edge, rebuilt each blocks redraw.
+// Persisted so overlay hover highlight and edge hit-testing don't re-walk the
+// span index per frame.
+interface EdgeLayout {
+  sourceSpanId: string;
+  targetSpanId: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color: string;
 }
 
 interface FrameMetrics {
@@ -89,6 +102,8 @@ export class GanttRenderer {
   private focusedAgentId: string | null = null;
   private selectedSpanId: string | null = null;
   private hoveredSpanId: string | null = null;
+  private edges: EdgeLayout[] = [];
+  private hoveredEdgeIdx: number | null = null;
 
   // Dirty flags per layer.
   private bgDirty = true;
@@ -208,13 +223,19 @@ export class GanttRenderer {
     const hit = this.hitTest(x, y);
     this.selectedSpanId = hit;
     this.overlayDirty = true;
-    this.cb.onSelect?.(hit);
+    this.cb.onSelect?.(hit, x, y);
   }
 
   // Public hit-test for DOM overlays that need to know what span sits under
   // the pointer (right-click context menu, annotation pin targeting).
   spanAt(x: number, y: number): string | null {
     return this.hitTest(x, y);
+  }
+
+  // Public accessor: used by DOM-layer overlays (SpanPopover) to anchor
+  // elements to a span's current on-canvas rectangle.
+  rectFor(spanId: string): { x: number; y: number; w: number; h: number } | null {
+    return this.rectForSpan(spanId);
   }
 
   handlePointerMove(x: number, y: number): void {
@@ -224,6 +245,12 @@ export class GanttRenderer {
       this.overlayDirty = true;
       this.cb.onHoverChange?.(hit ? { spanId: hit, x, y } : null);
     }
+    // Edge hover: only when no span is under the cursor, so spans win.
+    const edgeIdx = hit ? null : this.edgeHitTest(x, y);
+    if (edgeIdx !== this.hoveredEdgeIdx) {
+      this.hoveredEdgeIdx = edgeIdx;
+      this.overlayDirty = true;
+    }
   }
 
   handlePointerLeave(): void {
@@ -231,6 +258,10 @@ export class GanttRenderer {
       this.hoveredSpanId = null;
       this.overlayDirty = true;
       this.cb.onHoverChange?.(null);
+    }
+    if (this.hoveredEdgeIdx !== null) {
+      this.hoveredEdgeIdx = null;
+      this.overlayDirty = true;
     }
   }
 
@@ -582,9 +613,125 @@ export class GanttRenderer {
       }
     }
 
+    // Links layer: cross-agent LINK_INVOKED edges. Drawn inside the clipped
+    // data area so curves never bleed into the gutter or axis.
+    this.drawLinks(ctx);
+
     ctx.restore();
     // Expose last-draw count for stress tooling.
     this.lastDrawnCount = visibleCount;
+  }
+
+  // --- Links -------------------------------------------------------------
+
+  private drawLinks(ctx: CanvasRenderingContext2D): void {
+    this.edges.length = 0;
+    const vs = viewportStart(this.viewport);
+    const ve = this.viewport.endMs;
+    const w = this.widthCss;
+    const agents = this.store.agents.list;
+    if (agents.length === 0) return;
+
+    // Row center lookup.
+    const rowCenterY = new Map<string, number>();
+    let y = TOP_MARGIN_PX;
+    for (const agent of agents) {
+      const rowH = this.rowHeight(agent.id);
+      rowCenterY.set(agent.id, y + rowH / 2);
+      y += rowH;
+    }
+
+    const dataLeft = GUTTER_WIDTH_PX + 10;
+    const dataRight = w;
+    const scratch: Span[] = [];
+    // We pull a slightly wider range so edges whose endpoint sits off-screen
+    // still render if the other endpoint is in view.
+    const margin = this.viewport.windowMs * 0.5;
+    for (const agent of agents) {
+      scratch.length = 0;
+      this.store.spans.queryAgent(agent.id, vs - margin, ve + margin, scratch);
+      for (const s of scratch) {
+        if (!s.links || s.links.length === 0) continue;
+        for (const link of s.links) {
+          if (link.relation !== 'INVOKED') continue;
+          const target = this.store.spans.get(link.targetSpanId);
+          if (!target) continue;
+          const srcY = rowCenterY.get(s.agentId);
+          const tgtY = rowCenterY.get(target.agentId);
+          if (srcY === undefined || tgtY === undefined) continue;
+          // Source anchor: right edge of the transfer span (its endMs, or now
+          // if still running). Target anchor: left edge of the child span.
+          const srcMs = s.endMs ?? target.startMs;
+          const x1 = msToPx(this.viewport, w, srcMs);
+          const x2 = msToPx(this.viewport, w, target.startMs);
+          // Viewport cull: both endpoints off the same side of the data area.
+          if ((x1 < dataLeft && x2 < dataLeft) || (x1 > dataRight && x2 > dataRight)) {
+            continue;
+          }
+          const color = colorForAgent(s.agentId);
+          this.edges.push({
+            sourceSpanId: s.id,
+            targetSpanId: target.id,
+            x1,
+            y1: srcY,
+            x2,
+            y2: tgtY,
+            color,
+          });
+        }
+      }
+    }
+
+    if (this.edges.length === 0) return;
+
+    ctx.save();
+    ctx.lineWidth = 1.25;
+    ctx.globalAlpha = 0.4;
+    for (const e of this.edges) {
+      ctx.strokeStyle = e.color;
+      ctx.beginPath();
+      drawEdgePath(ctx, e.x1, e.y1, e.x2, e.y2);
+      ctx.stroke();
+      drawArrowhead(ctx, e.x2, e.y2, e.x1, e.y1, e.color);
+    }
+    ctx.restore();
+  }
+
+  private edgeHitTest(px: number, py: number): number | null {
+    const edges = this.edges;
+    if (edges.length === 0) return null;
+    const tol = 5;
+    const samples = 20;
+    for (let i = edges.length - 1; i >= 0; i--) {
+      const e = edges[i];
+      // Quick bbox reject with padding for curve bulge.
+      const minX = Math.min(e.x1, e.x2) - tol;
+      const maxX = Math.max(e.x1, e.x2) + tol;
+      const minY = Math.min(e.y1, e.y2) - 40;
+      const maxY = Math.max(e.y1, e.y2) + 40;
+      if (px < minX || px > maxX || py < minY || py > maxY) continue;
+      const [cp1x, cp1y, cp2x, cp2y] = edgeControlPoints(e.x1, e.y1, e.x2, e.y2);
+      let prevX = e.x1;
+      let prevY = e.y1;
+      for (let j = 1; j <= samples; j++) {
+        const t = j / samples;
+        const mt = 1 - t;
+        const x =
+          mt * mt * mt * e.x1 +
+          3 * mt * mt * t * cp1x +
+          3 * mt * t * t * cp2x +
+          t * t * t * e.x2;
+        const y =
+          mt * mt * mt * e.y1 +
+          3 * mt * mt * t * cp1y +
+          3 * mt * t * t * cp2y +
+          t * t * t * e.y2;
+        if (pointSegmentDist(px, py, prevX, prevY, x, y) <= tol) return i;
+        prevX = x;
+        prevY = y;
+      }
+    }
+    return null;
   }
 
   lastDrawnCount = 0;
@@ -621,6 +768,35 @@ export class GanttRenderer {
         ctx.strokeStyle = cssVar('--md-sys-color-on-surface') || '#e2e2e9';
         ctx.lineWidth = 2;
         ctx.strokeRect(rect.x - 1, rect.y - 1, rect.w + 2, rect.h + 2);
+      }
+    }
+
+    // Edge hover highlight: brighten the curve + both endpoint rectangles so
+    // the cross-agent link reads clearly.
+    if (this.hoveredEdgeIdx !== null) {
+      const e = this.edges[this.hoveredEdgeIdx];
+      if (e) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(GUTTER_WIDTH_PX, TOP_MARGIN_PX, w - GUTTER_WIDTH_PX, h - TOP_MARGIN_PX);
+        ctx.clip();
+        ctx.strokeStyle = e.color;
+        ctx.globalAlpha = 0.95;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        drawEdgePath(ctx, e.x1, e.y1, e.x2, e.y2);
+        ctx.stroke();
+        drawArrowhead(ctx, e.x2, e.y2, e.x1, e.y1, e.color);
+        ctx.restore();
+        const srcRect = this.rectForSpan(e.sourceSpanId);
+        const tgtRect = this.rectForSpan(e.targetSpanId);
+        ctx.save();
+        ctx.strokeStyle = e.color;
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.9;
+        if (srcRect) ctx.strokeRect(srcRect.x - 1, srcRect.y - 1, srcRect.w + 2, srcRect.h + 2);
+        if (tgtRect) ctx.strokeRect(tgtRect.x - 1, tgtRect.y - 1, tgtRect.w + 2, tgtRect.h + 2);
+        ctx.restore();
       }
     }
 
@@ -764,6 +940,81 @@ export class GanttRenderer {
 }
 
 // --- helpers ------------------------------------------------------------
+
+function edgeControlPoints(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): [number, number, number, number] {
+  // Horizontal tangents at both ends; offset scales with dx so short hops
+  // curve gently and long jumps arc broadly. Falls back to a fixed minimum
+  // when dx is near zero so near-vertical links still visibly curve.
+  const dx = Math.max(40, Math.abs(x2 - x1) * 0.4);
+  return [x1 + dx, y1, x2 - dx, y2];
+}
+
+function drawEdgePath(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): void {
+  const [cp1x, cp1y, cp2x, cp2y] = edgeControlPoints(x1, y1, x2, y2);
+  ctx.moveTo(x1, y1);
+  ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x2, y2);
+}
+
+function drawArrowhead(
+  ctx: CanvasRenderingContext2D,
+  tipX: number,
+  tipY: number,
+  fromX: number,
+  fromY: number,
+  color: string,
+): void {
+  // The incoming bezier arrives close to horizontal at the target (control
+  // point cp2 shares y2), so approximating direction with (tip - cp2) reads
+  // better than using the far source point directly.
+  const [, , cp2x, cp2y] = edgeControlPoints(fromX, fromY, tipX, tipY);
+  const dx = tipX - cp2x;
+  const dy = tipY - cp2y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  const size = 7;
+  const ax = tipX - ux * size;
+  const ay = tipY - uy * size;
+  const px = -uy;
+  const py = ux;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(ax + px * size * 0.5, ay + py * size * 0.5);
+  ctx.lineTo(ax - px * size * 0.5, ay - py * size * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function pointSegmentDist(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  if (len2 === 0) return Math.hypot(px - ax, py - ay);
+  let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
 
 function roundRectPath(
   ctx: CanvasRenderingContext2D,
