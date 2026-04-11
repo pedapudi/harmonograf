@@ -17,6 +17,8 @@ class ServerConfig:
     store_backend: str = "sqlite"  # "memory" | "sqlite"
     data_dir: str = "~/.harmonograf/data"
     log_level: str = "INFO"
+    log_format: str = "text"  # "text" | "json"
     grace_seconds: float = 5.0
     retention_hours: float = 0.0  # 0 disables retention sweeping
     retention_interval_seconds: float = 300.0
+    metrics_interval_seconds: float = 30.0  # 0 disables periodic metrics

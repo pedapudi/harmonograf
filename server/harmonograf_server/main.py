@@ -31,6 +31,7 @@ from harmonograf_server.config import ServerConfig
 from harmonograf_server.control_router import ControlRouter
 from harmonograf_server.ingest import IngestPipeline
 from harmonograf_server.pb import service_pb2_grpc
+from harmonograf_server.metrics import metrics_loop
 from harmonograf_server.retention import retention_loop
 from harmonograf_server.rpc.telemetry import TelemetryServicer, heartbeat_sweeper
 from harmonograf_server.storage import make_store
@@ -62,6 +63,7 @@ class Harmonograf:
         self._web_shutdown: Optional[asyncio.Event] = None
         self._sweeper_task: Optional[asyncio.Task] = None
         self._retention_task: Optional[asyncio.Task] = None
+        self._metrics_task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
 
     @classmethod
@@ -123,6 +125,17 @@ class Harmonograf:
                 self.cfg.retention_interval_seconds,
             )
 
+        # Periodic metrics snapshot.
+        if self.cfg.metrics_interval_seconds > 0:
+            self._metrics_task = asyncio.create_task(
+                metrics_loop(
+                    self.ingest,
+                    self.store,
+                    self.cfg.metrics_interval_seconds,
+                ),
+                name="metrics_loop",
+            )
+
         # gRPC-Web ASGI app. Reuses the same servicer instance so state is
         # shared with native gRPC.
         self._web_app = grpcASGI()
@@ -158,6 +171,12 @@ class Harmonograf:
             self._retention_task.cancel()
             try:
                 await self._retention_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if self._metrics_task is not None:
+            self._metrics_task.cancel()
+            try:
+                await self._metrics_task
             except (asyncio.CancelledError, Exception):
                 pass
         if self._grpc_server is not None:

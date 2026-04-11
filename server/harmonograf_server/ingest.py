@@ -145,6 +145,9 @@ class IngestPipeline:
     def live_streams(self, agent_id: str) -> list[StreamContext]:
         return list(self._streams_by_agent.get(agent_id, {}).values())
 
+    def active_stream_count(self) -> int:
+        return sum(len(b) for b in self._streams_by_agent.values())
+
     async def handle_hello(self, hello: telemetry_pb2.Hello) -> tuple[StreamContext, Session]:
         """Process a Hello and register a new StreamContext. Returns the
         context and the (possibly just-created) Session row.

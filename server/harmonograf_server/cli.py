@@ -46,6 +46,21 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
     )
     p.add_argument(
+        "--log-format",
+        default="text",
+        choices=("text", "json"),
+        help="log formatter: text for humans, json for log shippers (default: text)",
+    )
+    p.add_argument(
+        "--metrics-interval-seconds",
+        type=float,
+        default=30.0,
+        help=(
+            "how often to emit a metrics snapshot line (sessions/spans/ingest "
+            "rate/active streams); 0 disables (default: 30)"
+        ),
+    )
+    p.add_argument(
         "--grace",
         type=float,
         default=5.0,
@@ -81,15 +96,15 @@ def config_from_args(argv: list[str] | None = None) -> ServerConfig:
         grace_seconds=args.grace,
         retention_hours=args.retention_hours,
         retention_interval_seconds=args.retention_interval_seconds,
+        log_format=args.log_format,
+        metrics_interval_seconds=args.metrics_interval_seconds,
     )
 
 
 def main(argv: list[str] | None = None) -> int:
     cfg = config_from_args(argv)
-    logging.basicConfig(
-        level=getattr(logging, cfg.log_level),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    from harmonograf_server.logging_setup import configure_logging
+    configure_logging(cfg.log_level, cfg.log_format)
     if cfg.host != "127.0.0.1":
         logging.warning(
             "binding to non-loopback %s: v0 has no auth; any host on this "
