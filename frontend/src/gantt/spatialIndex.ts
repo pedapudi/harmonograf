@@ -54,6 +54,14 @@ export class SpanIndex {
   }
 
   append(span: Span): void {
+    // Idempotent on span id: WatchSession can deliver the same span via both
+    // the initial snapshot and a live-stream delta if the delta lands in the
+    // bus between subscribe and snapshot build. Without dedup, the span would
+    // be pushed into `b.spans` twice while `byId` held one entry.
+    if (this.byId.has(span.id)) {
+      this.update(span);
+      return;
+    }
     this.byId.set(span.id, span);
     let b = this.agents.get(span.agentId);
     if (!b) {
