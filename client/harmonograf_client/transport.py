@@ -52,6 +52,13 @@ RECONNECT_INITIAL_MS = 100
 RECONNECT_MAX_MS = 30_000
 SEND_BATCH_MAX = 64
 PAYLOAD_CHUNK_INTERLEAVE = 10  # one chunk per N span messages
+BREAKER_FAILURE_THRESHOLD = 10
+BREAKER_COOLDOWN_MS = 60_000
+
+
+BREAKER_CLOSED = "closed"
+BREAKER_OPEN = "open"
+BREAKER_HALF_OPEN = "half_open"
 
 
 @dataclasses.dataclass
@@ -61,6 +68,8 @@ class TransportConfig:
     reconnect_initial_ms: int = RECONNECT_INITIAL_MS
     reconnect_max_ms: int = RECONNECT_MAX_MS
     payload_chunk_bytes: int = 256 * 1024
+    breaker_failure_threshold: int = BREAKER_FAILURE_THRESHOLD
+    breaker_cooldown_ms: int = BREAKER_COOLDOWN_MS
 
 
 ControlHandler = Callable[[Any], "ControlAckSpec"]
@@ -131,6 +140,17 @@ class Transport:
         self._assigned_session_id: str = session_id
         self._assigned_stream_id: str = ""
 
+        # Reconnect hardening state.
+        # _healthy is set when the current connection has produced at
+        # least one successful upstream span/heartbeat send after
+        # Welcome. It is what drives the backoff reset — not just
+        # "connect succeeded", which can happen repeatedly against a
+        # server that accepts then immediately drops.
+        self._healthy = False
+        self._breaker_state: str = BREAKER_CLOSED
+        self._consecutive_failures = 0
+        self._breaker_lock = threading.Lock()
+
     # ------------------------------------------------------------------
     # Public (called from the agent thread)
     # ------------------------------------------------------------------
@@ -198,6 +218,23 @@ class Transport:
     def assigned_stream_id(self) -> str:
         return self._assigned_stream_id
 
+    @property
+    def breaker_state(self) -> str:
+        """Current circuit-breaker state: "closed", "open", or "half_open".
+
+        Closed is the normal operating state. Open means too many
+        consecutive connection attempts have failed and the worker is
+        sleeping out a cooldown window before trying again. Half-open
+        means a single trial attempt is in flight after a cooldown.
+        """
+        with self._breaker_lock:
+            return self._breaker_state
+
+    @property
+    def consecutive_failures(self) -> int:
+        with self._breaker_lock:
+            return self._consecutive_failures
+
     # ------------------------------------------------------------------
     # Thread + loop plumbing
     # ------------------------------------------------------------------
@@ -221,23 +258,104 @@ class Transport:
     async def _run(self) -> None:
         backoff_ms = self._config.reconnect_initial_ms
         while not self._stop.is_set():
+            # If the breaker is open, sleep the cooldown window before
+            # even attempting a connection. Half-open on wake.
+            if self._breaker_is_open():
+                cooldown_s = self._config.breaker_cooldown_ms / 1000.0
+                try:
+                    await asyncio.sleep(cooldown_s)
+                except asyncio.CancelledError:
+                    return
+                if self._stop.is_set():
+                    break
+                self._breaker_half_open()
+
+            self._healthy = False
             try:
                 await self._connect_and_serve()
-                backoff_ms = self._config.reconnect_initial_ms
             except asyncio.CancelledError:
                 return
             except Exception as e:
                 log.warning("transport disconnected: %s", e)
                 self._connected.clear()
+                if self._healthy:
+                    # The connection proved itself before dying.
+                    # Reset backoff and breaker; next loop iteration
+                    # reconnects immediately with the initial delay.
+                    self._on_healthy_disconnect()
+                    backoff_ms = self._config.reconnect_initial_ms
+                else:
+                    self._on_failed_attempt()
                 if self._stop.is_set():
                     break
-                jitter = random.uniform(0, backoff_ms / 2)
-                delay = (backoff_ms + jitter) / 1000.0
-                try:
-                    await asyncio.sleep(delay)
-                except asyncio.CancelledError:
-                    return
-                backoff_ms = min(backoff_ms * 2, self._config.reconnect_max_ms)
+                # If the breaker just opened, skip the exponential
+                # sleep — the top-of-loop cooldown handles it.
+                if not self._breaker_is_open():
+                    jitter = random.uniform(0, backoff_ms / 2)
+                    delay = (backoff_ms + jitter) / 1000.0
+                    try:
+                        await asyncio.sleep(delay)
+                    except asyncio.CancelledError:
+                        return
+                    backoff_ms = min(backoff_ms * 2, self._config.reconnect_max_ms)
+                continue
+            # Clean return (e.g., server_goodbye). Treat as healthy end.
+            self._connected.clear()
+            if self._healthy:
+                self._on_healthy_disconnect()
+            backoff_ms = self._config.reconnect_initial_ms
+
+    # ------------------------------------------------------------------
+    # Breaker helpers
+    # ------------------------------------------------------------------
+
+    def _breaker_is_open(self) -> bool:
+        with self._breaker_lock:
+            return self._breaker_state == BREAKER_OPEN
+
+    def _breaker_half_open(self) -> None:
+        with self._breaker_lock:
+            self._breaker_state = BREAKER_HALF_OPEN
+
+    def _on_failed_attempt(self) -> None:
+        with self._breaker_lock:
+            self._consecutive_failures += 1
+            if (
+                self._breaker_state != BREAKER_OPEN
+                and self._consecutive_failures >= self._config.breaker_failure_threshold
+            ):
+                self._breaker_state = BREAKER_OPEN
+                log.warning(
+                    "transport circuit breaker OPEN after %d consecutive failures; "
+                    "cooling down for %dms",
+                    self._consecutive_failures,
+                    self._config.breaker_cooldown_ms,
+                )
+            elif self._breaker_state == BREAKER_HALF_OPEN:
+                # Trial attempt failed — re-open for another cooldown.
+                self._breaker_state = BREAKER_OPEN
+                log.warning("transport circuit breaker re-OPEN after half-open trial failed")
+
+    def _on_healthy_disconnect(self) -> None:
+        """Called when a connection that was proven healthy has dropped.
+
+        Resets the breaker — the network is demonstrably working and we
+        should reconnect promptly, not treat the drop as another strike.
+        """
+        with self._breaker_lock:
+            self._breaker_state = BREAKER_CLOSED
+            self._consecutive_failures = 0
+
+    def _mark_healthy(self) -> None:
+        """Called by the send loop after a message has been handed off
+        to gRPC following the Welcome. Resets the breaker and backoff.
+        """
+        if self._healthy:
+            return
+        self._healthy = True
+        with self._breaker_lock:
+            self._breaker_state = BREAKER_CLOSED
+            self._consecutive_failures = 0
 
     async def _connect_and_serve(self) -> None:
         # Lazy import of grpc + pb so the module is cheap to import in
@@ -368,6 +486,7 @@ class Transport:
                     # sent so reconnect can resume from there.
                     self._resume_token = env.span_id or self._resume_token
                     await send_queue.put(up)
+                    self._mark_healthy()
                     sent_since_chunk += 1
                 if sent_since_chunk >= PAYLOAD_CHUNK_INTERLEAVE:
                     await self._maybe_send_chunk(send_queue, telemetry_pb2)
@@ -385,6 +504,7 @@ class Transport:
                 last_hb = now
                 hb = self._build_heartbeat(telemetry_pb2)
                 await send_queue.put(telemetry_pb2.TelemetryUp(heartbeat=hb))
+                self._mark_healthy()
 
     async def _maybe_send_chunk(self, send_queue: asyncio.Queue, telemetry_pb2: Any) -> bool:
         with self._chunk_lock:
