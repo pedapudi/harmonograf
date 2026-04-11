@@ -250,9 +250,11 @@ export class GanttRenderer {
   fitAll(): void {
     const maxEnd = Math.max(this.store.spans.maxEndMs(), this.store.nowMs, 1);
     const window = Math.min(ZOOM_MAX_MS, Math.max(ZOOM_MIN_MS, maxEnd * 1.05));
+    // Clamp so the left edge never sits before session start (t=0).
+    const endMs = Math.max(window, maxEnd);
     this.setViewport({
       ...this.viewport,
-      endMs: maxEnd,
+      endMs,
       windowMs: window,
       liveFollow: false,
     });
