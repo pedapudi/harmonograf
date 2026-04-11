@@ -1,0 +1,90 @@
+"""CLI entrypoint.
+
+Both `python -m harmonograf_server` and the `harmonograf-server` console
+script land here. Parses argparse, configures logging, constructs the
+ServerConfig, and delegates to main.run().
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import sys
+
+from harmonograf_server.config import ServerConfig
+from harmonograf_server.main import run
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="harmonograf-server",
+        description="Harmonograf coordination console server.",
+    )
+    p.add_argument("--host", default="127.0.0.1", help="bind address (default: 127.0.0.1)")
+    p.add_argument("--port", type=int, default=7531, help="gRPC port (default: 7531)")
+    p.add_argument(
+        "--web-port",
+        type=int,
+        default=7532,
+        help="gRPC-Web (sonora) port (default: 7532)",
+    )
+    p.add_argument(
+        "--store",
+        choices=("memory", "sqlite"),
+        default="sqlite",
+        help="storage backend (default: sqlite)",
+    )
+    p.add_argument(
+        "--data-dir",
+        default="~/.harmonograf/data",
+        help="data directory for sqlite + payloads (default: ~/.harmonograf/data)",
+    )
+    p.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+    )
+    p.add_argument(
+        "--grace",
+        type=float,
+        default=5.0,
+        help="shutdown grace period in seconds (default: 5.0)",
+    )
+    return p
+
+
+def config_from_args(argv: list[str] | None = None) -> ServerConfig:
+    args = build_parser().parse_args(argv)
+    return ServerConfig(
+        host=args.host,
+        grpc_port=args.port,
+        web_port=args.web_port,
+        store_backend=args.store,
+        data_dir=args.data_dir,
+        log_level=args.log_level,
+        grace_seconds=args.grace,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    cfg = config_from_args(argv)
+    logging.basicConfig(
+        level=getattr(logging, cfg.log_level),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    if cfg.host != "127.0.0.1":
+        logging.warning(
+            "binding to non-loopback %s: v0 has no auth; any host on this "
+            "network can connect",
+            cfg.host,
+        )
+    try:
+        asyncio.run(run(cfg))
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
