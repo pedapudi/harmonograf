@@ -1,0 +1,178 @@
+// Harmonograf v1 — telemetry channel.
+//
+// StreamTelemetry is the high-volume bidirectional stream from agent to
+// server. Spans, payload chunks, and control acks all flow upstream on
+// this RPC. The downstream is reserved for handshake (Welcome), payload
+// re-requests, and flow-control hints — NOT for delivering control events.
+// Control delivery has its own RPC (control.proto SubscribeControl).
+//
+// Why split telemetry from control? See docs/design/01 §4.2.1 — separate
+// flow control, independent reconnect, and folding acks back into telemetry
+// avoids a third RPC while preserving happens-before ordering.
+
+syntax = "proto3";
+
+package harmonograf.v1;
+
+import "google/protobuf/timestamp.proto";
+import "harmonograf/v1/types.proto";
+
+option go_package = "github.com/anthropics/harmonograf/gen/harmonograf/v1;harmonografv1";
+
+// ---------------------------------------------------------------------------
+// Upstream messages (client → server)
+// ---------------------------------------------------------------------------
+
+// First message on every StreamTelemetry. The server replies with Welcome.
+//
+// session_id may be empty — the server will auto-create one and return the
+// assigned id in Welcome. If session_id is provided and unknown, the server
+// creates it on the fly (resolved decision A).
+message Hello {
+  string agent_id = 1;
+  string session_id = 2;
+  string name = 3;
+  Framework framework = 4;
+  string framework_version = 5;
+  repeated Capability capabilities = 6;
+  map<string, string> metadata = 7;
+  // Optional: last span_id the server confirmed before disconnect, used by
+  // the client to drive replay-from on reconnect.
+  string resume_token = 8;
+  // Title and metadata to set on the session if this client is the first
+  // to create it. Ignored if joining an existing session.
+  string session_title = 9;
+}
+
+// Lifecycle messages — start/update/end of a span.
+//
+// SpanStart carries the full span minus end_time. SpanUpdate carries
+// only the fields that changed. SpanEnd carries the final state.
+message SpanStart {
+  Span span = 1;
+}
+
+message SpanUpdate {
+  string span_id = 1;
+  // Attribute deltas. Keys not present in the map are unchanged. To clear
+  // a key, send an AttributeValue with no oneof set.
+  map<string, AttributeValue> attributes = 2;
+  // Optional status transition.
+  SpanStatus status = 3;
+  // Optional payload references added mid-span (e.g., a streaming LLM
+  // attaching its completion as it arrives).
+  repeated PayloadRef payload_refs = 4;
+}
+
+message SpanEnd {
+  string span_id = 1;
+  google.protobuf.Timestamp end_time = 2;
+  SpanStatus status = 3;
+  ErrorInfo error = 4;
+  // Final attribute snapshot — additive, same semantics as SpanUpdate.
+  map<string, AttributeValue> attributes = 5;
+  repeated PayloadRef payload_refs = 6;
+}
+
+// PayloadUpload streams blob bytes in chunks of up to 256 KiB. The client
+// computes the digest locally and ships the PayloadRef in SpanStart/Update/End
+// before the bytes arrive — the timeline updates without waiting for the
+// upload. Multiple PayloadUploads for distinct digests interleave freely
+// on the same stream.
+message PayloadUpload {
+  string digest = 1;
+  int64 total_size = 2;
+  string mime = 3;
+  bytes chunk = 4;
+  bool last = 5;
+  // Set true on the last chunk if the client gave up uploading (eviction).
+  // Server records the digest as permanently unavailable.
+  bool evicted = 6;
+}
+
+// Periodic heartbeat (default every 5s). Carries the client's buffer
+// stats so the frontend can show health in the agent row header.
+message Heartbeat {
+  int64 buffered_events = 1;
+  int64 dropped_events = 2;
+  int64 dropped_spans_critical = 3;
+  int64 buffered_payload_bytes = 4;
+  int64 payloads_evicted = 5;
+  double cpu_self_pct = 6;
+  google.protobuf.Timestamp client_time = 7;
+}
+
+// Graceful client shutdown — server marks the agent DISCONNECTED without
+// waiting for the heartbeat timeout.
+message Goodbye {
+  string reason = 1;
+}
+
+// TelemetryUp is the upstream oneof that StreamTelemetry takes.
+message TelemetryUp {
+  oneof msg {
+    Hello hello = 1;
+    SpanStart span_start = 2;
+    SpanUpdate span_update = 3;
+    SpanEnd span_end = 4;
+    PayloadUpload payload = 5;
+    Heartbeat heartbeat = 6;
+    // Acks for ControlEvents received via SubscribeControl. Folded into
+    // telemetry to preserve happens-before. See types.proto ControlAck.
+    ControlAck control_ack = 7;
+    Goodbye goodbye = 8;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Downstream messages (server → client)
+// ---------------------------------------------------------------------------
+
+// Sent in response to Hello. Carries the assigned session_id (which may
+// equal what the client requested, or a freshly generated id) and a
+// stream_id that uniquely identifies this telemetry stream within the
+// agent_id. Multiple concurrent streams per agent_id are allowed; each
+// gets a distinct stream_id.
+message Welcome {
+  bool accepted = 1;
+  string assigned_session_id = 2;
+  string assigned_stream_id = 3;
+  google.protobuf.Timestamp server_time = 4;
+  // Server feature flags / capability advertisements. Reserved for future
+  // negotiation; v0 is always empty.
+  map<string, string> flags = 5;
+  // If accepted == false, why.
+  string rejection_reason = 6;
+}
+
+// Server asks the client to re-upload a payload by digest, typically
+// because the user opened a drawer for a span whose bytes never arrived.
+message PayloadRequest {
+  string digest = 1;
+}
+
+// Soft hint that the client should slow down or may resume. v0 ingest does
+// not actually emit these — reserved for future use when the server starts
+// shedding load itself.
+message FlowControl {
+  enum Action {
+    ACTION_UNSPECIFIED = 0;
+    ACTION_SLOW = 1;
+    ACTION_RESUME = 2;
+  }
+  Action action = 1;
+}
+
+message ServerGoodbye {
+  string reason = 1;
+}
+
+// TelemetryDown is the downstream oneof.
+message TelemetryDown {
+  oneof msg {
+    Welcome welcome = 1;
+    PayloadRequest payload_request = 2;
+    FlowControl flow_control = 3;
+    ServerGoodbye server_goodbye = 4;
+  }
+}

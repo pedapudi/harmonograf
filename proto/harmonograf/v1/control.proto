@@ -1,0 +1,37 @@
+// Harmonograf v1 — control delivery channel.
+//
+// SubscribeControl is a server-streaming RPC opened by the agent right
+// after StreamTelemetry's Welcome arrives. The server pushes ControlEvents
+// scoped to the (agent_id, stream_id) pair; the agent's acks travel back
+// upstream on StreamTelemetry, NOT on this stream.
+//
+// Splitting control out from telemetry gives control its own gRPC flow
+// window, so a stalled payload upload on the telemetry stream can never
+// delay a PAUSE event. See docs/design/01 §4.2.1.
+
+syntax = "proto3";
+
+package harmonograf.v1;
+
+import "harmonograf/v1/types.proto";
+
+option go_package = "github.com/anthropics/harmonograf/gen/harmonograf/v1;harmonografv1";
+
+// Subscribes to control events for one telemetry stream. The session_id,
+// agent_id, and stream_id must match a stream the server has previously
+// accepted (i.e., one that received a Welcome from StreamTelemetry).
+//
+// Multiple SubscribeControl calls under the same agent_id are allowed
+// (one per concurrent telemetry stream); the server fans every
+// SendControl out to all of them.
+message SubscribeControlRequest {
+  string session_id = 1;
+  string agent_id = 2;
+  string stream_id = 3;
+}
+
+// The response stream is a sequence of ControlEvents to deliver. The
+// agent's reply for each (a ControlAck) is sent upstream on the
+// corresponding StreamTelemetry, not on this stream. ControlEvent itself
+// is defined in types.proto so that frontend.proto SendControl can also
+// reference it.

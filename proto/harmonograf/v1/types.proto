@@ -1,0 +1,309 @@
+// Harmonograf v1 — core data model.
+//
+// All shared primitives used by telemetry, control, and the frontend RPCs.
+// See docs/design/01-data-model-and-rpc.md §2 for the design rationale.
+
+syntax = "proto3";
+
+package harmonograf.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/anthropics/harmonograf/gen/harmonograf/v1;harmonografv1";
+
+// ---------------------------------------------------------------------------
+// Sessions and agents
+// ---------------------------------------------------------------------------
+
+// Status of a session in the registry.
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED = 0;
+  SESSION_STATUS_LIVE = 1;
+  SESSION_STATUS_COMPLETED = 2;
+  SESSION_STATUS_ABORTED = 3;
+}
+
+// Session is the unit a user opens in the console. Multiple agents
+// collaborating on one task share a session id. Ids are human-readable
+// strings — either user-supplied or auto-generated as
+// `sess_YYYY-MM-DD_NNNN`. Validation regex: ^[a-zA-Z0-9_-]{1,128}$.
+message Session {
+  string id = 1;
+  string title = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp ended_at = 4;
+  SessionStatus status = 5;
+  repeated string agent_ids = 6;
+  map<string, string> metadata = 7;
+}
+
+// Status of an individual agent connection.
+enum AgentStatus {
+  AGENT_STATUS_UNSPECIFIED = 0;
+  AGENT_STATUS_CONNECTED = 1;
+  AGENT_STATUS_DISCONNECTED = 2;
+  AGENT_STATUS_CRASHED = 3;
+}
+
+// Framework that the agent is built on.
+enum Framework {
+  FRAMEWORK_UNSPECIFIED = 0;
+  FRAMEWORK_CUSTOM = 1;
+  FRAMEWORK_ADK = 2;
+}
+
+// Capabilities the agent advertises. The frontend uses these to grey out
+// control buttons the agent cannot honor.
+enum Capability {
+  CAPABILITY_UNSPECIFIED = 0;
+  CAPABILITY_PAUSE_RESUME = 1;
+  CAPABILITY_CANCEL = 2;
+  CAPABILITY_REWIND = 3;
+  CAPABILITY_STEERING = 4;
+  CAPABILITY_HUMAN_IN_LOOP = 5;
+  CAPABILITY_INTERCEPT_TRANSFER = 6;
+}
+
+// Agent identity is chosen by the client and persisted to disk so that a
+// restarted agent reclaims its row in the Gantt chart. Multiple concurrent
+// telemetry streams may exist under the same agent_id; each gets its own
+// stream_id from the server (see telemetry.proto Welcome).
+message Agent {
+  string id = 1;
+  string session_id = 2;
+  string name = 3;
+  Framework framework = 4;
+  string framework_version = 5;
+  repeated Capability capabilities = 6;
+  map<string, string> metadata = 7;
+  google.protobuf.Timestamp connected_at = 8;
+  google.protobuf.Timestamp last_heartbeat = 9;
+  AgentStatus status = 10;
+}
+
+// ---------------------------------------------------------------------------
+// Spans
+// ---------------------------------------------------------------------------
+
+// SpanKind is the canonical type of activity. CUSTOM is paired with
+// kind_string on the Span itself for framework-specific labels that don't
+// fit the enum (resolved decision E).
+enum SpanKind {
+  SPAN_KIND_UNSPECIFIED = 0;
+  SPAN_KIND_INVOCATION = 1;
+  SPAN_KIND_LLM_CALL = 2;
+  SPAN_KIND_TOOL_CALL = 3;
+  SPAN_KIND_USER_MESSAGE = 4;
+  SPAN_KIND_AGENT_MESSAGE = 5;
+  SPAN_KIND_TRANSFER = 6;
+  SPAN_KIND_WAIT_FOR_HUMAN = 7;
+  SPAN_KIND_PLANNED = 8;
+  SPAN_KIND_CUSTOM = 9;
+}
+
+// SpanStatus encodes lifecycle. AWAITING_HUMAN drives the urgent UI states.
+enum SpanStatus {
+  SPAN_STATUS_UNSPECIFIED = 0;
+  SPAN_STATUS_PENDING = 1;
+  SPAN_STATUS_RUNNING = 2;
+  SPAN_STATUS_COMPLETED = 3;
+  SPAN_STATUS_FAILED = 4;
+  SPAN_STATUS_CANCELLED = 5;
+  SPAN_STATUS_AWAITING_HUMAN = 6;
+}
+
+// Cross-span links. Most edges live within a single agent (parent_span_id),
+// but TRANSFER, WAITING_ON, and FOLLOWS links also cross agent boundaries
+// and become rendered arrows on the Gantt.
+enum LinkRelation {
+  LINK_RELATION_UNSPECIFIED = 0;
+  LINK_RELATION_INVOKED = 1;
+  LINK_RELATION_WAITING_ON = 2;
+  LINK_RELATION_TRIGGERED_BY = 3;
+  LINK_RELATION_FOLLOWS = 4;
+  LINK_RELATION_REPLACES = 5;
+}
+
+message SpanLink {
+  string target_span_id = 1;
+  string target_agent_id = 2;
+  LinkRelation relation = 3;
+}
+
+// AttributeValue is a typed scalar / list / map for span attributes.
+// Mirrors a subset of OpenTelemetry's AnyValue. The map carrier on Span
+// allows mixing types per key.
+message AttributeValue {
+  oneof value {
+    string string_value = 1;
+    int64 int_value = 2;
+    double double_value = 3;
+    bool bool_value = 4;
+    bytes bytes_value = 5;
+    AttributeArray array_value = 6;
+  }
+}
+
+message AttributeArray {
+  repeated AttributeValue values = 1;
+}
+
+// PayloadRef is the small, hot-path summary of a payload. The actual bytes
+// are uploaded out-of-band via PayloadUpload chunks (see telemetry.proto)
+// and fetched lazily by the frontend via GetPayload.
+message PayloadRef {
+  // sha256 hex digest, content-addressed.
+  string digest = 1;
+  int64 size = 2;
+  string mime = 3;
+  // Short preview shown in tooltips and the drawer header (~200 chars).
+  string summary = 4;
+  // Logical role of this payload on the span (e.g., "input", "output",
+  // "args", "result"). Spans may carry multiple payloads under different
+  // roles — see Span.payload_refs.
+  string role = 5;
+  // True when the client evicted the bytes due to backpressure. The
+  // PayloadRef still ships so the frontend can show the summary, but
+  // GetPayload will return NOT_FOUND.
+  bool evicted = 6;
+}
+
+// Structured error attached to a failed span.
+message ErrorInfo {
+  string type = 1;
+  string message = 2;
+  string stack = 3;
+}
+
+// Span — the core primitive of the data model.
+//
+// Span ids are UUIDv7 (sortable, collision-free across reconnects). The
+// server dedups by id when a client replays buffered spans after reconnect.
+//
+// Time fields use google.protobuf.Timestamp with microsecond precision.
+message Span {
+  string id = 1;
+  string session_id = 2;
+  string agent_id = 3;
+  string parent_span_id = 4;
+
+  SpanKind kind = 5;
+  // Populated only when kind == SPAN_KIND_CUSTOM. Holds the framework's
+  // own label for the activity (e.g., "langgraph_node", "crewai_task").
+  // Empty otherwise.
+  string kind_string = 6;
+
+  SpanStatus status = 7;
+  string name = 8;
+
+  google.protobuf.Timestamp start_time = 9;
+  google.protobuf.Timestamp end_time = 10;
+
+  map<string, AttributeValue> attributes = 11;
+
+  // Spans may carry multiple payloads (e.g., LLM_CALL has both prompt and
+  // completion). Distinct by role.
+  repeated PayloadRef payload_refs = 12;
+
+  repeated SpanLink links = 13;
+  ErrorInfo error = 14;
+}
+
+// ---------------------------------------------------------------------------
+// Annotations
+// ---------------------------------------------------------------------------
+
+// AnnotationKind: COMMENT is UI-only; STEERING is delivered to the agent
+// as a control event; HUMAN_RESPONSE answers a WAIT_FOR_HUMAN span.
+enum AnnotationKind {
+  ANNOTATION_KIND_UNSPECIFIED = 0;
+  ANNOTATION_KIND_COMMENT = 1;
+  ANNOTATION_KIND_STEERING = 2;
+  ANNOTATION_KIND_HUMAN_RESPONSE = 3;
+}
+
+// Annotations target either a span or a (agent_id, time) point on the
+// timeline.
+message AnnotationTarget {
+  oneof target {
+    string span_id = 1;
+    AgentTimePoint agent_time = 2;
+  }
+}
+
+message AgentTimePoint {
+  string agent_id = 1;
+  google.protobuf.Timestamp at = 2;
+}
+
+message Annotation {
+  string id = 1;
+  string session_id = 2;
+  AnnotationTarget target = 3;
+  string author = 4;
+  google.protobuf.Timestamp created_at = 5;
+  AnnotationKind kind = 6;
+  string body = 7;
+  // For STEERING / HUMAN_RESPONSE: when the agent ack'd delivery.
+  google.protobuf.Timestamp delivered_at = 8;
+}
+
+// ---------------------------------------------------------------------------
+// Control
+// ---------------------------------------------------------------------------
+
+// ControlKind enumerates the operations the frontend can issue against an
+// agent. The agent advertises which it accepts via Capability.
+enum ControlKind {
+  CONTROL_KIND_UNSPECIFIED = 0;
+  CONTROL_KIND_PAUSE = 1;
+  CONTROL_KIND_RESUME = 2;
+  CONTROL_KIND_CANCEL = 3;
+  // payload: target span id (UTF-8 string)
+  CONTROL_KIND_REWIND_TO = 4;
+  // payload: text or structured message
+  CONTROL_KIND_INJECT_MESSAGE = 5;
+  // payload: optional edited args for the pending tool call (json)
+  CONTROL_KIND_APPROVE = 6;
+  // payload: reason string
+  CONTROL_KIND_REJECT = 7;
+  // payload: new target agent_id, or empty to block
+  CONTROL_KIND_INTERCEPT_TRANSFER = 8;
+  // payload: steering body (utf-8)
+  CONTROL_KIND_STEER = 9;
+}
+
+// ControlTarget points at the agent (and optionally a span on it) the
+// event applies to.
+message ControlTarget {
+  string agent_id = 1;
+  string span_id = 2;
+}
+
+// ControlEvent flows server → agent on SubscribeControl. The id correlates
+// with the ControlAck that the agent sends back upstream on StreamTelemetry.
+message ControlEvent {
+  string id = 1;
+  google.protobuf.Timestamp issued_at = 2;
+  ControlTarget target = 3;
+  ControlKind kind = 4;
+  bytes payload = 5;
+}
+
+// ControlAck rides upstream on StreamTelemetry (NOT on a separate stream).
+// This colocation gives us happens-before for free: when the server sees
+// an ack, every span the client emitted before the ack is already on the
+// wire ahead of it. See docs/design/01 §4.2.1.
+message ControlAck {
+  string control_id = 1;
+  ControlAckResult result = 2;
+  string detail = 3;
+  google.protobuf.Timestamp acked_at = 4;
+}
+
+enum ControlAckResult {
+  CONTROL_ACK_RESULT_UNSPECIFIED = 0;
+  CONTROL_ACK_RESULT_SUCCESS = 1;
+  CONTROL_ACK_RESULT_FAILURE = 2;
+  CONTROL_ACK_RESULT_UNSUPPORTED = 3;
+}
