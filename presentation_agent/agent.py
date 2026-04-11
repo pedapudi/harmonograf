@@ -60,32 +60,11 @@ write_webpage_tool = FunctionTool(write_webpage)
 
 # Users can specify the model via environment variable.
 # For OpenAI-compatible endpoints, provide a LiteLLM-compliant string
-# (e.g. ``openai/my-model``) and set ``OPENAI_API_BASE``.
+# (e.g. ``openai/my-model``) and set ``OPENAI_API_BASE``. ADK's LLMRegistry
+# recognises provider-style strings and dispatches them through LiteLlm
+# automatically — no wrapping needed here, as long as litellm is installed
+# (the ``demo`` optional-deps group pulls it in).
 MODEL_NAME = os.environ.get("USER_MODEL_NAME", "gemini-2.5-flash")
-
-
-def _resolve_model(name: str) -> Any:
-    """Return either the plain model string (for native ADK model routing,
-    e.g. ``gemini-2.5-flash``) or a ``LiteLlm`` instance (for provider-style
-    strings like ``openai/qwen3.5:122b`` that need to be dispatched through
-    LiteLLM to an OpenAI-compatible endpoint).
-
-    Detection rule: if a "/" appears before any ":" in the string, it's a
-    LiteLLM provider/model identifier. Plain Google model names (``gemini-*``)
-    fall through unchanged so we don't pull in the LiteLLM dependency unless
-    actually needed.
-    """
-    slash = name.find("/")
-    colon = name.find(":")
-    is_provider_style = slash != -1 and (colon == -1 or slash < colon)
-    if not is_provider_style:
-        return name
-    from google.adk.models.lite_llm import LiteLlm
-
-    return LiteLlm(model=name)
-
-
-MODEL: Any = _resolve_model(MODEL_NAME)
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +74,7 @@ MODEL: Any = _resolve_model(MODEL_NAME)
 
 research_agent = Agent(
     name="research_agent",
-    model=MODEL,
+    model=MODEL_NAME,
     instruction=(
         "You are a researcher. Your goal is to gather information about the "
         "topic the user provides.\nThink step-by-step and provide a "
@@ -111,7 +90,7 @@ research_agent = Agent(
 
 web_developer_agent = Agent(
     name="web_developer_agent",
-    model=MODEL,
+    model=MODEL_NAME,
     instruction=(
         "You are an expert Frontend Web Developer. Your goal is to take "
         "research on a topic and generate a stunning, interactive, "
@@ -134,7 +113,7 @@ web_developer_agent = Agent(
 
 root_agent = Agent(
     name="coordinator_agent",
-    model=MODEL,
+    model=MODEL_NAME,
     instruction=(
         "You are the Coordinator Agent. Your task is to work with the user "
         "to pick a topic for an interactive slideshow presentation.\n"
