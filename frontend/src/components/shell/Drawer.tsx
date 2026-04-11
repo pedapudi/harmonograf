@@ -145,7 +145,11 @@ function SummaryTab({ span }: { span: Span }) {
       {span.error && (
         <div className="hg-drawer__error">
           <strong>{span.error.type || 'Error'}:</strong> {span.error.message}
-          {span.error.stack && <pre>{span.error.stack}</pre>}
+          {span.error.stack && (
+            <pre className="hg-drawer__code hg-drawer__code--error">
+              {span.error.stack}
+            </pre>
+          )}
         </div>
       )}
       {entries.length > 0 && (
@@ -156,7 +160,9 @@ function SummaryTab({ span }: { span: Span }) {
               {entries.map(([k, v]) => (
                 <tr key={k}>
                   <th>{k}</th>
-                  <td>{formatAttr(v)}</td>
+                  <td>
+                    <AttrValue value={v} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -164,6 +170,82 @@ function SummaryTab({ span }: { span: Span }) {
         </>
       )}
     </div>
+  );
+}
+
+// Render an attribute value. Strings that parse as JSON (objects, arrays,
+// primitives) are pretty-printed with syntax highlighting; everything else
+// falls back to plain text. This is the single interesting path for the
+// common ADK shape where tool.args / tool.result arrive as JSON strings.
+function AttrValue({ value }: { value: AttributeValue }) {
+  if (value.kind === 'string') {
+    const parsed = tryParseJson(value.value);
+    if (parsed !== NOT_JSON) {
+      const pretty = JSON.stringify(parsed, null, 2);
+      return <JsonCode text={pretty} />;
+    }
+    return <span>{value.value}</span>;
+  }
+  return <span>{formatAttr(value)}</span>;
+}
+
+const NOT_JSON: unique symbol = Symbol('not-json');
+
+function tryParseJson(raw: string): unknown | typeof NOT_JSON {
+  const trimmed = raw.trim();
+  // Cheap prefilter: only attempt to parse if it looks structured. JSON.parse
+  // accepts bare numbers and `"..."` strings, which would turn every numeric
+  // attribute into a "JSON" payload and double-format it — avoid that.
+  if (trimmed.length === 0) return NOT_JSON;
+  const first = trimmed[0];
+  if (first !== '{' && first !== '[') return NOT_JSON;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return NOT_JSON;
+  }
+}
+
+// Regex-based JSON syntax highlighter. Produces a <pre> with <span> tokens
+// classed by kind (key/string/number/boolean/null/punct). Cheap enough to run
+// on every drawer open — we never recolor the same payload twice since the
+// result is memoized by text identity at the call site.
+const JSON_TOKEN_RE =
+  /("(?:\\.|[^"\\])*"(?:\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[{}[\],])/g;
+
+function highlightJson(text: string): React.ReactNode {
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  let idx = 0;
+  for (const match of text.matchAll(JSON_TOKEN_RE)) {
+    const start = match.index ?? 0;
+    if (start > last) parts.push(text.slice(last, start));
+    const token = match[0];
+    let cls = 'hg-json__punct';
+    if (token.startsWith('"')) {
+      cls = token.trimEnd().endsWith(':') ? 'hg-json__key' : 'hg-json__string';
+    } else if (token === 'true' || token === 'false') {
+      cls = 'hg-json__bool';
+    } else if (token === 'null') {
+      cls = 'hg-json__null';
+    } else if (/^-?\d/.test(token)) {
+      cls = 'hg-json__number';
+    }
+    parts.push(
+      <span key={`t${idx++}`} className={cls}>
+        {token}
+      </span>,
+    );
+    last = start + token.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
+function JsonCode({ text }: { text: string }) {
+  const nodes = useMemo(() => highlightJson(text), [text]);
+  return (
+    <pre className="hg-drawer__code hg-drawer__code--json">{nodes}</pre>
   );
 }
 
@@ -270,13 +352,14 @@ function RenderPayloadBytes({ bytes, mime }: { bytes: Uint8Array; mime: string }
   }
 
   if (mime === 'application/json' && text) {
-    let pretty = text;
+    let pretty: string | null = null;
     try {
       pretty = JSON.stringify(JSON.parse(text), null, 2);
     } catch {
-      // fall through to raw text render
+      pretty = null;
     }
-    return <pre className="hg-drawer__code">{pretty}</pre>;
+    if (pretty !== null) return <JsonCode text={pretty} />;
+    return <pre className="hg-drawer__code">{text}</pre>;
   }
 
   if (mime.startsWith('text/') && text !== null) {

@@ -488,6 +488,21 @@ code {
   overflow-x: auto;
   max-height: 320px;
 }
+.hg-drawer__code--json {
+  color: var(--md-sys-color-on-surface, #e2e2e9);
+}
+.hg-drawer__code--error {
+  background: rgba(0, 0, 0, 0.28);
+  color: inherit;
+  margin-top: 6px;
+  max-height: 220px;
+}
+.hg-json__key    { color: #a8c8ff; }
+.hg-json__string { color: #b5f4a5; }
+.hg-json__number { color: #ffd38a; }
+.hg-json__bool   { color: #ff9fae; font-weight: 600; }
+.hg-json__null   { color: #c3c6cf; font-style: italic; }
+.hg-json__punct  { color: var(--md-sys-color-on-surface-variant, #c3c6cf); }
 .hg-drawer__dim {
   color: var(--md-sys-color-on-surface-variant, #c3c6cf);
   font-size: 12px;
