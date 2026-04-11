@@ -211,6 +211,14 @@ class _AdkState:
         # invocation_id → token from ContextVar.set(), so on_invocation_end
         # can reset the var in LIFO order.
         self._route_tokens: dict[str, Any] = {}
+        # LLM span_id → cumulative streaming text length. Partial events bump
+        # this so the frontend can render thinking tick marks on the in-flight
+        # LLM block. Task #12 (B4 liveness).
+        self._llm_stream_len: dict[str, int] = {}
+        # LLM span_id → partial-event counter, also used as a monotonic
+        # progress pulse so renderers can pulse/tick even when the partial
+        # text has no natural length (e.g. tool-call streaming).
+        self._llm_stream_ticks: dict[str, int] = {}
 
     # ------------------------------------------------------------------
     # Invocation
@@ -304,6 +312,8 @@ class _AdkState:
         with self._lock:
             if self._llm_by_invocation.get(inv_id) == span_id:
                 self._llm_by_invocation.pop(inv_id, None)
+            self._llm_stream_len.pop(span_id, None)
+            self._llm_stream_ticks.pop(span_id, None)
 
     # ------------------------------------------------------------------
     # Tool
@@ -400,6 +410,34 @@ class _AdkState:
     def on_event(self, ic: Any, event: Any) -> None:
         inv_id = _safe_attr(ic, "invocation_id", "")
         agent_id, hsession_id = self._route_from_context(ic)
+
+        # Partial LLM events → liveness ticks on the in-flight LLM span so
+        # the frontend can render a thinking progress indicator. ADK emits
+        # these with `partial=True` while the underlying model streams; the
+        # final event (partial False/None) is handled by after_model_callback.
+        # Task #12 (B4 liveness).
+        if _safe_attr(event, "partial", False):
+            with self._lock:
+                llm_span_id = self._llm_by_invocation.get(inv_id)
+            if llm_span_id:
+                text_len = _event_text_len(event)
+                with self._lock:
+                    if text_len > self._llm_stream_len.get(llm_span_id, 0):
+                        self._llm_stream_len[llm_span_id] = text_len
+                    ticks = self._llm_stream_ticks.get(llm_span_id, 0) + 1
+                    self._llm_stream_ticks[llm_span_id] = ticks
+                    cur_len = self._llm_stream_len[llm_span_id]
+                self._client.emit_span_update(
+                    llm_span_id,
+                    attributes={
+                        "streaming_text_len": cur_len,
+                        "streaming_tick": ticks,
+                    },
+                )
+            # Partial events don't carry actions we care about, so bail out
+            # before the transfer/state_delta bookkeeping below.
+            return
+
         actions = _safe_attr(event, "actions", None)
         if actions is None:
             return
@@ -595,6 +633,20 @@ def _safe_json(obj: Any) -> Optional[bytes]:
         return json.dumps(obj, default=str, ensure_ascii=False).encode("utf-8")
     except Exception:
         return None
+
+
+def _event_text_len(event: Any) -> int:
+    """Cumulative text length across all text parts in an event's content."""
+    content = _safe_attr(event, "content", None)
+    if content is None:
+        return 0
+    parts = _safe_attr(content, "parts", None) or []
+    total = 0
+    for p in parts:
+        text = _safe_attr(p, "text", None)
+        if isinstance(text, str):
+            total += len(text)
+    return total
 
 
 def _stringify(v: Any) -> str:

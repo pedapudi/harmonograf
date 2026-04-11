@@ -395,12 +395,25 @@ export class GanttRenderer {
   }
 
   private frame(): void {
+    // Advance "session-relative now" from the wall clock. The renderer owns
+    // this — transport only sets wallClockStartMs on session connect. Without
+    // this, in-flight span bars collapse to zero width because endMs is null
+    // and nowMs is frozen at 0. Task #12 (B4 liveness).
+    if (this.store.wallClockStartMs > 0) {
+      this.store.nowMs = Date.now() - this.store.wallClockStartMs;
+    }
+
     // Live follow advance
     this.viewport = advanceLive(this.viewport, this.store.nowMs);
 
-    // Any in-viewport animated state forces overlay redraw every frame.
+    // Any in-viewport animated state forces overlay redraw every frame. We
+    // also mark blocks dirty so that unfinished spans can visually grow as
+    // nowMs advances — the bar geometry depends on `s.endMs ?? nowMs`.
     const hasAnimatedInView = this.hasAnimatedInViewport();
-    if (hasAnimatedInView) this.overlayDirty = true;
+    if (hasAnimatedInView) {
+      this.overlayDirty = true;
+      this.blocksDirty = true;
+    }
 
     if (this.bgDirty) this.drawBackground();
     if (this.blocksDirty) this.drawBlocks();
@@ -581,6 +594,16 @@ export class GanttRenderer {
       labels: Array<{ s: Span; x: number; y: number; w: number; h: number }>;
     };
     const buckets = new Map<string, Bucket>();
+    // Liveness ticks drawn on top of running LLM spans. Each entry is the
+    // geometry of the span plus the streaming tick counter from the client.
+    // Task #12: thinking progress indicator for in-flight LLM calls.
+    const tickOverlays: Array<{
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      ticks: number;
+    }> = [];
 
     let y = TOP_MARGIN_PX;
     let visibleCount = 0;
@@ -641,6 +664,22 @@ export class GanttRenderer {
         if (width >= 24) {
           b.labels.push({ s, x: x1, y: laneTop, w: width, h: rectH });
         }
+        if (
+          s.status === 'RUNNING' &&
+          s.kind === 'LLM_CALL' &&
+          width >= 8
+        ) {
+          const tickAttr = s.attributes['streaming_tick'];
+          const ticks =
+            tickAttr && tickAttr.kind === 'int'
+              ? Number(tickAttr.value)
+              : tickAttr && tickAttr.kind === 'double'
+                ? tickAttr.value
+                : 0;
+          if (ticks > 0) {
+            tickOverlays.push({ x: x1, y: laneTop, w: width, h: rectH, ticks });
+          }
+        }
         visibleCount++;
       }
       // Flush density stripes as a neutral color band with a count annotation.
@@ -698,6 +737,25 @@ export class GanttRenderer {
         ctx.fillText(label, x + 6, ly + lh / 2);
         ctx.restore();
       }
+    }
+
+    // Liveness ticks: small vertical marks at the trailing edge of running
+    // LLM spans, one per partial streaming event. Gives the user a heartbeat
+    // that the model is still thinking even while the bar grows. Task #12.
+    if (tickOverlays.length > 0) {
+      ctx.fillStyle = cssVar('--md-sys-color-on-primary') || '#ffffff';
+      ctx.globalAlpha = 0.65;
+      for (const o of tickOverlays) {
+        const nTicks = Math.min(o.ticks, Math.max(1, Math.floor(o.w / 4)));
+        const step = o.w / (nTicks + 1);
+        const tickH = Math.max(2, Math.floor(o.h / 2));
+        const tickY = o.y + Math.floor((o.h - tickH) / 2);
+        for (let k = 1; k <= nTicks; k++) {
+          const tx = o.x + step * k;
+          ctx.fillRect(Math.floor(tx), tickY, 1, tickH);
+        }
+      }
+      ctx.globalAlpha = 1;
     }
 
     // Links layer: cross-agent LINK_INVOKED edges. Drawn inside the clipped
