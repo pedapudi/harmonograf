@@ -43,6 +43,7 @@ import free of the ADK dependency.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import threading
@@ -56,6 +57,19 @@ log = logging.getLogger("harmonograf_client.adk")
 
 STEERING_STATE_KEY = "_harmonograf_steering"
 INJECT_STATE_KEY = "_harmonograf_inject"
+
+
+# ContextVar that holds the harmonograf session id of the currently-open
+# ADK root invocation on *this* asyncio task. AgentTool sub-runners run
+# inline (``await runner.run_async(...)`` from the parent task), so they
+# inherit this value and alias their fresh ADK session id back to the
+# parent's harmonograf session. Concurrent top-level /run requests live
+# in independent asyncio tasks whose context copies are independent, so
+# each sees an empty CV and mints its own harmonograf session — which is
+# exactly the distinction we need to tell those two cases apart.
+_ROOT_HSESSION_CV: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "harmonograf_root_hsession", default=""
+)
 
 
 class AdkAdapter:
@@ -187,12 +201,15 @@ class _AdkState:
         self._pending_mutations: list[tuple[str, str]] = []
         # Multi-session routing: ADK sub-runners (AgentTool) create fresh
         # ADK session ids per sub-invocation, but those should land in the
-        # SAME harmonograf session as the enclosing root run. We track the
-        # open-invocation depth and alias every ADK session id we see while
-        # a root is in flight back to that root's harmonograf session id.
-        self._open_invocation_count: int = 0
-        self._current_root_hsession: str = ""
+        # SAME harmonograf session as the enclosing root run. We use a
+        # ContextVar so concurrent top-level invocations — each running in
+        # their own asyncio.Task — get independent routing state, while
+        # nested AgentTool sub-invocations (which run within the parent
+        # task's Context) naturally inherit the root's hsession.
         self._adk_to_h_session: dict[str, str] = {}
+        # invocation_id → token from ContextVar.set(), so on_invocation_end
+        # can reset the module-level ``_ROOT_HSESSION_CV`` in LIFO order.
+        self._route_tokens: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # Invocation
@@ -201,6 +218,10 @@ class _AdkState:
     def on_invocation_start(self, ic: Any) -> None:
         inv_id = _safe_attr(ic, "invocation_id", "")
         agent_id, hsession_id = self._route_from_context(ic, opening_root=True)
+        if hsession_id:
+            token = _ROOT_HSESSION_CV.set(hsession_id)
+            with self._lock:
+                self._route_tokens[inv_id] = token
         name = agent_id or "agent"
         attrs = {
             "invocation_id": inv_id,
@@ -226,10 +247,12 @@ class _AdkState:
             span_id = self._invocations.pop(inv_id, None)
             self._llm_by_invocation.pop(inv_id, None)
             self._invocation_route.pop(inv_id, None)
-            if self._open_invocation_count > 0:
-                self._open_invocation_count -= 1
-                if self._open_invocation_count == 0:
-                    self._current_root_hsession = ""
+            token = self._route_tokens.pop(inv_id, None)
+        if token is not None:
+            try:
+                _ROOT_HSESSION_CV.reset(token)
+            except (LookupError, ValueError):
+                pass
         if span_id:
             self._client.emit_span_end(span_id, status="COMPLETED")
 
@@ -463,20 +486,22 @@ class _AdkState:
         """Resolve (agent_id, harmonograf_session_id) from an
         InvocationContext-shaped object.
 
-        ``opening_root`` is set by ``on_invocation_start`` so this method
-        can take ownership of the open-invocation depth tracking. It
-        increments the depth on entry and either:
+        Routing rules, in order:
 
-          * registers a brand-new harmonograf session for the very first
-            invocation in a fresh root run, or
-          * aliases the (likely-fresh) ADK session id of an AgentTool
-            sub-invocation to whichever harmonograf session is already
-            associated with the in-flight root.
+          1. If the ADK session id is already in the pool, reuse it —
+             this covers repeat callbacks on an established session.
+          2. Otherwise, consult the ContextVar. If a root hsession is
+             already set in this asyncio Task's Context, the current
+             invocation is nested under it (AgentTool sub-run, which
+             executes inside the parent task), so alias to it.
+          3. Otherwise, if ``opening_root`` is set, mint a brand-new
+             harmonograf session id for this ADK session id.
 
-        For non-root callers (model/tool/event), the depth is left alone
-        and the lookup just returns whatever mapping has already been
-        installed for the ADK session id, or — if none exists yet — the
-        currently-open root's harmonograf session.
+        Concurrent top-level /run calls land in independent asyncio
+        Tasks, so each sees an empty ContextVar and hits rule 3 — no
+        cross-request aliasing. AgentTool sub-invocations run within
+        the parent Task, so they see the parent's ContextVar and hit
+        rule 2.
         """
         if ic is None:
             return "", ""
@@ -488,22 +513,16 @@ class _AdkState:
         )
         with self._lock:
             mapped = self._adk_to_h_session.get(adk_session_id, "")
-            if not mapped:
-                if self._open_invocation_count > 0 and self._current_root_hsession:
-                    # Sub-invocation under an in-flight root — alias.
-                    mapped = self._current_root_hsession
-                    if adk_session_id:
-                        self._adk_to_h_session[adk_session_id] = mapped
-                elif opening_root:
-                    # New root run. Mint a fresh harmonograf session id.
-                    mapped = _harmonograf_session_id_for_adk(adk_session_id)
-                    if adk_session_id and mapped:
-                        self._adk_to_h_session[adk_session_id] = mapped
-                    self._current_root_hsession = mapped
-            if opening_root:
-                self._open_invocation_count += 1
-                if not self._current_root_hsession and mapped:
-                    self._current_root_hsession = mapped
+        if not mapped:
+            parent_hsession = _ROOT_HSESSION_CV.get()
+            if parent_hsession:
+                mapped = parent_hsession
+            elif opening_root:
+                mapped = _harmonograf_session_id_for_adk(adk_session_id)
+            if adk_session_id and mapped:
+                with self._lock:
+                    self._adk_to_h_session.setdefault(adk_session_id, mapped)
+                    mapped = self._adk_to_h_session[adk_session_id]
         return agent_id or "", mapped
 
 

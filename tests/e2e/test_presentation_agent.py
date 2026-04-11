@@ -492,6 +492,119 @@ class TestPresentationMultiSession:
             client.shutdown(flush_timeout=5.0)
 
 
+@pytest.mark.asyncio
+class TestPresentationConcurrentSessions:
+    """Task #4: two top-level /run calls against distinct ADK sessions,
+    running *concurrently*, must produce two independent harmonograf
+    sessions. The previous depth-counter heuristic aliased the second
+    root's spans into the first's hsession; the ContextVar-based routing
+    keeps concurrent Tasks isolated."""
+
+    async def test_concurrent_adk_sessions_become_two_harmonograf_sessions(
+        self, harmonograf_server, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("HARMONOGRAF_HOME", str(tmp_path))
+
+        client = Client(
+            name="presentation",
+            server_addr=harmonograf_server["addr"],
+            framework="ADK",
+            capabilities=["HUMAN_IN_LOOP", "STEERING"],
+        )
+
+        # Two runners, two scripted models (each mock advances an
+        # internal cursor — sharing a single mock across concurrent
+        # drives would race on the cursor and is a test-fixture issue,
+        # not a plugin issue). Both runners share ONE client/plugin so
+        # we still exercise concurrent-root routing through a single
+        # _AdkState instance per runner on the shared client.
+        runner_a = _build_presentation_runner(tmp_path / "output_a")
+        runner_b = _build_presentation_runner(tmp_path / "output_b")
+        handle_a = attach_adk(runner_a, client)
+        handle_b = attach_adk(runner_b, client)
+        try:
+            t1 = asyncio.create_task(
+                _drive_invocation(
+                    runner_a, "Create a presentation about Python programming"
+                )
+            )
+            t2 = asyncio.create_task(
+                _drive_invocation(
+                    runner_b, "Create a presentation about Rust programming"
+                )
+            )
+            await asyncio.gather(t1, t2)
+
+            assert await _wait_for(
+                lambda: client._transport.connected, timeout=5.0
+            ), "transport never connected"
+
+            store = harmonograf_server["store"]
+
+            async def _have_two_sessions() -> bool:
+                sessions = await store.list_sessions()
+                adk_sessions = [s for s in sessions if s.id.startswith("adk_")]
+                return len(adk_sessions) >= 2
+
+            assert await _wait_for_async(
+                _have_two_sessions, timeout=10.0
+            ), "expected two harmonograf sessions from two concurrent ADK sessions"
+
+            sessions = await store.list_sessions()
+            adk_sessions = [s for s in sessions if s.id.startswith("adk_")]
+            assert len(adk_sessions) >= 2, (
+                f"expected ≥2 adk_-prefixed sessions, got {[s.id for s in sessions]}"
+            )
+
+            # Each session must own its own INVOCATION span(s) and carry
+            # spans attributed to its own agents — cross-task bleed would
+            # leave one session empty and pile everything into the other.
+            per_session_agents: list[set[str]] = []
+            per_session_invocation_ids: list[set[str]] = []
+            for s in adk_sessions[:2]:
+                spans = await _spans_in_store(store, s.id)
+                kinds = {str(getattr(sp, "kind", "")) for sp in spans}
+                assert any("INVOCATION" in k for k in kinds), (
+                    f"session {s.id} has no INVOCATION span — concurrent run was aliased away"
+                )
+                agent_ids: set[str] = set()
+                inv_ids: set[str] = set()
+                for sp in spans:
+                    aid = getattr(sp, "agent_id", "")
+                    if aid:
+                        agent_ids.add(aid)
+                    attrs = getattr(sp, "attributes", None)
+                    val = None
+                    if attrs is not None:
+                        try:
+                            val = attrs["invocation_id"]
+                        except Exception:
+                            val = None
+                        if hasattr(val, "string_value"):
+                            val = val.string_value
+                    if val:
+                        inv_ids.add(val)
+                per_session_agents.append(agent_ids)
+                per_session_invocation_ids.append(inv_ids)
+
+            assert per_session_agents[0] and per_session_agents[1], (
+                f"one of the sessions has no agent_ids: {per_session_agents}"
+            )
+            # Invocation ids are per-run and must not appear in both
+            # sessions — that would mean a second root's spans got
+            # written into the first session.
+            assert per_session_invocation_ids[0].isdisjoint(
+                per_session_invocation_ids[1]
+            ), (
+                f"concurrent runs bled into each other: "
+                f"{per_session_invocation_ids[0]} vs {per_session_invocation_ids[1]}"
+            )
+        finally:
+            handle_a.detach()
+            handle_b.detach()
+            client.shutdown(flush_timeout=5.0)
+
+
 # ---------------------------------------------------------------------------
 # Canonical `adk web` path: module-level `app` attaches the harmonograf
 # plugin automatically. This test imports presentation_agent.agent under a
