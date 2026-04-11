@@ -28,7 +28,6 @@
   --hg-drawer-width: 440px;
   --hg-appbar-height: 48px;
   --hg-transport-height: 44px;
-  --hg-minimap-height: 64px;
   --hg-radius-sm: 4px;
   --hg-radius-md: 8px;
   --hg-radius-lg: 12px;
@@ -360,17 +359,6 @@ code {
 @keyframes hg-live-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
-}
-
-/* ==========================================================================
- * Minimap
- * ========================================================================== */
-
-.hg-minimap {
-  height: var(--hg-minimap-height);
-  background: var(--md-sys-color-surface-container, #1c1f26);
-  border-top: 1px solid var(--md-sys-color-outline-variant, #43474e);
-  flex: 0 0 auto;
 }
 
 /* ==========================================================================
@@ -762,6 +750,199 @@ code {
 }
 [data-theme='amoled'] .hg-shell {
   background: #000000;
+}
+
+/* ==========================================================================
+ * Side panels (Activity / Notes / Settings)
+ * ========================================================================== */
+
+.hg-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--md-sys-color-surface, #10131a);
+  color: var(--md-sys-color-on-surface, #e3e4ea);
+  overflow: hidden;
+}
+
+.hg-panel__header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 16px 24px 8px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant, #2a2f3a);
+}
+
+.hg-panel__title {
+  font-size: 18px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.hg-panel__hint {
+  font-size: 12px;
+  opacity: 0.65;
+}
+
+.hg-panel__body {
+  flex: 1;
+  overflow: auto;
+  padding: 16px 24px;
+}
+
+.hg-panel__empty {
+  opacity: 0.6;
+  font-size: 13px;
+  padding: 24px 0;
+  text-align: center;
+}
+
+.hg-activity__list,
+.hg-notes__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hg-activity__row {
+  display: grid;
+  grid-template-columns: 56px 110px 1fr 160px 110px;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  font-size: 13px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.hg-activity__row:hover {
+  background: var(--md-sys-color-surface-container, #1b1f29);
+}
+
+.hg-activity__time {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.hg-activity__kind {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+
+.hg-activity__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hg-activity__agent {
+  opacity: 0.6;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hg-activity__status {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-align: right;
+  opacity: 0.85;
+}
+
+.hg-notes__row {
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid var(--md-sys-color-outline-variant, #2a2f3a);
+}
+
+.hg-notes__row:hover {
+  background: var(--md-sys-color-surface-container, #1b1f29);
+}
+
+.hg-notes__meta {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  opacity: 0.7;
+  margin-bottom: 4px;
+}
+
+.hg-notes__pending {
+  color: var(--md-sys-color-tertiary, #d0bcff);
+}
+
+.hg-notes__error {
+  color: var(--md-sys-color-error, #f2b8b5);
+}
+
+.hg-notes__body {
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.hg-settings__group {
+  margin-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 480px;
+}
+
+.hg-settings__label {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+  text-transform: uppercase;
+}
+
+.hg-settings__row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.hg-settings__chip {
+  padding: 6px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--md-sys-color-outline, #5a5e68);
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.hg-settings__chip[aria-selected='true'] {
+  background: var(--md-sys-color-secondary-container, #2b3447);
+  border-color: var(--md-sys-color-primary, #aac7ff);
+}
+
+.hg-settings__select {
+  background: var(--md-sys-color-surface-container, #1b1f29);
+  color: inherit;
+  border: 1px solid var(--md-sys-color-outline, #5a5e68);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 13px;
+  align-self: flex-start;
+}
+
+.hg-settings__value {
+  font-size: 13px;
+  display: block;
+  color: var(--md-sys-color-on-surface, #e3e4ea);
+  text-decoration: none;
+}
+
+a.hg-settings__value:hover {
+  text-decoration: underline;
 }
 
 /* ==========================================================================
