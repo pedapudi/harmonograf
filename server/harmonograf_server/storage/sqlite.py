@@ -699,6 +699,15 @@ class SqliteStore(Store):
             ) as cur:
                 return (await cur.fetchone()) is not None
 
+    async def ping(self) -> bool:
+        if self._db is None:
+            return False
+        try:
+            async with self.db.execute("SELECT 1") as cur:
+                return (await cur.fetchone()) is not None
+        except Exception:
+            return False
+
     async def gc_payloads(self) -> int:
         async with self._lock:
             async with self.db.execute(

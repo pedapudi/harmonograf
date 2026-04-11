@@ -306,6 +306,16 @@ class Store(ABC):
         a backend's per-delete accounting leaks a reference.
         """
 
+    # readiness ------------------------------------------------------------
+    async def ping(self) -> bool:
+        """Trivial readiness probe for /readyz.
+
+        Backends that want to actually touch their underlying storage
+        (e.g. sqlite executes ``SELECT 1``) should override. The default
+        implementation always reports ready.
+        """
+        return True
+
     # stats ----------------------------------------------------------------
     @abstractmethod
     async def stats(self) -> Stats: ...

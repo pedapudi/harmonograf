@@ -81,6 +81,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=300.0,
         help="retention sweeper interval in seconds (default: 300)",
     )
+    p.add_argument(
+        "--auth-token",
+        default="",
+        help=(
+            "require this shared secret in the 'authorization: bearer <token>' "
+            "metadata header on every RPC (and HTTP header on gRPC-Web); empty "
+            "disables auth. /healthz and /readyz are always unauthenticated."
+        ),
+    )
     return p
 
 
@@ -98,6 +107,7 @@ def config_from_args(argv: list[str] | None = None) -> ServerConfig:
         retention_interval_seconds=args.retention_interval_seconds,
         log_format=args.log_format,
         metrics_interval_seconds=args.metrics_interval_seconds,
+        auth_token=args.auth_token,
     )
 
 

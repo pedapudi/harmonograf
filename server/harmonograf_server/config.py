@@ -22,3 +22,4 @@ class ServerConfig:
     retention_hours: float = 0.0  # 0 disables retention sweeping
     retention_interval_seconds: float = 300.0
     metrics_interval_seconds: float = 30.0  # 0 disables periodic metrics
+    auth_token: str = ""  # empty string disables shared-secret auth

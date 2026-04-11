@@ -26,9 +26,11 @@ from hypercorn.asyncio import serve
 from hypercorn.config import Config as HypercornConfig
 from sonora.asgi import grpcASGI
 
+from harmonograf_server.auth import BearerTokenInterceptor, asgi_bearer_guard
 from harmonograf_server.bus import SessionBus
 from harmonograf_server.config import ServerConfig
 from harmonograf_server.control_router import ControlRouter
+from harmonograf_server.health import build_health_router
 from harmonograf_server.ingest import IngestPipeline
 from harmonograf_server.pb import service_pb2_grpc
 from harmonograf_server.metrics import metrics_loop
@@ -94,8 +96,12 @@ class Harmonograf:
         )
 
     async def start(self) -> None:
-        # Native gRPC server.
-        self._grpc_server = grpc.aio.server()
+        # Native gRPC server. Install bearer-token interceptor iff configured.
+        interceptors = []
+        if self.cfg.auth_token:
+            interceptors.append(BearerTokenInterceptor(self.cfg.auth_token))
+            logger.info("bearer-token auth enabled on gRPC + gRPC-Web")
+        self._grpc_server = grpc.aio.server(interceptors=interceptors)
         service_pb2_grpc.add_HarmonografServicer_to_server(
             self.servicer, self._grpc_server
         )
@@ -138,10 +144,15 @@ class Harmonograf:
 
         # gRPC-Web ASGI app. Reuses the same servicer instance so state is
         # shared with native gRPC.
-        self._web_app = grpcASGI()
+        grpc_web_app = grpcASGI()
         service_pb2_grpc.add_HarmonografServicer_to_server(
-            self.servicer, self._web_app
+            self.servicer, grpc_web_app
         )
+        # Bearer-token guard wraps only the gRPC-Web app; /healthz and
+        # /readyz remain unauthenticated so orchestrators can probe.
+        if self.cfg.auth_token:
+            grpc_web_app = asgi_bearer_guard(grpc_web_app, self.cfg.auth_token)
+        self._web_app = build_health_router(self.store, grpc_web_app)
         self._web_shutdown = asyncio.Event()
         hc = HypercornConfig()
         hc.bind = [f"{self.cfg.host}:{self.cfg.web_port}"]
