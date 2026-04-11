@@ -3,31 +3,39 @@ import { GanttCanvas } from '../../gantt/GanttCanvas';
 import { SessionStore } from '../../gantt/index';
 import { seedDemoSession } from '../../gantt/mockData';
 import { useUiStore } from '../../state/uiStore';
+import { useSessionWatch } from '../../rpc/hooks';
 
-// Demo surface for the Gantt while task #8 (WatchSession wiring) is in flight.
-// Each session id gets its own SessionStore, seeded with synthetic spans.
-const storeCache = new Map<string, SessionStore>();
+// When the server is reachable, the Gantt reads from the WatchSession-backed
+// SessionStore owned by the rpc hooks module. When the server isn't reachable
+// (or the session id is a demo id the server doesn't know), we fall back to a
+// locally-seeded mock store so the frontend stays usable standalone.
+const mockStoreCache = new Map<string, SessionStore>();
 
-function getStore(sessionId: string): SessionStore {
-  let s = storeCache.get(sessionId);
+function getMockStore(sessionId: string): SessionStore {
+  let s = mockStoreCache.get(sessionId);
   if (!s) {
     s = new SessionStore();
     seedDemoSession(s, { agents: 4, totalSpans: 400, durationMs: 5 * 60 * 1000 });
-    storeCache.set(sessionId, s);
+    mockStoreCache.set(sessionId, s);
   }
   return s;
 }
 
 export function GanttPlaceholder() {
   const sessionId = useUiStore((s) => s.currentSessionId);
-  const store = useMemo(
-    () => (sessionId ? getStore(sessionId) : new SessionStore()),
+  const watch = useSessionWatch(sessionId);
+  const mock = useMemo(
+    () => (sessionId ? getMockStore(sessionId) : new SessionStore()),
     [sessionId],
   );
 
-  // Advance the now cursor in live mode (visual only — no new spans).
+  const useLive =
+    !!sessionId && (watch.connected || watch.store.agents.size > 0);
+  const store = useLive ? watch.store : mock;
+
+  // Advance the now cursor in mock mode; in live mode the server drives it.
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || useLive) return;
     const start = performance.now();
     const t0 = store.nowMs;
     let handle = 0;
@@ -37,7 +45,7 @@ export function GanttPlaceholder() {
     };
     handle = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(handle);
-  }, [sessionId, store]);
+  }, [sessionId, store, useLive]);
 
   if (!sessionId) {
     return (
