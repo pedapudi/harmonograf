@@ -134,8 +134,10 @@ export class SpanIndex {
       else hi = mid;
     }
     // Walk backwards for straddlers, bounded by a small budget — avoids the
-    // pathological case of one giant span covering the whole session.
-    let i = Math.max(0, lo - 1);
+    // pathological case of one giant span covering the whole session. Start
+    // strictly before `lo`; the forward walk below covers spans[lo] itself,
+    // and clamping to 0 here would double-count the first span.
+    let i = lo - 1;
     while (i >= 0) {
       const s = spans[i];
       const end = s.endMs ?? Number.POSITIVE_INFINITY;
