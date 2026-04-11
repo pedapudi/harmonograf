@@ -51,6 +51,21 @@ def build_parser() -> argparse.ArgumentParser:
         default=5.0,
         help="shutdown grace period in seconds (default: 5.0)",
     )
+    p.add_argument(
+        "--retention-hours",
+        type=float,
+        default=0.0,
+        help=(
+            "delete terminal (COMPLETED/ABORTED) sessions older than this many "
+            "hours; 0 disables retention sweeping (default: 0)"
+        ),
+    )
+    p.add_argument(
+        "--retention-interval-seconds",
+        type=float,
+        default=300.0,
+        help="retention sweeper interval in seconds (default: 300)",
+    )
     return p
 
 
@@ -64,6 +79,8 @@ def config_from_args(argv: list[str] | None = None) -> ServerConfig:
         data_dir=args.data_dir,
         log_level=args.log_level,
         grace_seconds=args.grace,
+        retention_hours=args.retention_hours,
+        retention_interval_seconds=args.retention_interval_seconds,
     )
 
 

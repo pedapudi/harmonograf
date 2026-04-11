@@ -31,6 +31,7 @@ from harmonograf_server.config import ServerConfig
 from harmonograf_server.control_router import ControlRouter
 from harmonograf_server.ingest import IngestPipeline
 from harmonograf_server.pb import service_pb2_grpc
+from harmonograf_server.retention import retention_loop
 from harmonograf_server.rpc.telemetry import TelemetryServicer, heartbeat_sweeper
 from harmonograf_server.storage import make_store
 
@@ -60,6 +61,7 @@ class Harmonograf:
         self._grpc_server: Optional[grpc.aio.Server] = None
         self._web_shutdown: Optional[asyncio.Event] = None
         self._sweeper_task: Optional[asyncio.Task] = None
+        self._retention_task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
 
     @classmethod
@@ -105,6 +107,22 @@ class Harmonograf:
             heartbeat_sweeper(self.ingest), name="heartbeat_sweeper"
         )
 
+        # Retention sweeper (no-op when retention_hours == 0).
+        if self.cfg.retention_hours > 0:
+            self._retention_task = asyncio.create_task(
+                retention_loop(
+                    self.store,
+                    self.cfg.retention_hours * 3600.0,
+                    self.cfg.retention_interval_seconds,
+                ),
+                name="retention_sweeper",
+            )
+            logger.info(
+                "retention sweeper active: %.1fh window, %.0fs interval",
+                self.cfg.retention_hours,
+                self.cfg.retention_interval_seconds,
+            )
+
         # gRPC-Web ASGI app. Reuses the same servicer instance so state is
         # shared with native gRPC.
         self._web_app = grpcASGI()
@@ -134,6 +152,12 @@ class Harmonograf:
             self._sweeper_task.cancel()
             try:
                 await self._sweeper_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if self._retention_task is not None:
+            self._retention_task.cancel()
+            try:
+                await self._retention_task
             except (asyncio.CancelledError, Exception):
                 pass
         if self._grpc_server is not None:
