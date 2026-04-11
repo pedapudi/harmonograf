@@ -1,0 +1,14 @@
+{
+  "name": "harmonograf-integration",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Browser-driven cross-component smoke tests (Playwright). Boots server + client + frontend and exercises the full stack.",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "install-browsers": "playwright install --with-deps chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}
