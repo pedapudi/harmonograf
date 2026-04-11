@@ -55,7 +55,45 @@ def write_webpage(
         return f"Error writing file: {e}"
 
 
+def read_presentation_files(topic: str) -> dict[str, str]:
+    """Reads the generated presentation files for ``topic`` and returns a
+    dict mapping filename → file contents. Used by ``reviewer_agent`` to
+    critique ``web_developer_agent``'s output.
+    """
+    topic_filename = topic.lower().replace(" ", "_").replace("/", "_")
+    output_dir = os.path.join(os.path.dirname(__file__), "output", topic_filename)
+    files: dict[str, str] = {}
+    for name in ("index.html", "styles.css", "script.js"):
+        path = os.path.join(output_dir, name)
+        try:
+            with open(path, "r") as f:
+                files[name] = f.read()
+        except OSError as e:
+            files[name] = f"<error reading {path}: {e}>"
+    return files
+
+
+def patch_file(path: str, new_content: str) -> str:
+    """Overwrites ``path`` with ``new_content`` in place. Used by
+    ``debugger_agent`` to fix issues that ``reviewer_agent`` flagged or
+    that caused ``write_webpage`` to fail. Relative paths are resolved
+    against the ``output/`` directory so the debugger can't accidentally
+    scribble outside the sandbox.
+    """
+    try:
+        if not os.path.isabs(path):
+            path = os.path.join(os.path.dirname(__file__), "output", path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(new_content)
+        return f"Successfully patched {path}"
+    except Exception as e:  # noqa: BLE001 — tool result must be serialisable
+        return f"Error patching file: {e}"
+
+
 write_webpage_tool = FunctionTool(write_webpage)
+read_presentation_files_tool = FunctionTool(read_presentation_files)
+patch_file_tool = FunctionTool(patch_file)
 
 
 # Users can specify the model via environment variable.
@@ -111,6 +149,45 @@ web_developer_agent = Agent(
     tools=[write_webpage_tool],
 )
 
+reviewer_agent = Agent(
+    name="reviewer_agent",
+    model=MODEL_NAME,
+    instruction=(
+        "You are a senior frontend code reviewer. You will be given the "
+        "topic of a presentation that ``web_developer_agent`` just "
+        "generated. Call the ``read_presentation_files`` tool with the "
+        "topic to fetch the generated HTML, CSS, and JS, then produce a "
+        "structured critique as a list of issues. Each issue must include "
+        "a short description and a severity of 'critical', 'major', or "
+        "'minor'. If there are no issues, return an empty list and say so "
+        "explicitly so the coordinator knows to skip debugging."
+    ),
+    description=(
+        "A reviewer agent that reads the generated presentation files and "
+        "produces a structured critique of issues and their severity."
+    ),
+    tools=[read_presentation_files_tool],
+)
+
+debugger_agent = Agent(
+    name="debugger_agent",
+    model=MODEL_NAME,
+    instruction=(
+        "You are a debugging agent. You are invoked when "
+        "``write_webpage`` failed or when ``reviewer_agent`` flagged "
+        "critical issues in the generated presentation. Read the issues "
+        "and their file paths, then call the ``patch_file`` tool with the "
+        "full corrected content of each file that needs to change. "
+        "Report which files you patched when you are done."
+    ),
+    description=(
+        "A debugger agent that patches generated presentation files in "
+        "place to resolve critical issues flagged by the reviewer or by "
+        "a failing write_webpage call."
+    ),
+    tools=[patch_file_tool],
+)
+
 root_agent = Agent(
     name="coordinator_agent",
     model=MODEL_NAME,
@@ -122,14 +199,27 @@ root_agent = Agent(
         "the topic. Make sure to provide it with the topic!\nThird, after "
         "researching, transfer control to the 'web_developer_agent' and "
         "provide it with all the researched materials. Instruct it to "
-        "generate and save the presentation codebase.\nReport back to the "
-        "user when the task is complete."
+        "generate and save the presentation codebase.\nFourth, transfer "
+        "control to the 'reviewer_agent' with the topic so it can read "
+        "the generated files and produce a structured critique.\nFifth, "
+        "if ``write_webpage`` failed or the reviewer reported any "
+        "critical issues, transfer control to the 'debugger_agent' with "
+        "the reviewer's critique and have it patch the affected files. "
+        "Skip this step when the reviewer reports no critical issues.\n"
+        "Finally, report back to the user when the task is complete.\n"
+        "Flow: research → web_developer → reviewer → "
+        "(if critical issues) debugger → report."
     ),
     description=(
         "The main coordinator agent that drives the overall process of "
         "creating an interactive slideshow generation."
     ),
-    tools=[AgentTool(research_agent), AgentTool(web_developer_agent)],
+    tools=[
+        AgentTool(research_agent),
+        AgentTool(web_developer_agent),
+        AgentTool(reviewer_agent),
+        AgentTool(debugger_agent),
+    ],
 )
 
 

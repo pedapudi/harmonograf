@@ -85,7 +85,15 @@ Override the topic or server address on the command line:
 make demo-presentation TOPIC="Rust memory model" HARMONOGRAF_SERVER=127.0.0.1:7531
 ```
 
-The demo prints `[harmonograf] session_id=<id>` as soon as the server assigns one — open the frontend and that session should materialize on the Gantt view while the coordinator → research → web_developer pipeline runs.
+The demo prints `[harmonograf] session_id=<id>` as soon as the server assigns one — open the frontend and that session should materialize on the Gantt view while the coordinator → research → web_developer → reviewer → (debugger) pipeline runs.
+
+The `presentation_agent` coordinator drives five agents:
+
+- **coordinator_agent** — orchestrates the flow and dispatches to each sub-agent via AgentTool.
+- **research_agent** — gathers facts and notes about the user's topic.
+- **web_developer_agent** — generates the presentation HTML/CSS/JS and saves them via `write_webpage`.
+- **reviewer_agent** — reads the generated files with `read_presentation_files` and returns a structured critique (issues + severity).
+- **debugger_agent** — invoked only when `write_webpage` fails or the reviewer flags critical issues; patches files in place with `patch_file`.
 
 ### Using a local OpenAI-compatible endpoint
 

@@ -96,8 +96,19 @@ def _build_scripted_model() -> Any:
     css_content = "body { font-family: sans-serif; }"
     js_content = "console.log('slides');"
 
+    reviewer_critique = (
+        "Issues:\n"
+        "- [critical] script.js missing slide navigation handlers\n"
+        "- [minor] heading lacks accessible label"
+    )
+    patched_js_content = (
+        "document.addEventListener('keydown', e => {});"
+        " console.log('slides');"
+    )
+
     # Scripted turn sequence. Any extra calls reuse the last response so
     # stray follow-ups from ADK's orchestrator don't blow up the run.
+    # Flow: research → web_developer → reviewer → debugger → report.
     script: list[LlmResponse] = [
         # 1. coordinator dispatches to research_agent
         _tool_call_response(
@@ -122,7 +133,34 @@ def _build_scripted_model() -> Any:
         ),
         # 5. web_developer_agent confirms and returns text
         _text_response("Presentation saved to disk."),
-        # 6. coordinator final answer to the user
+        # 6. coordinator dispatches to reviewer_agent
+        _tool_call_response(
+            "reviewer_agent",
+            {"request": "Review the generated presentation on python_programming_test"},
+        ),
+        # 7. reviewer_agent reads the files via its tool
+        _tool_call_response(
+            "read_presentation_files",
+            {"topic": "python_programming_test"},
+        ),
+        # 8. reviewer_agent returns structured critique
+        _text_response(reviewer_critique),
+        # 9. coordinator dispatches to debugger_agent because of critical issue
+        _tool_call_response(
+            "debugger_agent",
+            {"request": f"Fix critical issues: {reviewer_critique}"},
+        ),
+        # 10. debugger_agent patches script.js
+        _tool_call_response(
+            "patch_file",
+            {
+                "path": "python_programming_test/script.js",
+                "new_content": patched_js_content,
+            },
+        ),
+        # 11. debugger_agent confirms the patch
+        _text_response("Patched script.js with navigation handlers."),
+        # 12. coordinator final answer to the user
         _text_response("All done — your presentation is ready."),
     ]
 
@@ -183,7 +221,33 @@ def _build_presentation_runner(tmp_output_dir: Any) -> Any:
             f.write(js_content)
         return f"Successfully created presentation on '{topic}' at {out_dir}"
 
+    def read_presentation_files(topic: str) -> dict[str, str]:
+        topic_filename = topic.lower().replace(" ", "_").replace("/", "_")
+        out_dir = os.path.join(str(tmp_output_dir), topic_filename)
+        files: dict[str, str] = {}
+        for name in ("index.html", "styles.css", "script.js"):
+            path = os.path.join(out_dir, name)
+            try:
+                with open(path, "r") as f:
+                    files[name] = f.read()
+            except OSError as e:
+                files[name] = f"<error: {e}>"
+        return files
+
+    def patch_file(path: str, new_content: str) -> str:
+        # Resolve relative paths against tmp_output_dir so the test
+        # stays inside its sandbox even if the mock script passes a
+        # naked "topic/script.js".
+        if not os.path.isabs(path):
+            path = os.path.join(str(tmp_output_dir), path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(new_content)
+        return f"Successfully patched {path}"
+
     write_webpage_tool = FunctionTool(write_webpage)
+    read_presentation_files_tool = FunctionTool(read_presentation_files)
+    patch_file_tool = FunctionTool(patch_file)
 
     research_agent = LlmAgent(
         name="research_agent",
@@ -199,15 +263,40 @@ def _build_presentation_runner(tmp_output_dir: Any) -> Any:
         description="Web developer.",
         tools=[write_webpage_tool],
     )
+    reviewer_agent = LlmAgent(
+        name="reviewer_agent",
+        model=model,
+        instruction=(
+            "You are a reviewer. Call read_presentation_files then report "
+            "a structured critique."
+        ),
+        description="Reviewer.",
+        tools=[read_presentation_files_tool],
+    )
+    debugger_agent = LlmAgent(
+        name="debugger_agent",
+        model=model,
+        instruction=(
+            "You are a debugger. Call patch_file to fix critical issues."
+        ),
+        description="Debugger.",
+        tools=[patch_file_tool],
+    )
     coordinator_agent = LlmAgent(
         name="coordinator_agent",
         model=model,
         instruction=(
-            "First dispatch to research_agent, then to web_developer_agent, "
+            "First dispatch to research_agent, then web_developer_agent, "
+            "then reviewer_agent, then (if critical issues) debugger_agent, "
             "then return a final answer."
         ),
         description="Coordinator.",
-        tools=[AgentTool(research_agent), AgentTool(web_developer_agent)],
+        tools=[
+            AgentTool(research_agent),
+            AgentTool(web_developer_agent),
+            AgentTool(reviewer_agent),
+            AgentTool(debugger_agent),
+        ],
     )
     return InMemoryRunner(agent=coordinator_agent, app_name="presentation_e2e")
 
@@ -312,7 +401,23 @@ class TestPresentationAgentHarmonograf:
                 have_invocation = any("INVOCATION" in k for k in kinds)
                 have_llm = any("LLM_CALL" in k for k in kinds)
                 have_tool = any("TOOL_CALL" in k for k in kinds)
-                return have_invocation and have_llm and have_tool
+                # Wait until the full pipeline's tool spans have
+                # flushed — write_webpage is emitted last-ish, so its
+                # presence is a good proxy for "everything landed."
+                tool_names = {
+                    getattr(s, "name", "")
+                    for s in spans
+                    if "TOOL_CALL" in str(getattr(s, "kind", ""))
+                }
+                have_write = "write_webpage" in tool_names
+                have_patch = "patch_file" in tool_names
+                return (
+                    have_invocation
+                    and have_llm
+                    and have_tool
+                    and have_write
+                    and have_patch
+                )
 
             assert await _wait_for_async(
                 _have_core_kinds, timeout=10.0
@@ -365,6 +470,8 @@ class TestPresentationAgentHarmonograf:
                 "coordinator_agent",
                 "research_agent",
                 "web_developer_agent",
+                "reviewer_agent",
+                "debugger_agent",
             ):
                 assert agent_name in all_span_names, (
                     f"agent {agent_name!r} missing from emitted span set; "
@@ -372,12 +479,12 @@ class TestPresentationAgentHarmonograf:
                 )
 
             # A5 / task #12: AgentTool sub-dispatch must read as a
-            # transfer in the Gantt. The coordinator fans out to two
-            # sub-agents via AgentTool so we expect ≥2 TRANSFER spans,
+            # transfer in the Gantt. The coordinator fans out to four
+            # sub-agents via AgentTool so we expect ≥4 TRANSFER spans,
             # each attributed to the correct target agent and carrying
             # a LINK_RELATION_INVOKED edge back to the paired TOOL_CALL.
-            assert len(transfer_spans) >= 2, (
-                f"expected ≥2 TRANSFER spans for AgentTool dispatch, "
+            assert len(transfer_spans) >= 4, (
+                f"expected ≥4 TRANSFER spans for AgentTool dispatch, "
                 f"got {len(transfer_spans)}: "
                 f"names={[getattr(s, 'name', None) for s in transfer_spans]}"
             )
@@ -403,7 +510,12 @@ class TestPresentationAgentHarmonograf:
                         val = val.string_value
                     if val:
                         transfer_targets.add(val)
-            assert {"research_agent", "web_developer_agent"} <= transfer_targets, (
+            assert {
+                "research_agent",
+                "web_developer_agent",
+                "reviewer_agent",
+                "debugger_agent",
+            } <= transfer_targets, (
                 f"TRANSFER spans missing expected sub-agents; "
                 f"saw targets={transfer_targets}"
             )
@@ -414,14 +526,25 @@ class TestPresentationAgentHarmonograf:
                     "expected LINK_RELATION_INVOKED edge to the TOOL_CALL"
                 )
 
-            # Task #1: every sub-agent should own its own row in the
-            # Gantt — i.e. spans should be attributed to ≥3 distinct
-            # agent_ids (coordinator + research + web_developer).
+            # Task #1 / #9: every sub-agent should own its own row in
+            # the Gantt — i.e. spans should be attributed to ≥5 distinct
+            # agent_ids (coordinator + research + web_developer +
+            # reviewer + debugger).
             agent_ids = {
                 getattr(s, "agent_id", "") for s in spans if getattr(s, "agent_id", "")
             }
-            assert {"coordinator_agent", "research_agent", "web_developer_agent"} <= agent_ids, (
+            assert {
+                "coordinator_agent",
+                "research_agent",
+                "web_developer_agent",
+                "reviewer_agent",
+                "debugger_agent",
+            } <= agent_ids, (
                 f"expected per-sub-agent rows; saw agent_ids={agent_ids}"
+            )
+            assert len(agent_ids) >= 5, (
+                f"expected ≥5 distinct agent_ids in session spans, "
+                f"got {len(agent_ids)}: {agent_ids}"
             )
         finally:
             handle.detach()
@@ -655,6 +778,8 @@ class TestPresentationAppExport:
         scripted = _build_scripted_model()
         agent_mod.research_agent.model = scripted
         agent_mod.web_developer_agent.model = scripted
+        agent_mod.reviewer_agent.model = scripted
+        agent_mod.debugger_agent.model = scripted
         agent_mod.root_agent.model = scripted
 
         from google.adk.runners import InMemoryRunner
@@ -689,10 +814,15 @@ class TestPresentationAppExport:
                     return False
                 spans = await _spans_in_store(store, sid)
                 kinds = {str(getattr(s, "kind", "")) for s in spans}
+                tool_names = {
+                    getattr(s, "name", "")
+                    for s in spans
+                    if "TOOL_CALL" in str(getattr(s, "kind", ""))
+                }
                 return (
                     any("INVOCATION" in k for k in kinds)
                     and any("LLM_CALL" in k for k in kinds)
-                    and any("TOOL_CALL" in k for k in kinds)
+                    and "write_webpage" in tool_names
                 )
 
             assert await _wait_for_async(
