@@ -25,6 +25,7 @@ Thumbs.db
 
 # Harmonograf runtime data
 data/
+presentation_agent/output/
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal

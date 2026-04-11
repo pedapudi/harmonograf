@@ -8,7 +8,7 @@ FRONTEND_PB := $(ROOT)/frontend/src/pb
 
 .PHONY: help proto proto-python proto-ts \
         server-install client-install frontend-install install \
-        server-run frontend-dev \
+        server-run frontend-dev demo-presentation \
         test server-test client-test frontend-test e2e \
         lint format clean stats
 
@@ -89,6 +89,14 @@ server-run:
 
 frontend-dev:
 	@cd $(ROOT)/frontend && pnpm dev
+
+# Run the presentation_agent sample wired to a Harmonograf server.
+# Override TOPIC / HARMONOGRAF_SERVER as needed:
+#   make demo-presentation TOPIC="Rust memory model" HARMONOGRAF_SERVER=127.0.0.1:7531
+TOPIC ?= Python programming
+HARMONOGRAF_SERVER ?= 127.0.0.1:7531
+demo-presentation:
+	@cd $(ROOT) && HARMONOGRAF_SERVER=$(HARMONOGRAF_SERVER) uv run --extra e2e python -m presentation_agent.run_harmonograf --topic "$(TOPIC)" --server $(HARMONOGRAF_SERVER)
 
 # ---------------------------------------------------------------------------
 # Tests
