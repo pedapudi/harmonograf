@@ -106,7 +106,7 @@ frontend-test:
 	@cd $(ROOT)/frontend && pnpm build && pnpm lint
 
 e2e:
-	@cd $(ROOT) && uv run --with pytest --with pytest-asyncio python -m pytest tests/e2e -q
+	@cd $(ROOT) && uv run --extra e2e pytest tests/e2e -q
 
 # ---------------------------------------------------------------------------
 # Quality
