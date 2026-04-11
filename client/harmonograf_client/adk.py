@@ -273,6 +273,30 @@ class _AdkState:
         if is_long_running:
             self._client.emit_span_update(span_id, status="AWAITING_HUMAN")
 
+        # AgentTool dispatch reads as a sub-agent transfer in the Gantt.
+        # Emit a TRANSFER span alongside the TOOL_CALL (kept for
+        # bookkeeping) with a LINK_INVOKED edge back to the TOOL_CALL.
+        if _is_agent_tool(tool):
+            target_agent_name = (
+                _safe_attr(_safe_attr(tool, "agent", None), "name", "") or name
+            )
+            transfer_sid = self._client.emit_span_start(
+                kind="TRANSFER",
+                name=f"transfer_to_{target_agent_name}",
+                parent_span_id=parent,
+                attributes={
+                    "target_agent": target_agent_name,
+                    "via": "agent_tool",
+                },
+                links=[
+                    {
+                        "target_span_id": span_id,
+                        "relation": "INVOKED",
+                    }
+                ],
+            )
+            self._client.emit_span_end(transfer_sid, status="COMPLETED")
+
     def on_tool_end(
         self,
         tool: Any,
@@ -368,6 +392,26 @@ class _AdkState:
 # ---------------------------------------------------------------------------
 # Module-level helpers — defensive against ADK internals moving.
 # ---------------------------------------------------------------------------
+
+
+def _is_agent_tool(tool: Any) -> bool:
+    """Structural check — True when ``tool`` is an ADK ``AgentTool``.
+
+    Uses ``isinstance`` (preferred) when ADK is importable, falling back
+    to a duck-typed check for a ``.agent`` attribute that itself looks
+    like an ADK agent. Name-based matching is deliberately avoided.
+    """
+    try:
+        from google.adk.tools.agent_tool import AgentTool  # type: ignore
+
+        if isinstance(tool, AgentTool):
+            return True
+    except Exception:
+        pass
+    agent = getattr(tool, "agent", None)
+    if agent is None:
+        return False
+    return hasattr(agent, "name") and hasattr(agent, "description")
 
 
 def _safe_attr(obj: Any, name: str, default: Any) -> Any:

@@ -166,6 +166,7 @@ class Client:
         payload_mime: str = "application/json",
         payload_role: str = "input",
         start_time: Any = None,
+        links: Optional[Iterable[Mapping[str, Any]]] = None,
     ) -> str:
         sid = span_id or _uuid7_hex()
         kind_enum, kind_string = self._resolve_kind(kind)
@@ -181,6 +182,7 @@ class Client:
             start_time=_to_ts(start_time),
         )
         self._apply_attributes(span.attributes, attributes)
+        self._apply_links(span.links, links)
         has_payload = self._attach_payload(
             span.payload_refs, payload, payload_mime, payload_role
         )
@@ -308,6 +310,24 @@ class Client:
             else:
                 av.string_value = str(v)
             target[k].CopyFrom(av)
+
+    def _apply_links(self, target: Any, links: Optional[Iterable[Mapping[str, Any]]]) -> None:
+        if not links:
+            return
+        types_pb2 = self._types_pb2
+        for link in links:
+            relation_name = str(link.get("relation", "UNSPECIFIED"))
+            relation_val = getattr(
+                types_pb2,
+                f"LINK_RELATION_{relation_name}",
+                types_pb2.LINK_RELATION_UNSPECIFIED,
+            )
+            sl = types_pb2.SpanLink(
+                target_span_id=str(link.get("target_span_id", "") or ""),
+                target_agent_id=str(link.get("target_agent_id", "") or ""),
+                relation=relation_val,
+            )
+            target.append(sl)
 
     def _attach_payload(
         self,

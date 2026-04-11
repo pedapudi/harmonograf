@@ -321,6 +321,9 @@ class TestPresentationAgentHarmonograf:
             tool_spans = [
                 s for k, g in by_kind.items() if "TOOL_CALL" in k for s in g
             ]
+            transfer_spans = [
+                s for k, g in by_kind.items() if "TRANSFER" in k for s in g
+            ]
 
             assert len(invocation_spans) >= 1, (
                 f"expected at least 1 INVOCATION span, got {len(invocation_spans)}"
@@ -354,6 +357,49 @@ class TestPresentationAgentHarmonograf:
                 assert agent_name in all_span_names, (
                     f"agent {agent_name!r} missing from emitted span set; "
                     f"invocation_names={invocation_names}, tool_names={tool_names}"
+                )
+
+            # A5 / task #12: AgentTool sub-dispatch must read as a
+            # transfer in the Gantt. The coordinator fans out to two
+            # sub-agents via AgentTool so we expect ≥2 TRANSFER spans,
+            # each attributed to the correct target agent and carrying
+            # a LINK_RELATION_INVOKED edge back to the paired TOOL_CALL.
+            assert len(transfer_spans) >= 2, (
+                f"expected ≥2 TRANSFER spans for AgentTool dispatch, "
+                f"got {len(transfer_spans)}: "
+                f"names={[getattr(s, 'name', None) for s in transfer_spans]}"
+            )
+            transfer_targets = {
+                getattr(s, "attributes", {}).get("target_agent")
+                if isinstance(getattr(s, "attributes", None), dict)
+                else None
+                for s in transfer_spans
+            }
+            # Attributes may be a protobuf map — fall back to reading
+            # via getattr lookup if dict access returned None.
+            if None in transfer_targets:
+                transfer_targets = set()
+                for s in transfer_spans:
+                    attrs = getattr(s, "attributes", None)
+                    if attrs is None:
+                        continue
+                    try:
+                        val = attrs["target_agent"]
+                    except Exception:
+                        val = None
+                    if hasattr(val, "string_value"):
+                        val = val.string_value
+                    if val:
+                        transfer_targets.add(val)
+            assert {"research_agent", "web_developer_agent"} <= transfer_targets, (
+                f"TRANSFER spans missing expected sub-agents; "
+                f"saw targets={transfer_targets}"
+            )
+            for s in transfer_spans:
+                links = list(getattr(s, "links", []) or [])
+                assert links, (
+                    f"TRANSFER span {getattr(s, 'name', '?')} has no links; "
+                    "expected LINK_RELATION_INVOKED edge to the TOOL_CALL"
                 )
         finally:
             handle.detach()

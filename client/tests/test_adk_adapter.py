@@ -225,6 +225,64 @@ class TestAdkStateEvents:
             "state_delta.step" in (kw.get("attributes") or {}) for (_, kw) in updates
         )
 
+    def test_agent_tool_dispatch_emits_transfer_span_with_link(self):
+        """AgentTool-wrapped sub-agent dispatch should read as a transfer.
+
+        The adapter must detect the wrapper structurally (``.agent`` on
+        the tool), emit a TRANSFER span next to the TOOL_CALL, and add a
+        LINK_INVOKED link pointing at the TOOL_CALL span id so the
+        frontend can render the edge.
+        """
+        client = FakeClient()
+        state = _AdkState(client=client)  # type: ignore[arg-type]
+        ic = FakeInvocationContext(invocation_id="inv_at")
+        state.on_invocation_start(ic)
+
+        # Duck-typed AgentTool: has .agent with .name/.description.
+        sub_agent = types.SimpleNamespace(
+            name="research_agent", description="Researches things."
+        )
+        agent_tool = types.SimpleNamespace(
+            name="research_agent",
+            is_long_running=False,
+            agent=sub_agent,
+        )
+        tc = FakeToolContext(function_call_id="call_at", _invocation_context=ic)
+        state.on_tool_start(agent_tool, {"request": "go"}, tc)
+
+        starts = client.starts()
+        kinds = [kw["kind"] for (_, kw) in starts]
+        assert "TOOL_CALL" in kinds, f"expected TOOL_CALL; got {kinds}"
+        assert "TRANSFER" in kinds, f"expected TRANSFER; got {kinds}"
+
+        tool_sid = next(sid for (sid, kw) in starts if kw["kind"] == "TOOL_CALL")
+        transfer_kw = next(kw for (_, kw) in starts if kw["kind"] == "TRANSFER")
+
+        assert transfer_kw["attributes"]["target_agent"] == "research_agent"
+        assert transfer_kw["attributes"]["via"] == "agent_tool"
+        links = transfer_kw.get("links")
+        assert links, "TRANSFER span must carry at least one link"
+        link = links[0]
+        assert link["target_span_id"] == tool_sid
+        assert link["relation"] == "INVOKED"
+
+        # TRANSFER span is ended (it is a point-in-time marker).
+        end_sids = [sid for (sid, _) in client.ends()]
+        transfer_sid = next(sid for (sid, kw) in starts if kw["kind"] == "TRANSFER")
+        assert transfer_sid in end_sids
+
+    def test_plain_function_tool_does_not_emit_transfer(self):
+        client = FakeClient()
+        state = _AdkState(client=client)  # type: ignore[arg-type]
+        ic = FakeInvocationContext(invocation_id="inv_ft")
+        state.on_invocation_start(ic)
+        tc = FakeToolContext(_invocation_context=ic)
+        state.on_tool_start(FakeTool(name="write_webpage"), {"x": 1}, tc)
+        kinds = [kw["kind"] for (_, kw) in client.starts()]
+        assert "TRANSFER" not in kinds, (
+            f"plain FunctionTool should not trigger a TRANSFER span; kinds={kinds}"
+        )
+
     def test_transfer_to_agent_emits_transfer_span(self):
         client = FakeClient()
         state = _AdkState(client=client)  # type: ignore[arg-type]
