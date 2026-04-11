@@ -103,7 +103,7 @@ client-test:
 	@cd $(ROOT)/client && uv run --with pytest --with pytest-asyncio python -m pytest -q
 
 frontend-test:
-	@cd $(ROOT)/frontend && pnpm test --run 2>/dev/null || pnpm build
+	@cd $(ROOT)/frontend && pnpm build && pnpm lint
 
 e2e:
 	@cd $(ROOT) && uv run --with pytest --with pytest-asyncio python -m pytest tests/e2e -q
