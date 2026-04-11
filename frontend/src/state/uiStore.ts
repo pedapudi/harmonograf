@@ -9,6 +9,8 @@ interface UiState {
   navSection: NavSection;
   navRailOpen: boolean;
   sessionPickerOpen: boolean;
+  helpOpen: boolean;
+  focusedAgentId: string | null;
   zoomSeconds: number; // visible time window in seconds
   liveFollow: boolean;
   paused: boolean;
@@ -20,6 +22,9 @@ interface UiState {
   toggleNavRail: () => void;
   openSessionPicker: () => void;
   closeSessionPicker: () => void;
+  toggleHelp: () => void;
+  closeHelp: () => void;
+  setFocusedAgent: (id: string | null) => void;
   zoomIn: () => void;
   zoomOut: () => void;
   setZoom: (sec: number) => void;
@@ -37,6 +42,8 @@ export const useUiStore = create<UiState>((set) => ({
   navSection: 'sessions',
   navRailOpen: true,
   sessionPickerOpen: false,
+  helpOpen: false,
+  focusedAgentId: null,
   zoomSeconds: 300,
   liveFollow: true,
   paused: false,
@@ -48,6 +55,9 @@ export const useUiStore = create<UiState>((set) => ({
   toggleNavRail: () => set((s) => ({ navRailOpen: !s.navRailOpen })),
   openSessionPicker: () => set({ sessionPickerOpen: true }),
   closeSessionPicker: () => set({ sessionPickerOpen: false }),
+  toggleHelp: () => set((s) => ({ helpOpen: !s.helpOpen })),
+  closeHelp: () => set({ helpOpen: false }),
+  setFocusedAgent: (id) => set({ focusedAgentId: id }),
   zoomIn: () =>
     set((s) => ({ zoomSeconds: Math.max(ZOOM_MIN, Math.round(s.zoomSeconds / 1.5)) })),
   zoomOut: () =>

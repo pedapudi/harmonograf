@@ -5,6 +5,7 @@ import { GanttPlaceholder } from '../Gantt/GanttPlaceholder';
 import { Minimap } from '../Minimap/Minimap';
 import { TransportBar } from '../TransportBar/TransportBar';
 import { SessionPicker } from '../SessionPicker/SessionPicker';
+import { HelpOverlay } from './HelpOverlay';
 import { useGlobalShortcuts } from '../../lib/shortcuts';
 
 export function Shell() {
@@ -20,6 +21,7 @@ export function Shell() {
       </main>
       <Drawer />
       <SessionPicker />
+      <HelpOverlay />
     </div>
   );
 }
