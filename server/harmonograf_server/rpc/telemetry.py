@@ -14,27 +14,39 @@ from typing import AsyncIterator, Optional
 import grpc
 from google.protobuf.timestamp_pb2 import Timestamp
 
+from harmonograf_server.bus import SessionBus
 from harmonograf_server.control_router import ControlRouter
 from harmonograf_server.ingest import IngestPipeline
 from harmonograf_server.pb import service_pb2_grpc, telemetry_pb2
 from harmonograf_server.rpc.control import ControlServicerMixin
+from harmonograf_server.rpc.frontend import FrontendServicerMixin
+from harmonograf_server.storage import Store
 
 
 logger = logging.getLogger(__name__)
 
 
-class TelemetryServicer(ControlServicerMixin, service_pb2_grpc.HarmonografServicer):
-    """Implements StreamTelemetry + SubscribeControl.
-
-    Frontend-facing RPCs (ListSessions, WatchSession, etc.) land in task #3
-    as additional mixins composed into this same class.
-    """
+class TelemetryServicer(
+    FrontendServicerMixin,
+    ControlServicerMixin,
+    service_pb2_grpc.HarmonografServicer,
+):
+    """Implements StreamTelemetry + SubscribeControl + frontend RPCs."""
 
     def __init__(
-        self, ingest: IngestPipeline, router: Optional[ControlRouter] = None
+        self,
+        ingest: IngestPipeline,
+        router: Optional[ControlRouter] = None,
+        *,
+        store: Optional[Store] = None,
+        bus: Optional[SessionBus] = None,
+        data_dir: str = "",
     ) -> None:
         self._ingest = ingest
         self._router = router or ControlRouter()
+        self._store = store if store is not None else ingest.store
+        self._bus = bus if bus is not None else ingest.bus
+        self._data_dir = data_dir
 
     async def StreamTelemetry(
         self,

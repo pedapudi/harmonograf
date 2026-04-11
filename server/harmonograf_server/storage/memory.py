@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import math
 from typing import Optional
 
 from intervaltree import Interval, IntervalTree
@@ -187,9 +188,11 @@ class InMemoryStore(Store):
 
     def _index_span(self, tree: IntervalTree, span: Span) -> None:
         end = span.end_time if span.end_time is not None else span.start_time
-        # intervaltree requires begin < end
+        # intervaltree requires begin < end; use math.nextafter so the epsilon
+        # survives float rounding at large unix-timestamp magnitudes where a
+        # naive +1e-9 collapses back to the original value.
         if end <= span.start_time:
-            end = span.start_time + 1e-9
+            end = math.nextafter(span.start_time, math.inf)
         tree.add(Interval(span.start_time, end, span.id))
 
     async def update_span(
