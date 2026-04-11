@@ -71,6 +71,7 @@ export function SpanContextMenu({ state, onClose }: Props) {
     <div
       ref={ref}
       role="menu"
+      data-testid="span-context-menu"
       className="hg-ctxmenu"
       style={{
         position: 'fixed',
@@ -106,6 +107,7 @@ export function SpanContextMenu({ state, onClose }: Props) {
           />
           <MenuItem
             label="Steer"
+            testId="span-context-menu-steer"
             disabled={disabled || !hasCapability(span, 'STEERING')}
             onClick={() => setMode('steer')}
             hint={!hasCapability(span, 'STEERING') ? 'Agent lacks STEERING capability' : undefined}
@@ -187,6 +189,8 @@ export function SpanContextMenu({ state, onClose }: Props) {
         <InlineCompose
           label="Steer"
           placeholder="Consider: "
+          inputTestId="steer-input"
+          submitTestId="steer-submit"
           value={body}
           setValue={setBody}
           busy={busy}
@@ -228,15 +232,18 @@ function MenuItem({
   disabled,
   onClick,
   hint,
+  testId,
 }: {
   label: string;
   disabled?: boolean;
   onClick: () => void;
   hint?: string;
+  testId?: string;
 }) {
   return (
     <div
       role="menuitem"
+      data-testid={testId}
       title={hint}
       onClick={disabled ? undefined : onClick}
       style={{
@@ -267,6 +274,8 @@ function InlineCompose({
   busy,
   onCancel,
   onSubmit,
+  inputTestId,
+  submitTestId,
 }: {
   label: string;
   placeholder: string;
@@ -275,12 +284,15 @@ function InlineCompose({
   busy: boolean;
   onCancel: () => void;
   onSubmit: () => void;
+  inputTestId?: string;
+  submitTestId?: string;
 }) {
   return (
     <div style={{ padding: 8, minWidth: 260 }}>
       <div style={{ fontWeight: 600, marginBottom: 6 }}>{label}</div>
       <textarea
         autoFocus
+        data-testid={inputTestId}
         placeholder={placeholder}
         value={value}
         onChange={(e) => setValue(e.target.value)}
@@ -308,7 +320,11 @@ function InlineCompose({
         <button onClick={onCancel} disabled={busy}>
           Cancel
         </button>
-        <button onClick={onSubmit} disabled={busy || !value.trim()}>
+        <button
+          data-testid={submitTestId}
+          onClick={onSubmit}
+          disabled={busy || !value.trim()}
+        >
           {busy ? 'Sending…' : 'Send'}
         </button>
       </div>

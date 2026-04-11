@@ -82,6 +82,7 @@ export function PinStrip({ ctx, sessionId }: Props) {
   return (
     <div
       aria-hidden="true"
+      data-testid="pin-strip"
       style={{
         position: 'absolute',
         inset: 0,
@@ -193,6 +194,8 @@ function Pin({
       )}
       <button
         type="button"
+        data-testid="pin"
+        data-annotation-id={ann.id}
         title={title}
         onClick={handle}
         style={{

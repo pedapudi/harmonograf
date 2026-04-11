@@ -119,6 +119,7 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
     <div
       ref={containerRef}
       className="hg-gantt"
+      data-testid="gantt-canvas"
       style={{
         position: 'relative',
         width: '100%',

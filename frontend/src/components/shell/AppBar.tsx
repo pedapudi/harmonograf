@@ -33,7 +33,7 @@ export function AppBar() {
   const attention = mockSessions.reduce((acc, s) => acc + s.attention, 0);
 
   return (
-    <header className="hg-appbar">
+    <header className="hg-appbar" data-testid="app-bar">
       <button
         className="hg-appbar__icon-btn"
         onClick={toggleRail}
@@ -42,7 +42,11 @@ export function AppBar() {
         ☰
       </button>
       <div className="hg-appbar__title">Harmonograf</div>
-      <button className="hg-appbar__session-trigger" onClick={openPicker}>
+      <button
+        className="hg-appbar__session-trigger"
+        onClick={openPicker}
+        data-testid="session-picker"
+      >
         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {sessionTitle}
         </span>

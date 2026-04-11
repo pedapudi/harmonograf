@@ -19,7 +19,11 @@ export function NavRail() {
   const setSection = useUiStore((s) => s.setNavSection);
 
   return (
-    <nav className={`hg-rail${open ? '' : ' hg-rail--collapsed'}`} aria-label="Sections">
+    <nav
+      className={`hg-rail${open ? '' : ' hg-rail--collapsed'}`}
+      aria-label="Sections"
+      data-testid="nav-rail"
+    >
       {ITEMS.map((item) => (
         <button
           key={item.id}

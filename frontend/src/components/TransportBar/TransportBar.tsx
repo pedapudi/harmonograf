@@ -30,7 +30,12 @@ export function TransportBar() {
   const elapsedSeconds = sessionId ? tick : 0;
 
   return (
-    <footer className="hg-transport" role="toolbar" aria-label="Transport controls">
+    <footer
+      className="hg-transport"
+      role="toolbar"
+      aria-label="Transport controls"
+      data-testid="transport-bar"
+    >
       <div className="hg-transport__group">
         <button
           className="hg-transport__btn"

@@ -101,7 +101,11 @@ function SessionPickerBody({
       role="dialog"
       aria-label="Session picker"
     >
-      <div className="hg-picker" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="hg-picker"
+        onClick={(e) => e.stopPropagation()}
+        data-testid="session-picker-menu"
+      >
         <div className="hg-picker__search">
           <input
             ref={inputRef}
@@ -177,7 +181,13 @@ function SessionRow({
   live?: boolean;
 }) {
   return (
-    <div className="hg-picker__row" onClick={() => onPick(session)} role="button">
+    <div
+      className="hg-picker__row"
+      onClick={() => onPick(session)}
+      role="button"
+      data-testid="session-picker-item"
+      data-session-id={session.id}
+    >
       {live && <span className="hg-transport__live-dot" />}
       <div className="hg-picker__row-meta">
         <div className="hg-picker__row-title">{session.title}</div>

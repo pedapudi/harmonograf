@@ -99,6 +99,8 @@ export function AttentionSnackbar({ store, sessionId }: Props) {
     <div
       role="status"
       aria-live="polite"
+      data-testid="approval-snackbar"
+      data-span-id={span.id}
       style={{
         position: 'fixed',
         left: '50%',
@@ -152,6 +154,7 @@ export function AttentionSnackbar({ store, sessionId }: Props) {
         Inspect
       </button>
       <button
+        data-testid="approval-reject"
         onClick={() => void dispatch('REJECT')}
         style={buttonStyle}
         disabled={busy !== null}
@@ -159,6 +162,7 @@ export function AttentionSnackbar({ store, sessionId }: Props) {
         {busy === 'REJECT' ? '…' : 'Reject'}
       </button>
       <button
+        data-testid="approval-approve"
         onClick={() => void dispatch('APPROVE')}
         style={{ ...buttonStyle, fontWeight: 700 }}
         disabled={busy !== null}
