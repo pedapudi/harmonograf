@@ -1,12 +1,18 @@
 import './views.css';
 import { useUiStore } from '../../../state/uiStore';
-import { useAnnotationStore } from '../../../state/annotationStore';
+import { useAnnotationStore, type Annotation } from '../../../state/annotationStore';
+
+// Stable reference so the zustand selector doesn't return a fresh array every
+// render when the session has no annotations (which triggers React 19's
+// useSyncExternalStore "getSnapshot should be cached" infinite loop and
+// unmounts the entire tree).
+const EMPTY_ANNOTATIONS: readonly Annotation[] = Object.freeze([]);
 
 export function NotesView() {
   const sessionId = useUiStore((s) => s.currentSessionId);
   const selectSpan = useUiStore((s) => s.selectSpan);
-  const annotations = useAnnotationStore((s) =>
-    sessionId ? (s.bySession.get(sessionId) ?? []) : [],
+  const annotations = useAnnotationStore(
+    (s) => (sessionId && s.bySession.get(sessionId)) || EMPTY_ANNOTATIONS,
   );
 
   const sorted = annotations.slice().sort((a, b) => b.createdAtMs - a.createdAtMs);

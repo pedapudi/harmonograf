@@ -5,6 +5,7 @@ import { GanttPlaceholder } from '../Gantt/GanttPlaceholder';
 import { TransportBar } from '../TransportBar/TransportBar';
 import { SessionPicker } from '../SessionPicker/SessionPicker';
 import { HelpOverlay } from './HelpOverlay';
+import { ShellErrorBoundary } from './ErrorBoundary';
 import { SessionsSyncer } from '../../rpc/SessionsSyncer';
 import { useGlobalShortcuts } from '../../lib/shortcuts';
 import { useUiStore } from '../../state/uiStore';
@@ -21,15 +22,17 @@ export function Shell() {
       <AppBar />
       <NavRail />
       <main className="hg-main" data-testid="main-content" data-view={navSection}>
-        {navSection === 'sessions' && (
-          <>
-            <GanttPlaceholder />
-            <TransportBar />
-          </>
-        )}
-        {navSection === 'activity' && <ActivityView />}
-        {navSection === 'annotations' && <NotesView />}
-        {navSection === 'settings' && <SettingsView />}
+        <ShellErrorBoundary key={navSection}>
+          {navSection === 'sessions' && (
+            <>
+              <GanttPlaceholder />
+              <TransportBar />
+            </>
+          )}
+          {navSection === 'activity' && <ActivityView />}
+          {navSection === 'annotations' && <NotesView />}
+          {navSection === 'settings' && <SettingsView />}
+        </ShellErrorBoundary>
       </main>
       <Drawer />
       <SessionPicker />
