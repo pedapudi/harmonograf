@@ -298,6 +298,124 @@ class TestAdkStateEvents:
         assert transfer_entry["attributes"]["target_agent"] == "other_agent"
 
 
+class TestAdkStateConcurrentRouting:
+    """Regression for task #4: two concurrent top-level invocations on a
+    *single* ``_AdkState`` (as ``adk web`` creates when it installs one
+    plugin on one Runner and then serves overlapping /run requests) must
+    mint two independent harmonograf session ids. The previous
+    depth-counter heuristic collapsed the second root into the first;
+    the ContextVar-based routing keeps each asyncio Task isolated.
+    """
+
+    def test_concurrent_invocations_get_distinct_hsessions(self):
+        import asyncio
+
+        client = FakeClient()
+        state = _AdkState(client=client)  # type: ignore[arg-type]
+
+        started = asyncio.Event()
+        # Each task performs on_invocation_start, waits until the peer
+        # task has also started (so both invocations are in-flight
+        # simultaneously — exactly the qa-dev race), then ends. If the
+        # adapter's routing is task-aware, each task's span_start call
+        # must carry its own ``session_id`` keyword.
+        barrier: list[int] = [0]
+
+        async def drive(ic_inv_id: str, adk_sid: str, agent_name: str) -> str:
+            ic = FakeInvocationContext(
+                invocation_id=ic_inv_id,
+                agent=FakeAgent(name=agent_name),
+                session=FakeSession(id=adk_sid),
+            )
+            state.on_invocation_start(ic)
+            barrier[0] += 1
+            # Yield until BOTH tasks have emitted their start. This is
+            # what makes the test a real concurrency probe — if we just
+            # awaited sequentially the bug would be masked by the depth
+            # counter decrementing to zero before the next root opens.
+            while barrier[0] < 2:
+                await asyncio.sleep(0)
+            state.on_invocation_end(ic)
+            # Pull the session_id that was actually attributed to this
+            # invocation's INVOCATION span.
+            for op, _sid, kw in client.calls:
+                if (
+                    op == "start"
+                    and kw.get("kind") == "INVOCATION"
+                    and kw.get("attributes", {}).get("invocation_id") == ic_inv_id
+                ):
+                    return kw.get("session_id") or ""
+            return ""
+
+        async def run() -> tuple[str, str]:
+            t1 = asyncio.create_task(drive("inv_A", "adk_sess_A", "coordinator_agent"))
+            t2 = asyncio.create_task(drive("inv_B", "adk_sess_B", "coordinator_agent"))
+            return await asyncio.gather(t1, t2)  # type: ignore[return-value]
+
+        sid_a, sid_b = asyncio.run(run())
+        _ = started  # silence lint — retained as documentation
+        assert sid_a, "invocation A had no session_id on its INVOCATION span"
+        assert sid_b, "invocation B had no session_id on its INVOCATION span"
+        assert sid_a != sid_b, (
+            f"concurrent root invocations collapsed into one harmonograf "
+            f"session: A={sid_a!r} B={sid_b!r}"
+        )
+        assert sid_a.startswith("adk_") and sid_b.startswith("adk_")
+
+    def test_inline_subinvocation_aliases_to_parent_hsession(self):
+        """AgentTool sub-runners execute inline (``await``) on the
+        parent task and must *still* alias to the parent's hsession —
+        the ContextVar inherits within a single Task. This is the
+        counterpart to the concurrent case and guards against an
+        over-correction that would split AgentTool sub-runs into their
+        own hsession.
+        """
+        import asyncio
+
+        client = FakeClient()
+        state = _AdkState(client=client)  # type: ignore[arg-type]
+
+        async def run() -> tuple[str, str]:
+            parent_ic = FakeInvocationContext(
+                invocation_id="inv_parent",
+                agent=FakeAgent(name="coordinator_agent"),
+                session=FakeSession(id="adk_root"),
+            )
+            state.on_invocation_start(parent_ic)
+            # Sub-runner fires a brand-new InvocationContext with a
+            # distinct ADK session id (AgentTool creates an in-memory
+            # session service for the sub-run) — still inline on the
+            # same asyncio Task.
+            sub_ic = FakeInvocationContext(
+                invocation_id="inv_sub",
+                agent=FakeAgent(name="research_agent"),
+                session=FakeSession(id="adk_sub_fresh"),
+            )
+            state.on_invocation_start(sub_ic)
+            state.on_invocation_end(sub_ic)
+            state.on_invocation_end(parent_ic)
+
+            parent_sid = ""
+            sub_sid = ""
+            for op, _sid, kw in client.calls:
+                if op != "start" or kw.get("kind") != "INVOCATION":
+                    continue
+                attrs = kw.get("attributes", {})
+                if attrs.get("invocation_id") == "inv_parent":
+                    parent_sid = kw.get("session_id") or ""
+                elif attrs.get("invocation_id") == "inv_sub":
+                    sub_sid = kw.get("session_id") or ""
+            return parent_sid, sub_sid
+
+        parent_sid, sub_sid = asyncio.run(run())
+        assert parent_sid, "parent invocation had no session_id"
+        assert sub_sid, "sub invocation had no session_id"
+        assert parent_sid == sub_sid, (
+            f"AgentTool sub-invocation should alias to the parent's "
+            f"hsession; got parent={parent_sid!r} sub={sub_sid!r}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Live attach_adk test — runs only when google.adk is importable.
 # ---------------------------------------------------------------------------

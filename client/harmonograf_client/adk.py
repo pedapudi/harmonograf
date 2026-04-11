@@ -59,19 +59,6 @@ STEERING_STATE_KEY = "_harmonograf_steering"
 INJECT_STATE_KEY = "_harmonograf_inject"
 
 
-# ContextVar that holds the harmonograf session id of the currently-open
-# ADK root invocation on *this* asyncio task. AgentTool sub-runners run
-# inline (``await runner.run_async(...)`` from the parent task), so they
-# inherit this value and alias their fresh ADK session id back to the
-# parent's harmonograf session. Concurrent top-level /run requests live
-# in independent asyncio tasks whose context copies are independent, so
-# each sees an empty CV and mints its own harmonograf session — which is
-# exactly the distinction we need to tell those two cases apart.
-_ROOT_HSESSION_CV: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "harmonograf_root_hsession", default=""
-)
-
-
 class AdkAdapter:
     """Handle returned by :func:`attach_adk`. Holds the installed plugin
     and exposes :meth:`detach` for clean removal in tests.
@@ -201,14 +188,28 @@ class _AdkState:
         self._pending_mutations: list[tuple[str, str]] = []
         # Multi-session routing: ADK sub-runners (AgentTool) create fresh
         # ADK session ids per sub-invocation, but those should land in the
-        # SAME harmonograf session as the enclosing root run. We use a
-        # ContextVar so concurrent top-level invocations — each running in
-        # their own asyncio.Task — get independent routing state, while
-        # nested AgentTool sub-invocations (which run within the parent
-        # task's Context) naturally inherit the root's hsession.
+        # SAME harmonograf session as the enclosing root run. A PER-INSTANCE
+        # ContextVar gives us two guarantees at once:
+        #
+        #   * Concurrent top-level /run calls live in independent asyncio
+        #     Tasks whose context copies are independent — each sees an
+        #     empty CV and mints its own harmonograf session.
+        #   * AgentTool sub-runners execute inline (``await`` on the parent
+        #     task) and naturally inherit the CV — their fresh ADK
+        #     session id aliases back to the parent's harmonograf session.
+        #
+        # Per-instance (rather than module-level) means two different
+        # ``_AdkState`` objects can't leak state into each other, which
+        # matters both for tests that share a process and for future
+        # callers who attach multiple plugins on one Client.
         self._adk_to_h_session: dict[str, str] = {}
+        self._current_root_hsession_var: contextvars.ContextVar[str] = (
+            contextvars.ContextVar(
+                f"_harmonograf_current_root_hsession_{id(self)}", default=""
+            )
+        )
         # invocation_id → token from ContextVar.set(), so on_invocation_end
-        # can reset the module-level ``_ROOT_HSESSION_CV`` in LIFO order.
+        # can reset the var in LIFO order.
         self._route_tokens: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
@@ -219,7 +220,7 @@ class _AdkState:
         inv_id = _safe_attr(ic, "invocation_id", "")
         agent_id, hsession_id = self._route_from_context(ic, opening_root=True)
         if hsession_id:
-            token = _ROOT_HSESSION_CV.set(hsession_id)
+            token = self._current_root_hsession_var.set(hsession_id)
             with self._lock:
                 self._route_tokens[inv_id] = token
         name = agent_id or "agent"
@@ -250,7 +251,7 @@ class _AdkState:
             token = self._route_tokens.pop(inv_id, None)
         if token is not None:
             try:
-                _ROOT_HSESSION_CV.reset(token)
+                self._current_root_hsession_var.reset(token)
             except (LookupError, ValueError):
                 pass
         if span_id:
@@ -514,7 +515,7 @@ class _AdkState:
         with self._lock:
             mapped = self._adk_to_h_session.get(adk_session_id, "")
         if not mapped:
-            parent_hsession = _ROOT_HSESSION_CV.get()
+            parent_hsession = self._current_root_hsession_var.get()
             if parent_hsession:
                 mapped = parent_hsession
             elif opening_root:
