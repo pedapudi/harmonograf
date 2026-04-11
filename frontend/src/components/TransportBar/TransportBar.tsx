@@ -18,6 +18,7 @@ export function TransportBar() {
   const zoomOut = useUiStore((s) => s.zoomOut);
   const zoomSeconds = useUiStore((s) => s.zoomSeconds);
   const liveFollow = useUiStore((s) => s.liveFollow);
+  const toggleLiveFollow = useUiStore((s) => s.toggleLiveFollow);
   const sessionId = useUiStore((s) => s.currentSessionId);
   const [tick, setTick] = useState(0);
 
@@ -74,8 +75,19 @@ export function TransportBar() {
       <div className="hg-transport__clock">
         {liveFollow && sessionId && <span className="hg-transport__live-dot" />}
         {sessionId ? formatDuration(elapsedSeconds) : '—'}
-        {sessionId && <span> / {liveFollow ? 'LIVE' : 'PAUSED'}</span>}
       </div>
+      <button
+        className="hg-transport__btn hg-transport__follow-btn"
+        onClick={toggleLiveFollow}
+        disabled={!sessionId}
+        aria-pressed={liveFollow}
+        aria-label={liveFollow ? 'Live-tail on — click to pause follow' : 'Live-tail off — click to follow now'}
+        title={liveFollow ? 'Following now (click to pause follow)' : 'Paused follow (click to jump to now)'}
+        data-testid="transport-follow-toggle"
+        data-active={liveFollow || undefined}
+      >
+        {liveFollow ? '● LIVE' : '○ PAUSED'}
+      </button>
       <div className="hg-transport__spacer" />
       <div className="hg-transport__group">
         <span className="hg-picker__row-sub" aria-label="Zoom window">

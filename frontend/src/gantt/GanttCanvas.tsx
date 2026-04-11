@@ -64,9 +64,15 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
           setLiveBroken(!v.liveFollow);
           setOverlayTick((n) => (n + 1) | 0);
           // Sync zoomSeconds so the transport bar label tracks wheel zoom too.
+          const state = useUiStore.getState();
           const sec = Math.round(v.windowMs / 1000);
-          if (sec !== useUiStore.getState().zoomSeconds) {
-            useUiStore.getState().setZoom(sec);
+          if (sec !== state.zoomSeconds) {
+            state.setZoom(sec);
+          }
+          // Sync liveFollow so the transport bar Follow button reflects
+          // pan/zoom-induced breaks from live mode.
+          if (v.liveFollow !== state.liveFollow) {
+            useUiStore.setState({ liveFollow: v.liveFollow });
           }
         },
       }),

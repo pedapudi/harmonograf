@@ -278,6 +278,14 @@ export class GanttRenderer {
     this.setViewport(returnToLive(this.viewport, this.store.nowMs));
   }
 
+  setLiveFollow(enabled: boolean): void {
+    if (enabled) {
+      this.returnToLive();
+    } else if (this.viewport.liveFollow) {
+      this.setViewport({ ...this.viewport, liveFollow: false });
+    }
+  }
+
   fitAll(): void {
     const maxEnd = Math.max(this.store.spans.maxEndMs(), this.store.nowMs, 1);
     const window = Math.min(ZOOM_MAX_MS, Math.max(ZOOM_MIN_MS, maxEnd * 1.05));

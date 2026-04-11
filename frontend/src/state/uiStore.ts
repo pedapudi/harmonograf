@@ -36,6 +36,7 @@ interface UiState {
   zoomOut: () => void;
   setZoom: (sec: number) => void;
   jumpToLive: () => void;
+  toggleLiveFollow: () => void;
   togglePause: () => void;
   setActiveRenderer: (r: GanttRenderer | null) => void;
 }
@@ -81,6 +82,12 @@ export const useUiStore = create<UiState>((set) => ({
     }),
   setZoom: (sec) => set({ zoomSeconds: Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, sec)) }),
   jumpToLive: () => set({ liveFollow: true }),
+  toggleLiveFollow: () =>
+    set((s) => {
+      const next = !s.liveFollow;
+      s.activeRenderer?.setLiveFollow(next);
+      return { liveFollow: next };
+    }),
   togglePause: () => set((s) => ({ paused: !s.paused })),
   setActiveRenderer: (r) => set({ activeRenderer: r }),
 }));

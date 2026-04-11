@@ -360,6 +360,18 @@ code {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }
+.hg-transport__follow-btn {
+  font-family: ui-monospace, Consolas, monospace;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  min-width: 82px;
+  text-align: center;
+}
+.hg-transport__follow-btn[data-active] {
+  background: var(--md-sys-color-primary-container, #00468a);
+  color: var(--md-sys-color-on-primary-container, #d6e3ff);
+  border-color: var(--md-sys-color-primary, #a8c8ff);
+}
 
 /* ==========================================================================
  * Gantt canvas
