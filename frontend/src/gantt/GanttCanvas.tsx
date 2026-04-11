@@ -40,6 +40,7 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
   const [overlayTick, setOverlayTick] = useState(0);
   const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
   const selectSpan = useUiStore((s) => s.selectSpan);
+  const setActiveRenderer = useUiStore((s) => s.setActiveRenderer);
   const themeBase = useThemeStore((s) => s.base);
   const colorBlind = useThemeStore((s) => s.colorBlind);
 
@@ -51,10 +52,20 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
         onViewportChange: (v) => {
           setLiveBroken(!v.liveFollow);
           setOverlayTick((n) => (n + 1) | 0);
+          // Sync zoomSeconds so the transport bar label tracks wheel zoom too.
+          const sec = Math.round(v.windowMs / 1000);
+          if (sec !== useUiStore.getState().zoomSeconds) {
+            useUiStore.getState().setZoom(sec);
+          }
         },
       }),
     [store, selectSpan],
   );
+
+  useEffect(() => {
+    setActiveRenderer(renderer);
+    return () => setActiveRenderer(null);
+  }, [renderer, setActiveRenderer]);
 
   // Mount + resize observer.
   useLayoutEffect(() => {
