@@ -49,8 +49,10 @@ from typing import Any
 
 import pytest
 
+import grpc
+
 from harmonograf_client import Client, attach_adk
-from harmonograf_server.pb import types_pb2
+from harmonograf_server.pb import frontend_pb2, service_pb2_grpc, types_pb2
 
 
 _ADK_AVAILABLE = importlib.util.find_spec("google.adk") is not None
@@ -434,3 +436,279 @@ class TestAdkHumanInLoop:
         finally:
             handle.detach()
             client.shutdown(flush_timeout=2.0)
+
+
+# ---------------------------------------------------------------------------
+# HITL transient-state observability via WatchSession
+# ---------------------------------------------------------------------------
+
+
+def _build_hitl_runner() -> Any:
+    """Builds an ADK runner whose tool is marked ``is_long_running=True``.
+
+    The mock model calls the tool once, then returns a plain final
+    response on the follow-up turn, so the invocation terminates cleanly.
+    """
+    from google.adk.agents.llm_agent import LlmAgent
+    from google.adk.runners import InMemoryRunner
+    from google.adk.tools.long_running_tool import LongRunningFunctionTool
+
+    def request_human_approval(prompt: str) -> dict[str, Any]:
+        return {"status": "pending_human"}
+
+    tool = LongRunningFunctionTool(func=request_human_approval)
+    agent = LlmAgent(
+        name="hitl_agent",
+        model=_make_mock_model_responding_with(
+            "request_human_approval", {"prompt": "ok?"}
+        ),
+        tools=[tool],
+        instruction="Always request human approval.",
+    )
+    return InMemoryRunner(agent=agent, app_name="hitl_watch_e2e")
+
+
+async def _watch_session_until(
+    stub: service_pb2_grpc.HarmonografStub,
+    session_id: str,
+    *,
+    stop_when,
+    timeout: float = 10.0,
+) -> tuple[list[tuple[str, Any]], bool]:
+    """Open WatchSession and collect (kind, update) pairs until
+    ``stop_when(kind_list)`` returns True or ``timeout`` elapses.
+
+    Returns ``(events, stopped_cleanly)``. ``events`` is the full list of
+    (oneof-kind-name, SessionUpdate) tuples captured, in stream order.
+    """
+    call = stub.WatchSession(frontend_pb2.WatchSessionRequest(session_id=session_id))
+    events: list[tuple[str, Any]] = []
+    stopped = False
+
+    async def _consume() -> None:
+        nonlocal stopped
+        async for upd in call:
+            which = upd.WhichOneof("kind")
+            events.append((which or "", upd))
+            if stop_when(events):
+                stopped = True
+                return
+
+    try:
+        await asyncio.wait_for(_consume(), timeout=timeout)
+    except asyncio.TimeoutError:
+        pass
+    finally:
+        call.cancel()
+    return events, stopped
+
+
+async def _run_hitl_scenario(
+    *,
+    harmonograf_server,
+    tmp_path,
+    monkeypatch,
+    client_name: str,
+) -> list[tuple[str, Any]]:
+    """Drives one long-running HITL invocation while a WatchSession
+    stream is open. Returns the full (kind, update) event list observed
+    on the WatchSession tail stream (post-burst).
+    """
+    monkeypatch.setenv("HARMONOGRAF_HOME", str(tmp_path))
+
+    client = Client(
+        name=client_name,
+        server_addr=harmonograf_server["addr"],
+        framework="ADK",
+        capabilities=["HUMAN_IN_LOOP"],
+    )
+
+    store = harmonograf_server["store"]
+
+    # Force the transport handshake by emitting a sentinel INVOCATION
+    # span and ending it. This causes the server to assign a session id
+    # and persist the session row so WatchSession can subscribe before
+    # the ADK invocation emits any TOOL_CALL updates.
+    sentinel_id = client.emit_span_start(
+        kind="INVOCATION",
+        name="hitl_sentinel",
+        attributes={"sentinel": True},
+    )
+    client.emit_span_end(sentinel_id, status="COMPLETED")
+
+    assert await _wait_for(
+        lambda: client.session_id != "" and client._transport.connected,
+        timeout=5.0,
+    ), "client transport never established a session"
+
+    session_id = client.session_id
+
+    async def _session_persisted() -> bool:
+        return (await store.get_session(session_id)) is not None
+
+    assert await _wait_for_async(
+        _session_persisted, timeout=5.0
+    ), f"session {session_id} never appeared in the store"
+
+    channel = grpc.aio.insecure_channel(harmonograf_server["addr"])
+    stub = service_pb2_grpc.HarmonografStub(channel)
+
+    tail_events: list[tuple[str, Any]] = []
+
+    try:
+        # Open WatchSession and drain the initial burst before attaching
+        # the ADK runner. We want every TOOL_CALL delta to land on the
+        # tail stream, not be replayed as an initial_span.
+        call = stub.WatchSession(
+            frontend_pb2.WatchSessionRequest(session_id=session_id)
+        )
+
+        burst_done = asyncio.Event()
+        scenario_done = asyncio.Event()
+        stream_error: list[BaseException] = []
+
+        async def _drain() -> None:
+            try:
+                async for upd in call:
+                    which = upd.WhichOneof("kind") or ""
+                    if not burst_done.is_set():
+                        if which == "burst_complete":
+                            burst_done.set()
+                        continue
+                    tail_events.append((which, upd))
+                    # Stop once we've seen the terminal ended_span for a
+                    # TOOL_CALL — the HITL scenario is complete by then.
+                    if which == "ended_span":
+                        # Only stop after we've also seen at least one
+                        # updated_span event, so the assertions have
+                        # something to chew on.
+                        if any(k == "updated_span" for k, _ in tail_events):
+                            scenario_done.set()
+                            return
+            except grpc.aio.AioRpcError as exc:
+                if exc.code() != grpc.StatusCode.CANCELLED:
+                    stream_error.append(exc)
+
+        drain_task = asyncio.create_task(_drain())
+        try:
+            await asyncio.wait_for(burst_done.wait(), timeout=5.0)
+
+            runner = _build_hitl_runner()
+            handle = attach_adk(runner, client)
+            try:
+                await _run_adk_invocation(runner, "go")
+                await asyncio.wait_for(scenario_done.wait(), timeout=5.0)
+            finally:
+                handle.detach()
+        finally:
+            call.cancel()
+            try:
+                await asyncio.wait_for(drain_task, timeout=2.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+
+        if stream_error:
+            raise stream_error[0]
+    finally:
+        await channel.close()
+        client.shutdown(flush_timeout=2.0)
+
+    return tail_events
+
+
+@pytest.mark.asyncio
+class TestAdkHumanInLoopWatchSession:
+    """Regression-guard for the HITL observability contract.
+
+    Task #16: unlike :class:`TestAdkHumanInLoop`, this test does not
+    inspect persisted span attributes — it subscribes to WatchSession
+    and asserts that the frontend sees the transient
+    ``SPAN_STATUS_AWAITING_HUMAN`` update strictly before the terminal
+    ``ended_span`` for the same span id. The key invariant is that the
+    update ordering is deterministic across runs, because the frontend
+    drives attention UI off this stream.
+    """
+
+    async def test_awaiting_human_update_precedes_ended_span(
+        self, harmonograf_server, tmp_path, monkeypatch
+    ):
+        tail = await _run_hitl_scenario(
+            harmonograf_server=harmonograf_server,
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            client_name="hitl-watch-agent-1",
+        )
+
+        # Find every updated_span that flipped a span to AWAITING_HUMAN.
+        awaiting: dict[str, int] = {}
+        ended: dict[str, int] = {}
+        for idx, (which, upd) in enumerate(tail):
+            if which == "updated_span":
+                us = upd.updated_span
+                if us.status == types_pb2.SPAN_STATUS_AWAITING_HUMAN:
+                    awaiting.setdefault(us.span_id, idx)
+            elif which == "ended_span":
+                ended.setdefault(upd.ended_span.span_id, idx)
+
+        assert awaiting, (
+            "no updated_span with SPAN_STATUS_AWAITING_HUMAN arrived on the "
+            f"WatchSession tail stream; events={[k for k, _ in tail]}"
+        )
+
+        # At least one span must exhibit the full transient lifecycle:
+        # updated_span(AWAITING_HUMAN) observed strictly before
+        # ended_span for the same id.
+        witnessed = [
+            span_id
+            for span_id, awaiting_idx in awaiting.items()
+            if span_id in ended and awaiting_idx < ended[span_id]
+        ]
+        assert witnessed, (
+            "no span had an AWAITING_HUMAN update strictly preceding its "
+            f"ended_span; awaiting={awaiting}, ended={ended}"
+        )
+
+    async def test_transient_state_ordering_is_deterministic(
+        self, harmonograf_server, tmp_path, monkeypatch
+    ):
+        """Drive the same HITL scenario twice against a fresh client
+        each time and assert the observed WatchSession tail kind-
+        sequence is identical. This is a regression-guard for any
+        reordering between the ingest pipeline and the session bus.
+        """
+        run_kinds: list[tuple[str, ...]] = []
+        for i in range(2):
+            # Clean HARMONOGRAF_HOME per run so resume tokens don't
+            # leak state between invocations.
+            run_tmp = tmp_path / f"run{i}"
+            run_tmp.mkdir()
+            tail = await _run_hitl_scenario(
+                harmonograf_server=harmonograf_server,
+                tmp_path=run_tmp,
+                monkeypatch=monkeypatch,
+                client_name=f"hitl-watch-agent-det-{i}",
+            )
+            # Filter to just span lifecycle events — agent_status_changed
+            # updates are driven by heartbeats and are inherently
+            # non-deterministic in timing.
+            kinds = tuple(
+                k for k, _ in tail if k in {"new_span", "updated_span", "ended_span"}
+            )
+            run_kinds.append(kinds)
+
+        assert run_kinds[0] == run_kinds[1], (
+            "HITL WatchSession tail ordering diverged between runs: "
+            f"run0={run_kinds[0]}, run1={run_kinds[1]}"
+        )
+        # And the ordering must contain at least one updated_span before
+        # the final ended_span — degenerate empty/identical sequences
+        # would pass the equality check above but not this.
+        assert "updated_span" in run_kinds[0]
+        assert "ended_span" in run_kinds[0]
+        last_ended = max(
+            i for i, k in enumerate(run_kinds[0]) if k == "ended_span"
+        )
+        first_update = next(
+            i for i, k in enumerate(run_kinds[0]) if k == "updated_span"
+        )
+        assert first_update < last_ended
