@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "harmonograf-server"
+version = "0.0.1"
+description = "Harmonograf server: gRPC fan-in for multi-agent telemetry and control."
+requires-python = ">=3.11"
+dependencies = [
+    "grpcio>=1.62",
+    "grpcio-tools>=1.62",
+    "protobuf>=4.25",
+    "aiosqlite>=0.20",
+    "intervaltree>=3.1",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+harmonograf-server = "harmonograf_server.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["harmonograf_server"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
