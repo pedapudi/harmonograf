@@ -8,7 +8,7 @@ FRONTEND_PB := $(ROOT)/frontend/src/pb
 
 .PHONY: help proto proto-python proto-ts \
         server-install client-install frontend-install install \
-        server-run frontend-dev demo demo-presentation \
+        server-run frontend-dev demo demo-presentation .demo-agents-stage \
         test server-test client-test frontend-test e2e \
         lint format clean stats
 
@@ -97,9 +97,13 @@ frontend-dev:
 # enough to emit spans.
 #
 # adk web expects an AGENTS_DIR where each subdirectory is one agent.
-# We stage a dedicated .demo-agents/ dir containing only a symlink to
-# presentation_agent/ so the adk web UI doesn't show our monorepo's
-# other top-level dirs (server/, client/, etc.) as broken agents.
+# We stage a dedicated .demo-agents/presentation_agent/ as a real
+# passthrough package: a symlink would be rejected by ADK's
+# _resolve_agent_dir which calls Path.resolve() and refuses any
+# resolved path that escapes the agents_root sandbox. The passthrough
+# loads the real presentation_agent.agent module by absolute file path
+# (not by package import) to avoid colliding with the .demo-agents
+# entry that ADK puts on sys.path[0].
 #
 # Override HARMONOGRAF_SERVER / ADK_WEB_PORT as needed:
 #   make demo-presentation ADK_WEB_PORT=8080 HARMONOGRAF_SERVER=127.0.0.1:7531
@@ -108,18 +112,45 @@ ADK_WEB_PORT ?= 8080
 SERVER_PORT ?= 7531
 FRONTEND_PORT ?= 5173
 
-demo-presentation:
-	@mkdir -p $(ROOT)/.demo-agents
-	@ln -sfn ../presentation_agent $(ROOT)/.demo-agents/presentation_agent
+# Stage a real (non-symlink) passthrough agent dir at .demo-agents/presentation_agent.
+# Regenerated fresh on every invocation so edits to the real module are picked up.
+.demo-agents-stage:
+	@rm -rf $(ROOT)/.demo-agents
+	@mkdir -p $(ROOT)/.demo-agents/presentation_agent
+	@printf '' > $(ROOT)/.demo-agents/presentation_agent/__init__.py
+	@printf '%s\n' \
+		'"""Passthrough so adk web can run presentation_agent under .demo-agents/.' \
+		'' \
+		'ADK puts .demo-agents/ on sys.path[0], which would otherwise shadow' \
+		'the real presentation_agent package at the repo root. We load the' \
+		'real module by absolute file path under a private name so ADK still' \
+		'resolves agent_dir inside .demo-agents (its safety check rejects' \
+		'symlinks that escape the sandbox) while the actual code lives in' \
+		'the canonical presentation_agent/ package.' \
+		'"""' \
+		'from __future__ import annotations' \
+		'' \
+		'import importlib.util' \
+		'from pathlib import Path' \
+		'' \
+		'_real = Path(__file__).resolve().parents[2] / "presentation_agent" / "agent.py"' \
+		'_spec = importlib.util.spec_from_file_location("_real_presentation_agent", _real)' \
+		'_mod = importlib.util.module_from_spec(_spec)' \
+		'assert _spec.loader is not None' \
+		'_spec.loader.exec_module(_mod)' \
+		'' \
+		'root_agent = _mod.root_agent' \
+		'app = _mod.app' \
+		> $(ROOT)/.demo-agents/presentation_agent/agent.py
+
+demo-presentation: .demo-agents-stage
 	@cd $(ROOT) && HARMONOGRAF_SERVER=$(HARMONOGRAF_SERVER) \
 		uv run --extra e2e adk web --host 127.0.0.1 --port $(ADK_WEB_PORT) .demo-agents
 
 # Boot the full Harmonograf demo stack: backend server + Vite frontend +
 # adk web presentation_agent. Prints both URLs on startup and kills all
 # three children when you Ctrl-C out of the foreground target.
-demo:
-	@mkdir -p $(ROOT)/.demo-agents
-	@ln -sfn ../presentation_agent $(ROOT)/.demo-agents/presentation_agent
+demo: .demo-agents-stage
 	@bash -eu -c '\
 		cleanup() { \
 			echo; \
@@ -132,7 +163,7 @@ demo:
 		echo "[demo] starting harmonograf-server on :$(SERVER_PORT) ..."; \
 		( cd $(ROOT)/server && uv run python -m harmonograf_server \
 			--store sqlite --data-dir $(ROOT)/data \
-			--grpc-port $(SERVER_PORT) ) & SERVER_PID=$$!; \
+			--port $(SERVER_PORT) ) & SERVER_PID=$$!; \
 		echo "[demo] starting frontend Vite dev server on :$(FRONTEND_PORT) ..."; \
 		( cd $(ROOT)/frontend && pnpm dev --port $(FRONTEND_PORT) --strictPort ) & FRONTEND_PID=$$!; \
 		echo "[demo] starting adk web presentation_agent on :$(ADK_WEB_PORT) ..."; \
