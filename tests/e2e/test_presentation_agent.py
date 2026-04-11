@@ -295,10 +295,19 @@ class TestPresentationAgentHarmonograf:
             ), "transport never connected"
 
             store = harmonograf_server["store"]
-            session_id = client.session_id
+
+            async def _resolve_adk_session_id() -> str:
+                sessions = await store.list_sessions()
+                for s in sessions:
+                    if s.id.startswith("adk_"):
+                        return s.id
+                return ""
 
             async def _have_core_kinds() -> bool:
-                spans = await _spans_in_store(store, session_id)
+                sid = await _resolve_adk_session_id()
+                if not sid:
+                    return False
+                spans = await _spans_in_store(store, sid)
                 kinds = {str(getattr(s, "kind", "")) for s in spans}
                 have_invocation = any("INVOCATION" in k for k in kinds)
                 have_llm = any("LLM_CALL" in k for k in kinds)
@@ -309,6 +318,7 @@ class TestPresentationAgentHarmonograf:
                 _have_core_kinds, timeout=10.0
             ), "expected INVOCATION + LLM_CALL + TOOL_CALL spans never reached the store"
 
+            session_id = await _resolve_adk_session_id()
             spans = await _spans_in_store(store, session_id)
             by_kind: dict[str, list[Any]] = {}
             for s in spans:
@@ -403,6 +413,80 @@ class TestPresentationAgentHarmonograf:
                     f"TRANSFER span {getattr(s, 'name', '?')} has no links; "
                     "expected LINK_RELATION_INVOKED edge to the TOOL_CALL"
                 )
+
+            # Task #1: every sub-agent should own its own row in the
+            # Gantt — i.e. spans should be attributed to ≥3 distinct
+            # agent_ids (coordinator + research + web_developer).
+            agent_ids = {
+                getattr(s, "agent_id", "") for s in spans if getattr(s, "agent_id", "")
+            }
+            assert {"coordinator_agent", "research_agent", "web_developer_agent"} <= agent_ids, (
+                f"expected per-sub-agent rows; saw agent_ids={agent_ids}"
+            )
+        finally:
+            handle.detach()
+            client.shutdown(flush_timeout=5.0)
+
+
+@pytest.mark.asyncio
+class TestPresentationMultiSession:
+    """Task #2: drive two ADK sessions through one Client and assert two
+    independent harmonograf sessions are created on the server."""
+
+    async def test_two_adk_sessions_become_two_harmonograf_sessions(
+        self, harmonograf_server, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("HARMONOGRAF_HOME", str(tmp_path))
+
+        client = Client(
+            name="presentation",
+            server_addr=harmonograf_server["addr"],
+            framework="ADK",
+            capabilities=["HUMAN_IN_LOOP", "STEERING"],
+        )
+
+        runner = _build_presentation_runner(tmp_path / "output")
+        handle = attach_adk(runner, client)
+        try:
+            # Drive two distinct ADK sessions through the same runner.
+            # _drive_invocation creates a fresh ADK session each call.
+            await _drive_invocation(runner, "Create a presentation about Python programming")
+            await _drive_invocation(runner, "Create a presentation about Rust programming")
+
+            assert await _wait_for(
+                lambda: client._transport.connected,
+                timeout=5.0,
+            ), "transport never connected"
+
+            store = harmonograf_server["store"]
+
+            async def _have_two_sessions() -> bool:
+                sessions = await store.list_sessions()
+                # Filter to harmonograf sessions our adapter would create —
+                # those whose ids start with "adk_". The transport's own
+                # auto-generated session is also present but unused for
+                # spans, so requiring ≥2 adk_-prefixed sessions is the
+                # acceptance criterion for task #2.
+                adk_sessions = [s for s in sessions if s.id.startswith("adk_")]
+                return len(adk_sessions) >= 2
+
+            assert await _wait_for_async(
+                _have_two_sessions, timeout=10.0
+            ), "expected two harmonograf sessions for two ADK sessions"
+
+            sessions = await store.list_sessions()
+            adk_sessions = [s for s in sessions if s.id.startswith("adk_")]
+            assert len(adk_sessions) >= 2, (
+                f"expected ≥2 adk_-prefixed sessions, got {[s.id for s in sessions]}"
+            )
+
+            # Each session must contain its own coordinator INVOCATION span.
+            for s in adk_sessions[:2]:
+                spans = await _spans_in_store(store, s.id)
+                kinds = {str(getattr(sp, "kind", "")) for sp in spans}
+                assert any("INVOCATION" in k for k in kinds), (
+                    f"session {s.id} has no INVOCATION span"
+                )
         finally:
             handle.detach()
             client.shutdown(flush_timeout=5.0)
@@ -478,10 +562,19 @@ class TestPresentationAppExport:
             ), "transport never connected"
 
             store = harmonograf_server["store"]
-            session_id = client.session_id
+
+            async def _resolve_adk_session_id() -> str:
+                sessions = await store.list_sessions()
+                for s in sessions:
+                    if s.id.startswith("adk_"):
+                        return s.id
+                return ""
 
             async def _have_core_kinds() -> bool:
-                spans = await _spans_in_store(store, session_id)
+                sid = await _resolve_adk_session_id()
+                if not sid:
+                    return False
+                spans = await _spans_in_store(store, sid)
                 kinds = {str(getattr(s, "kind", "")) for s in spans}
                 return (
                     any("INVOCATION" in k for k in kinds)
@@ -493,6 +586,7 @@ class TestPresentationAppExport:
                 _have_core_kinds, timeout=10.0
             ), "core spans never reached the store via the app-exported plugin"
 
+            session_id = await _resolve_adk_session_id()
             spans = await _spans_in_store(store, session_id)
             by_kind: dict[str, list[Any]] = {}
             for s in spans:

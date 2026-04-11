@@ -37,6 +37,7 @@ from harmonograf_server.pb import telemetry_pb2, types_pb2
 from harmonograf_server.storage import (
     Agent,
     AgentStatus,
+    Framework,
     Session,
     SessionStatus,
     Store,
@@ -101,9 +102,17 @@ class StreamContext:
     session_id: str
     connected_at: float
     last_heartbeat: float
+    name: str = ""
+    framework: int = 0
+    framework_version: str = ""
+    capabilities: tuple[int, ...] = ()
+    metadata: dict[str, str] = field(default_factory=dict)
     payloads: dict[str, _PayloadAssembler] = field(default_factory=dict)
     # seen span ids (for fast dedup ahead of storage)
     seen_span_ids: set[str] = field(default_factory=set)
+    # (session_id, agent_id) tuples we've already auto-registered on this
+    # stream — avoids re-creating sessions/agents for every span.
+    seen_routes: set[tuple[str, str]] = field(default_factory=set)
 
 
 class IngestPipeline:
@@ -190,6 +199,12 @@ class IngestPipeline:
                 session_id=session_id,
                 connected_at=now,
                 last_heartbeat=now,
+                name=hello.name or hello.agent_id,
+                framework=int(hello.framework),
+                framework_version=hello.framework_version or "",
+                capabilities=tuple(int(c) for c in hello.capabilities),
+                metadata=dict(hello.metadata) if hello.metadata else {},
+                seen_routes={(session_id, hello.agent_id)},
             )
             self._streams_by_agent.setdefault(hello.agent_id, {})[stream_id] = ctx
 
@@ -292,11 +307,81 @@ class IngestPipeline:
         if pb_span.id in ctx.seen_span_ids:
             return  # fast local dedup
         ctx.seen_span_ids.add(pb_span.id)
+
+        # Per-span agent_id / session_id overrides — these let one
+        # client emit on behalf of multiple sub-agents and multiple
+        # sessions over a single StreamTelemetry RPC. Falls back to the
+        # stream's defaults from Hello when not set.
+        agent_id = pb_span.agent_id or ctx.agent_id
+        session_id = pb_span.session_id or ctx.session_id
+        await self._ensure_route(ctx, session_id, agent_id, name=pb_span.name)
+
         span = pb_span_to_storage(
-            pb_span, agent_id=ctx.agent_id, session_id=ctx.session_id
+            pb_span, agent_id=agent_id, session_id=session_id
         )
         stored = await self._store.append_span(span)
         self._bus.publish_span_start(stored)
+
+    async def _ensure_route(
+        self,
+        ctx: StreamContext,
+        session_id: str,
+        agent_id: str,
+        *,
+        name: str = "",
+    ) -> None:
+        """Auto-register (session, agent) the first time we see them on
+        this stream. The session inherits the stream's framework metadata
+        from Hello so cross-session views still know what produced it.
+        """
+        key = (session_id, agent_id)
+        if key in ctx.seen_routes:
+            return
+        ctx.seen_routes.add(key)
+        now = self._now()
+        if await self._store.get_session(session_id) is None:
+            session = Session(
+                id=session_id,
+                title=session_id,
+                created_at=now,
+                status=SessionStatus.LIVE,
+                metadata={},
+            )
+            try:
+                await self._store.create_session(session)
+            except Exception as e:
+                logger.warning(
+                    "auto session create failed session_id=%s agent_id=%s: %s",
+                    session_id,
+                    agent_id,
+                    e,
+                )
+                return
+            logger.info(
+                "auto session created session_id=%s by agent_id=%s",
+                session_id,
+                agent_id,
+            )
+        if await self._store.get_agent(session_id, agent_id) is None:
+            agent = Agent(
+                id=agent_id,
+                session_id=session_id,
+                name=name or agent_id,
+                framework=Framework.UNKNOWN,
+                framework_version=ctx.framework_version or "",
+                capabilities=[],
+                metadata={},
+                connected_at=now,
+                last_heartbeat=now,
+                status=AgentStatus.CONNECTED,
+            )
+            await self._store.register_agent(agent)
+            self._bus.publish_agent_upsert(agent)
+            logger.info(
+                "auto agent registered session_id=%s agent_id=%s",
+                session_id,
+                agent_id,
+            )
 
     async def _handle_span_update(
         self, ctx: StreamContext, msg: telemetry_pb2.SpanUpdate

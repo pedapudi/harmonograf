@@ -167,13 +167,15 @@ class Client:
         payload_role: str = "input",
         start_time: Any = None,
         links: Optional[Iterable[Mapping[str, Any]]] = None,
+        agent_id: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> str:
         sid = span_id or _uuid7_hex()
         kind_enum, kind_string = self._resolve_kind(kind)
         span = self._types_pb2.Span(
             id=sid,
-            session_id=self._session_id,
-            agent_id=self._agent_id,
+            session_id=session_id or self._session_id,
+            agent_id=agent_id or self._agent_id,
             parent_span_id=parent_span_id or "",
             kind=kind_enum,
             kind_string=kind_string,

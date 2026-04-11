@@ -52,6 +52,7 @@ import pytest
 import grpc
 
 from harmonograf_client import Client, attach_adk
+from harmonograf_client.adk import _harmonograf_session_id_for_adk
 from harmonograf_server.pb import frontend_pb2, service_pb2_grpc, types_pb2
 
 
@@ -155,6 +156,25 @@ def _build_adk_runner() -> tuple[Any, list[dict[str, Any]]]:
     return runner, tool_calls
 
 
+async def _run_adk_invocation_in_session(
+    runner: Any, session_id: str, user_text: str
+) -> list[Any]:
+    """Drive an invocation against an existing ADK session id (no
+    create_session call)."""
+    from google.genai import types as genai_types
+
+    events: list[Any] = []
+    async for event in runner.run_async(
+        user_id="e2e_user",
+        session_id=session_id,
+        new_message=genai_types.Content(
+            role="user", parts=[genai_types.Part(text=user_text)]
+        ),
+    ):
+        events.append(event)
+    return events
+
+
 async def _run_adk_invocation(runner: Any, user_text: str) -> list[Any]:
     """Drive one invocation through ``runner.run_async`` and return the
     emitted events.
@@ -220,6 +240,20 @@ async def _spans_in_store(store, session_id: str) -> list[Any]:
     return list(result or [])
 
 
+async def _resolve_adk_session_id(store, fallback: str = "") -> str:
+    """The ADK adapter routes spans to a per-ADK-session harmonograf
+    session whose id is prefixed with ``adk_``. Tests that expect spans
+    to land for a single-invocation run must look these up by listing
+    sessions on the server, since the Client's default session id is
+    only used for the stream-level Hello, not for span attribution.
+    """
+    sessions = await store.list_sessions()
+    for s in sessions:
+        if s.id.startswith("adk_"):
+            return s.id
+    return fallback
+
+
 # ---------------------------------------------------------------------------
 # Happy path
 # ---------------------------------------------------------------------------
@@ -254,12 +288,18 @@ class TestAdkHelloHappyPath:
                 timeout=5.0,
             ), "transport never connected"
 
-            session_id = client.session_id
-            assert await _wait_for_async(
-                lambda: _store_has_kinds(store, session_id, {"INVOCATION", "LLM_CALL", "TOOL_CALL"}),
-                timeout=5.0,
-            ), "expected span kinds never reached the store"
+            async def _have_kinds() -> bool:
+                sid = await _resolve_adk_session_id(store)
+                if not sid:
+                    return False
+                return await _store_has_kinds(
+                    store, sid, {"INVOCATION", "LLM_CALL", "TOOL_CALL"}
+                )
 
+            assert await _wait_for_async(_have_kinds, timeout=5.0), (
+                "expected span kinds never reached the store"
+            )
+            session_id = await _resolve_adk_session_id(store)
             spans = await _spans_in_store(store, session_id)
             assert tool_calls, "deterministic tool was never called"
 
@@ -400,11 +440,12 @@ class TestAdkHumanInLoop:
                     lambda: client.session_id != "",
                     timeout=5.0,
                 ), "client never received a session assignment"
-                session_id = client.session_id
 
                 # Invocation completes once the mock model returns its
                 # follow-up final_response turn; we let it drain.
                 await asyncio.wait_for(invocation_task, timeout=5.0)
+
+                session_id = await _resolve_adk_session_id(store)
 
                 # Verify the long-running tool call was flagged in the
                 # stored span attributes. The adapter also emits a
@@ -414,7 +455,10 @@ class TestAdkHumanInLoop:
                 # terminal state — that is what a frontend inspecting
                 # a persisted span would see.
                 async def long_running_tool_present() -> bool:
-                    spans = await _spans_in_store(store, session_id)
+                    sid = session_id or await _resolve_adk_session_id(store)
+                    if not sid:
+                        return False
+                    spans = await _spans_in_store(store, sid)
                     for s in spans:
                         if not str(getattr(s, "kind", "")).endswith("TOOL_CALL"):
                             continue
@@ -525,14 +569,23 @@ async def _run_hitl_scenario(
 
     store = harmonograf_server["store"]
 
-    # Force the transport handshake by emitting a sentinel INVOCATION
-    # span and ending it. This causes the server to assign a session id
-    # and persist the session row so WatchSession can subscribe before
-    # the ADK invocation emits any TOOL_CALL updates.
+    # Pre-create the ADK session that the invocation will run against,
+    # then compute its harmonograf-side session id so WatchSession can
+    # subscribe to the right row before any ADK callback fires. The
+    # adapter routes spans to ``adk_<adk_session_id>``, so our sentinel
+    # span carries the same session_id override and the WatchSession
+    # subscribes to it.
+    runner = _build_hitl_runner()
+    adk_session = await runner.session_service.create_session(
+        app_name=runner.app_name, user_id="e2e_user"
+    )
+    session_id = _harmonograf_session_id_for_adk(adk_session.id)
+
     sentinel_id = client.emit_span_start(
         kind="INVOCATION",
         name="hitl_sentinel",
         attributes={"sentinel": True},
+        session_id=session_id,
     )
     client.emit_span_end(sentinel_id, status="COMPLETED")
 
@@ -540,8 +593,6 @@ async def _run_hitl_scenario(
         lambda: client.session_id != "" and client._transport.connected,
         timeout=5.0,
     ), "client transport never established a session"
-
-    session_id = client.session_id
 
     async def _session_persisted() -> bool:
         return (await store.get_session(session_id)) is not None
@@ -593,10 +644,11 @@ async def _run_hitl_scenario(
         try:
             await asyncio.wait_for(burst_done.wait(), timeout=5.0)
 
-            runner = _build_hitl_runner()
             handle = attach_adk(runner, client)
             try:
-                await _run_adk_invocation(runner, "go")
+                await _run_adk_invocation_in_session(
+                    runner, adk_session.id, "go"
+                )
                 await asyncio.wait_for(scenario_done.wait(), timeout=5.0)
             finally:
                 handle.detach()

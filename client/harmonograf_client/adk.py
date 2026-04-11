@@ -179,9 +179,20 @@ class _AdkState:
         self._tools: dict[str, str] = {}
         # tool call id → long-running flag
         self._long_running: set[str] = set()
+        # invocation_id → (agent_id, session_id) the spans were emitted under,
+        # so SpanEnd can re-route to the same row even if context routing fails.
+        self._invocation_route: dict[str, tuple[str, str]] = {}
         # Session mutations queued by control handlers — surfaced via
         # pending_session_mutations() for agent code to apply.
         self._pending_mutations: list[tuple[str, str]] = []
+        # Multi-session routing: ADK sub-runners (AgentTool) create fresh
+        # ADK session ids per sub-invocation, but those should land in the
+        # SAME harmonograf session as the enclosing root run. We track the
+        # open-invocation depth and alias every ADK session id we see while
+        # a root is in flight back to that root's harmonograf session id.
+        self._open_invocation_count: int = 0
+        self._current_root_hsession: str = ""
+        self._adk_to_h_session: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Invocation
@@ -189,27 +200,36 @@ class _AdkState:
 
     def on_invocation_start(self, ic: Any) -> None:
         inv_id = _safe_attr(ic, "invocation_id", "")
-        name = _safe_attr(getattr(ic, "agent", None), "name", "agent") or "agent"
+        agent_id, hsession_id = self._route_from_context(ic, opening_root=True)
+        name = agent_id or "agent"
         attrs = {
             "invocation_id": inv_id,
             "user_id": _safe_attr(getattr(ic, "user_id", None), "__str__", "") or str(_safe_attr(ic, "user_id", "")),
         }
-        session_id = _safe_attr(getattr(ic, "session", None), "id", "")
-        if session_id:
-            attrs["adk_session_id"] = session_id
+        adk_session_id = _safe_attr(getattr(ic, "session", None), "id", "")
+        if adk_session_id:
+            attrs["adk_session_id"] = adk_session_id
         span_id = self._client.emit_span_start(
             kind="INVOCATION",
             name=name,
             attributes=attrs,
+            agent_id=agent_id or None,
+            session_id=hsession_id or None,
         )
         with self._lock:
             self._invocations[inv_id] = span_id
+            self._invocation_route[inv_id] = (agent_id, hsession_id)
 
     def on_invocation_end(self, ic: Any) -> None:
         inv_id = _safe_attr(ic, "invocation_id", "")
         with self._lock:
             span_id = self._invocations.pop(inv_id, None)
             self._llm_by_invocation.pop(inv_id, None)
+            self._invocation_route.pop(inv_id, None)
+            if self._open_invocation_count > 0:
+                self._open_invocation_count -= 1
+                if self._open_invocation_count == 0:
+                    self._current_root_hsession = ""
         if span_id:
             self._client.emit_span_end(span_id, status="COMPLETED")
 
@@ -220,6 +240,7 @@ class _AdkState:
     def on_model_start(self, cc: Any, req: Any) -> None:
         inv_id = _invocation_id_from_callback(cc)
         parent = self._get_invocation_span(inv_id)
+        agent_id, hsession_id = self._route_from_callback_or_invocation(cc, inv_id)
         model = _safe_attr(req, "model", "") or "llm"
         attrs: dict[str, Any] = {"model": model}
         payload = _safe_llm_request_payload(req)
@@ -231,6 +252,8 @@ class _AdkState:
             payload=payload,
             payload_mime="application/json",
             payload_role="input",
+            agent_id=agent_id or None,
+            session_id=hsession_id or None,
         )
         with self._lock:
             self._llm_by_invocation[inv_id] = span_id
@@ -266,6 +289,7 @@ class _AdkState:
         call_id = _safe_attr(tool_context, "function_call_id", "") or _safe_attr(tool, "name", "tool")
         inv_id = _invocation_id_from_callback(tool_context)
         parent = self._current_llm_span(inv_id) or self._get_invocation_span(inv_id)
+        agent_id, hsession_id = self._route_from_callback_or_invocation(tool_context, inv_id)
         is_long_running = bool(_safe_attr(tool, "is_long_running", False))
         name = _safe_attr(tool, "name", "tool") or "tool"
         payload = _safe_json(tool_args)
@@ -277,6 +301,8 @@ class _AdkState:
             payload=payload,
             payload_mime="application/json",
             payload_role="args",
+            agent_id=agent_id or None,
+            session_id=hsession_id or None,
         )
         with self._lock:
             self._tools[call_id] = span_id
@@ -286,8 +312,9 @@ class _AdkState:
             self._client.emit_span_update(span_id, status="AWAITING_HUMAN")
 
         # AgentTool dispatch reads as a sub-agent transfer in the Gantt.
-        # Emit a TRANSFER span alongside the TOOL_CALL (kept for
-        # bookkeeping) with a LINK_INVOKED edge back to the TOOL_CALL.
+        # Emit a TRANSFER span on the PARENT agent's row (coordinator),
+        # with LINK_INVOKED back to the child TOOL_CALL so the frontend
+        # can draw the cross-row arrow into the sub-agent's lane.
         if _is_agent_tool(tool):
             target_agent_name = (
                 _safe_attr(_safe_attr(tool, "agent", None), "name", "") or name
@@ -303,9 +330,12 @@ class _AdkState:
                 links=[
                     {
                         "target_span_id": span_id,
+                        "target_agent_id": target_agent_name,
                         "relation": "INVOKED",
                     }
                 ],
+                agent_id=agent_id or None,
+                session_id=hsession_id or None,
             )
             self._client.emit_span_end(transfer_sid, status="COMPLETED")
 
@@ -345,6 +375,7 @@ class _AdkState:
 
     def on_event(self, ic: Any, event: Any) -> None:
         inv_id = _safe_attr(ic, "invocation_id", "")
+        agent_id, hsession_id = self._route_from_context(ic)
         actions = _safe_attr(event, "actions", None)
         if actions is None:
             return
@@ -371,6 +402,9 @@ class _AdkState:
                 name=f"transfer_to_{transfer_to}",
                 parent_span_id=parent,
                 attributes={"target_agent": transfer_to},
+                links=[{"target_agent_id": transfer_to, "relation": "INVOKED"}],
+                agent_id=agent_id or None,
+                session_id=hsession_id or None,
             )
             self._client.emit_span_end(transfer_sid, status="COMPLETED")
 
@@ -400,10 +434,100 @@ class _AdkState:
         with self._lock:
             return self._llm_by_invocation.get(inv_id)
 
+    def _route_from_callback_or_invocation(
+        self, cc: Any, inv_id: str
+    ) -> tuple[str, str]:
+        """Resolve (agent_id, harmonograf_session_id) for a callback that
+        carries an InvocationContext (CallbackContext, ToolContext, …).
+        Falls back to whatever route the invocation was opened under so a
+        SpanEnd that can't see the context still lands on the same row.
+        """
+        ic = _safe_attr(cc, "_invocation_context", None) or _safe_attr(
+            cc, "invocation_context", None
+        )
+        if ic is None and _safe_attr(cc, "agent", None) is not None:
+            ic = cc
+        agent_id, hsession_id = (
+            self._route_from_context(ic) if ic is not None else ("", "")
+        )
+        if not agent_id or not hsession_id:
+            with self._lock:
+                fallback = self._invocation_route.get(inv_id, ("", ""))
+            agent_id = agent_id or fallback[0]
+            hsession_id = hsession_id or fallback[1]
+        return agent_id, hsession_id
+
+    def _route_from_context(
+        self, ic: Any, *, opening_root: bool = False
+    ) -> tuple[str, str]:
+        """Resolve (agent_id, harmonograf_session_id) from an
+        InvocationContext-shaped object.
+
+        ``opening_root`` is set by ``on_invocation_start`` so this method
+        can take ownership of the open-invocation depth tracking. It
+        increments the depth on entry and either:
+
+          * registers a brand-new harmonograf session for the very first
+            invocation in a fresh root run, or
+          * aliases the (likely-fresh) ADK session id of an AgentTool
+            sub-invocation to whichever harmonograf session is already
+            associated with the in-flight root.
+
+        For non-root callers (model/tool/event), the depth is left alone
+        and the lookup just returns whatever mapping has already been
+        installed for the ADK session id, or — if none exists yet — the
+        currently-open root's harmonograf session.
+        """
+        if ic is None:
+            return "", ""
+        agent = _safe_attr(ic, "agent", None)
+        agent_id = _safe_attr(agent, "name", "") if agent is not None else ""
+        session = _safe_attr(ic, "session", None)
+        adk_session_id = (
+            _safe_attr(session, "id", "") if session is not None else ""
+        )
+        with self._lock:
+            mapped = self._adk_to_h_session.get(adk_session_id, "")
+            if not mapped:
+                if self._open_invocation_count > 0 and self._current_root_hsession:
+                    # Sub-invocation under an in-flight root — alias.
+                    mapped = self._current_root_hsession
+                    if adk_session_id:
+                        self._adk_to_h_session[adk_session_id] = mapped
+                elif opening_root:
+                    # New root run. Mint a fresh harmonograf session id.
+                    mapped = _harmonograf_session_id_for_adk(adk_session_id)
+                    if adk_session_id and mapped:
+                        self._adk_to_h_session[adk_session_id] = mapped
+                    self._current_root_hsession = mapped
+            if opening_root:
+                self._open_invocation_count += 1
+                if not self._current_root_hsession and mapped:
+                    self._current_root_hsession = mapped
+        return agent_id or "", mapped
+
 
 # ---------------------------------------------------------------------------
 # Module-level helpers — defensive against ADK internals moving.
 # ---------------------------------------------------------------------------
+
+
+_HSESSION_SAFE = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+)
+
+
+def _harmonograf_session_id_for_adk(adk_session_id: str) -> str:
+    """Build a harmonograf session_id (regex ^[a-zA-Z0-9_-]{1,128}$) that
+    encodes an ADK session id. Non-matching characters are replaced with
+    ``_``; oversize ids are truncated to fit the 128-char limit while
+    keeping the ``adk_`` prefix readable.
+    """
+    if not adk_session_id:
+        return ""
+    safe = "".join(c if c in _HSESSION_SAFE else "_" for c in adk_session_id)
+    out = f"adk_{safe}"
+    return out[:128]
 
 
 def _is_agent_tool(tool: Any) -> bool:
