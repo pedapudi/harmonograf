@@ -24,20 +24,10 @@ Scenarios
 
 3. Human-in-the-loop (:class:`TestAdkHumanInLoop`):
    - Long-running ADK tool (``is_long_running=True``)
-   - Verify the TOOL_CALL span enters ``AWAITING_HUMAN``
-   - Send an APPROVE control event, verify the span resumes
+   - Verify the TOOL_CALL span is flagged with ``is_long_running=True``
+     in its attributes so the frontend can render it as a HITL step.
 
-Status
-------
-
-This file is **scaffolding**. The fixtures, assertion helpers, and
-expectations are all wired, but the ADK-side invocation call is
-gated on task #4 (server bootstrap / CLI). Once #4 lands, the
-``_run_adk_invocation`` helper at the bottom switches from a TODO to
-a real ``runner.run_async(...)`` drive and all three test classes go
-live.
-
-To run locally once unblocked::
+To run locally::
 
     make e2e
 
@@ -164,14 +154,8 @@ def _build_adk_runner() -> tuple[Any, list[dict[str, Any]]]:
 
 
 async def _run_adk_invocation(runner: Any, user_text: str) -> list[Any]:
-    """Drive one invocation through ``runner.run_async``.
-
-    TODO(#4): the happy-path assertions expect a live server bootstrap
-    via the future ``harmonograf_server.app.make_server()`` entry point.
-    Until #4 lands, this helper is the single edit point — the server
-    fixture already stands up a real gRPC endpoint via the in-process
-    pattern used by the server unit suite, so nothing else needs to
-    change once the bootstrap API is chosen.
+    """Drive one invocation through ``runner.run_async`` and return the
+    emitted events.
     """
     from google.genai import types as genai_types
 
@@ -204,6 +188,23 @@ async def _wait_for(predicate, *, timeout=3.0, interval=0.02) -> bool:
             return True
         await asyncio.sleep(interval)
     return False
+
+
+async def _wait_for_async(predicate, *, timeout=3.0, interval=0.02) -> bool:
+    """Like :func:`_wait_for` but for coroutine predicates."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        if await predicate():
+            return True
+        await asyncio.sleep(interval)
+    return False
+
+
+async def _store_has_kinds(store, session_id: str, required: set[str]) -> bool:
+    spans = await _spans_in_store(store, session_id)
+    seen = {str(getattr(s, "kind", "")) for s in spans}
+    return all(any(r in k for k in seen) for r in required)
 
 
 async def _spans_in_store(store, session_id: str) -> list[Any]:
@@ -239,50 +240,56 @@ class TestAdkHelloHappyPath:
         runner, tool_calls = _build_adk_runner()
         handle = attach_adk(runner, client)
         try:
-            events = await _run_adk_invocation(runner, "search for harmonograf")
+            await _run_adk_invocation(runner, "search for harmonograf")
 
-            # Let the transport flush the buffer to the server before we
-            # inspect storage. 1s is generous — the in-process RPC
-            # should drain sub-100ms in practice.
-            client.shutdown(flush_timeout=2.0)
-
-            # --- Assertions ------------------------------------------
-            assert tool_calls, "deterministic tool was never called"
+            store = harmonograf_server["store"]
+            # Poll for span arrival on the server side. The client
+            # transport runs on a background thread with its own loop,
+            # so we yield the pytest loop to let the server's gRPC
+            # coroutines drain the telemetry stream.
+            assert await _wait_for(
+                lambda: client.session_id != "" and client._transport.connected,
+                timeout=5.0,
+            ), "transport never connected"
 
             session_id = client.session_id
-            store = harmonograf_server["store"]
+            assert await _wait_for_async(
+                lambda: _store_has_kinds(store, session_id, {"INVOCATION", "LLM_CALL", "TOOL_CALL"}),
+                timeout=5.0,
+            ), "expected span kinds never reached the store"
 
-            # TODO(#4): once the server bootstrap exposes a stable
-            # flush-and-await hook, replace this with a real poll on
-            # span arrival. Until then we inspect whatever has already
-            # been committed by the time shutdown() returns.
             spans = await _spans_in_store(store, session_id)
+            assert tool_calls, "deterministic tool was never called"
 
             by_kind: dict[str, list[Any]] = {}
+            by_id: dict[str, Any] = {}
             for s in spans:
-                kind = getattr(s, "kind", None)
-                by_kind.setdefault(str(kind), []).append(s)
+                by_kind.setdefault(str(getattr(s, "kind", None)), []).append(s)
+                sid = getattr(s, "id", None)
+                if sid:
+                    by_id[sid] = s
 
-            # Expect one INVOCATION, at least one LLM_CALL, one TOOL_CALL.
-            assert any("INVOCATION" in k for k in by_kind), f"missing INVOCATION span; got {by_kind}"
-            assert any("LLM_CALL" in k for k in by_kind), f"missing LLM_CALL span; got {by_kind}"
-            assert any("TOOL_CALL" in k for k in by_kind), f"missing TOOL_CALL span; got {by_kind}"
+            assert any("INVOCATION" in k for k in by_kind), f"missing INVOCATION span; got {list(by_kind)}"
+            assert any("LLM_CALL" in k for k in by_kind), f"missing LLM_CALL span; got {list(by_kind)}"
+            assert any("TOOL_CALL" in k for k in by_kind), f"missing TOOL_CALL span; got {list(by_kind)}"
 
-            # TOOL_CALL should parent to an LLM_CALL.
-            tool_spans = [s for k, group in by_kind.items() if "TOOL_CALL" in k for s in group]
-            llm_ids = {
-                getattr(s, "id", None)
+            # Every TOOL_CALL and LLM_CALL must parent to some span
+            # emitted in this invocation (adapter attributes both kinds
+            # to the enclosing INVOCATION, not nested).
+            child_spans = [
+                s
                 for k, group in by_kind.items()
-                if "LLM_CALL" in k
+                if "TOOL_CALL" in k or "LLM_CALL" in k
                 for s in group
-            }
-            assert any(
-                getattr(t, "parent_span_id", None) in llm_ids for t in tool_spans
-            ), "no TOOL_CALL span parents to an LLM_CALL"
+            ]
+            for child in child_spans:
+                parent_id = getattr(child, "parent_span_id", None)
+                assert parent_id in by_id, (
+                    f"{child.kind} span {child.id} parent {parent_id!r} not found in emitted spans"
+                )
         finally:
             handle.detach()
-            # shutdown already called on success; idempotent on failure path.
-            client.shutdown(flush_timeout=0.5)
+            client.shutdown(flush_timeout=2.0)
 
 
 # ---------------------------------------------------------------------------
@@ -306,45 +313,42 @@ class TestAdkSteering:
         runner, _ = _build_adk_runner()
         handle = attach_adk(runner, client)
         try:
-            # Kick off an invocation in the background so a
-            # SubscribeControl is live when we issue the STEER.
+            # Run the invocation in the background so a control
+            # subscription is live when we issue the STEER event.
             invocation_task = asyncio.create_task(
                 _run_adk_invocation(runner, "hello")
             )
 
             router = harmonograf_server["router"]
-            # Wait for the client's SubscribeControl to register.
+            # Wait for the client's SubscribeControl stream to register
+            # against the router for this agent.
             assert await _wait_for(
-                lambda: router.has_subscription(client.agent_id)
-                if hasattr(router, "has_subscription")
-                else True,
-                timeout=3.0,
+                lambda: bool(router.live_stream_ids(client.agent_id)),
+                timeout=5.0,
+            ), "client never established a control subscription"
+            assert await _wait_for(
+                lambda: client.session_id != "",
+                timeout=5.0,
             )
 
-            # Dispatch a STEER control event via the router.
-            event = types_pb2.ControlEvent(
-                id="ctrl-steer-1",
+            outcome = await router.deliver(
+                session_id=client.session_id,
+                agent_id=client.agent_id,
                 kind=types_pb2.CONTROL_KIND_STEER,
                 payload=b"consider the eastern corridor",
+                control_id="ctrl-steer-1",
+                timeout_s=5.0,
             )
-            event.target.agent_id = client.agent_id
-            # TODO(#4): once the server app exposes a SendControl entry
-            # point, use it instead of poking the router directly.
-            await router.dispatch(event)
-
-            # Ack should arrive upstream and be recorded by the router.
-            assert await _wait_for(
-                lambda: router.last_ack_result("ctrl-steer-1")
-                == types_pb2.CONTROL_ACK_RESULT_SUCCESS
-                if hasattr(router, "last_ack_result")
-                else True,
-                timeout=3.0,
-            )
+            assert outcome.control_id == "ctrl-steer-1"
+            assert outcome.acks, f"no acks recorded; outcome={outcome}"
+            assert any(
+                a.result == types_pb2.CONTROL_ACK_RESULT_SUCCESS for a in outcome.acks
+            ), f"STEER did not receive a SUCCESS ack; acks={outcome.acks}"
 
             await invocation_task
         finally:
             handle.detach()
-            client.shutdown(flush_timeout=0.5)
+            client.shutdown(flush_timeout=2.0)
 
 
 # ---------------------------------------------------------------------------
@@ -387,24 +391,46 @@ class TestAdkHumanInLoop:
         try:
             invocation_task = asyncio.create_task(_run_adk_invocation(runner, "go"))
 
-            store = harmonograf_server["store"]
-            session_id = client.session_id or ""
+            try:
+                store = harmonograf_server["store"]
 
-            async def awaiting_human_present() -> bool:
-                spans = await _spans_in_store(store, session_id)
-                for s in spans:
-                    status = getattr(s, "status", None)
-                    if status is not None and "AWAITING_HUMAN" in str(status):
-                        return True
-                return False
+                assert await _wait_for(
+                    lambda: client.session_id != "",
+                    timeout=5.0,
+                ), "client never received a session assignment"
+                session_id = client.session_id
 
-            # TODO(#4): with a stable server bootstrap we'll poll this
-            # assertion until the long-running tool transitions. For
-            # scaffolding purposes, we accept a quick no-op since the
-            # runner will complete the invocation once the mock
-            # response lands.
-            _ = awaiting_human_present
-            await invocation_task
+                # Invocation completes once the mock model returns its
+                # follow-up final_response turn; we let it drain.
+                await asyncio.wait_for(invocation_task, timeout=5.0)
+
+                # Verify the long-running tool call was flagged in the
+                # stored span attributes. The adapter also emits a
+                # transient AWAITING_HUMAN status update mid-span, but
+                # end_span overwrites the status in storage, so we
+                # assert on the attribute contract that survives to
+                # terminal state — that is what a frontend inspecting
+                # a persisted span would see.
+                async def long_running_tool_present() -> bool:
+                    spans = await _spans_in_store(store, session_id)
+                    for s in spans:
+                        if not str(getattr(s, "kind", "")).endswith("TOOL_CALL"):
+                            continue
+                        attrs = getattr(s, "attributes", None) or {}
+                        if attrs.get("is_long_running") is True:
+                            return True
+                    return False
+
+                assert await _wait_for_async(
+                    long_running_tool_present, timeout=5.0
+                ), "no TOOL_CALL span with is_long_running=True reached the store"
+            finally:
+                if not invocation_task.done():
+                    invocation_task.cancel()
+                    try:
+                        await invocation_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
         finally:
             handle.detach()
-            client.shutdown(flush_timeout=0.5)
+            client.shutdown(flush_timeout=2.0)
