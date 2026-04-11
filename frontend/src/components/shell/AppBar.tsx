@@ -22,6 +22,7 @@ const COLOR_BLIND: { id: ColorBlindMode; label: string }[] = [
 export function AppBar() {
   const openPicker = useUiStore((s) => s.openSessionPicker);
   const toggleRail = useUiStore((s) => s.toggleNavRail);
+  const setNavSection = useUiStore((s) => s.setNavSection);
   const sessionId = useUiStore((s) => s.currentSessionId);
   const rpcSessions = useSessionsStore((s) => s.sessions);
   const rpcError = useSessionsStore((s) => s.error);
@@ -83,7 +84,13 @@ export function AppBar() {
       >
         ◐
       </button>
-      <button className="hg-appbar__icon-btn" aria-label="User menu">
+      <button
+        className="hg-appbar__icon-btn"
+        onClick={() => setNavSection('settings')}
+        aria-label="Settings"
+        title="Settings"
+        data-testid="app-bar-settings"
+      >
         ⚙
       </button>
       {themeMenuOpen && (
