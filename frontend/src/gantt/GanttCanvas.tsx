@@ -4,6 +4,7 @@ import type { SessionStore } from './index';
 import { useThemeStore } from '../theme/store';
 import { useUiStore } from '../state/uiStore';
 import { SpanContextMenu, type ContextMenuState } from '../components/Interaction/SpanContextMenu';
+import { usePopoverStore } from '../state/popoverStore';
 
 interface Props {
   store: SessionStore;
@@ -39,7 +40,8 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const [overlayTick, setOverlayTick] = useState(0);
   const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
-  const selectSpan = useUiStore((s) => s.selectSpan);
+  const openPopover = usePopoverStore((s) => s.openForSpan);
+  const closeUnpinnedPopovers = usePopoverStore((s) => s.closeUnpinned);
   const setActiveRenderer = useUiStore((s) => s.setActiveRenderer);
   const themeBase = useThemeStore((s) => s.base);
   const colorBlind = useThemeStore((s) => s.colorBlind);
@@ -47,7 +49,16 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
   const renderer = useMemo(
     () =>
       new GanttRenderer(store, {
-        onSelect: (id) => selectSpan(id),
+        onSelect: (id, cx, cy) => {
+          // Click opens a quick-look popover anchored to the span. The full
+          // Inspector Drawer is reserved for the "open drawer" action inside
+          // the popover (and keyboard nav, notes, etc.).
+          if (id) {
+            openPopover(id, cx, cy);
+          } else {
+            closeUnpinnedPopovers();
+          }
+        },
         onHoverChange: (h) => setHover(h),
         onViewportChange: (v) => {
           setLiveBroken(!v.liveFollow);
@@ -59,7 +70,7 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
           }
         },
       }),
-    [store, selectSpan],
+    [store, openPopover, closeUnpinnedPopovers],
   );
 
   useEffect(() => {
