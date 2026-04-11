@@ -699,6 +699,29 @@ class SqliteStore(Store):
             ) as cur:
                 return (await cur.fetchone()) is not None
 
+    async def gc_payloads(self) -> int:
+        async with self._lock:
+            async with self.db.execute(
+                """
+                SELECT p.digest, p.path
+                FROM payloads p
+                LEFT JOIN spans s ON s.payload_digest = p.digest
+                WHERE s.id IS NULL
+                """
+            ) as cur:
+                orphans = [(r["digest"], r["path"]) for r in await cur.fetchall()]
+            for digest, path in orphans:
+                try:
+                    Path(path).unlink(missing_ok=True)
+                except OSError:
+                    pass
+                await self.db.execute(
+                    "DELETE FROM payloads WHERE digest = ?", (digest,)
+                )
+            if orphans:
+                await self.db.commit()
+            return len(orphans)
+
     # stats ---------------------------------------------------------------
     async def stats(self) -> Stats:
         async with self._lock:

@@ -297,6 +297,15 @@ class Store(ABC):
     @abstractmethod
     async def has_payload(self, digest: str) -> bool: ...
 
+    @abstractmethod
+    async def gc_payloads(self) -> int:
+        """Remove content-addressed payloads no span references.
+
+        Returns the number of payloads evicted. Safe to call at any time;
+        intended as a belt-and-suspenders sweep after delete_session in case
+        a backend's per-delete accounting leaks a reference.
+        """
+
     # stats ----------------------------------------------------------------
     @abstractmethod
     async def stats(self) -> Stats: ...

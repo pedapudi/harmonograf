@@ -332,6 +332,17 @@ class InMemoryStore(Store):
         async with self._lock:
             return digest in self._payloads
 
+    async def gc_payloads(self) -> int:
+        async with self._lock:
+            referenced: set[str] = {
+                sp.payload_digest for sp in self._spans.values() if sp.payload_digest
+            }
+            orphans = [d for d in self._payloads if d not in referenced]
+            for d in orphans:
+                self._payloads.pop(d, None)
+                self._payload_refcount.pop(d, None)
+            return len(orphans)
+
     def _decref_payload(self, digest: str) -> None:
         n = self._payload_refcount.get(digest, 0) - 1
         if n <= 0:

@@ -514,6 +514,13 @@ class FrontendServicerMixin:
                     payload_bytes += rec.meta.size
 
         deleted = await self._store.delete_session(request.session_id)
+        if deleted:
+            try:
+                await self._store.gc_payloads()
+            except Exception:
+                logger.exception(
+                    "gc_payloads failed after delete session=%s", request.session_id
+                )
         return frontend_pb2.DeleteSessionResponse(
             deleted=deleted,
             spans_removed=len(spans),
