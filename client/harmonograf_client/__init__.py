@@ -10,16 +10,19 @@ Public surface (stable):
     SpanKind, SpanStatus, Capability — enum mirrors of the wire protocol
 """
 
+from .adk import AdkAdapter, attach_adk
 from .client import Client
 from .enums import Capability, SpanKind, SpanStatus
 from .transport import ControlAckSpec
 
 __all__ = [
+    "AdkAdapter",
     "Capability",
     "Client",
     "ControlAckSpec",
     "SpanKind",
     "SpanStatus",
+    "attach_adk",
 ]
 
 __version__ = "0.0.0"
