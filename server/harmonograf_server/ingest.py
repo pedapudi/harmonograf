@@ -56,15 +56,20 @@ _SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
 class ControlAckSink(Protocol):
     """Minimal interface the ingest pipeline needs from a ControlRouter.
 
-    Task #2 implements the full router; until then the default is a no-op
-    sink that just drops acks.
+    The stream_id lets the router attribute acks to the specific
+    SubscribeControl subscription that delivered the event, which matters
+    when the same agent has multiple concurrent control streams.
     """
 
-    def record_ack(self, ack: types_pb2.ControlAck) -> None: ...
+    def record_ack(
+        self, ack: types_pb2.ControlAck, *, stream_id: Optional[str] = None
+    ) -> None: ...
 
 
 class _NullControlAckSink:
-    def record_ack(self, ack: types_pb2.ControlAck) -> None:  # pragma: no cover - trivial
+    def record_ack(
+        self, ack: types_pb2.ControlAck, *, stream_id: Optional[str] = None
+    ) -> None:  # pragma: no cover - trivial
         return None
 
 
@@ -210,7 +215,7 @@ class IngestPipeline:
         elif kind == "heartbeat":
             await self._handle_heartbeat(ctx, msg.heartbeat)
         elif kind == "control_ack":
-            self._control_sink.record_ack(msg.control_ack)
+            self._control_sink.record_ack(msg.control_ack, stream_id=ctx.stream_id)
         elif kind == "goodbye":
             await self._handle_goodbye(ctx, msg.goodbye)
         elif kind == "hello":
