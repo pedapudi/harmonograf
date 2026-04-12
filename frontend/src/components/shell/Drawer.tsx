@@ -512,10 +512,7 @@ function AnnotationsTab({
 
   return (
     <div className="hg-drawer__section">
-      <p className="hg-drawer__dim">
-        Annotations list feeds off WatchSession deltas (task #5). For now this
-        pane composes new ones via PostAnnotation.
-      </p>
+      <p className="hg-drawer__dim">Add a comment to this span.</p>
       <textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}

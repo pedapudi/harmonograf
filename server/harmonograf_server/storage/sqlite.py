@@ -460,7 +460,15 @@ class SqliteStore(Store):
 
     async def _fetch_span(self, span_id: str) -> Optional[Span]:
         async with self.db.execute(
-            "SELECT * FROM spans WHERE id = ?", (span_id,)
+            """
+            SELECT s.*,
+                   COALESCE(NULLIF(s.payload_mime, ''), p.mime)  AS _mime,
+                   COALESCE(NULLIF(s.payload_size, 0),  p.size)  AS _size
+            FROM spans s
+            LEFT JOIN payloads p ON p.digest = s.payload_digest
+            WHERE s.id = ?
+            """,
+            (span_id,),
         ) as cur:
             row = await cur.fetchone()
             if row is None:
@@ -482,8 +490,8 @@ class SqliteStore(Store):
             end_time=row["end_time"],
             attributes=json.loads(row["attributes"]),
             payload_digest=row["payload_digest"],
-            payload_mime=row["payload_mime"] or "",
-            payload_size=row["payload_size"] or 0,
+            payload_mime=row["_mime"] or "",
+            payload_size=row["_size"] or 0,
             payload_summary=row["payload_summary"] or "",
             payload_role=row["payload_role"] or "",
             payload_evicted=bool(row["payload_evicted"]),
