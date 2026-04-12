@@ -10,6 +10,7 @@ import { SessionsSyncer } from '../../rpc/SessionsSyncer';
 import { useGlobalShortcuts } from '../../lib/shortcuts';
 import { useUiStore } from '../../state/uiStore';
 import { ActivityView } from './views/ActivityView';
+import { GraphView } from './views/GraphView';
 import { NotesView } from './views/NotesView';
 import { SettingsView } from './views/SettingsView';
 
@@ -30,6 +31,7 @@ export function Shell() {
             </>
           )}
           {navSection === 'activity' && <ActivityView />}
+          {navSection === 'graph' && <GraphView />}
           {navSection === 'annotations' && <NotesView />}
           {navSection === 'settings' && <SettingsView />}
         </ShellErrorBoundary>

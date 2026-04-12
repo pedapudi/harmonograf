@@ -3,7 +3,7 @@ import type { OverlayContext } from '../../gantt/GanttCanvas';
 import { usePopoverStore, type SpanPopover as SpanPopoverState } from '../../state/popoverStore';
 import { useUiStore } from '../../state/uiStore';
 import { getSessionStore, usePostAnnotation, useSendControl } from '../../rpc/hooks';
-import type { Span } from '../../gantt/types';
+import type { AttributeValue, Span, SpanKind } from '../../gantt/types';
 
 // Floating quick-look popover anchored to a span block. Separate from the
 // full Inspector Drawer: the drawer is the deep-dive surface, this is the
@@ -14,7 +14,7 @@ import type { Span } from '../../gantt/types';
 // read the renderer's current span rectangle each render — the popover
 // tracks its span through viewport pans and zooms.
 
-const POPOVER_WIDTH = 280;
+const POPOVER_WIDTH = 320;
 
 interface Props {
   ctx: OverlayContext;
@@ -103,7 +103,12 @@ function computePosition(
   // Anchor above the span block when we know where it is; fall back to the
   // click-time anchor when the span is off-screen or has been removed.
   let left = rect ? rect.x : p.anchorX;
-  let top = rect ? rect.y - 10 : p.anchorY;
+  // Try to open above; fall back to below if not enough room.
+  const approxH = 220;
+  let top = rect ? rect.y - 10 - approxH : p.anchorY - approxH;
+  if (top < 8) {
+    top = rect ? rect.y + rect.h + 6 : p.anchorY + 20;
+  }
   left = Math.max(8, Math.min(widthCss - POPOVER_WIDTH - 8, left));
   top = Math.max(8, Math.min(heightCss - 160, top));
   return { left, top };
@@ -133,6 +138,9 @@ function PopoverCard({
   const agentName = agent?.name || span.agentId;
   const duration =
     span.endMs != null ? `${Math.max(0, span.endMs - span.startMs).toFixed(0)}ms` : '…';
+
+  const summary = spanSummary(span.kind, span.name, agentName);
+  const thinking = extractThinking(span);
 
   const copyId = () => {
     void navigator.clipboard?.writeText(span.id).catch(() => {});
@@ -215,6 +223,9 @@ function PopoverCard({
           </IconButton>
         </div>
       </div>
+      <div style={{ opacity: 0.85, lineHeight: 1.5, marginBottom: 6 }}>
+        {summary}
+      </div>
       <div style={{ opacity: 0.85, lineHeight: 1.5 }}>
         <div>
           <span style={{ opacity: 0.7 }}>kind </span>
@@ -231,6 +242,24 @@ function PopoverCard({
           {duration}
         </div>
       </div>
+      {thinking && (
+        <div
+          style={{
+            marginTop: 8,
+            padding: '6px 8px',
+            background: 'var(--md-sys-color-surface-container, #1d1f27)',
+            borderRadius: 6,
+            fontStyle: 'italic',
+            opacity: 0.7,
+            fontSize: 11,
+            lineHeight: 1.4,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+          }}
+        >
+          {thinking}
+        </div>
+      )}
       <div
         style={{
           display: 'flex',
@@ -250,6 +279,38 @@ function PopoverCard({
       </div>
     </div>
   );
+}
+
+function spanSummary(kind: SpanKind, name: string, agentName: string): string {
+  switch (kind) {
+    case 'INVOCATION':
+      return `${agentName} is running an invocation`;
+    case 'LLM_CALL':
+      return `${agentName} is processing a model request`;
+    case 'TOOL_CALL':
+      return `${agentName} is calling ${name}`;
+    case 'TRANSFER':
+      return `${agentName} is transferring to ${name}`;
+    default:
+      return `${agentName} is handling ${name}`;
+  }
+}
+
+function attrString(attr: AttributeValue | undefined): string | null {
+  if (!attr) return null;
+  if (attr.kind === 'string') return attr.value;
+  return null;
+}
+
+function extractThinking(span: Span): string | null {
+  const attrs = span.attributes;
+  const text =
+    attrString(attrs['streaming_text']) ||
+    attrString(attrs['last_response']) ||
+    attrString(attrs['tool_args']) ||
+    attrString(attrs['args']);
+  if (text) return text.length > 200 ? text.slice(0, 200) + '...' : text;
+  return null;
 }
 
 function IconButton({

@@ -396,9 +396,8 @@ export class GanttRenderer {
 
   private frame(): void {
     // Advance "session-relative now" from the wall clock. The renderer owns
-    // this — transport only sets wallClockStartMs on session connect. Without
-    // this, in-flight span bars collapse to zero width because endMs is null
-    // and nowMs is frozen at 0. Task #12 (B4 liveness).
+    // this — transport only sets wallClockStartMs on session connect.
+    const prevNowMs = this.store.nowMs;
     if (this.store.wallClockStartMs > 0) {
       this.store.nowMs = Date.now() - this.store.wallClockStartMs;
     }
@@ -406,13 +405,11 @@ export class GanttRenderer {
     // Live follow advance
     this.viewport = advanceLive(this.viewport, this.store.nowMs);
 
-    // Any in-viewport animated state forces overlay redraw every frame. We
-    // also mark blocks dirty so that unfinished spans can visually grow as
-    // nowMs advances — the bar geometry depends on `s.endMs ?? nowMs`.
-    const hasAnimatedInView = this.hasAnimatedInViewport();
-    if (hasAnimatedInView) {
-      this.overlayDirty = true;
+    // When nowMs advances, redraw blocks (bar growth depends on
+    // `s.endMs ?? nowMs`) and overlay (the "now" cursor line moves).
+    if (this.store.nowMs !== prevNowMs) {
       this.blocksDirty = true;
+      this.overlayDirty = true;
     }
 
     if (this.bgDirty) this.drawBackground();
@@ -661,7 +658,7 @@ export class GanttRenderer {
           buckets.set(key, b);
         }
         b.rects.push(x1, laneTop, width, rectH);
-        if (width >= 24) {
+        if (width > 12) {
           b.labels.push({ s, x: x1, y: laneTop, w: width, h: rectH });
         }
         if (
@@ -721,7 +718,7 @@ export class GanttRenderer {
       ctx.globalAlpha = 1;
     }
 
-    // Labels pass (text is expensive — only for blocks >= 24px wide).
+    // Labels pass — full label for bars > 40px, icon-only for 12–40px.
     ctx.font = '11px system-ui, sans-serif';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = cssVar('--md-sys-color-on-surface') || '#e2e2e9';
@@ -729,13 +726,18 @@ export class GanttRenderer {
       for (const l of b.labels) {
         const { s, x, y: ly, w: lw, h: lh } = l;
         const icon = KIND_ICON[s.kind];
-        const label = `${icon} ${s.name}`;
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(x + 4, ly, lw - 8, lh);
-        ctx.clip();
-        ctx.fillText(label, x + 6, ly + lh / 2);
-        ctx.restore();
+        if (lw > 40) {
+          const label = icon ? `${icon} ${s.name}` : s.name;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(x, ly, lw, lh);
+          ctx.clip();
+          ctx.fillText(label, x + 4, ly + lh / 2);
+          ctx.restore();
+        } else if (icon) {
+          // Narrow bar: just the kind icon centered
+          ctx.fillText(icon, x + lw / 2, ly + lh / 2);
+        }
       }
     }
 
@@ -993,20 +995,6 @@ export class GanttRenderer {
     ctx.globalAlpha = 1;
   }
 
-  private hasAnimatedInViewport(): boolean {
-    const vs = viewportStart(this.viewport);
-    const ve = this.viewport.endMs;
-    const scratch: Span[] = [];
-    for (const agent of this.store.agents.list) {
-      scratch.length = 0;
-      this.store.spans.queryAgent(agent.id, vs, ve, scratch);
-      for (const s of scratch) {
-        if (s.status === 'RUNNING' || s.status === 'AWAITING_HUMAN') return true;
-      }
-    }
-    return false;
-  }
-
   // --- Hit testing -------------------------------------------------------
 
   private hitTest(px: number, py: number): string | null {
@@ -1034,7 +1022,8 @@ export class GanttRenderer {
           const laneH = Math.max(SUB_LANE_HEIGHT_PX, Math.floor(rowH / 3));
           const laneTop = y + 2 + (s.lane >= 0 ? s.lane : 0) * laneH;
           const rectH = Math.max(6, Math.min(y + rowH - 2, laneTop + laneH - 2) - laneTop);
-          if (px >= x1 && px <= x1 + width && py >= laneTop && py <= laneTop + rectH) {
+          // Expand hit zone by 4px on each side so small blocks are easier to click.
+          if (px >= x1 - 4 && px <= x1 + width + 4 && py >= laneTop && py <= laneTop + rectH) {
             return s.id;
           }
         }

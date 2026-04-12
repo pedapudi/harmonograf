@@ -137,9 +137,14 @@ class SqliteStore(Store):
         self.payload_dir.mkdir(parents=True, exist_ok=True)
         self._db = await aiosqlite.connect(str(self.db_path))
         self._db.row_factory = aiosqlite.Row
-        await self._db.executescript(SCHEMA)
-        await self._db.execute("PRAGMA foreign_keys = ON")
+        # Enable WAL and set busy_timeout *before* schema so concurrent
+        # processes (e.g. a stale server left running) don't immediately
+        # deadlock on startup writes.
         await self._db.execute("PRAGMA journal_mode = WAL")
+        await self._db.execute("PRAGMA busy_timeout = 5000")
+        await self._db.execute("PRAGMA foreign_keys = ON")
+        await self._db.execute("PRAGMA synchronous = NORMAL")
+        await self._db.executescript(SCHEMA)
         # Backfill payload_* columns on pre-existing DBs created before task #7.
         async with self._db.execute("PRAGMA table_info(spans)") as cur:
             cols = {row[1] for row in await cur.fetchall()}
@@ -751,8 +756,9 @@ class SqliteStore(Store):
         if self._db is None:
             return False
         try:
-            async with self.db.execute("SELECT 1") as cur:
-                return (await cur.fetchone()) is not None
+            async with self._lock:
+                async with self.db.execute("SELECT 1") as cur:
+                    return (await cur.fetchone()) is not None
         except Exception:
             return False
 

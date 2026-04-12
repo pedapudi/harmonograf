@@ -61,7 +61,10 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
             closeUnpinnedPopovers();
           }
         },
-        onHoverChange: (h) => setHover(h),
+        onHoverChange: (h) => setHover(prev => {
+          if (prev?.spanId === h?.spanId) return prev;
+          return h;
+        }),
         onGutterAgentClick: (agentId) => {
           useUiStore.getState().toggleAgentHidden(agentId);
         },

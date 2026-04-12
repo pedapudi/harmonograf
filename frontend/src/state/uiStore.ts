@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { GanttRenderer } from '../gantt/renderer';
 
-export type NavSection = 'sessions' | 'activity' | 'annotations' | 'settings';
+export type NavSection = 'sessions' | 'activity' | 'graph' | 'annotations' | 'settings';
 
 interface UiState {
   currentSessionId: string | null;

@@ -219,6 +219,8 @@ class _AdkState:
         # progress pulse so renderers can pulse/tick even when the partial
         # text has no natural length (e.g. tool-call streaming).
         self._llm_stream_ticks: dict[str, int] = {}
+        # LLM span_id → accumulated streaming text for popover "thinking".
+        self._llm_streaming_text: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Invocation
@@ -239,6 +241,11 @@ class _AdkState:
         adk_session_id = _safe_attr(getattr(ic, "session", None), "id", "")
         if adk_session_id:
             attrs["adk_session_id"] = adk_session_id
+        # Emit agent description if available from the ADK Agent object.
+        agent = _safe_attr(ic, "agent", None)
+        agent_desc = _safe_attr(agent, "description", "") if agent is not None else ""
+        if agent_desc:
+            attrs["agent_description"] = str(agent_desc)
         span_id = self._client.emit_span_start(
             kind="INVOCATION",
             name=name,
@@ -275,6 +282,8 @@ class _AdkState:
         agent_id, hsession_id = self._route_from_callback_or_invocation(cc, inv_id)
         model = _safe_attr(req, "model", "") or "llm"
         attrs: dict[str, Any] = {"model": model}
+        if model and model != "llm":
+            attrs["model_name"] = str(model)
         payload = _safe_llm_request_payload(req)
         span_id = self._client.emit_span_start(
             kind="LLM_CALL",
@@ -314,6 +323,7 @@ class _AdkState:
                 self._llm_by_invocation.pop(inv_id, None)
             self._llm_stream_len.pop(span_id, None)
             self._llm_stream_ticks.pop(span_id, None)
+            self._llm_streaming_text.pop(span_id, None)
 
     # ------------------------------------------------------------------
     # Tool
@@ -327,11 +337,20 @@ class _AdkState:
         is_long_running = bool(_safe_attr(tool, "is_long_running", False))
         name = _safe_attr(tool, "name", "tool") or "tool"
         payload = _safe_json(tool_args)
+        tool_attrs: dict[str, Any] = {"is_long_running": is_long_running}
+        # Emit a preview of tool arguments so the popover can show what the
+        # tool is doing (truncated to 300 chars).
+        if tool_args:
+            try:
+                args_preview = json.dumps(tool_args, default=str, ensure_ascii=False)[:300]
+                tool_attrs["tool_args_preview"] = args_preview
+            except Exception:
+                pass
         span_id = self._client.emit_span_start(
             kind="TOOL_CALL",
             name=name,
             parent_span_id=parent,
-            attributes={"is_long_running": is_long_running},
+            attributes=tool_attrs,
             payload=payload,
             payload_mime="application/json",
             payload_role="args",
@@ -421,18 +440,29 @@ class _AdkState:
                 llm_span_id = self._llm_by_invocation.get(inv_id)
             if llm_span_id:
                 text_len = _event_text_len(event)
+                # Accumulate partial text for popover "thinking" display.
+                partial_text = _event_text(event)
                 with self._lock:
                     if text_len > self._llm_stream_len.get(llm_span_id, 0):
                         self._llm_stream_len[llm_span_id] = text_len
                     ticks = self._llm_stream_ticks.get(llm_span_id, 0) + 1
                     self._llm_stream_ticks[llm_span_id] = ticks
                     cur_len = self._llm_stream_len[llm_span_id]
+                    if partial_text:
+                        accumulated = (self._llm_streaming_text.get(llm_span_id, "") + partial_text)
+                        if len(accumulated) > 500:
+                            accumulated = "..." + accumulated[-480:]
+                        self._llm_streaming_text[llm_span_id] = accumulated
+                    streaming_text = self._llm_streaming_text.get(llm_span_id)
+                update_attrs: dict[str, Any] = {
+                    "streaming_text_len": cur_len,
+                    "streaming_tick": ticks,
+                }
+                if streaming_text:
+                    update_attrs["streaming_text"] = streaming_text
                 self._client.emit_span_update(
                     llm_span_id,
-                    attributes={
-                        "streaming_text_len": cur_len,
-                        "streaming_tick": ticks,
-                    },
+                    attributes=update_attrs,
                 )
             # Partial events don't carry actions we care about, so bail out
             # before the transfer/state_delta bookkeeping below.
@@ -647,6 +677,20 @@ def _event_text_len(event: Any) -> int:
         if isinstance(text, str):
             total += len(text)
     return total
+
+
+def _event_text(event: Any) -> str:
+    """Concatenated text across all text parts in an event's content."""
+    content = _safe_attr(event, "content", None)
+    if content is None:
+        return ""
+    parts = _safe_attr(content, "parts", None) or []
+    pieces: list[str] = []
+    for p in parts:
+        text = _safe_attr(p, "text", None)
+        if isinstance(text, str):
+            pieces.append(text)
+    return "".join(pieces)
 
 
 def _stringify(v: Any) -> str:

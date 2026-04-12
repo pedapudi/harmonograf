@@ -186,3 +186,13 @@
 a.hg-settings__value:hover {
   text-decoration: underline;
 }
+
+/* Graph view — running span pulse */
+@keyframes hg-graph-pulse {
+  0%, 100% { stroke-opacity: 1; }
+  50% { stroke-opacity: 0.4; }
+}
+
+.hg-graph__pulse {
+  animation: hg-graph-pulse 1.5s ease-in-out infinite;
+}
