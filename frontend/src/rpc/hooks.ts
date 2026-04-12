@@ -293,6 +293,11 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
                 kind.value.agentId,
                 m[kind.value.status] ?? 'DISCONNECTED',
               );
+              store.agents.setActivityAndStuck(
+                kind.value.agentId,
+                (kind.value as any).currentActivity ?? '',
+                (kind.value as any).stuck ?? false,
+              );
               break;
             }
             default:

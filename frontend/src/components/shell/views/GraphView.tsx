@@ -1,326 +1,248 @@
 import './views.css';
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useUiStore } from '../../../state/uiStore';
 import { useSessionWatch } from '../../../rpc/hooks';
 import { colorForAgent } from '../../../theme/agentColors';
-import type { Agent, Span } from '../../../gantt/types';
+import type { Span } from '../../../gantt/types';
 import type { SessionStore } from '../../../gantt/index';
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
-const NODE_W = 180;
-const NODE_H = 80;
-const H_GAP = 80;   // horizontal gap between nodes in the same level
-const V_GAP = 110;  // vertical gap between levels
-const PAD_X = 60;
-const PAD_Y = 60;
+const TIME_LABEL_W = 56;
+const COL_W = 200;
+const HEADER_H = 70;
+const ACT_W = 16;
+const MIN_PX_PER_SEC = 60;
+const MAX_PLOT_H = 2400;
+const MIN_PLOT_H = 400;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface AgentNode {
-  agent: Agent;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  color: string;
-  spanCount: number;
-  invocationCount: number;
-  hasRunning: boolean;
-  level: number;
-}
+type ArrowKind = 'transfer' | 'delegation' | 'return';
 
-type EdgeKind = 'transfer' | 'delegation';
-
-interface AgentEdge {
+interface SeqArrow {
   id: string;
-  fromId: string;
-  toId: string;
-  kind: EdgeKind;
-  count: number;
-  // computed from node positions
-  x1: number; y1: number;
-  x2: number; y2: number;
+  kind: ArrowKind;
+  fromCol: number;
+  toCol: number;
+  yMs: number;     // time in ms (for y-position mapping)
+  label: string;
 }
 
-interface GraphLayout {
-  nodes: Map<string, AgentNode>;
-  edges: AgentEdge[];
-  width: number;
-  height: number;
+interface ActivationBox {
+  agentIdx: number;
+  startMs: number;
+  endMs: number | null; // null = still running
+  isRunning: boolean;
+}
+
+interface SeqLayout {
+  agentIds: string[];      // ordered columns
+  arrows: SeqArrow[];
+  activations: ActivationBox[];
+  totalMs: number;         // duration of entire session in ms
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function fmtTime(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
 // ─── Layout computation ───────────────────────────────────────────────────────
 
-function computeGraph(store: SessionStore): GraphLayout {
+function computeSequence(store: SessionStore): SeqLayout {
   const agents = store.agents.list;
   const allSpans = store.spans.queryRange(-Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
 
-  // Build span lookup
   const spanById = new Map<string, Span>();
   for (const s of allSpans) spanById.set(s.id, s);
 
-  // Per-agent stats
-  const spanCount = new Map<string, number>();
-  const invCount = new Map<string, number>();
-  const hasRunning = new Map<string, boolean>();
-  for (const a of agents) { spanCount.set(a.id, 0); invCount.set(a.id, 0); hasRunning.set(a.id, false); }
-  for (const s of allSpans) {
-    spanCount.set(s.agentId, (spanCount.get(s.agentId) ?? 0) + 1);
-    if (s.kind === 'INVOCATION') invCount.set(s.agentId, (invCount.get(s.agentId) ?? 0) + 1);
-    if (s.status === 'RUNNING') hasRunning.set(s.agentId, true);
+  // ── Derive edges (same logic as old GraphView for topology) ───────────────
+  type RawEdgeKind = 'transfer' | 'delegation';
+  interface RawEdge {
+    fromId: string;
+    toId: string;
+    kind: RawEdgeKind;
+    yMs: number;
+    label: string;
+    spanId: string;
   }
 
-  // ── Derive edges ─────────────────────────────────────────────────────────
-  // edgeKey → { kind, count }
-  const edgeAcc = new Map<string, { kind: EdgeKind; count: number }>();
+  const transferArrows: RawEdge[] = [];
+  const coveredPairs = new Set<string>(); // "fromId→toId@approxMs" to dedup
 
-  const addEdge = (from: string, to: string, kind: EdgeKind) => {
-    if (from === to) return;
-    // transfer takes precedence over delegation on the same pair
-    const key = `${from}→${to}`;
-    const existing = edgeAcc.get(key);
-    if (existing) {
-      if (kind === 'transfer') existing.kind = 'transfer';
-      existing.count++;
-    } else {
-      edgeAcc.set(key, { kind, count: 1 });
-    }
-  };
-
-  // Method 1 — explicit TRANSFER spans with INVOKED links
+  // Method 1 — TRANSFER spans with INVOKED links
   for (const s of allSpans) {
     if (s.kind !== 'TRANSFER') continue;
     for (const link of s.links) {
       if (link.relation !== 'INVOKED') continue;
-      if (link.targetAgentId && link.targetAgentId !== s.agentId) {
-        addEdge(s.agentId, link.targetAgentId, 'transfer');
-      }
+      if (!link.targetAgentId || link.targetAgentId === s.agentId) continue;
+      const key = `${s.agentId}→${link.targetAgentId}@${Math.round(s.startMs / 500)}`;
+      coveredPairs.add(key);
+      transferArrows.push({
+        fromId: s.agentId,
+        toId: link.targetAgentId,
+        kind: 'transfer',
+        yMs: s.startMs,
+        label: s.name.length > 22 ? s.name.slice(0, 21) + '…' : s.name,
+        spanId: s.id,
+      });
     }
   }
 
-  // Method 2 — cross-agent parent-child at the INVOCATION boundary
-  // Count one delegation per invocation of the called agent, not per every child span.
+  // Method 2 — cross-agent INVOCATION parents (fallback/delegation)
+  const delegationArrows: RawEdge[] = [];
   for (const s of allSpans) {
     if (s.kind !== 'INVOCATION') continue;
     if (!s.parentSpanId) continue;
     const parent = spanById.get(s.parentSpanId);
     if (!parent || parent.agentId === s.agentId) continue;
-    addEdge(parent.agentId, s.agentId, 'delegation');
-  }
-
-  // ── Hierarchical layout ───────────────────────────────────────────────────
-  // Build adjacency for BFS level assignment
-  const inDegree = new Map<string, number>();
-  const outAdj = new Map<string, Set<string>>();
-  for (const a of agents) { inDegree.set(a.id, 0); outAdj.set(a.id, new Set()); }
-
-  for (const key of edgeAcc.keys()) {
-    const [from, to] = key.split('→');
-    if (!outAdj.has(from) || !inDegree.has(to)) continue;
-    outAdj.get(from)!.add(to);
-    inDegree.set(to, (inDegree.get(to) ?? 0) + 1);
-  }
-
-  // BFS topological level assignment
-  const level = new Map<string, number>();
-  const queue: string[] = [];
-  for (const a of agents) {
-    if ((inDegree.get(a.id) ?? 0) === 0) { level.set(a.id, 0); queue.push(a.id); }
-  }
-  while (queue.length) {
-    const curr = queue.shift()!;
-    const currLevel = level.get(curr) ?? 0;
-    for (const next of (outAdj.get(curr) ?? [])) {
-      const nl = currLevel + 1;
-      if ((level.get(next) ?? -1) < nl) {
-        level.set(next, nl);
-        queue.push(next);
-      }
-    }
-  }
-  // Agents unreachable from roots (isolated or in cycles) → level 0
-  for (const a of agents) { if (!level.has(a.id)) level.set(a.id, 0); }
-
-  // Group by level, sort deterministically within level
-  const byLevel = new Map<number, string[]>();
-  for (const a of agents) {
-    const l = level.get(a.id)!;
-    const group = byLevel.get(l) ?? [];
-    group.push(a.id);
-    byLevel.set(l, group);
-  }
-  for (const g of byLevel.values()) g.sort();
-
-  // Compute canvas size
-  const maxPerLevel = Math.max(1, ...Array.from(byLevel.values()).map((g) => g.length));
-  const numLevels = Math.max(1, byLevel.size);
-  const canvasW = Math.max(600, PAD_X * 2 + maxPerLevel * NODE_W + (maxPerLevel - 1) * H_GAP);
-  const canvasH = Math.max(400, PAD_Y * 2 + numLevels * NODE_H + (numLevels - 1) * V_GAP);
-
-  // Position nodes
-  const nodes = new Map<string, AgentNode>();
-  for (const [lvl, group] of byLevel) {
-    const rowW = group.length * NODE_W + (group.length - 1) * H_GAP;
-    const startX = (canvasW - rowW) / 2;
-    group.forEach((id, i) => {
-      const agent = agents.find((a) => a.id === id)!;
-      const x = startX + i * (NODE_W + H_GAP);
-      const y = PAD_Y + lvl * (NODE_H + V_GAP);
-      nodes.set(id, {
-        agent,
-        x, y, w: NODE_W, h: NODE_H,
-        color: colorForAgent(id),
-        spanCount: spanCount.get(id) ?? 0,
-        invocationCount: invCount.get(id) ?? 0,
-        hasRunning: hasRunning.get(id) ?? false,
-        level: lvl,
-      });
+    const key = `${parent.agentId}→${s.agentId}@${Math.round(s.startMs / 500)}`;
+    if (coveredPairs.has(key)) continue; // already covered by method 1
+    delegationArrows.push({
+      fromId: parent.agentId,
+      toId: s.agentId,
+      kind: 'delegation',
+      yMs: s.startMs,
+      label: s.name.length > 22 ? s.name.slice(0, 21) + '…' : s.name,
+      spanId: s.id,
     });
   }
 
-  // Build edge objects with positions
-  const edges: AgentEdge[] = [];
-  for (const [key, info] of edgeAcc) {
-    const [fromId, toId] = key.split('→');
-    const src = nodes.get(fromId);
-    const dst = nodes.get(toId);
-    if (!src || !dst) continue;
+  const forwardArrows: RawEdge[] = [...transferArrows, ...delegationArrows];
 
-    // Exit/entry points: prefer top/bottom for vertical flow, sides for same-level
-    let x1: number, y1: number, x2: number, y2: number;
-    const srcCx = src.x + src.w / 2;
-    const srcCy = src.y + src.h / 2;
-    const dstCx = dst.x + dst.w / 2;
-    const dstCy = dst.y + dst.h / 2;
-
-    if (Math.abs(src.level - dst.level) >= 1) {
-      // vertical flow
-      if (dst.level > src.level) {
-        x1 = srcCx; y1 = src.y + src.h;  // exit bottom
-        x2 = dstCx; y2 = dst.y;           // enter top
-      } else {
-        x1 = srcCx; y1 = src.y;           // exit top
-        x2 = dstCx; y2 = dst.y + dst.h;  // enter bottom
-      }
-    } else {
-      // same level — exit/enter sides
-      if (srcCx <= dstCx) {
-        x1 = src.x + src.w; y1 = srcCy;
-        x2 = dst.x;          y2 = dstCy;
-      } else {
-        x1 = src.x;          y1 = srcCy;
-        x2 = dst.x + dst.w;  y2 = dstCy;
-      }
+  // ── Topological level assignment ──────────────────────────────────────────
+  const inDegree = new Map<string, number>();
+  const outAdj = new Map<string, Set<string>>();
+  for (const a of agents) { inDegree.set(a.id, 0); outAdj.set(a.id, new Set()); }
+  for (const e of forwardArrows) {
+    if (!outAdj.has(e.fromId) || !inDegree.has(e.toId)) continue;
+    if (!outAdj.get(e.fromId)!.has(e.toId)) {
+      outAdj.get(e.fromId)!.add(e.toId);
+      inDegree.set(e.toId, (inDegree.get(e.toId) ?? 0) + 1);
     }
-
-    edges.push({ id: key, fromId, toId, kind: info.kind, count: info.count, x1, y1, x2, y2 });
   }
 
-  return { nodes, edges, width: canvasW, height: canvasH };
+  const level = new Map<string, number>();
+  const bfsQueue: string[] = [];
+  for (const a of agents) {
+    if ((inDegree.get(a.id) ?? 0) === 0) { level.set(a.id, 0); bfsQueue.push(a.id); }
+  }
+  while (bfsQueue.length) {
+    const curr = bfsQueue.shift()!;
+    const currLvl = level.get(curr) ?? 0;
+    for (const next of (outAdj.get(curr) ?? [])) {
+      const nl = currLvl + 1;
+      if ((level.get(next) ?? -1) < nl) { level.set(next, nl); bfsQueue.push(next); }
+    }
+  }
+  for (const a of agents) { if (!level.has(a.id)) level.set(a.id, 0); }
+
+  // First-activity time per agent (for stable ordering within the same level)
+  const firstActivity = new Map<string, number>();
+  for (const s of allSpans) {
+    const prev = firstActivity.get(s.agentId);
+    if (prev === undefined || s.startMs < prev) firstActivity.set(s.agentId, s.startMs);
+  }
+
+  const agentIds = agents
+    .map((a) => a.id)
+    .sort((a, b) => {
+      const la = level.get(a) ?? 0;
+      const lb = level.get(b) ?? 0;
+      if (la !== lb) return la - lb;
+      return (firstActivity.get(a) ?? 0) - (firstActivity.get(b) ?? 0);
+    });
+
+  const colIdx = new Map<string, number>();
+  agentIds.forEach((id, i) => colIdx.set(id, i));
+
+  // ── Return arrows ─────────────────────────────────────────────────────────
+  // For each INVOCATION span with endMs, find who called it and emit a return.
+  // We also track return arrows from delegation (cross-agent parent) invocations.
+  const returnArrows: SeqArrow[] = [];
+
+  // Build a map: calledAgentId → list of forward arrows that went TO it (sorted by yMs)
+  const forwardByDest = new Map<string, RawEdge[]>();
+  for (const e of forwardArrows) {
+    const arr = forwardByDest.get(e.toId) ?? [];
+    arr.push(e);
+    forwardByDest.set(e.toId, arr);
+  }
+
+  for (const s of allSpans) {
+    if (s.kind !== 'INVOCATION') continue;
+    if (s.endMs === null) continue;
+
+    // Find the most recent forward arrow that went TO this agent before this invocation started
+    const incoming = forwardByDest.get(s.agentId) ?? [];
+    const callerArrow = incoming
+      .filter((e) => e.yMs <= s.startMs)
+      .sort((a, b) => b.yMs - a.yMs)[0];
+
+    if (!callerArrow) continue;
+    const fromCol = colIdx.get(s.agentId);
+    const toCol = colIdx.get(callerArrow.fromId);
+    if (fromCol === undefined || toCol === undefined) continue;
+    if (fromCol === toCol) continue;
+
+    returnArrows.push({
+      id: `return-${s.id}`,
+      kind: 'return',
+      fromCol,
+      toCol,
+      yMs: s.endMs,
+      label: '↩ return',
+    });
+  }
+
+  // ── Combine all arrows ────────────────────────────────────────────────────
+  const arrows: SeqArrow[] = [
+    ...forwardArrows
+      .map((e, i): SeqArrow | null => {
+        const fc = colIdx.get(e.fromId);
+        const tc = colIdx.get(e.toId);
+        if (fc === undefined || tc === undefined || fc === tc) return null;
+        return { id: `fwd-${i}-${e.spanId}`, kind: e.kind, fromCol: fc, toCol: tc, yMs: e.yMs, label: e.label };
+      })
+      .filter((a): a is SeqArrow => a !== null),
+    ...returnArrows,
+  ];
+
+  // ── Activation boxes ──────────────────────────────────────────────────────
+  const activations: ActivationBox[] = [];
+  for (const s of allSpans) {
+    if (s.kind !== 'INVOCATION') continue;
+    const idx = colIdx.get(s.agentId);
+    if (idx === undefined) continue;
+    activations.push({
+      agentIdx: idx,
+      startMs: s.startMs,
+      endMs: s.endMs,
+      isRunning: s.endMs === null,
+    });
+  }
+
+  // ── Total time ────────────────────────────────────────────────────────────
+  let totalMs = 1000;
+  for (const s of allSpans) {
+    const end = s.endMs ?? store.nowMs;
+    if (end > totalMs) totalMs = end;
+  }
+
+  return { agentIds, arrows, activations, totalMs };
 }
 
-// ─── SVG helpers ──────────────────────────────────────────────────────────────
-
-/** Cubic bezier path that curves nicely between two points. */
-function bezierPath(x1: number, y1: number, x2: number, y2: number): string {
-  const dx = Math.abs(x2 - x1);
-  const dy = Math.abs(y2 - y1);
-  // Bias the control points toward the dominant axis
-  const cx = dx > dy ? (x1 + x2) / 2 : x1;
-  const cy = dx > dy ? y1 : (y1 + y2) / 2;
-  const cx2 = dx > dy ? (x1 + x2) / 2 : x2;
-  const cy2 = dx > dy ? y2 : (y1 + y2) / 2;
-  return `M ${x1} ${y1} C ${cx} ${cy}, ${cx2} ${cy2}, ${x2} ${y2}`;
-}
-
-// ─── Sub-components ───────────────────────────────────────────────────────────
+// ─── Status colors ────────────────────────────────────────────────────────────
 
 const STATUS_COLOR: Record<string, string> = {
   CONNECTED: '#4caf7d',
   DISCONNECTED: '#777',
   CRASHED: '#e06070',
 };
-
-function AgentNodeSvg({ node, onClick }: { node: AgentNode; onClick: () => void }) {
-  const { agent, x, y, w, h, color, spanCount, invocationCount, hasRunning } = node;
-  const statusDot = STATUS_COLOR[agent.status] ?? '#777';
-  const label = agent.name.length > 20 ? agent.name.slice(0, 18) + '…' : agent.name;
-
-  return (
-    <g onClick={onClick} style={{ cursor: 'pointer' }} role="button" aria-label={agent.name}>
-      {/* Glow for running agents */}
-      {hasRunning && (
-        <rect
-          x={x - 4} y={y - 4} width={w + 8} height={h + 8}
-          rx={12} fill={color} opacity={0.12}
-          className="hg-graph__pulse"
-        />
-      )}
-      {/* Node body */}
-      <rect
-        x={x} y={y} width={w} height={h} rx={8}
-        fill="var(--md-sys-color-surface-container, #1e2130)"
-        stroke={color}
-        strokeWidth={hasRunning ? 2.5 : 1.5}
-        className={hasRunning ? 'hg-graph__pulse' : undefined}
-      />
-      {/* Agent name */}
-      <text
-        x={x + w / 2} y={y + 28}
-        textAnchor="middle" dominantBaseline="central"
-        fill={color} fontSize={13} fontWeight={700}
-      >
-        {label}
-      </text>
-      {/* Stats row */}
-      <text
-        x={x + w / 2} y={y + 52}
-        textAnchor="middle" dominantBaseline="central"
-        fill="var(--md-sys-color-on-surface-variant, #9da3b4)" fontSize={10}
-      >
-        {invocationCount} inv · {spanCount} spans
-      </text>
-      {/* Status dot */}
-      <circle cx={x + w - 14} cy={y + 14} r={4} fill={statusDot} />
-    </g>
-  );
-}
-
-function EdgeSvg({ edge }: { edge: AgentEdge }) {
-  const isTransfer = edge.kind === 'transfer';
-  const stroke = isTransfer ? '#e8953a' : '#5b8def';
-  const strokeW = isTransfer ? 2.5 : 1.5;
-  const opacity = isTransfer ? 0.9 : 0.6;
-  const markerId = isTransfer ? 'url(#arrow-transfer)' : 'url(#arrow-delegation)';
-  const d = bezierPath(edge.x1, edge.y1, edge.x2, edge.y2);
-  const midX = (edge.x1 + edge.x2) / 2;
-  const midY = (edge.y1 + edge.y2) / 2 - 10;
-  const kindLabel = isTransfer ? 'transfer' : 'calls';
-
-  return (
-    <g>
-      <path
-        d={d} fill="none"
-        stroke={stroke} strokeWidth={strokeW}
-        markerEnd={markerId} opacity={opacity}
-        strokeDasharray={isTransfer ? undefined : '6 3'}
-      />
-      {/* Count + kind badge */}
-      <rect
-        x={midX - 26} y={midY - 8}
-        width={52} height={16} rx={4}
-        fill="var(--md-sys-color-surface, #10131a)" opacity={0.85}
-      />
-      <text
-        x={midX} y={midY + 1}
-        textAnchor="middle" dominantBaseline="central"
-        fill={stroke} fontSize={9} fontWeight={600}
-      >
-        {edge.count}× {kindLabel}
-      </text>
-    </g>
-  );
-}
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
@@ -338,14 +260,13 @@ export function GraphView() {
   }, [sessionId, watch.store]);
 
   const layout = useMemo(
-    () => computeGraph(watch.store),
+    () => computeSequence(watch.store),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [watch.store, watch.store.spans.size, watch.store.agents.size],
   );
 
   const handleAgentClick = useCallback(
     (agentId: string) => {
-      // Select the most recent invocation span for this agent so the drawer opens
       const spans = watch.store.spans
         .queryRange(-Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER)
         .filter((s) => s.agentId === agentId && s.kind === 'INVOCATION')
@@ -359,7 +280,7 @@ export function GraphView() {
     return (
       <section className="hg-panel" data-testid="graph-view">
         <header className="hg-panel__header">
-          <h2 className="hg-panel__title">Graph</h2>
+          <h2 className="hg-panel__title">Agent Graph</h2>
         </header>
         <div className="hg-panel__body">
           <div className="hg-panel__empty">
@@ -376,7 +297,7 @@ export function GraphView() {
     return (
       <section className="hg-panel" data-testid="graph-view">
         <header className="hg-panel__header">
-          <h2 className="hg-panel__title">Graph</h2>
+          <h2 className="hg-panel__title">Agent Graph</h2>
           <span className="hg-panel__hint">0 agents</span>
         </header>
         <div className="hg-panel__body">
@@ -386,8 +307,44 @@ export function GraphView() {
     );
   }
 
-  const transferEdges = layout.edges.filter((e) => e.kind === 'transfer').length;
-  const delegEdges = layout.edges.filter((e) => e.kind === 'delegation').length;
+  const nowMs = watch.store.nowMs;
+  const { agentIds, arrows, activations, totalMs } = layout;
+
+  // Scale: pixels per millisecond
+  const effectiveTotalMs = Math.max(totalMs, 1000);
+  const rawPxPerMs = MIN_PX_PER_SEC / 1000;
+  // Ensure plot is at least MIN_PLOT_H, at most MAX_PLOT_H
+  const rawPlotH = effectiveTotalMs * rawPxPerMs;
+  const plotH = Math.min(MAX_PLOT_H, Math.max(MIN_PLOT_H, rawPlotH));
+  const pxPerMs = plotH / effectiveTotalMs;
+
+  const svgW = Math.max(600, TIME_LABEL_W + agentIds.length * COL_W);
+  const svgH = HEADER_H + plotH + 40;
+
+  // Column center x for each agent
+  const colCx = (idx: number) => TIME_LABEL_W + idx * COL_W + COL_W / 2;
+  const timeY = (ms: number) => HEADER_H + ms * pxPerMs;
+
+  // Time label positions: at each arrow + at regular intervals
+  const labelMsSet = new Set<number>();
+  for (const arr of arrows) labelMsSet.add(arr.yMs);
+  // Also add interval marks every ~100px
+  const intervalMs = Math.ceil(100 / pxPerMs / 1000) * 1000;
+  for (let t = 0; t <= effectiveTotalMs; t += intervalMs) labelMsSet.add(t);
+  const labelMsList = Array.from(labelMsSet).sort((a, b) => a - b);
+
+  // Filter out labels that are too close together (< 20px apart)
+  const filteredLabels: number[] = [];
+  for (const ms of labelMsList) {
+    const y = timeY(ms);
+    if (filteredLabels.length === 0 || y - timeY(filteredLabels[filteredLabels.length - 1]) >= 20) {
+      filteredLabels.push(ms);
+    }
+  }
+
+  const transferCount = arrows.filter((a) => a.kind === 'transfer').length;
+  const delegCount = arrows.filter((a) => a.kind === 'delegation').length;
+  const returnCount = arrows.filter((a) => a.kind === 'return').length;
 
   return (
     <section className="hg-panel" data-testid="graph-view">
@@ -395,14 +352,15 @@ export function GraphView() {
         <h2 className="hg-panel__title">Agent Graph</h2>
         <span className="hg-panel__hint">
           {agentCount} agent{agentCount !== 1 ? 's' : ''}
-          {transferEdges > 0 && ` · ${transferEdges} transfer${transferEdges !== 1 ? 's' : ''}`}
-          {delegEdges > 0 && ` · ${delegEdges} delegation${delegEdges !== 1 ? 's' : ''}`}
+          {transferCount > 0 && ` · ${transferCount} transfer${transferCount !== 1 ? 's' : ''}`}
+          {delegCount > 0 && ` · ${delegCount} delegation${delegCount !== 1 ? 's' : ''}`}
+          {returnCount > 0 && ` · ${returnCount} return${returnCount !== 1 ? 's' : ''}`}
         </span>
       </header>
       <div className="hg-panel__body" style={{ overflow: 'auto' }}>
         {/* Legend */}
         <div style={{
-          display: 'flex', gap: 20, padding: '8px 16px 0',
+          display: 'flex', gap: 20, padding: '0 0 10px',
           fontSize: 11, color: 'var(--md-sys-color-on-surface-variant, #9da3b4)',
         }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -417,42 +375,224 @@ export function GraphView() {
             </svg>
             Delegation
           </span>
-          {layout.edges.length === 0 && agentCount > 0 && (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <svg width={32} height={8}>
+              <line x1={0} y1={4} x2={28} y2={4} stroke="#888" strokeWidth={1.2} strokeDasharray="4 4" />
+            </svg>
+            Return
+          </span>
+          {arrows.length === 0 && agentCount > 0 && (
             <span style={{ marginLeft: 8, opacity: 0.6 }}>
-              No agent relationships detected yet — relationships appear when agents call each other.
+              No agent interactions detected yet.
             </span>
           )}
         </div>
 
         <svg
-          width={layout.width}
-          height={layout.height}
-          style={{ display: 'block', minWidth: layout.width }}
+          width={svgW}
+          height={svgH}
+          style={{ display: 'block', minWidth: svgW }}
         >
           <defs>
-            <marker id="arrow-delegation" viewBox="0 0 10 10" refX={8} refY={5}
+            <marker id="arr-transfer" viewBox="0 0 10 10" refX={8} refY={5}
+              markerWidth={7} markerHeight={7} orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#e8953a" />
+            </marker>
+            <marker id="arr-delegation" viewBox="0 0 10 10" refX={8} refY={5}
               markerWidth={6} markerHeight={6} orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#5b8def" opacity={0.8} />
             </marker>
-            <marker id="arrow-transfer" viewBox="0 0 10 10" refX={8} refY={5}
-              markerWidth={8} markerHeight={8} orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#e8953a" />
+            <marker id="arr-return" viewBox="0 0 10 10" refX={8} refY={5}
+              markerWidth={6} markerHeight={6} orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#888" />
             </marker>
           </defs>
 
-          {/* Edges (behind nodes) */}
-          {layout.edges.map((e) => (
-            <EdgeSvg key={e.id} edge={e} />
-          ))}
+          {/* Time labels + horizontal tick lines */}
+          {filteredLabels.map((ms) => {
+            const y = timeY(ms);
+            return (
+              <g key={`tl-${ms}`}>
+                <line
+                  x1={TIME_LABEL_W} y1={y} x2={svgW} y2={y}
+                  stroke="var(--md-sys-color-outline-variant, #2a2f3a)"
+                  strokeWidth={0.5} opacity={0.4}
+                />
+                <text
+                  x={TIME_LABEL_W - 8} y={y}
+                  textAnchor="end" dominantBaseline="middle"
+                  fill="var(--md-sys-color-on-surface-variant, #9da3b4)"
+                  fontSize={10}
+                >
+                  {fmtTime(ms)}
+                </text>
+              </g>
+            );
+          })}
 
-          {/* Agent nodes */}
-          {Array.from(layout.nodes.values()).map((node) => (
-            <AgentNodeSvg
-              key={node.agent.id}
-              node={node}
-              onClick={() => handleAgentClick(node.agent.id)}
-            />
-          ))}
+          {/* Agent header boxes + lifelines */}
+          {agentIds.map((agentId, idx) => {
+            const agent = watch.store.agents.get(agentId);
+            if (!agent) return null;
+            const cx = colCx(idx);
+            const color = colorForAgent(agentId);
+            const isStuck = agent.stuck === true;
+            const statusDot = isStuck ? '#f59e0b' : (STATUS_COLOR[agent.status] ?? '#777');
+            const hasRunning = activations.some((a) => a.agentIdx === idx && a.isRunning);
+            const label = agent.name.length > 18 ? agent.name.slice(0, 17) + '…' : agent.name;
+            const hBoxW = COL_W - 24;
+            const hBoxX = cx - hBoxW / 2;
+            const hBoxY = 4;
+            const hBoxH = 52;
+            const borderColor = isStuck ? '#f59e0b' : color;
+
+            return (
+              <g key={agentId}>
+                {/* Lifeline */}
+                <line
+                  x1={cx} y1={HEADER_H} x2={cx} y2={HEADER_H + plotH}
+                  stroke={color} strokeWidth={1} opacity={0.25}
+                  strokeDasharray="5 5"
+                />
+
+                {/* Header box */}
+                <g
+                  onClick={() => handleAgentClick(agentId)}
+                  style={{ cursor: 'pointer' }}
+                  role="button"
+                  aria-label={agent.name}
+                >
+                  {(hasRunning || isStuck) && (
+                    <rect
+                      x={hBoxX - 3} y={hBoxY - 3}
+                      width={hBoxW + 6} height={hBoxH + 6}
+                      rx={9}
+                      fill={isStuck ? '#f59e0b' : color} opacity={0.1}
+                      className="hg-graph__pulse"
+                    />
+                  )}
+                  <rect
+                    x={hBoxX} y={hBoxY}
+                    width={hBoxW} height={hBoxH}
+                    rx={7}
+                    fill={isStuck ? '#f59e0b' : color}
+                    fillOpacity={0.15}
+                    stroke={borderColor}
+                    strokeWidth={hasRunning || isStuck ? 2 : 1.5}
+                    className={isStuck ? 'hg-graph__pulse' : hasRunning ? 'hg-graph__pulse' : undefined}
+                  />
+                  <text
+                    x={cx} y={hBoxY + 22}
+                    textAnchor="middle" dominantBaseline="central"
+                    fill={isStuck ? '#f59e0b' : color} fontSize={12} fontWeight={700}
+                  >
+                    {label}
+                  </text>
+                  <text
+                    x={cx} y={hBoxY + 40}
+                    textAnchor="middle" dominantBaseline="central"
+                    fill={isStuck ? '#f59e0b' : 'var(--md-sys-color-on-surface-variant, #9da3b4)'}
+                    fontSize={10}
+                  >
+                    {isStuck ? '⚠ stuck' : (agent.framework !== 'UNKNOWN' ? agent.framework : '')}
+                  </text>
+                  {/* Status dot */}
+                  <circle cx={hBoxX + hBoxW - 10} cy={hBoxY + 10} r={4} fill={statusDot} />
+                </g>
+              </g>
+            );
+          })}
+
+          {/* Activation boxes */}
+          {activations.map((act, i) => {
+            const cx = colCx(act.agentIdx);
+            const color = colorForAgent(agentIds[act.agentIdx] ?? '');
+            const y1 = timeY(act.startMs);
+            const endMs = act.endMs ?? Math.max(nowMs, act.startMs + 100);
+            const y2 = timeY(endMs);
+            const boxH = Math.max(4, y2 - y1);
+            return (
+              <rect
+                key={`act-${i}`}
+                x={cx - ACT_W / 2}
+                y={y1}
+                width={ACT_W}
+                height={boxH}
+                rx={3}
+                fill={color}
+                fillOpacity={act.isRunning ? 0.85 : 0.55}
+                stroke={color}
+                strokeWidth={act.isRunning ? 1.5 : 0}
+                className={act.isRunning ? 'hg-graph__pulse' : undefined}
+              />
+            );
+          })}
+
+          {/* Arrows */}
+          {arrows.map((arrow) => {
+            const x1 = colCx(arrow.fromCol);
+            const x2 = colCx(arrow.toCol);
+            const y = timeY(arrow.yMs);
+            const isLeft = x2 < x1;
+
+            let stroke: string;
+            let strokeWidth: number;
+            let strokeDasharray: string | undefined;
+            let markerId: string;
+
+            if (arrow.kind === 'transfer') {
+              stroke = '#e8953a';
+              strokeWidth = 2.5;
+              strokeDasharray = undefined;
+              markerId = 'url(#arr-transfer)';
+            } else if (arrow.kind === 'delegation') {
+              stroke = '#5b8def';
+              strokeWidth = 1.5;
+              strokeDasharray = '6 3';
+              markerId = 'url(#arr-delegation)';
+            } else {
+              stroke = '#888';
+              strokeWidth = 1.2;
+              strokeDasharray = '4 4';
+              markerId = 'url(#arr-return)';
+            }
+
+            // Offset start/end by activation box half-width
+            const startX = x1 + (isLeft ? -ACT_W / 2 : ACT_W / 2);
+            const endX = x2 + (isLeft ? ACT_W / 2 : -ACT_W / 2);
+
+            // Label position: above the arrow, centered
+            const labelX = (startX + endX) / 2;
+            const labelY = y - 8;
+            const truncLabel = arrow.label.length > 22 ? arrow.label.slice(0, 21) + '…' : arrow.label;
+
+            return (
+              <g key={arrow.id}>
+                <line
+                  x1={startX} y1={y} x2={endX} y2={y}
+                  stroke={stroke} strokeWidth={strokeWidth}
+                  strokeDasharray={strokeDasharray}
+                  markerEnd={markerId}
+                />
+                {/* Label background */}
+                <rect
+                  x={labelX - 50} y={labelY - 8}
+                  width={100} height={14}
+                  rx={3}
+                  fill="var(--md-sys-color-surface, #10131a)"
+                  opacity={0.8}
+                />
+                <text
+                  x={labelX} y={labelY}
+                  textAnchor="middle" dominantBaseline="middle"
+                  fill={arrow.kind === 'return' ? '#888' : stroke}
+                  fontSize={9.5} fontStyle={arrow.kind === 'return' ? 'italic' : undefined}
+                >
+                  {truncLabel}
+                </text>
+              </g>
+            );
+          })}
         </svg>
       </div>
     </section>

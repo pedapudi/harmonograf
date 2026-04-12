@@ -119,6 +119,9 @@ class Client:
         for c in capabilities:
             caps.append(c.value if isinstance(c, Capability) else str(c))
 
+        self._progress_counter: int = 0
+        self._current_activity: str = ""
+
         cfg = TransportConfig(
             server_addr=server_addr,
             payload_chunk_bytes=payload_chunk_bytes,
@@ -137,6 +140,7 @@ class Client:
             session_title=session_title,
             config=cfg,
             auth_token=token,
+            progress_fn=lambda: self._progress_snapshot,
         )
         self._shutdown_called = False
         if autostart:
@@ -153,6 +157,15 @@ class Client:
     @property
     def session_id(self) -> str:
         return self._transport.assigned_session_id or self._session_id
+
+    def set_current_activity(self, text: str) -> None:
+        """Set the current activity description, reported in the next heartbeat."""
+        self._current_activity = text
+
+    @property
+    def _progress_snapshot(self) -> tuple[int, str]:
+        """Returns (progress_counter, current_activity) for heartbeat assembly."""
+        return self._progress_counter, self._current_activity
 
     def emit_span_start(
         self,
@@ -197,6 +210,7 @@ class Client:
         )
         self._events.push(env)
         self._transport.notify()
+        self._progress_counter += 1
         return sid
 
     def emit_span_update(
@@ -224,6 +238,7 @@ class Client:
         )
         self._events.push(env)
         self._transport.notify()
+        self._progress_counter += 1
 
     def emit_span_end(
         self,
@@ -258,6 +273,7 @@ class Client:
         )
         self._events.push(env)
         self._transport.notify()
+        self._progress_counter += 1
 
     def on_control(self, kind: str, callback: ControlCallback) -> None:
         self._transport.register_control_handler(kind.upper(), callback)

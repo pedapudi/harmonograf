@@ -46,6 +46,9 @@ class FakeClient:
     def on_control(self, kind: str, cb) -> None:
         self.calls.append(("on_control", kind, cb))
 
+    def set_current_activity(self, text: str) -> None:
+        self.calls.append(("set_activity", text, {}))
+
     # Convenience filters
     def starts(self) -> list[tuple[str, dict]]:
         return [(sid, kw) for (op, sid, kw) in self.calls if op == "start"]

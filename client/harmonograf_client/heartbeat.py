@@ -28,6 +28,8 @@ class Heartbeat:
     buffered_payload_bytes: int
     cpu_self_pct: float
     sent_at_unix: float
+    progress_counter: int = 0
+    current_activity: str = ""
 
 
 def build_heartbeat(
@@ -35,6 +37,8 @@ def build_heartbeat(
     payloads: PayloadBuffer,
     cpu_self_pct: float = 0.0,
     now: float | None = None,
+    progress_counter: int = 0,
+    current_activity: str = "",
 ) -> Heartbeat:
     stats: BufferStats = events.stats_snapshot()
     return Heartbeat(
@@ -43,6 +47,8 @@ def build_heartbeat(
         buffered_payload_bytes=payloads.buffered_bytes(),
         cpu_self_pct=cpu_self_pct,
         sent_at_unix=now if now is not None else time.time(),
+        progress_counter=progress_counter,
+        current_activity=current_activity,
     )
 
 

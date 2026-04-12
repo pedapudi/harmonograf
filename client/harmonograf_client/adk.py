@@ -221,6 +221,8 @@ class _AdkState:
         self._llm_stream_ticks: dict[str, int] = {}
         # LLM span_id → accumulated streaming text for popover "thinking".
         self._llm_streaming_text: dict[str, str] = {}
+        # agent_id → cumulative invocation count for that agent (iteration attribute).
+        self._invocation_count: dict[str, int] = {}
 
     # ------------------------------------------------------------------
     # Invocation
@@ -234,18 +236,28 @@ class _AdkState:
             with self._lock:
                 self._route_tokens[inv_id] = token
         name = agent_id or "agent"
-        attrs = {
+        # Track per-agent invocation count for the "iteration" attribute.
+        with self._lock:
+            iteration = self._invocation_count.get(name, 0) + 1
+            self._invocation_count[name] = iteration
+        attrs: dict[str, Any] = {
             "invocation_id": inv_id,
             "user_id": _safe_attr(getattr(ic, "user_id", None), "__str__", "") or str(_safe_attr(ic, "user_id", "")),
+            "iteration": iteration,
         }
         adk_session_id = _safe_attr(getattr(ic, "session", None), "id", "")
         if adk_session_id:
             attrs["adk_session_id"] = adk_session_id
-        # Emit agent description if available from the ADK Agent object.
+        # Emit agent description and class if available from the ADK Agent object.
         agent = _safe_attr(ic, "agent", None)
         agent_desc = _safe_attr(agent, "description", "") if agent is not None else ""
         if agent_desc:
             attrs["agent_description"] = str(agent_desc)
+        if agent is not None:
+            agent_class = type(agent).__name__
+            if agent_class and agent_class not in ("NoneType", "object"):
+                attrs["agent_class"] = agent_class
+        self._client.set_current_activity(f"Starting invocation of {name}")
         span_id = self._client.emit_span_start(
             kind="INVOCATION",
             name=name,
@@ -284,6 +296,24 @@ class _AdkState:
         attrs: dict[str, Any] = {"model": model}
         if model and model != "llm":
             attrs["model_name"] = str(model)
+        # Count messages and build request_preview for popover.
+        contents = _safe_attr(req, "contents", None)
+        msg_count = len(contents) if contents is not None else 0
+        if msg_count:
+            attrs["message_count"] = msg_count
+        try:
+            if contents:
+                preview_parts = []
+                for item in contents:
+                    dump = getattr(item, "model_dump", None)
+                    preview_parts.append(str(dump(mode="json") if callable(dump) else item))
+                request_preview = " ".join(preview_parts)[:200]
+                attrs["request_preview"] = request_preview
+        except Exception:
+            pass
+        self._client.set_current_activity(
+            f"Calling {model} with {msg_count} message{'s' if msg_count != 1 else ''}"
+        )
         payload = _safe_llm_request_payload(req)
         span_id = self._client.emit_span_start(
             kind="LLM_CALL",
@@ -303,9 +333,35 @@ class _AdkState:
         inv_id = _invocation_id_from_callback(cc)
         with self._lock:
             span_id = self._llm_by_invocation.get(inv_id)
+            streaming_text = self._llm_streaming_text.get(span_id, "") if span_id else ""
         if not span_id:
             return
         attrs = _safe_llm_response_attrs(resp)
+        # Add response_preview and finish_reason for popover.
+        try:
+            content = _safe_attr(resp, "content", None)
+            if content is not None:
+                parts = _safe_attr(content, "parts", None) or []
+                response_text = "".join(
+                    _safe_attr(p, "text", "") or "" for p in parts
+                )
+                if response_text:
+                    attrs["response_preview"] = response_text[:200]
+        except Exception:
+            pass
+        finish_reason = _safe_attr(resp, "finish_reason", None)
+        if finish_reason is not None:
+            try:
+                attrs["finish_reason"] = str(finish_reason)
+            except Exception:
+                pass
+        # Set activity description from accumulated streaming text if available.
+        if streaming_text:
+            self._client.set_current_activity(
+                f"Received response: {streaming_text[:60]}\u2026"
+            )
+        else:
+            self._client.set_current_activity("Processing model response")
         payload = _safe_llm_response_payload(resp)
         self._client.emit_span_end(
             span_id,
@@ -337,7 +393,7 @@ class _AdkState:
         is_long_running = bool(_safe_attr(tool, "is_long_running", False))
         name = _safe_attr(tool, "name", "tool") or "tool"
         payload = _safe_json(tool_args)
-        tool_attrs: dict[str, Any] = {"is_long_running": is_long_running}
+        tool_attrs: dict[str, Any] = {"is_long_running": is_long_running, "tool_name": name}
         # Emit a preview of tool arguments so the popover can show what the
         # tool is doing (truncated to 300 chars).
         if tool_args:
@@ -346,6 +402,13 @@ class _AdkState:
                 tool_attrs["tool_args_preview"] = args_preview
             except Exception:
                 pass
+        if _is_agent_tool(tool):
+            target_agent_name = (
+                _safe_attr(_safe_attr(tool, "agent", None), "name", "") or name
+            )
+            self._client.set_current_activity(f"Transferring to {target_agent_name}")
+        else:
+            self._client.set_current_activity(f"Calling tool {name}")
         span_id = self._client.emit_span_start(
             kind="TOOL_CALL",
             name=name,
@@ -401,11 +464,13 @@ class _AdkState:
         error: Optional[BaseException],
     ) -> None:
         call_id = _safe_attr(tool_context, "function_call_id", "") or _safe_attr(tool, "name", "tool")
+        tool_name = _safe_attr(tool, "name", "tool") or "tool"
         with self._lock:
             span_id = self._tools.pop(call_id, None)
             self._long_running.discard(call_id)
         if not span_id:
             return
+        self._client.set_current_activity(f"Completed tool {tool_name}")
         if error is not None:
             self._client.emit_span_end(
                 span_id,

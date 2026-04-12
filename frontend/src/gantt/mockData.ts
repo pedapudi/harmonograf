@@ -19,6 +19,8 @@ export function makeAgent(name: string, joinMs: number): Agent {
     capabilities: ['PAUSE_RESUME', 'CANCEL', 'REWIND', 'STEERING', 'HUMAN_IN_LOOP'],
     status: 'CONNECTED',
     connectedAtMs: joinMs,
+    currentActivity: '',
+    stuck: false,
   };
 }
 

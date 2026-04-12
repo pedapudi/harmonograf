@@ -139,7 +139,10 @@ function PopoverCard({
   const duration =
     span.endMs != null ? `${Math.max(0, span.endMs - span.startMs).toFixed(0)}ms` : '…';
 
-  const summary = spanSummary(span.kind, span.name, agentName);
+  const summary =
+    agent?.currentActivity
+      ? agent.currentActivity
+      : spanSummary(span.kind, span.name, agentName);
   const thinking = extractThinking(span);
 
   const copyId = () => {

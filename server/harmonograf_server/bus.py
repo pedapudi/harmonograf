@@ -120,13 +120,28 @@ class SessionBus:
         self.publish(Delta(agent.session_id, DELTA_AGENT_UPSERT, agent))
 
     def publish_agent_status(
-        self, session_id: str, agent_id: str, status: AgentStatus, last_heartbeat: Optional[float]
+        self,
+        session_id: str,
+        agent_id: str,
+        status: AgentStatus,
+        last_heartbeat: Optional[float],
+        *,
+        current_activity: str = "",
+        progress_counter: int = 0,
+        stuck: bool = False,
     ) -> None:
         self.publish(
             Delta(
                 session_id,
                 DELTA_AGENT_STATUS,
-                {"agent_id": agent_id, "status": status, "last_heartbeat": last_heartbeat},
+                {
+                    "agent_id": agent_id,
+                    "status": status,
+                    "last_heartbeat": last_heartbeat,
+                    "current_activity": current_activity,
+                    "progress_counter": progress_counter,
+                    "stuck": stuck,
+                },
             )
         )
 

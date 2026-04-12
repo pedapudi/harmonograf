@@ -102,6 +102,7 @@ class Transport:
         config: TransportConfig | None = None,
         channel_factory: Optional[Callable[[str], Any]] = None,
         auth_token: str | None = None,
+        progress_fn: Optional[Callable[[], tuple[int, str]]] = None,
     ) -> None:
         self._events = events
         self._payloads = payloads
@@ -116,6 +117,7 @@ class Transport:
         self._session_title = session_title
         self._config = config or TransportConfig()
         self._channel_factory = channel_factory
+        self._progress_fn = progress_fn
 
         self._handlers: dict[str, ControlHandler] = {}
         self._handlers_lock = threading.Lock()
@@ -590,6 +592,9 @@ class Transport:
 
     def _build_heartbeat(self, telemetry_pb2: Any) -> Any:
         stats: BufferStats = self._events.stats_snapshot()
+        progress_counter, current_activity = (
+            self._progress_fn() if self._progress_fn is not None else (0, "")
+        )
         return telemetry_pb2.Heartbeat(
             buffered_events=stats.buffered_events,
             dropped_events=stats.dropped_total,
@@ -597,6 +602,8 @@ class Transport:
             buffered_payload_bytes=self._payloads.buffered_bytes(),
             payloads_evicted=self._payloads_evicted,
             cpu_self_pct=0.0,
+            progress_counter=progress_counter,
+            current_activity=current_activity,
         )
 
     # ------------------------------------------------------------------

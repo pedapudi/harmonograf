@@ -96,4 +96,6 @@ export interface Agent {
   capabilities: Capability[];
   status: AgentConnection;
   connectedAtMs: number;
+  currentActivity: string;   // "" if none
+  stuck: boolean;
 }

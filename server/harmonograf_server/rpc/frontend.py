@@ -633,6 +633,9 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
                 status=_AGENT_STATUS_TO_PB.get(
                     p["status"], types_pb2.AGENT_STATUS_UNSPECIFIED
                 ),
+                current_activity=p.get("current_activity", ""),
+                progress_counter=p.get("progress_counter", 0),
+                stuck=p.get("stuck", False),
             )
         )
     if delta.kind == DELTA_HEARTBEAT:
@@ -643,6 +646,9 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
                 status=types_pb2.AGENT_STATUS_CONNECTED,
                 buffered_events=p.get("buffered_events", 0),
                 dropped_events=p.get("dropped_events", 0),
+                current_activity=p.get("current_activity", ""),
+                progress_counter=p.get("progress_counter", 0),
+                stuck=p.get("stuck", False),
             )
         )
     if delta.kind == DELTA_BACKPRESSURE:

@@ -112,6 +112,8 @@ export function convertAgent(a: PbAgent): UiAgent {
       .filter((c): c is UiCapability => c !== null),
     status: AGENT_STATUS[a.status] ?? 'DISCONNECTED',
     connectedAtMs: tsToMs(a.connectedAt),
+    currentActivity: '',
+    stuck: false,
   };
 }
 

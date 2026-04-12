@@ -52,6 +52,14 @@ export class AgentRegistry {
     this.emit();
   }
 
+  setActivityAndStuck(id: string, currentActivity: string, stuck: boolean): void {
+    const a = this.byId.get(id);
+    if (!a) return;
+    a.currentActivity = currentActivity;
+    a.stuck = stuck;
+    this.emit();
+  }
+
   clear(): void {
     this.agents = [];
     this.byId.clear();

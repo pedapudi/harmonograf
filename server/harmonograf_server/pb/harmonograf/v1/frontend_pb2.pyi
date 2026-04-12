@@ -160,16 +160,22 @@ class AgentLeft(_message.Message):
     def __init__(self, agent_id: _Optional[str] = ..., stream_id: _Optional[str] = ...) -> None: ...
 
 class AgentStatusChanged(_message.Message):
-    __slots__ = ("agent_id", "status", "buffered_events", "dropped_events")
+    __slots__ = ("agent_id", "status", "buffered_events", "dropped_events", "current_activity", "stuck", "progress_counter")
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
     BUFFERED_EVENTS_FIELD_NUMBER: _ClassVar[int]
     DROPPED_EVENTS_FIELD_NUMBER: _ClassVar[int]
+    CURRENT_ACTIVITY_FIELD_NUMBER: _ClassVar[int]
+    STUCK_FIELD_NUMBER: _ClassVar[int]
+    PROGRESS_COUNTER_FIELD_NUMBER: _ClassVar[int]
     agent_id: str
     status: _types_pb2.AgentStatus
     buffered_events: int
     dropped_events: int
-    def __init__(self, agent_id: _Optional[str] = ..., status: _Optional[_Union[_types_pb2.AgentStatus, str]] = ..., buffered_events: _Optional[int] = ..., dropped_events: _Optional[int] = ...) -> None: ...
+    current_activity: str
+    stuck: bool
+    progress_counter: int
+    def __init__(self, agent_id: _Optional[str] = ..., status: _Optional[_Union[_types_pb2.AgentStatus, str]] = ..., buffered_events: _Optional[int] = ..., dropped_events: _Optional[int] = ..., current_activity: _Optional[str] = ..., stuck: bool = ..., progress_counter: _Optional[int] = ...) -> None: ...
 
 class SessionEnded(_message.Message):
     __slots__ = ("ended_at", "final_status")

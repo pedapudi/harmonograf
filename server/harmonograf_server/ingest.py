@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 
 HEARTBEAT_TIMEOUT_S = 15.0
 HEARTBEAT_CHECK_INTERVAL_S = 5.0
+STUCK_THRESHOLD_BEATS = 3  # 3 consecutive unchanged heartbeats ≈ 15s
 PAYLOAD_MAX_BYTES = 64 * 1024 * 1024  # hard ceiling per digest — guards against runaway uploads
 
 _SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
@@ -113,6 +114,10 @@ class StreamContext:
     # (session_id, agent_id) tuples we've already auto-registered on this
     # stream — avoids re-creating sessions/agents for every span.
     seen_routes: set[tuple[str, str]] = field(default_factory=set)
+    last_progress_counter: int = -1
+    stuck_heartbeat_count: int = 0
+    current_activity: str = ""
+    is_stuck: bool = False
 
 
 class IngestPipeline:
@@ -469,6 +474,26 @@ class IngestPipeline:
         await self._store.update_agent_status(
             ctx.session_id, ctx.agent_id, AgentStatus.CONNECTED, last_heartbeat=now
         )
+
+        if msg.progress_counter > 0 and msg.progress_counter == ctx.last_progress_counter:
+            ctx.stuck_heartbeat_count += 1
+        else:
+            ctx.stuck_heartbeat_count = 0
+            ctx.last_progress_counter = msg.progress_counter
+        ctx.current_activity = msg.current_activity
+        now_stuck = ctx.stuck_heartbeat_count >= STUCK_THRESHOLD_BEATS
+        if now_stuck != ctx.is_stuck:
+            ctx.is_stuck = now_stuck
+            self._bus.publish_agent_status(
+                ctx.session_id,
+                ctx.agent_id,
+                AgentStatus.CONNECTED,
+                now,
+                current_activity=ctx.current_activity,
+                progress_counter=ctx.last_progress_counter,
+                stuck=ctx.is_stuck,
+            )
+
         self._bus.publish_heartbeat(
             ctx.session_id,
             ctx.agent_id,
@@ -480,6 +505,9 @@ class IngestPipeline:
                 "payloads_evicted": msg.payloads_evicted,
                 "cpu_self_pct": msg.cpu_self_pct,
                 "last_heartbeat": now,
+                "current_activity": msg.current_activity,
+                "progress_counter": msg.progress_counter,
+                "stuck": ctx.is_stuck,
             },
         )
 

@@ -105,7 +105,7 @@ class PayloadUpload(_message.Message):
     def __init__(self, digest: _Optional[str] = ..., total_size: _Optional[int] = ..., mime: _Optional[str] = ..., chunk: _Optional[bytes] = ..., last: bool = ..., evicted: bool = ...) -> None: ...
 
 class Heartbeat(_message.Message):
-    __slots__ = ("buffered_events", "dropped_events", "dropped_spans_critical", "buffered_payload_bytes", "payloads_evicted", "cpu_self_pct", "client_time")
+    __slots__ = ("buffered_events", "dropped_events", "dropped_spans_critical", "buffered_payload_bytes", "payloads_evicted", "cpu_self_pct", "client_time", "progress_counter", "current_activity")
     BUFFERED_EVENTS_FIELD_NUMBER: _ClassVar[int]
     DROPPED_EVENTS_FIELD_NUMBER: _ClassVar[int]
     DROPPED_SPANS_CRITICAL_FIELD_NUMBER: _ClassVar[int]
@@ -113,6 +113,8 @@ class Heartbeat(_message.Message):
     PAYLOADS_EVICTED_FIELD_NUMBER: _ClassVar[int]
     CPU_SELF_PCT_FIELD_NUMBER: _ClassVar[int]
     CLIENT_TIME_FIELD_NUMBER: _ClassVar[int]
+    PROGRESS_COUNTER_FIELD_NUMBER: _ClassVar[int]
+    CURRENT_ACTIVITY_FIELD_NUMBER: _ClassVar[int]
     buffered_events: int
     dropped_events: int
     dropped_spans_critical: int
@@ -120,7 +122,9 @@ class Heartbeat(_message.Message):
     payloads_evicted: int
     cpu_self_pct: float
     client_time: _timestamp_pb2.Timestamp
-    def __init__(self, buffered_events: _Optional[int] = ..., dropped_events: _Optional[int] = ..., dropped_spans_critical: _Optional[int] = ..., buffered_payload_bytes: _Optional[int] = ..., payloads_evicted: _Optional[int] = ..., cpu_self_pct: _Optional[float] = ..., client_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    progress_counter: int
+    current_activity: str
+    def __init__(self, buffered_events: _Optional[int] = ..., dropped_events: _Optional[int] = ..., dropped_spans_critical: _Optional[int] = ..., buffered_payload_bytes: _Optional[int] = ..., payloads_evicted: _Optional[int] = ..., cpu_self_pct: _Optional[float] = ..., client_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., progress_counter: _Optional[int] = ..., current_activity: _Optional[str] = ...) -> None: ...
 
 class Goodbye(_message.Message):
     __slots__ = ("reason",)

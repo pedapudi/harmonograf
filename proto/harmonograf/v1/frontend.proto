@@ -140,6 +140,15 @@ message AgentStatusChanged {
   AgentStatus status = 2;
   int64 buffered_events = 3;
   int64 dropped_events = 4;
+  // One-sentence description of what the agent is currently doing.
+  // Sourced from Heartbeat.current_activity and forwarded here so the
+  // frontend can display it without waiting for a span update.
+  string current_activity = 5;
+  // Whether the agent appears stuck: has a RUNNING invocation but
+  // progress_counter has not changed for STUCK_THRESHOLD heartbeats.
+  bool stuck = 6;
+  // The most recent progress_counter value seen from this agent.
+  int64 progress_counter = 7;
 }
 
 message SessionEnded {

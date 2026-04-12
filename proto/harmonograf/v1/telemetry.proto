@@ -100,6 +100,19 @@ message Heartbeat {
   int64 payloads_evicted = 5;
   double cpu_self_pct = 6;
   google.protobuf.Timestamp client_time = 7;
+
+  // Monotonically increasing counter incremented on every meaningful action
+  // (span start/update/end, tool call, LLM call, etc.). The server compares
+  // successive heartbeats: if progress_counter has not changed for
+  // STUCK_THRESHOLD consecutive heartbeats while an INVOCATION span is
+  // RUNNING, the agent is declared stuck and the frontend is notified.
+  int64 progress_counter = 8;
+
+  // One-sentence description of what the agent is currently doing, suitable
+  // for display in the popover summary and graph view tooltip. Set by the
+  // client adapter (e.g. "Calling tool search_web with query: climate change").
+  // Empty string means no current activity description is available.
+  string current_activity = 9;
 }
 
 // Graceful client shutdown — server marks the agent DISCONNECTED without
