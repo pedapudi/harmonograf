@@ -507,6 +507,48 @@ code {
   color: var(--md-sys-color-on-surface-variant, #c3c6cf);
   font-size: 12px;
 }
+.hg-drawer__section--task {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant, #43474e);
+}
+.hg-drawer__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.hg-drawer__section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface-variant, #c3c6cf);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0;
+}
+.hg-drawer__task-report {
+  color: var(--md-sys-color-primary, #7b9cf5);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 12px;
+  background: var(--md-sys-color-surface-container, #1e2130);
+  border-radius: 6px;
+  border-left: 3px solid var(--md-sys-color-primary, #7b9cf5);
+  margin: 0;
+}
+.hg-drawer__ask-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--md-sys-color-outline, #8d9199);
+  background: transparent;
+  color: var(--md-sys-color-on-surface-variant, #c3c6cf);
+  cursor: pointer;
+}
+.hg-drawer__ask-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .hg-drawer__error {
   background: var(--md-sys-color-error-container, #93000a);
   color: var(--md-sys-color-on-error-container, #ffdad6);

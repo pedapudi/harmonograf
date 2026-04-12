@@ -300,7 +300,18 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
               );
               break;
             }
-            default:
+            default: {
+              // Handle task_report delta (not yet in generated proto types).
+              if ((kind as any).case === 'taskReport') {
+                const tr = (kind as any).value;
+                const recordedMs = tr.recordedAt
+                  ? Number(tr.recordedAt.seconds ?? 0) * 1000 +
+                    Math.floor((tr.recordedAt.nanos ?? 0) / 1_000_000)
+                  : Date.now();
+                store.agents.setTaskReport(tr.agentId ?? '', tr.report ?? '', recordedMs);
+              }
+              break;
+            }
               break;
           }
         }
@@ -431,6 +442,27 @@ export function useSendControl(): (args: SendControlArgs) => Promise<void> {
       });
     };
   }, []);
+}
+
+// STATUS_QUERY control kind (value 10 — not yet in the ControlKind enum).
+const CONTROL_KIND_STATUS_QUERY = 10 as unknown as ControlKind;
+
+export async function sendStatusQuery(sessionId: string, agentId: string): Promise<string> {
+  try {
+    const client = getHarmonografClient();
+    const resp = await client.sendControl({
+      sessionId,
+      target: { agentId, spanId: '' },
+      kind: CONTROL_KIND_STATUS_QUERY,
+      payload: new Uint8Array(0),
+      ackTimeoutMs: 8000n,
+    });
+    // Return the detail from the first ack, or the top-level detail if present.
+    const firstAck = (resp as any).acks?.[0];
+    return firstAck?.detail ?? (resp as any).detail ?? '';
+  } catch {
+    return '';
+  }
 }
 
 export interface PostAnnotationArgs {

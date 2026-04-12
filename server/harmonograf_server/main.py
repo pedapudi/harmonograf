@@ -88,6 +88,12 @@ class Harmonograf:
         bus = SessionBus()
         router = ControlRouter()
         ingest = IngestPipeline(store, bus, control_sink=router)
+
+        async def _on_status_query(session_id: str, agent_id: str, span_id: str, report: str) -> None:
+            bus.publish_task_report(session_id, agent_id, report, invocation_span_id=span_id)
+
+        router.on_status_query_response(_on_status_query)
+
         servicer = TelemetryServicer(ingest, router=router, data_dir=data_dir)
         return cls(
             cfg,

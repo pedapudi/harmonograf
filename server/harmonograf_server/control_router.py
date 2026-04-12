@@ -26,7 +26,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 from harmonograf_server.pb import types_pb2
 
@@ -80,6 +80,9 @@ class _PendingDelivery:
     control_id: str
     expected_stream_ids: set[str]
     require_all: bool
+    session_id: str = ""
+    agent_id: str = ""
+    kind: int = 0
     acks: list[AckRecord] = field(default_factory=list)
     future: asyncio.Future = field(default_factory=lambda: asyncio.get_event_loop().create_future())
 
@@ -91,6 +94,12 @@ class ControlRouter:
         # control_id -> pending delivery
         self._pending: dict[str, _PendingDelivery] = {}
         self._lock = asyncio.Lock()
+        # callbacks invoked when a STATUS_QUERY ack arrives
+        self._status_query_callbacks: list[Callable[[str, str, str, str], Awaitable[None]]] = []
+
+    def on_status_query_response(self, cb: Callable) -> None:
+        """Register a callback invoked whenever a STATUS_QUERY ack arrives."""
+        self._status_query_callbacks.append(cb)
 
     # ---- subscription lifecycle --------------------------------------
 
@@ -171,6 +180,9 @@ class ControlRouter:
             control_id=control_id,
             expected_stream_ids=set(live_ids),
             require_all=require_all_acks,
+            session_id=session_id,
+            agent_id=agent_id,
+            kind=int(kind),
             future=loop.create_future(),
         )
         async with self._lock:
@@ -238,6 +250,18 @@ class ControlRouter:
         pending.expected_stream_ids.discard(record.stream_id)
         pending.acks.append(record)
         self._maybe_resolve(pending)
+
+        # Fire STATUS_QUERY callbacks when the ack is a success response.
+        if (
+            pending.kind == types_pb2.CONTROL_KIND_STATUS_QUERY
+            and record.result == types_pb2.CONTROL_ACK_RESULT_SUCCESS
+            and self._status_query_callbacks
+        ):
+            loop = asyncio.get_event_loop()
+            for cb in self._status_query_callbacks:
+                loop.create_task(
+                    cb(pending.session_id, pending.agent_id, "", record.detail)
+                )
 
     # ---- internals ---------------------------------------------------
 

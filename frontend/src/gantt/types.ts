@@ -98,4 +98,6 @@ export interface Agent {
   connectedAtMs: number;
   currentActivity: string;   // "" if none
   stuck: boolean;
+  taskReport: string;        // latest self-reported task description
+  taskReportAt: number;      // ms timestamp when report was recorded
 }

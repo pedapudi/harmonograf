@@ -144,8 +144,41 @@ def make_adk_plugin(client: Client) -> Any:
         state.queue_session_mutation(INJECT_STATE_KEY, body)
         return ControlAckSpec(result="success")
 
+    def _handle_status_query(event: Any) -> ControlAckSpec:
+        """Respond to STATUS_QUERY with a plain-text description of current activity."""
+        parts: list[str] = []
+
+        # Current activity reported via heartbeat tracking.
+        activity = client._current_activity
+        if activity:
+            parts.append(activity)
+
+        # Latest accumulated LLM streaming text across all in-flight LLM spans.
+        with state._lock:
+            streaming_texts = list(state._llm_streaming_text.values())
+        if streaming_texts:
+            # Pick the longest accumulated text (most informative).
+            latest = max(streaming_texts, key=len)
+            if len(latest) > 10:
+                snippet = latest[:120].replace("\n", " ")
+                if len(latest) > 120:
+                    parts.append(f"LLM thinking: {snippet}\u2026")
+                else:
+                    parts.append(f"LLM: {snippet}")
+
+        # Active tool calls: report by span id lookup isn't straightforward
+        # (tool span ids are values in _tools), so report the count.
+        with state._lock:
+            active_tool_count = len(state._tools)
+        if active_tool_count:
+            parts.append(f"{active_tool_count} tool call(s) in flight")
+
+        report = " | ".join(parts) if parts else "No active task."
+        return ControlAckSpec(result="success", detail=report)
+
     client.on_control("STEER", _handle_steer)
     client.on_control("INJECT_MESSAGE", _handle_inject)
+    client.on_control("STATUS_QUERY", _handle_status_query)
 
     return plugin
 
@@ -258,6 +291,7 @@ class _AdkState:
             if agent_class and agent_class not in ("NoneType", "object"):
                 attrs["agent_class"] = agent_class
         self._client.set_current_activity(f"Starting invocation of {name}")
+        attrs["task_report"] = f"Starting: {name}"
         span_id = self._client.emit_span_start(
             kind="INVOCATION",
             name=name,
@@ -371,6 +405,41 @@ class _AdkState:
             payload_mime="application/json",
             payload_role="output",
         )
+        # Emit task_report on the enclosing INVOCATION span: what the LLM
+        # just did and what it's planning to do next (tool calls, if any).
+        with self._lock:
+            invocation_span_id = self._invocations.get(inv_id)
+        if invocation_span_id:
+            planned: list[str] = []
+            try:
+                candidates = _safe_attr(resp, "candidates", None)
+                if candidates:
+                    for candidate in list(candidates)[:1]:
+                        cand_content = _safe_attr(candidate, "content", None)
+                        if cand_content is not None:
+                            cand_parts = _safe_attr(cand_content, "parts", None) or []
+                            for part in cand_parts:
+                                fc = _safe_attr(part, "function_call", None)
+                                if fc is not None:
+                                    fc_name = _safe_attr(fc, "name", None)
+                                    if fc_name:
+                                        planned.append(f"call {fc_name}")
+            except Exception:
+                pass
+            if planned:
+                description = f"Planning: {', '.join(planned)}"
+            else:
+                description = "Processing response"
+            if streaming_text:
+                snippet = streaming_text[:80].replace("\n", " ")
+                if planned:
+                    description = f"{snippet}\u2026 \u2192 {description}"
+                else:
+                    description = snippet
+            self._client.emit_span_update(
+                invocation_span_id,
+                attributes={"task_report": description, "current_task": description},
+            )
         # LLM span is done — the current-LLM pointer is cleared so
         # subsequent tool calls link to the INVOCATION again if no new
         # LLM_CALL is open.

@@ -327,6 +327,12 @@ class IngestPipeline:
         stored = await self._store.append_span(span)
         self._bus.publish_span_start(stored)
 
+        # Proactive task report via span attribute.
+        if pb_span.attributes:
+            task_report_attr = pb_span.attributes.get("task_report")
+            if task_report_attr is not None and task_report_attr.HasField("string_value"):
+                self._bus.publish_task_report(session_id, agent_id, task_report_attr.string_value)
+
     async def _ensure_route(
         self,
         ctx: StreamContext,
@@ -404,6 +410,14 @@ class IngestPipeline:
         )
         if updated is not None:
             self._bus.publish_span_update(updated)
+
+            # Proactive task report via span attribute.
+            if msg.attributes:
+                task_report_attr = msg.attributes.get("task_report")
+                if task_report_attr is not None and task_report_attr.HasField("string_value"):
+                    agent_id = updated.agent_id
+                    session_id = updated.session_id
+                    self._bus.publish_task_report(session_id, agent_id, task_report_attr.string_value)
 
     async def _handle_span_end(
         self, ctx: StreamContext, msg: telemetry_pb2.SpanEnd

@@ -8,6 +8,7 @@ backpressure signal; ingest is never blocked on a slow consumer.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -27,6 +28,7 @@ DELTA_SPAN_END = "span_end"
 DELTA_ANNOTATION = "annotation"
 DELTA_HEARTBEAT = "heartbeat"
 DELTA_BACKPRESSURE = "backpressure"
+DELTA_TASK_REPORT = "task_report"
 
 
 @dataclass
@@ -160,4 +162,26 @@ class SessionBus:
     def publish_heartbeat(self, session_id: str, agent_id: str, stats: dict) -> None:
         self.publish(
             Delta(session_id, DELTA_HEARTBEAT, {"agent_id": agent_id, **stats})
+        )
+
+    def publish_task_report(
+        self,
+        session_id: str,
+        agent_id: str,
+        report: str,
+        invocation_span_id: str = "",
+        recorded_at: Optional[float] = None,
+    ) -> None:
+        """Broadcast a TaskReport delta to WatchSession subscribers."""
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_TASK_REPORT,
+                {
+                    "agent_id": agent_id,
+                    "report": report,
+                    "invocation_span_id": invocation_span_id,
+                    "recorded_at": recorded_at or time.time(),
+                },
+            )
         )

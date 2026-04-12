@@ -271,6 +271,12 @@ enum ControlKind {
   CONTROL_KIND_INTERCEPT_TRANSFER = 8;
   // payload: steering body (utf-8)
   CONTROL_KIND_STEER = 9;
+
+  // Ask the agent to report what it is currently working on.
+  // The agent responds via ControlAck.detail with a plain-text description.
+  // The server also broadcasts the report to all WatchSession subscribers as
+  // a TaskReport delta so the Gantt and graph views update for all viewers.
+  CONTROL_KIND_STATUS_QUERY = 10;
 }
 
 // ControlTarget points at the agent (and optionally a span on it) the

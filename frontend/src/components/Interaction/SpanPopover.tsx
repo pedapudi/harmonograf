@@ -140,8 +140,8 @@ function PopoverCard({
     span.endMs != null ? `${Math.max(0, span.endMs - span.startMs).toFixed(0)}ms` : '…';
 
   const summary =
-    agent?.currentActivity
-      ? agent.currentActivity
+    agent?.taskReport || agent?.currentActivity
+      ? (agent?.taskReport || agent?.currentActivity)!
       : spanSummary(span.kind, span.name, agentName);
   const thinking = extractThinking(span);
 

@@ -114,6 +114,8 @@ export function convertAgent(a: PbAgent): UiAgent {
     connectedAtMs: tsToMs(a.connectedAt),
     currentActivity: '',
     stuck: false,
+    taskReport: '',
+    taskReportAt: 0,
   };
 }
 

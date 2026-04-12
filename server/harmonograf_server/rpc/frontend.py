@@ -18,6 +18,7 @@ from typing import AsyncIterator, Optional
 
 import grpc
 from google.protobuf.timestamp_pb2 import Timestamp
+from google.protobuf import timestamp_pb2
 
 from harmonograf_server.bus import (
     DELTA_AGENT_STATUS,
@@ -28,6 +29,7 @@ from harmonograf_server.bus import (
     DELTA_SPAN_END,
     DELTA_SPAN_START,
     DELTA_SPAN_UPDATE,
+    DELTA_TASK_REPORT,
     Delta,
     SessionBus,
 )
@@ -651,6 +653,21 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
                 stuck=p.get("stuck", False),
             )
         )
+    if delta.kind == DELTA_TASK_REPORT:
+        p = delta.payload
+        tr = frontend_pb2.TaskReport(
+            agent_id=p["agent_id"],
+            report=p["report"],
+            invocation_span_id=p.get("invocation_span_id", ""),
+        )
+        ts = timestamp_pb2.Timestamp()
+        ts.FromSeconds(int(p.get("recorded_at", time.time())))
+        # Preserve sub-second precision if available.
+        recorded_at_f = p.get("recorded_at", time.time())
+        ts.seconds = int(recorded_at_f)
+        ts.nanos = int((recorded_at_f - int(recorded_at_f)) * 1e9)
+        tr.recorded_at.CopyFrom(ts)
+        return frontend_pb2.SessionUpdate(task_report=tr)
     if delta.kind == DELTA_BACKPRESSURE:
         return None
     return None

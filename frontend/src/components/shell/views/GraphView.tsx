@@ -1,7 +1,7 @@
 import './views.css';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { useUiStore } from '../../../state/uiStore';
-import { useSessionWatch } from '../../../rpc/hooks';
+import { useSessionWatch, sendStatusQuery } from '../../../rpc/hooks';
 import { colorForAgent } from '../../../theme/agentColors';
 import type { Span } from '../../../gantt/types';
 import type { SessionStore } from '../../../gantt/index';
@@ -9,7 +9,7 @@ import type { SessionStore } from '../../../gantt/index';
 // ─── Layout constants ─────────────────────────────────────────────────────────
 const TIME_LABEL_W = 56;
 const COL_W = 200;
-const HEADER_H = 70;
+const HEADER_H = 84;
 const ACT_W = 16;
 const MIN_PX_PER_SEC = 60;
 const MAX_PLOT_H = 2400;
@@ -251,6 +251,7 @@ export function GraphView() {
   const selectSpan = useUiStore((s) => s.selectSpan);
   const watch = useSessionWatch(sessionId);
   const [, setTick] = useState(0);
+  const [askingAgents, setAskingAgents] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!sessionId) return;
@@ -443,8 +444,26 @@ export function GraphView() {
             const hBoxW = COL_W - 24;
             const hBoxX = cx - hBoxW / 2;
             const hBoxY = 4;
-            const hBoxH = 52;
+            const hBoxH = 66;
             const borderColor = isStuck ? '#f59e0b' : color;
+            const taskReport = agent.taskReport || '';
+            const taskReportTrunc = taskReport.length > 32
+              ? taskReport.slice(0, 32) + '…'
+              : taskReport;
+            const isAsking = askingAgents.has(agentId);
+
+            const handleAsk = (e: React.MouseEvent) => {
+              e.stopPropagation();
+              if (!sessionId || isAsking) return;
+              setAskingAgents((prev) => new Set([...prev, agentId]));
+              sendStatusQuery(sessionId, agentId).finally(() => {
+                setAskingAgents((prev) => {
+                  const next = new Set(prev);
+                  next.delete(agentId);
+                  return next;
+                });
+              });
+            };
 
             return (
               <g key={agentId}>
@@ -482,23 +501,60 @@ export function GraphView() {
                     className={isStuck ? 'hg-graph__pulse' : hasRunning ? 'hg-graph__pulse' : undefined}
                   />
                   <text
-                    x={cx} y={hBoxY + 22}
+                    x={cx} y={hBoxY + 18}
                     textAnchor="middle" dominantBaseline="central"
                     fill={isStuck ? '#f59e0b' : color} fontSize={12} fontWeight={700}
                   >
                     {label}
                   </text>
                   <text
-                    x={cx} y={hBoxY + 40}
+                    x={cx} y={hBoxY + 34}
                     textAnchor="middle" dominantBaseline="central"
                     fill={isStuck ? '#f59e0b' : 'var(--md-sys-color-on-surface-variant, #9da3b4)'}
                     fontSize={10}
                   >
                     {isStuck ? '⚠ stuck' : (agent.framework !== 'UNKNOWN' ? agent.framework : '')}
                   </text>
+                  {/* Task report line */}
+                  {taskReportTrunc && (
+                    <text
+                      x={cx} y={hBoxY + 50}
+                      textAnchor="middle" dominantBaseline="central"
+                      fill="var(--md-sys-color-on-surface-variant, #9da3b4)"
+                      fontSize={9}
+                    >
+                      {taskReportTrunc}
+                    </text>
+                  )}
                   {/* Status dot */}
                   <circle cx={hBoxX + hBoxW - 10} cy={hBoxY + 10} r={4} fill={statusDot} />
                 </g>
+                {/* Ask ? button (foreignObject so we get a real HTML button) */}
+                <foreignObject
+                  x={hBoxX + hBoxW - 52} y={hBoxY + hBoxH - 22}
+                  width={48} height={18}
+                  style={{ pointerEvents: 'all' }}
+                >
+                  <button
+                    onClick={handleAsk}
+                    disabled={isAsking}
+                    title="Ask agent what it's working on"
+                    style={{
+                      fontSize: 9,
+                      padding: '1px 5px',
+                      cursor: isAsking ? 'default' : 'pointer',
+                      border: `1px solid ${color}`,
+                      borderRadius: 4,
+                      background: 'var(--md-sys-color-surface, #10131a)',
+                      color: color,
+                      width: '100%',
+                      height: '100%',
+                      opacity: isAsking ? 0.6 : 1,
+                    }}
+                  >
+                    {isAsking ? '…' : 'Ask ?'}
+                  </button>
+                </foreignObject>
               </g>
             );
           })}

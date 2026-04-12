@@ -60,6 +60,14 @@ export class AgentRegistry {
     this.emit();
   }
 
+  setTaskReport(agentId: string, report: string, recordedAt: number): void {
+    const a = this.byId.get(agentId);
+    if (!a) return;
+    a.taskReport = report;
+    a.taskReportAt = recordedAt;
+    this.emit();
+  }
+
   clear(): void {
     this.agents = [];
     this.byId.clear();

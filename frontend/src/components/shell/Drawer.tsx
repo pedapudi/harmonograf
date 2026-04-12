@@ -5,6 +5,7 @@ import {
   usePayload,
   usePostAnnotation,
   useSendControl,
+  sendStatusQuery,
 } from '../../rpc/hooks';
 import type {
   Span,
@@ -99,7 +100,7 @@ function DrawerTabs({ span, sessionId }: { span: Span; sessionId: string | null 
         ))}
       </div>
       <div className="hg-drawer__body">
-        {tab === 'summary' && <SummaryTab span={span} />}
+        {tab === 'summary' && <SummaryTab span={span} sessionId={sessionId} />}
         {tab === 'payload' && <PayloadTab span={span} />}
         {tab === 'timeline' && <TimelineTab span={span} sessionId={sessionId} />}
         {tab === 'links' && <LinksTab span={span} />}
@@ -116,12 +117,54 @@ function DrawerTabs({ span, sessionId }: { span: Span; sessionId: string | null 
 
 // --- Summary tab ------------------------------------------------------------
 
-function SummaryTab({ span }: { span: Span }) {
+function SummaryTab({ span, sessionId }: { span: Span; sessionId: string | null }) {
   const durationMs =
     span.endMs !== null ? span.endMs - span.startMs : null;
   const entries = Object.entries(span.attributes);
+  const agent = sessionId ? getSessionStore(sessionId)?.agents.get(span.agentId) : undefined;
+  const [asking, setAsking] = useState(false);
+
+  const handleAsk = async () => {
+    if (!sessionId || asking) return;
+    setAsking(true);
+    await sendStatusQuery(sessionId, span.agentId).catch(() => {});
+    setAsking(false);
+  };
+
   return (
     <div className="hg-drawer__section">
+      {agent?.taskReport && (
+        <div className="hg-drawer__section hg-drawer__section--task">
+          <div className="hg-drawer__section-header">
+            <h4 className="hg-drawer__section-label">Current Task</h4>
+            <button
+              className="hg-drawer__ask-btn"
+              onClick={handleAsk}
+              disabled={asking}
+              title="Ask agent what it's working on"
+            >
+              {asking ? 'Asking…' : 'Ask ?'}
+            </button>
+          </div>
+          <p className="hg-drawer__task-report">{agent.taskReport}</p>
+        </div>
+      )}
+      {!agent?.taskReport && (
+        <div className="hg-drawer__section hg-drawer__section--task">
+          <div className="hg-drawer__section-header">
+            <h4 className="hg-drawer__section-label">Current Task</h4>
+            <button
+              className="hg-drawer__ask-btn"
+              onClick={handleAsk}
+              disabled={asking}
+              title="Ask agent what it's working on"
+            >
+              {asking ? 'Asking…' : 'Ask ?'}
+            </button>
+          </div>
+          <p className="hg-drawer__dim">No task report yet.</p>
+        </div>
+      )}
       <dl className="hg-drawer__meta">
         <dt>Status</dt>
         <dd>{span.status}</dd>

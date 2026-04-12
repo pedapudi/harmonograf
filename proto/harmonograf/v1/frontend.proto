@@ -92,6 +92,8 @@ message SessionUpdate {
     // summary was already delivered. Server emits these opportunistically
     // when the drawer-less client explicitly subscribes to payloads.
     PayloadAvailable payload_available = 14;
+    // Agent responded to a STATUS_QUERY or proactively emitted a task report.
+    TaskReport task_report = 15;
   }
 }
 
@@ -158,6 +160,19 @@ message SessionEnded {
 
 message PayloadAvailable {
   string digest = 1;
+}
+
+// Broadcast whenever an agent responds to a STATUS_QUERY control event, or
+// proactively emits a task-progress update. Delivered to all WatchSession
+// subscribers so the Gantt modal and graph view stay in sync across viewers.
+message TaskReport {
+  string agent_id = 1;
+  // The agent's self-reported description of what it is working on.
+  string report = 2;
+  // The active invocation span at the time of the report, if known.
+  string invocation_span_id = 3;
+  // Server wall-clock time when the report was recorded.
+  google.protobuf.Timestamp recorded_at = 4;
 }
 
 // ---------------------------------------------------------------------------

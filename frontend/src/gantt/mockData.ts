@@ -21,6 +21,8 @@ export function makeAgent(name: string, joinMs: number): Agent {
     connectedAtMs: joinMs,
     currentActivity: '',
     stuck: false,
+    taskReport: '',
+    taskReportAt: 0,
   };
 }
 
