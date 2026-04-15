@@ -77,6 +77,24 @@ Rules:
 See commit `1424e35 feat: progress/liveness tracking + stuckness
 detection end-to-end` for the implementation landing.
 
+**Stuck-detection decision** — the server compares successive heartbeats;
+unchanged `progress_counter` for `STUCK_THRESHOLD` beats while an INVOCATION
+span is RUNNING is the canonical "stuck" signal.
+
+```mermaid
+flowchart TD
+    HB([Heartbeat arrives every ~5s]) --> Q1{progress_counter<br/>changed since last?}
+    Q1 -- "yes" --> A1[Agent active<br/>reset counter streak]:::ok
+    Q1 -- "no" --> Q2{INVOCATION span<br/>RUNNING?}
+    Q2 -- "no" --> A2[Idle agent<br/>no alert]:::ok
+    Q2 -- "yes" --> Q3{streak ≥<br/>STUCK_THRESHOLD?}
+    Q3 -- "no" --> A3[Building streak]:::ok
+    Q3 -- "yes" --> A4[Mark agent STUCK<br/>publish on WatchSession<br/>frontend renders alert]:::bad
+
+    classDef ok fill:#d4edda,stroke:#27ae60,color:#000
+    classDef bad fill:#fde2e4,stroke:#c0392b,color:#000
+```
+
 ## Consequences
 
 **Good.**

@@ -37,6 +37,34 @@ graph TD
 
 Data flow between the backend and the UI relies on Streaming RPCs. The synchronization relies natively on Zustand stores.
 
+**State store layout** — Zustand is used for chrome (selection, filters,
+viewport intent); the hot span data lives in plain mutable stores the
+canvas subscribes to directly, never through React.
+
+```mermaid
+flowchart LR
+    subgraph Z["Zustand (React-bound)"]
+      UI[UIStore<br/>selectedSpanId · drawerOpen · filters]
+      VP[ViewportStore<br/>zoom · pan · live-follow]
+      Sess[SessionsStore<br/>list + status]
+    end
+    subgraph Mut["Mutable stores (canvas-bound)"]
+      Idx[SpanIndex<br/>Map<id,Span> + R-tree]
+      Plans[PlanStore<br/>revisions]
+      Hb[HeartbeatStore<br/>per-agent stats]
+    end
+    Wire[gRPC-Web streams] --> Idx
+    Wire --> Plans
+    Wire --> Hb
+    Idx -. dirty events .-> Render[Canvas renderer]
+    UI --> Drawer[Drawer / chrome]
+    VP --> Render
+    Sess --> Picker[Session picker]
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class Idx,Render good
+```
+
 ### Streaming Pipeline
 
 ```mermaid
@@ -79,6 +107,27 @@ To interpret standard mouse actions natively, we correlate `onClick` queries dyn
   };
 ```
 As bounds are computed for X and Y natively within the layout engine, they are registered to an R-Tree index.
+
+**Canvas layer pipeline** — three stacked canvases with independent
+dirty triggers; the DOM overlay layer rides on top for hit-test handlers
+and accessible inputs.
+
+```mermaid
+flowchart TB
+    RAF([requestAnimationFrame]) --> D{dirty layer?}
+    D -- "background<br/>(zoom · pan · agents)" --> L0[layer 0<br/>rows · ticks · gridlines]
+    D -- "blocks<br/>(span data · viewport)" --> Q[R-tree query<br/>viewport-cull]
+    Q --> Batch[batch by color<br/>fillRect passes]
+    Batch --> L1[layer 1<br/>span blocks]
+    D -- "overlay<br/>(hover · cursor · arrows · pulse)" --> L2[layer 2<br/>volatile overlay]
+    L0 --> Out[(stacked canvas)]
+    L1 --> Out
+    L2 --> Out
+    Out --- Dom[DOM overlay layer<br/>SpanContextMenu · tooltips · text inputs]
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class Q,Batch,L1 good
+```
 
 ## 5. Viewport Scaling & DOM Overlay Proxy
 

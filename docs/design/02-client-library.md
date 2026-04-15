@@ -17,6 +17,44 @@ This doc presupposes the wire protocol in `01-data-model-and-rpc.md`. Anything w
 
 ---
 
+**Internals overview** — public emit lands in the ring buffer; a single
+transport worker drains it, runs reconnect/backoff, and shares a stream
+with the control subscriber so acks ride telemetry.
+
+```mermaid
+flowchart LR
+    subgraph Public["Public API (caller threads)"]
+      C[Client.start_span / end_span /<br/>attach_payload / on_control]
+    end
+    subgraph Buffers
+      EB[EventRing<br/>~2000 entries]
+      PS[PayloadStager<br/>16 MiB cap, sha256, dedup]
+    end
+    subgraph Worker["TransportWorker (daemon thread)"]
+      Send[send loop<br/>drain + interleave + heartbeat]
+      Recv[downstream loop<br/>Welcome / PayloadRequest]
+      Re[reconnect/backoff<br/>resume token]
+    end
+    subgraph Ctrl["ControlSubscriber (daemon thread)"]
+      Sub[SubscribeControl loop]
+      H[handler dispatch]
+    end
+    Srv[(Harmonograf server)]
+    C --> EB
+    C --> PS
+    EB --> Send
+    PS --> Send
+    Send -- StreamTelemetry --> Srv
+    Srv -- Welcome / PayloadRequest --> Recv
+    Srv -- ControlEvent --> Sub
+    Sub --> H
+    H -- ControlAck --> EB
+    Re --- Send
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class Send,Recv,Sub,H good
+```
+
 ## 2. Package layout
 
 ```
@@ -200,6 +238,26 @@ Resume tokens are **not** persisted across restarts — they live in memory on t
 
 The buffer sits between the public emit methods and the transport worker. Its job is to absorb bursts and gracefully shed load when the agent emits faster than the network can drain.
 
+**Drop-policy ladder** — the buffer protects load-bearing spans last; every
+drop bumps a counter that rides the next `Heartbeat` so the operator sees
+the loss in the agent row header.
+
+```mermaid
+flowchart TD
+    Push([EventRing.push at capacity]) --> T1{evict oldest<br/>SpanUpdate?}
+    T1 -- "found" --> Done([ok]):::ok
+    T1 -- "none" --> T2{evict oldest<br/>Heartbeat?}
+    T2 -- "found" --> Done
+    T2 -- "none" --> T3{evict completed<br/>LLM_CALL / TOOL_CALL pair?}
+    T3 -- "found" --> Done
+    T3 -- "none" --> T4{evict any non-critical<br/>span pair?}
+    T4 -- "found" --> Done
+    T4 -- "none" --> T5[evict critical<br/>INVOCATION/TRANSFER/<br/>WAIT_FOR_HUMAN<br/>session unsalvageable]:::bad
+
+    classDef ok fill:#d4edda,stroke:#27ae60,color:#000
+    classDef bad fill:#fde2e4,stroke:#c0392b,color:#000
+```
+
 ### 5.1 Structure
 
 Two buffers:
@@ -266,6 +324,23 @@ A single daemon thread (`transport.TransportWorker`) owns:
 - The `SubscribeControl` server-stream
 - Reconnect/backoff state
 - The resume token (last span_id the server confirmed)
+
+**Worker lifecycle** — one daemon thread owns the channel; reconnect is a
+state of the same thread. The control subscriber is a sibling thread that
+shares the buffer for ack delivery.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Spawned
+    Spawned --> Connecting : channel.open
+    Connecting --> Handshaking : Hello sent
+    Handshaking --> Live : Welcome received<br/>SubscribeControl opened
+    Live --> Live : drain buffer · payload chunks · heartbeat
+    Live --> Disconnected : RPC error / heartbeat gap
+    Disconnected --> Connecting : backoff (100ms→30s, jitter)
+    Live --> Draining : shutdown(timeout)
+    Draining --> [*] : Goodbye sent · joined
+```
 
 ### 6.1 Connect & handshake
 

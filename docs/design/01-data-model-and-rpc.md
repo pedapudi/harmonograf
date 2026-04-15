@@ -19,6 +19,25 @@ This is the most load-bearing document in the set: the span abstraction and the 
 
 ## 2. Core entities
 
+**Entity overview** — the primitives of the wire model and how they
+relate. Spans are the high-volume hot path; payloads ride out-of-band by
+digest; annotations and control events orbit spans/agents.
+
+```mermaid
+erDiagram
+    Session ||--o{ Agent : "contains"
+    Session ||--o{ Annotation : "scoped to"
+    Agent ||--o{ Span : "emits"
+    Agent ||--o{ Capability : "advertises"
+    Span ||--o{ SpanLink : "links from"
+    Span }o--|| Span : "parent_span_id"
+    Span ||--o| PayloadRef : "payload_ref"
+    PayloadRef ||--|| Payload : "digest (sha256)"
+    Annotation }o--|| Span : "target span_id"
+    ControlEvent }o--|| Agent : "target agent_id"
+    ControlEvent ||--|| ControlAck : "id (rides telemetry)"
+```
+
 ### 2.1 Session
 
 A session is the unit a user opens in the console. Multiple agents collaborating on one task share a session id.
@@ -237,6 +256,32 @@ The client library ships with an ADK adapter that translates ADK concepts into s
 
 ## 4. gRPC service
 
+**RPC surface at a glance** — agents speak two streaming RPCs (telemetry
+bidi + control server-stream); the frontend uses a mix of unary and
+server-streaming RPCs; everything lives on one `Harmonograf` service.
+
+```mermaid
+flowchart LR
+    subgraph Agent["Agent process"]
+      AC[client lib]
+    end
+    subgraph Srv["Harmonograf server"]
+      H[(Harmonograf service)]
+    end
+    subgraph FE["Browser SPA"]
+      F[frontend]
+    end
+    AC -- "StreamTelemetry (bidi)<br/>spans · payloads · acks · heartbeats" --> H
+    H -- "SubscribeControl (server stream)<br/>ControlEvent → agent" --> AC
+    F -- "WatchSession (server stream)<br/>SessionUpdate deltas" --> H
+    F -- "ListSessions / GetSpanTree /<br/>GetPayload / SendControl /<br/>PostAnnotation / GetStats /<br/>DeleteSession (unary)" --> H
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class H good
+```
+
+
+
 ```protobuf
 syntax = "proto3";
 package harmonograf.v1;
@@ -299,6 +344,31 @@ message TelemetryDown {
 5. Client sends `ControlAck` upstream on `StreamTelemetry` for every `ControlEvent` it receives via `SubscribeControl`. Acks ride telemetry so happens-before is observable: when the server sees an ack, it knows every span emitted before the ack was at least enqueued.
 6. On heartbeat gaps > 15s, server marks the agent `DISCONNECTED`. Client reconnects with the same `agent_id` and a `resume_token` from the last server-acknowledged span.
 7. Either side may send `Goodbye` / `ServerGoodbye` for clean shutdown.
+
+**Connect → stream → control sequence** — Hello on `StreamTelemetry`
+returns a `stream_id` that the agent then uses to open `SubscribeControl`.
+Control events flow down the second stream; their acks ride back upstream
+on the first.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Cl as Client lib
+    participant Srv as Server
+    participant FE as Frontend
+    Cl->>Srv: StreamTelemetry · Hello { agent_id, session_id?, capabilities }
+    Srv-->>Cl: TelemetryDown · Welcome { assigned_session_id, stream_id, server_time }
+    Cl->>Srv: SubscribeControl { session_id, agent_id, stream_id }
+    loop agent runs
+        Cl->>Srv: SpanStart / SpanUpdate / SpanEnd
+        Cl->>Srv: PayloadUpload (chunked, interleaved)
+        Cl->>Srv: Heartbeat (every ~5s)
+    end
+    FE->>Srv: SendControl(PAUSE, target=agent_id)
+    Srv->>Cl: ControlEvent(PAUSE) [SubscribeControl]
+    Cl->>Srv: ControlAck(id=PAUSE) [StreamTelemetry — happens-after surrounding spans]
+    Note over Srv,FE: WatchSession deltas push the ack to the frontend
+```
 
 **Resume semantics**: on reconnect, the client replays any buffered but un-ack'd messages on a fresh `StreamTelemetry`. The server idempotently de-duplicates by `span.id` (UUIDv7 makes this cheap). `SubscribeControl` is re-opened too — control delivery is at-least-once with ack-driven dedup on the client.
 

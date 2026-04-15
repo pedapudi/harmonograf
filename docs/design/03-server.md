@@ -17,6 +17,32 @@ This doc presupposes the wire protocol in `01-data-model-and-rpc.md` and the fro
 
 ---
 
+**Component layout** — one process composes ingest, sessions, control,
+fanout, and storage. The hot path stays in memory via `SessionRegistry`;
+the `Store` is write-behind.
+
+```mermaid
+flowchart TB
+    subgraph Proc["harmonograf-server (single process)"]
+      Svc[HarmonografServicer<br/>grpc.aio]
+      Svc --> Ing[IngestPipeline]
+      Svc --> Reg[SessionRegistry<br/>LiveSession dict + interval trees]
+      Svc --> CR[ControlRouter]
+      Svc --> WF[WatchFanout]
+      Ing --> Reg
+      Ing --> WF
+      Reg --> Store[(Store ABC)]
+      Store --> Mem[InMemoryStore]
+      Store --> SQ[SQLiteStore<br/>+ payloads/ blob dir]
+      CR -. ack futures .- Ing
+    end
+    Agents[Agents · client libs] -- StreamTelemetry / SubscribeControl --> Svc
+    FE[Frontend] -- WatchSession / unary --> Svc
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class Reg,Ing,WF,CR good
+```
+
 ## 2. Package layout
 
 ```
@@ -151,6 +177,23 @@ All methods are synchronous. Async wrapping happens in the service layer using a
 
 `Span`, `AgentInfo`, etc., are plain dataclasses defined in `storage/base.py`, **not** the protobuf types directly. The service layer converts at the boundary. This keeps the storage layer free of protobuf imports and lets us evolve the wire format without breaking persistence.
 
+**Storage layering** — the live mirror serves the hot path; the `Store`
+ABC is the only persistence seam. Payload bytes sit on disk under
+two-char shards rather than in SQLite blobs.
+
+```mermaid
+flowchart TB
+    Hot[Hot path<br/>WatchSession · GetSpanTree<br/>(live sessions)] --> LM[LiveSession mirror<br/>per-agent interval trees]
+    LM -. write-behind<br/>asyncio.to_thread .-> Store[Store ABC]
+    Cold[Cold path<br/>ListSessions · re-open<br/>(after grace)] --> Store
+    Store --> Mem[InMemoryStore<br/>dicts + intervaltree]
+    Store --> SQ[SQLiteStore<br/>WAL · indexed by<br/>(session, agent, time)]
+    SQ --> FS[(payloads/{xx}/{digest}<br/>filesystem blobs<br/>ref-counted)]
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class LM,Store good
+```
+
 ### 4.1 InMemoryStore
 
 Backed by:
@@ -275,6 +318,28 @@ IngestPipeline.handle(stream)
   - on Heartbeat: update agent last_heartbeat, mirror BufferStats to LiveSession
   - on ControlAck: route to ControlRouter so a SendControl caller can resolve
   - on Goodbye: mark agent DISCONNECTED, schedule grace timer
+```
+
+**Ingest fan-out** — every `TelemetryUp` variant is dispatched into its
+own handler; spans land in both the live mirror and the `Store`, then
+broadcast to every interested watcher.
+
+```mermaid
+flowchart LR
+    In([TelemetryUp]) --> Disp{oneof variant}
+    Disp -- Hello --> H1[ensure session<br/>register agent<br/>mint stream_id]
+    Disp -- SpanStart/Update/End --> H2[dedup by id]
+    H2 --> LM[LiveSession mirror<br/>(in-memory)]
+    H2 --> ST[asyncio.to_thread<br/>Store.write_span_*]
+    H2 --> WF[WatchFanout.broadcast<br/>SessionUpdate delta]
+    Disp -- PayloadUpload --> H3[PayloadAssembler[digest]<br/>verify on last=true]
+    H3 --> ST
+    Disp -- Heartbeat --> H4[update last_heartbeat<br/>mirror BufferStats]
+    Disp -- ControlAck --> H5[ControlRouter.deliver_ack]
+    Disp -- Goodbye --> H6[mark DISCONNECTED<br/>30s grace timer]
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class LM,WF good
 ```
 
 ### 5.1 Dedup

@@ -63,6 +63,27 @@ third-party agent run) wants the plugin without the agent. Forcing
 them to take both is the same failure as forcing a single
 orchestration mode (ADR 0012).
 
+**Two ADK extension points, one App** — `HarmonografAgent` subclasses
+`BaseAgent` (orchestration), `HarmonografAdkPlugin` subclasses `BasePlugin`
+(telemetry + state). The agent discovers the plugin at runtime via
+`ctx.plugin_manager`.
+
+```mermaid
+flowchart TB
+    App[ADK App] --> Root[HarmonografAgent<br/>(BaseAgent subclass)<br/>orchestration loop]
+    App --> Plug[HarmonografAdkPlugin<br/>(BasePlugin subclass)<br/>telemetry + _AdkState]
+    Root -. ctx.plugin_manager<br/>discovers .-> Plug
+    Plug --> State[_AdkState<br/>plan + task transitions]
+    Root --> State
+    Plug --> Wire[client transport<br/>spans / heartbeats / acks]
+    Note["attach_adk() helper<br/>installs both for InMemoryRunner"]:::note
+    App --- Note
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    classDef note fill:#fef3c7,stroke:#b45309,color:#000
+    class Root,Plug good
+```
+
 ## Consequences
 
 **Good.**

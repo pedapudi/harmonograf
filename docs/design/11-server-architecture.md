@@ -88,6 +88,32 @@ sequenceDiagram
 
 The system inherently binds connection sockets across `identity.py` hashes securely. Resolving conflicts prevents autonomous networks stalling sequentially inherently locally safely. 
 
+**Ingest pipeline & bus subscribers** — every `TelemetryUp` variant routes
+through `IngestPipeline` and lands on `SessionBus`; subscribers (storage,
+WatchSession watchers, retention sweeper) read independently without
+contending on a SQL transaction.
+
+```mermaid
+flowchart LR
+    Up([TelemetryUp]) --> Disp{oneof}
+    Disp -- Hello --> Sess[SessionRegistry<br/>create / join]
+    Disp -- SpanStart/Update/End --> SP[span pipeline<br/>dedup + bind tasks]
+    Disp -- PayloadUpload --> PA[PayloadAssembler<br/>chunks → digest verify]
+    Disp -- Heartbeat --> HB[liveness + progress_counter]
+    Disp -- ControlAck --> CR[ControlRouter.deliver_ack]
+    SP --> Bus[(SessionBus<br/>per-session fan-out)]
+    PA --> Bus
+    HB --> Bus
+    Sess --> Bus
+    Bus --> Sub1[Storage adapter<br/>(SQLite / Memory)]
+    Bus --> Sub2[WatchSession queues<br/>(per frontend)]
+    Bus --> Sub3[Retention sweeper]
+    Bus --> Sub4[Stuck-detection<br/>heartbeat watcher]
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class Bus,SP good
+```
+
 ## 5. System Health, Retention, and GC
 
 Large swarms of active autonomous agents flood bounding limitations frequently. The `retention.py` background chron process guarantees garbage collections natively:

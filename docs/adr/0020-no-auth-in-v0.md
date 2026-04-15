@@ -54,6 +54,24 @@ Harmonograf v0:
 v0 operators who need auth at all use the bearer token; everyone else
 runs on loopback and trusts the OS.
 
+**v0 access matrix** — loopback is the default; `--auth-token` adds a
+shared bearer; everything else is documented as a known gap until auth v1.
+
+```mermaid
+flowchart LR
+    Op[Operator] --> Q1{bind address?}
+    Q1 -- "127.0.0.1<br/>(default)" --> L[Loopback only<br/>OS scopes access]:::ok
+    Q1 -- "0.0.0.0 / LAN" --> Warn[Startup warning logged]
+    Warn --> Q2{--auth-token set?}
+    Q2 -- "yes" --> T[Shared bearer required<br/>on every RPC]:::ok
+    Q2 -- "no" --> Open[Wide open on LAN<br/>known v0 risk]:::bad
+    L --> HZ[/healthz, /readyz<br/>always open/]
+    T --> HZ
+
+    classDef ok fill:#d4edda,stroke:#27ae60,color:#000
+    classDef bad fill:#fde2e4,stroke:#c0392b,color:#000
+```
+
 ## Consequences
 
 **Good.**

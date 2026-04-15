@@ -17,6 +17,34 @@ This doc presupposes the span/session/control model defined in `01-data-model-an
 
 ---
 
+**Frontend architecture** — React owns the chrome (app bar, drawer, nav
+rail) and never re-renders the Gantt; the canvas renderer subscribes
+directly to a mutable span index.
+
+```mermaid
+flowchart TB
+    subgraph React["React tree"]
+      Shell[App shell · MD3 chrome]
+      Drawer[Inspector drawer]
+      Picker[Session picker]
+      Trans[Transport bar]
+    end
+    subgraph Hot["Hot path (bypasses React)"]
+      Idx[(span index<br/>Map + per-agent interval trees)]
+      Render[Canvas renderer<br/>3 layers · RAF loop]
+      Cv[(HTMLCanvasElement)]
+    end
+    Wire[gRPC-Web<br/>WatchSession deltas] --> Idx
+    Idx -- dirty rects --> Render
+    Render --> Cv
+    Shell --- Cv
+    Drawer -. GetPayload (lazy) .- Wire
+    Trans -. SendControl .- Wire
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class Render,Idx,Cv good
+```
+
 ## 2. Stack
 
 - **React 18 + TypeScript**. Concurrent rendering used for drawer/inspector updates only; hot Gantt rendering bypasses React.
@@ -168,6 +196,43 @@ Every agent row has a left-edge colored strip (8px wide, full row height), in th
 
 This is the heart of the doc. Every interaction maps to one or more control events or annotations from the protocol.
 
+**Interaction → control flow** — every observation primitive maps to a
+network call (or doesn't); every action maps to a `ControlEvent` or an
+`Annotation`. This is the seam the protocol exposes to the user.
+
+```mermaid
+flowchart LR
+    subgraph User["User input"]
+      Hov[hover]
+      Clk[click]
+      RC[right-click]
+      KB[keyboard / transport bar]
+    end
+    subgraph Local["Local-only"]
+      Tip[tooltip / dim]
+      Sel[select span<br/>open drawer]
+    end
+    subgraph Net["Network-bound"]
+      Pay[GetPayload]
+      Anno[PostAnnotation]
+      Steer["PostAnnotation kind=STEERING<br/>→ ControlEvent.STEER"]
+      Ctrl["SendControl<br/>(PAUSE / RESUME / CANCEL /<br/>REWIND_TO / APPROVE / REJECT)"]
+    end
+    Hov --> Tip
+    Clk --> Sel
+    Sel --> Pay
+    RC --> Anno
+    RC --> Steer
+    KB --> Ctrl
+    Ctrl --> Srv[(Server)]
+    Steer --> Srv
+    Anno --> Srv
+    Pay --> Srv
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class Ctrl,Steer good
+```
+
 ### 7.1 Observation — passive, fast, rich
 
 - **Hover a block** → 200ms-delayed tooltip: kind, name, duration, status, agent, summary preview (from `payload_ref.summary`). No network call.
@@ -293,6 +358,26 @@ Opens on span selection. Tabbed.
 ## 9. Performance architecture
 
 Hitting 60fps with 10k+ blocks requires discipline, not tricks. The key moves:
+
+**Renderer pipeline** — three canvas layers, each with its own dirty
+trigger; only the blocks layer touches the spatial index, and React is
+absent from the loop.
+
+```mermaid
+flowchart TB
+    RAF([requestAnimationFrame]) --> Coalesce[coalesce dirty rects]
+    Coalesce --> L1{layer dirty?}
+    L1 -- "background<br/>(zoom/pan/agents)" --> Bg[draw rows · gridlines · ticks]
+    L1 -- "blocks<br/>(span data / viewport)" --> Q[interval-tree query<br/>viewport-cull]
+    Q --> Batch[batch by color bucket<br/>fillRect passes]
+    L1 -- "overlay<br/>(hover / selection / animation)" --> Ov[hover · cursor · arrows ·<br/>pulse / breathe]
+    Bg --> Out[(canvas)]
+    Batch --> Out
+    Ov --> Out
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class Q,Batch good
+```
 
 ### 9.1 Render loop architecture
 
