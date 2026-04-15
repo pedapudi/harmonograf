@@ -30,6 +30,9 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Vendor google/adk-python
+        run: git clone --depth 1 https://github.com/google/adk-python.git third_party/adk-python
+
       - name: Install server deps
         run: make server-install
 
@@ -58,6 +61,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Vendor google/adk-python
+        run: git clone --depth 1 https://github.com/google/adk-python.git third_party/adk-python
 
       - name: Install client deps
         run: make client-install
