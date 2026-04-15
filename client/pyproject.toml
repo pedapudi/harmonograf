@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "grpcio>=1.60",
     "protobuf>=4.25",
+    "pydantic>=2.0",
 ]
 
 [project.optional-dependencies]

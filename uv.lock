@@ -1604,6 +1604,7 @@ source = { editable = "client" }
 dependencies = [
     { name = "grpcio" },
     { name = "protobuf" },
+    { name = "pydantic" },
 ]
 
 [package.optional-dependencies]
@@ -1616,6 +1617,7 @@ test = [
 requires-dist = [
     { name = "grpcio", specifier = ">=1.60" },
     { name = "protobuf", specifier = ">=4.25" },
+    { name = "pydantic", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23" },
 ]
