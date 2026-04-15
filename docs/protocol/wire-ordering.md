@@ -48,6 +48,23 @@ Cross-stream ordering is **undefined**. Two concurrent telemetry
 streams under the same agent_id see interleaved delivery at the
 server; rely on span ids + timestamps, not wire order, to reconstruct.
 
+The five per-stream ordering rules at a glance — the wire allows freedom only for cross-digest payload chunks and unrelated spans:
+
+```mermaid
+flowchart TD
+    Open["StreamTelemetry opens"]
+    Hello["Hello (must be first)"]
+    Welcome["Welcome arrives"]
+    Plan["task_plan (recommended<br/>before bound spans)"]
+    Parent["SpanStart(parent)"]
+    Child["SpanStart(child)"]
+    Update["SpanUpdate(child)"]
+    End["SpanEnd(child)"]
+    Chunks["payload chunks for digest D<br/>(in order; cross-digest free)"]
+    Open --> Hello --> Welcome --> Plan --> Parent --> Child --> Update --> End
+    Child -. interleave freely .-> Chunks
+```
+
 ### `SubscribeControl`
 
 Server-streaming. Control events are ordered per subscription:
@@ -76,6 +93,26 @@ event is on the wire ahead of the ack.
 That's exactly what the UI needs to say "the agent paused at span X"
 correctly — the last span before the ack is by definition the last
 thing the agent did before handling the pause.
+
+The argument as a sequence — pre-ack spans are guaranteed on the wire ahead of the ack because they share a single ordered gRPC stream:
+
+```mermaid
+sequenceDiagram
+    participant Server
+    participant CtlSub as SubscribeControl (S→A)
+    participant Agent
+    participant Tel as StreamTelemetry (A→S, single ordered stream)
+    Server->>CtlSub: ControlEvent{ id=ctl_1, kind=PAUSE }
+    CtlSub->>Agent: deliver event
+    Note over Agent: handler emits final spans for in-flight work
+    Agent->>Tel: span_update(s9)
+    Agent->>Tel: span_end(s9)
+    Agent->>Tel: control_ack{ control_id=ctl_1 }
+    Note over Tel: gRPC preserves order on this stream:<br/>span_update, span_end arrive at server<br/>strictly before the ack
+    Tel->>Server: span_update(s9)
+    Tel->>Server: span_end(s9)
+    Tel->>Server: control_ack ⇒ record_ack ⇒ resolve future
+```
 
 ### Why it's free
 

@@ -4,6 +4,28 @@ User sent their first message, the agent accepted it, but no plan is
 rendered in the UI. The Gantt stays empty; `task_plans` is empty in
 sqlite; the drawer's Plan tab is blank.
 
+**Triage decision tree** — the SKIP-reason log lines are the fast path.
+Grep `maybe_run_planner: SKIP` first; the `reason=...` value names the branch.
+
+```mermaid
+flowchart TD
+    Start([No plan rendered]):::sym --> Q1{Client log:<br/>maybe_run_planner: SKIP?}
+    Q1 -- "reason=no_planner" --> F1[Construct HarmonografAgent<br/>with planner=LLMPlanner(...)]:::fix
+    Q1 -- "reason=is_harmonograf_agent<br/>_without_host" --> F2[Sub-agent: expected.<br/>Or set orchestrator_mode=True]:::fix
+    Q1 -- "no SKIP line" --> Q2{planner.generate<br/>raised?}
+    Q2 -- "yes" --> F3[Fix LLM connectivity /<br/>prompt — see demo-wont-start]:::fix
+    Q2 -- "no" --> Q3{LLMPlanner: empty<br/>response?}
+    Q3 -- "yes" --> F4[Model returned function call:<br/>switch to structured output]:::fix
+    Q3 -- "no" --> Q4{client.submit_plan<br/>raised?}
+    Q4 -- "yes" --> F5[Transport problem:<br/>see agent-disconnects-repeatedly]:::fix
+    Q4 -- "no" --> Q5{no user request<br/>found on invocation?}
+    Q5 -- "yes" --> F6[Tool-triggered turn,<br/>not user turn — no plan by design]:::fix
+    Q5 -- "no" --> F7[Custom planner hook raised:<br/>grep 'planner hook raised']:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **UI**: current-task strip reads "no plan yet" or similar; no task

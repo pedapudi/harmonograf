@@ -91,6 +91,28 @@ The two-char shard directory (`sqlite.py:_payload_path`) keeps any
 single directory under a few thousand files at realistic payload
 counts.
 
+The same layout as a tree:
+
+```mermaid
+flowchart TD
+    root[~/.harmonograf/data/]
+    db[harmonograf.db<br/>schema + spans + agents + tasks]
+    wal[harmonograf.db-wal<br/>WAL journal, ephemeral]
+    shm[harmonograf.db-shm<br/>WAL shared memory]
+    pay[payloads/<br/>content-addressed blobs]
+    s1[ab/<br/>two-char shard]
+    s2[cd/]
+    f1[abcdef…<br/>sha256 file]
+    f2[cdef…]
+
+    root --> db
+    root --> wal
+    root --> shm
+    root --> pay
+    pay --> s1 --> f1
+    pay --> s2 --> f2
+```
+
 ### Backup
 
 Use the `GetStats` RPC first to find out how big the live state

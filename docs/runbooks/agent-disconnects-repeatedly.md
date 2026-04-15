@@ -5,6 +5,29 @@ reconnects; it streams some more; it dies again. You see a sawtooth in
 the heartbeat counters and the UI flickers between CONNECTED and
 DISCONNECTED.
 
+**Triage decision tree** — sawtooth reconnects → narrow the cause → fix.
+Heartbeat timeout dominates this runbook in practice; check it first.
+
+```mermaid
+flowchart TD
+    Start([Sawtooth: connect →<br/>disconnect → reconnect]):::sym --> Q1{Server log:<br/>heartbeat timeout?}
+    Q1 -- "yes, regular cadence" --> Q1a{Client buffered_events<br/>climbing?}
+    Q1a -- "yes" --> F1a[Buffer overflow:<br/>reduce span emission<br/>or grow buffer]:::fix
+    Q1a -- "no" --> F1b[Raise heartbeat_timeout_s<br/>or lower client interval]:::fix
+    Q1 -- "no" --> Q2{Disconnects correlate<br/>across ALL agents?}
+    Q2 -- "yes" --> F2[Server crash loop:<br/>see post-crash-recovery]:::fix
+    Q2 -- "no" --> Q3{Client exception is<br/>UNAVAILABLE / DEADLINE?}
+    Q3 -- "yes" --> F3[Network flap:<br/>investigate transport,<br/>client auto-recovers]:::fix
+    Q3 -- "no" --> Q4{sqlite agents row:<br/>duplicate agent_id<br/>across sessions?}
+    Q4 -- "yes" --> F4[Stop duplicate process,<br/>delete stale identity file]:::fix
+    Q4 -- "no" --> Q5{HARMONOGRAF_SERVER<br/>= :5174?}
+    Q5 -- "yes" --> F5[Switch to native<br/>port 7531]:::fix
+    Q5 -- "no" --> F6[Inspect control subscription<br/>logs; rule out gRPC-Web<br/>proxy buffering]:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **Client log**:

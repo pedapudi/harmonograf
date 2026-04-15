@@ -35,6 +35,30 @@ The layers are attached via `renderer.attach()` from
 
 ## The frame loop
 
+`frame()` (`renderer.ts:508-533`) drives the three layers in a fixed
+phase order. Each phase only runs work for layers whose dirty bit is
+set, except for the overlay which always redraws to keep interactive
+feedback responsive.
+
+```mermaid
+flowchart TD
+  RAF[requestAnimationFrame fires] --> F[frame]
+  F --> NOW[advance session-relative now]
+  NOW --> LF[live-follow viewport if parked at right edge]
+  LF --> DB[update dirty bits]
+  DB --> BG{background dirty?}
+  BG -->|yes| DBG[drawBackground<br/>axis / rows / gutter]
+  BG -->|no| BL
+  DBG --> BL{blocks dirty?}
+  BL -->|yes| DBL[drawBlocks<br/>context band → bucketing → labels]
+  BL -->|no| OV
+  DBL --> OV[drawOverlay<br/>now cursor / hover / selection]
+  OV --> SF[scheduleFrame — always]
+  SF --> RAF
+```
+
+
+
 `frame()` at `renderer.ts:508-533` is the per-frame entry point, scheduled
 via `scheduleFrame()` (`renderer.ts:461`). Each frame does:
 
@@ -190,6 +214,52 @@ Zoom bounds (`ZOOM_MIN_MS` / `ZOOM_MAX_MS`) are enforced inside
 the smallest zoom that shows all spans plus 5% padding.
 
 ## Subscription model
+
+Each child registry on `SessionStore` gets its own subscriber. The
+callback's only job is to set the appropriate dirty bit and return —
+the actual draw happens in the next `frame()`. This decouples mutation
+volume from frame rate: a hundred mutations in one microtask still
+result in a single redraw on the next animation frame.
+
+```mermaid
+sequenceDiagram
+  participant H as useSessionWatch
+  participant SS as SessionStore
+  participant R as Renderer
+  participant RAF as rAF loop
+  H->>SS: store.spans.append(...)
+  SS->>R: subscriber fires
+  R->>R: blocksDirty = true
+  H->>SS: store.tasks.upsertPlan(...)
+  SS->>R: subscriber fires
+  R->>R: blocksDirty = true
+  H->>SS: store.agents.upsert(...)
+  SS->>R: subscriber fires
+  R->>R: bgDirty = true; blocksDirty = true
+  Note over R: callbacks return immediately —<br/>no draw work yet
+  RAF->>R: frame()
+  R->>R: drawBackground (bgDirty)
+  R->>R: drawBlocks (blocksDirty)
+  R->>R: drawOverlay (always)
+  R->>R: clear dirty bits
+```
+
+### Three-layer subscribe → repaint fan-out
+
+A second view of the same machinery, focused on which subscribers mark
+which canvas layers and how that fans into the per-frame draw calls:
+
+```mermaid
+flowchart LR
+  SP[spans.subscribe] --> BD[blocksDirty]
+  AG[agents.subscribe] --> BGD[bgDirty]
+  AG --> BD
+  TK[tasks.subscribe] --> BD
+  CS[contextSeries.subscribe] --> BD
+  BGD --> DBG[drawBackground]
+  BD --> DBL[drawBlocks]
+  OV[every frame] --> DOV[drawOverlay]
+```
 
 `attach()` at `renderer.ts:197-211` subscribes to four `SessionStore`
 sub-stores in order:

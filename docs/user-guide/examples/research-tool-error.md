@@ -8,6 +8,25 @@ which the agent then executes to completion.
 This is the smallest complete scenario in harmonograf. Use it to calibrate
 what a healthy refine cycle looks like.
 
+The full arc as a sequence — agent, tool, planner, UI — so you know what to look for at each beat:
+
+```mermaid
+sequenceDiagram
+    participant You
+    participant UI
+    participant Agent as researcher
+    participant Tool as web_search
+    participant Plan as planner
+    Agent->>Tool: web_search(query)
+    Tool-->>Agent: HTTP 503
+    Agent->>Plan: drift: tool_error
+    Plan-->>Agent: revised plan (+retry task)
+    Plan-->>UI: PlanRevisionBanner pill
+    Agent->>Tool: alt_search(query)
+    Tool-->>Agent: results
+    Agent-->>UI: tasks → COMPLETED
+```
+
 ## Set-up
 
 - One agent: `researcher` (ADK, `FRAMEWORK_ADK`).

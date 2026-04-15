@@ -18,6 +18,21 @@ Harmonograf has four conceptual layers. Every primitive in the system
 lives in exactly one of them. Keeping them straight is the single biggest
 investment you can make in your mental model.
 
+The four layers stack like this — telemetry at the bottom records what happened, the plan layer says what was supposed to happen, state carries per-turn context, and control is how humans push back. They only touch through explicit interfaces (reporting tools, session.state keys, control events).
+
+```mermaid
+flowchart TB
+    Control[Control layer<br/>events · acks · annotations]
+    State[State layer<br/>session.state · ContextVars]
+    Plan[Plan layer<br/>tasks · plans · revisions]
+    Telemetry[Telemetry layer<br/>spans · payloads · links]
+    Control -. annotations on .-> Telemetry
+    Control -. steer / pause .-> State
+    State -. read by agents .-> Plan
+    Plan -. binds tasks to .-> Telemetry
+```
+
+
 1. **Telemetry layer.** Spans, payloads, links. What actually happened,
    with timestamps. Fine-grained, high-volume, append-only.
 2. **Plan layer.** Tasks, edges, plans, plan revisions. What was *supposed*
@@ -57,6 +72,49 @@ onto the session for fast listing.
 The relationship is one-to-many: one session, many agents. There is no
 cross-session agent concept — an agent only exists in the context of a
 session, and spans always belong to a single `(session, agent)` pair.
+
+The class diagram below sketches the relationships between the primitives — read it as "Session contains Agents and Plans, Agents emit Spans, Plans contain Tasks, and Tasks bind back to Spans by id."
+
+```mermaid
+classDiagram
+    class Session {
+      id
+      title
+      status
+    }
+    class Agent {
+      id
+      framework
+      capabilities
+    }
+    class Span {
+      id
+      kind
+      status
+      attributes
+    }
+    class Plan {
+      id
+      revision
+      reason
+    }
+    class Task {
+      id
+      title
+      assignee
+      status
+      bound_span_id
+    }
+    class Annotation
+    class ControlEvent
+    Session "1" --> "*" Agent
+    Session "1" --> "*" Plan
+    Agent "1" --> "*" Span
+    Plan "1" --> "*" Task
+    Task ..> Span : bound_span_id
+    Session --> Annotation
+    Session --> ControlEvent
+```
 
 See [docs/protocol/data-model.md](../protocol/data-model.md) for the wire
 shape of `Session` and `Agent`.
@@ -369,6 +427,24 @@ User view: [docs/user-guide/drawer.md](../user-guide/drawer.md).
 ---
 
 ## How the layers compose
+
+A task's lifecycle reads top-to-bottom across all four layers. Below is the same story as a state diagram — what state a task is in, and which event drives each transition.
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING : planner upserts plan
+    PENDING --> RUNNING : report_task_started
+    RUNNING --> RUNNING : report_task_progress
+    RUNNING --> COMPLETED : report_task_completed
+    RUNNING --> FAILED : report_task_failed
+    COMPLETED --> [*]
+    FAILED --> [*]
+    note right of FAILED
+      fires refine →
+      revised plan with
+      new task in PENDING
+    end note
+```
 
 Putting it all together, a single task's lifecycle looks like this:
 

@@ -33,6 +33,48 @@ Public API surface lives in `client/harmonograf_client/__init__.py:29-49`:
 `make_harmonograf_runner`. Anything not in that list is internal — feel free
 to rename or restructure it.
 
+### Class layout
+
+How the public entry points relate to the inner classes:
+
+```mermaid
+classDiagram
+    class HarmonografAgent {
+        +agent: BaseAgent
+        +orchestrator_mode: bool
+        +parallel_mode: bool
+        +planner: PlannerHelper
+        -_augment_subtree_with_reporting()
+    }
+    class AdkAdapter {
+        +on_model_*()
+        +before_tool_callback()
+        +on_event_callback()
+    }
+    class _AdkState {
+        +tasks: dict
+        +apply_transition()
+    }
+    class Client {
+        +emit_span_*()
+        -ring_buffer
+        -transport
+    }
+    class Transport {
+        +start()
+        +shutdown()
+    }
+    class EventRingBuffer
+    class InvariantChecker
+
+    HarmonografAgent --> AdkAdapter : installs plugin
+    HarmonografAgent --> Client : owns
+    AdkAdapter --> _AdkState : owns
+    AdkAdapter --> InvariantChecker : guards transitions
+    Client --> EventRingBuffer
+    Client --> Transport
+```
+
 ## Plugin vs agent: why both?
 
 `HarmonografAgent` (in `agent.py`) and `AdkAdapter` (in `adk.py`) look like
@@ -74,9 +116,42 @@ This separation is the most important design decision in the client library.
 Do not re-couple span lifecycle to task state. Any PR that tries to "simplify"
 by inferring task state from spans should be rejected.
 
+The plan-state machine itself, monotonic and enforced by `InvariantChecker._check_monotonic`:
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING
+    PENDING --> IN_PROGRESS: report_task_started
+    IN_PROGRESS --> COMPLETED: report_task_completed
+    IN_PROGRESS --> FAILED: report_task_failed
+    IN_PROGRESS --> BLOCKED: report_task_blocked
+    BLOCKED --> IN_PROGRESS: unblocked
+    COMPLETED --> [*]
+    FAILED --> [*]
+    note right of PENDING
+        Monotonic — no
+        backwards transitions
+    end note
+```
+
 ### The three channels
 
 Plan state moves through three coordinated paths:
+
+All three channels funnel into `_AdkState`:
+
+```mermaid
+flowchart LR
+    s[session.state<br/>shared dict]
+    rt[Reporting tools<br/>before_tool_callback]
+    cb[ADK callbacks<br/>after_model / on_event]
+    state[_AdkState<br/>plan state machine]
+    inv[InvariantChecker]
+    s -- harmonograf.* keys --> state
+    rt -- intercepted transitions --> state
+    cb -- prose / event signals --> state
+    state -- guarded by --> inv
+```
 
 #### 1. `session.state` (ADK's shared mutable dict)
 
@@ -147,6 +222,34 @@ Interception happens in `AdkAdapter.before_tool_callback`
 (`adk.py:1299`) — it checks whether the tool name is in
 `REPORTING_TOOL_NAMES` and, if so, applies the transition on `_AdkState`
 before returning the stub ack.
+
+Sequence of one reporting-tool call from model to state transition:
+
+```mermaid
+sequenceDiagram
+    participant LLM
+    participant ADK as ADK Runner
+    participant Plug as AdkAdapter
+    participant Reg as REPORTING_TOOL_NAMES
+    participant State as _AdkState
+    participant Inv as InvariantChecker
+
+    LLM->>ADK: function_call("report_task_completed", task_id=t3)
+    ADK->>Plug: before_tool_callback(name, args)
+    Plug->>Reg: name in REPORTING_TOOL_NAMES?
+    Reg-->>Plug: yes
+    Plug->>State: apply IN_PROGRESS → COMPLETED for t3
+    State->>Inv: check_monotonic, check_forced_task
+    alt valid
+        Inv-->>State: ok
+        State-->>Plug: applied
+    else illegal
+        Inv-->>State: violation
+        State-->>Plug: stamp mismatch (counter++)
+    end
+    Plug-->>ADK: stub return {acknowledged: true}
+    ADK-->>LLM: tool result
+```
 
 **Pitfall:** agents sometimes call reporting tools with stale task IDs
 (e.g., because the model repeated itself). `_AdkState` uses the

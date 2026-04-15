@@ -64,6 +64,29 @@ drawer for a span whose bytes never arrived. This is best-effort:
 if the client has already evicted, the request gets an eviction
 ack.
 
+**Payload lifecycle** — span and bytes travel as separate frames on the
+same telemetry stream, joined at the server by sha256 digest. The frontend
+fetches lazily; under backpressure the client marks `evicted` instead of
+blocking.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Ag as Agent / client buffer
+    participant Srv as Server (ingest)
+    participant Store as Payload store (digest-keyed)
+    participant FE as Frontend
+    Ag->>Ag: sha256(payload bytes) → digest
+    Ag->>Srv: SpanStart { PayloadRef(digest, size, mime, summary) }
+    Ag->>Srv: PayloadUpload(digest, chunk 1..N) [interleaved]
+    Srv->>Store: write blob[digest]
+    Note over Ag,Srv: under backpressure → drop bytes,<br/>set PayloadUpload.evicted=true
+    FE->>Srv: WatchSession → sees PayloadRef
+    FE->>Srv: GetPayload(digest) [drawer open]
+    Srv->>Store: read blob[digest]
+    Store-->>FE: bytes (or 'evicted' marker)
+```
+
 ## Consequences
 
 **Good.**

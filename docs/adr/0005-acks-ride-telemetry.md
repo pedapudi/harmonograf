@@ -55,6 +55,31 @@ ordering relationship to telemetry. The operator would see pause-acked while
 still receiving spans that "happened before pause" on a different stream,
 with no way to tell the two apart.
 
+**Happens-before on one stream vs split across two** — left: separate ack RPC
+lets PAUSE-ack overtake an in-flight span, leaving the operator unable to tell
+"before pause" from "after pause." Right: ack rides telemetry, so any span
+ahead of it on the wire is necessarily "before."
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Op as Operator
+    participant Srv as Server
+    participant Ag as Agent
+    Note over Ag,Srv: Rejected — separate ack RPC
+    Op->>Srv: PAUSE
+    Srv->>Ag: ControlEvent(PAUSE) [SubscribeControl]
+    Ag-->>Srv: SpanUpdate(s1) [StreamTelemetry]
+    Ag->>Srv: ControlAck(PAUSE) [SendControlAck — different stream!]
+    Note right of Srv: ack arrives before s1<br/>ordering ambiguous
+    Note over Ag,Srv: Chosen — ack on telemetry
+    Op->>Srv: PAUSE
+    Srv->>Ag: ControlEvent(PAUSE) [SubscribeControl]
+    Ag-->>Srv: SpanUpdate(s1) [StreamTelemetry]
+    Ag->>Srv: ControlAck(PAUSE) [StreamTelemetry — same stream]
+    Note right of Srv: s1 read before ack<br/>happens-before preserved
+```
+
 ## Consequences
 
 **Good.**

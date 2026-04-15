@@ -62,6 +62,39 @@ so the server and frontend can group spans by task. But neither is derived
 from the other — the task's status transitions come from reporting tools
 (ADR 0011), not from inspecting `bound_span_id`'s span status.
 
+**Two primitives, one-way binding** — Task carries intent and is mutable;
+Span records activity and is append-only. The only edge between them is
+`Task.bound_span_id` plus the `hgraf.task_id` span attribute used for
+grouping.
+
+```mermaid
+classDiagram
+    class Task {
+      +id: str
+      +plan_id: str
+      +status: TaskStatus
+      +assignee: str
+      +deps: List~str~
+      +bound_span_id: str
+    }
+    class Span {
+      +id: UUIDv7
+      +parent_span_id: str
+      +kind: SpanKind
+      +start_time / end_time
+      +status: SpanStatus
+      +attributes (incl. hgraf.task_id)
+    }
+    class TaskPlan {
+      +id: str
+      +revision: int
+      +tasks: List~Task~
+    }
+    TaskPlan "1" --> "*" Task
+    Task --> Span : bound_span_id (optional)
+    Span ..> Task : hgraf.task_id (group-by)
+```
+
 ## Consequences
 
 **Good.**

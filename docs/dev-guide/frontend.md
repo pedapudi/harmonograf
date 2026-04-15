@@ -47,6 +47,32 @@ frontend/src/
 └── __tests__/                # vitest tests
 ```
 
+The React tree with annotations of which plane each component reads from:
+
+```mermaid
+flowchart TD
+    Shell --> AppBar
+    Shell --> NavRail
+    Shell --> Main[main view container]
+    Shell --> Drawer
+    Shell --> TransportBar
+    Main --> GanttCanvas
+    Main --> GraphView
+    Main --> LiveActivity
+    Main --> NotesView
+    Main --> SettingsView
+    GanttCanvas --> Renderer[GanttRenderer<br/>canvas]
+    Renderer --> SS[SessionStore<br/>mutable hot store]
+    Renderer --> AR[AgentRegistry]
+    Renderer --> TR[TaskRegistry]
+    Drawer --> SS
+    Drawer --> SpanPopover
+    AppBar --> UI[uiStore<br/>zustand UI state]
+    NavRail --> UI
+    GanttCanvas --> UI
+    Drawer --> UI
+```
+
 ## The unusual bit: two data planes
 
 React apps usually have one data plane: `setState` → re-render. The
@@ -114,6 +140,26 @@ of data. It holds:
 
 There is one `SessionStore` per session currently being watched. In practice
 that's one at a time — switching sessions discards the old store.
+
+SessionStore subscription model: mutators notify React subscribers, while the canvas reads on every animation frame without subscribing.
+
+```mermaid
+flowchart LR
+    hook[useSessionWatch hook]
+    upsert[SessionStore.upsertSpan<br/>upsertAgent / upsertTaskPlan]
+    spans[Map of SpanRow]
+    notify[notify subscribers]
+    drawer[Drawer / Minimap<br/>React components]
+    raf[requestAnimationFrame loop]
+    canvas[GanttRenderer<br/>reads on each frame]
+
+    hook --> upsert
+    upsert --> spans
+    upsert --> notify
+    notify --> drawer
+    raf --> canvas
+    canvas -. reads .-> spans
+```
 
 ### Mutation entry points
 
@@ -221,6 +267,36 @@ Helper functions in the same file:
   renderer.
 
 Proto/frontend type conversion lives in `frontend/src/rpc/convert.ts`.
+
+RPC hook → store → renderer fan-out for the watch flow:
+
+```mermaid
+flowchart LR
+    tx[getTransport<br/>Connect-RPC web]
+    ws[useSessionWatch]
+    pay[usePayload]
+    sc[useSendControl]
+    pa[usePostAnnotation]
+    ss[SessionStore]
+    tr[TaskRegistry]
+    ar[AgentRegistry]
+    rdr[GanttRenderer]
+    drawer[Drawer]
+
+    tx --> ws
+    tx --> pay
+    tx --> sc
+    tx --> pa
+    ws --> ss
+    ws --> ar
+    ws --> tr
+    ss --> rdr
+    ar --> rdr
+    tr --> rdr
+    pay --> drawer
+    sc -- await ack --> tx
+    pa -- await ack --> tx
+```
 
 ### Snapshot + deltas pattern
 

@@ -6,6 +6,25 @@ more `InvariantViolation` lines in the client log and may see the
 `ProtocolMetrics.invariant_violations` counter climb on the invocation
 span.
 
+**Triage decision tree** — the violation's `rule=` field names the failing
+invariant; each rule has a different fix path.
+
+```mermaid
+flowchart TD
+    Start([InvariantViolation in<br/>client log]):::sym --> Q1{rule=?}
+    Q1 -- "monotonic" --> F1[Reporting tool raced<br/>callback: serialise writers,<br/>tool wins]:::fix
+    Q1 -- "dependency_consistency" --> F2[Planner produced cycle /<br/>dangling edge — fix planner]:::fix
+    Q1 -- "assignee_validity" --> F3[Planner invented agent;<br/>validate against known list]:::fix
+    Q1 -- "plan_id_uniqueness" --> F4[Counter-based ID; switch<br/>to UUID]:::fix
+    Q1 -- "forced_task" --> F5[Walker holding task ID a<br/>refine removed; clear<br/>ContextVar on apply]:::fix
+    Q1 -- "task_results_keys" --> F6[Stale key in completed_<br/>task_results — only write<br/>for current plan IDs]:::fix
+    Q1 -- "revision_history_monotone" --> F7[Late refine raced fresh plan;<br/>guard put_task_plan server-side]:::fix
+    Q1 -- "span_bindings" --> F8[hgraf.task_id stamped on<br/>wrapper span — only LLM_CALL /<br/>TOOL_CALL]:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **Client log** (example):

@@ -9,6 +9,17 @@ If you just want a list of server flags and ops knobs, jump to
 [operator-quickstart.md](operator-quickstart.md) instead. If you want the
 motivation and design context, read [overview.md](overview.md) first.
 
+The whole walk-through is five steps. Here is the shape:
+
+```mermaid
+flowchart LR
+    Clone[1. Clone] --> Install[2. make install]
+    Install --> LLM[3. Point at an LLM]
+    LLM --> Demo[4. make demo]
+    Demo --> Drive[5. Drive a rollout<br/>in the ADK tab]
+    Drive -. watch live .-> UI[harmonograf UI<br/>:5173]
+```
+
 ---
 
 ## Prerequisites

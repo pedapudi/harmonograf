@@ -46,6 +46,27 @@ Set at the top of `start()` (`sqlite.py:187-190`):
 
 ## The schema
 
+The eight tables and their key relationships. Solid arrows are foreign
+keys (the only enforced one is `tasks.plan_id → task_plans.id ON DELETE
+CASCADE`); dashed arrows are by-value joins on shared id columns.
+
+```mermaid
+erDiagram
+  sessions ||--o{ agents : "session_id"
+  sessions ||--o{ spans : "session_id"
+  sessions ||--o{ annotations : "session_id"
+  sessions ||--o{ task_plans : "session_id"
+  sessions ||--o{ context_window_samples : "session_id"
+  agents ||--o{ spans : "agent_id"
+  agents ||--o{ context_window_samples : "agent_id"
+  spans ||--o{ span_links : "span_id"
+  spans }o--|| payloads : "payload_digest"
+  task_plans ||--o{ tasks : "FK ON DELETE CASCADE"
+  spans ||--o{ annotations : "target_span_id"
+```
+
+
+
 Defined at the top of the file as a multi-statement `SCHEMA` string.
 Each `CREATE TABLE` corresponds to one entity. Walking through them
 with the lines in `sqlite.py`:
@@ -251,6 +272,32 @@ live as files on disk rather than in the SQLite database, because
 large blobs fragment the SQLite file. Small payloads are inlined.
 
 ## Migration pattern
+
+The migration strategy is "idempotent ALTER on startup": after
+`executescript(SCHEMA)` runs the `CREATE TABLE IF NOT EXISTS` statements
+(which are no-ops on an existing DB), `start()` introspects each table
+with `PRAGMA table_info` and adds any missing columns one at a time. No
+version table, no migration scripts on disk — the DDL is the source of
+truth and the runtime fills any gaps.
+
+```mermaid
+flowchart TD
+  S[start] --> M[mkdir db_path / payload_dir]
+  M --> C[aiosqlite.connect]
+  C --> P[set PRAGMAs<br/>WAL / busy_timeout / FK / NORMAL]
+  P --> SC[executescript SCHEMA<br/>CREATE TABLE IF NOT EXISTS]
+  SC --> I1[PRAGMA table_info spans]
+  I1 --> A1{payload_* cols present?}
+  A1 -->|missing| AL1[ALTER TABLE spans ADD COLUMN]
+  A1 -->|present| I2
+  AL1 --> I2[PRAGMA table_info task_plans]
+  I2 --> A2{revision_* cols present?}
+  A2 -->|missing| AL2[ALTER TABLE task_plans ADD COLUMN]
+  A2 -->|present| K[commit → ready]
+  AL2 --> K
+```
+
+
 
 `start()` at `sqlite.py:179-223` executes the base SCHEMA first
 (which is idempotent thanks to `IF NOT EXISTS`), then runs

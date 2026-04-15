@@ -22,6 +22,32 @@ pass; afterwards they work as reference.
 | 8 | [`debugging.md`](debugging.md) | When something is broken. Logging, invariants, common failure modes. |
 | 9 | [`contributing.md`](contributing.md) | Before opening a PR. Commit style, CI expectations, AGENTS.md rules. |
 
+The map below shows how the chapters depend on each other on a first read:
+
+```mermaid
+flowchart TD
+    setup[setup.md<br/>day-one install]
+    arch[architecture.md<br/>three-component map]
+    client[client-library.md<br/>plan state machine]
+    server[server.md<br/>ingest + bus + storage]
+    frontend[frontend.md<br/>SessionStore + canvas]
+    proto[working-with-protos.md<br/>codegen + compat]
+    testing[testing.md<br/>four test tiers]
+    debugging[debugging.md<br/>symptom-first triage]
+    contributing[contributing.md<br/>commit → PR → CI]
+
+    setup --> arch
+    arch --> client
+    arch --> server
+    arch --> frontend
+    client --> proto
+    server --> proto
+    frontend --> proto
+    proto --> testing
+    testing --> debugging
+    debugging --> contributing
+```
+
 A dedicated wire-protocol reference lives in a sibling tree under
 `docs/protocol/` (see task #8). This guide covers *internals, workflow, and
 architecture* — for byte-level message shapes and the gRPC surface, cross-link

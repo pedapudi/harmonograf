@@ -43,6 +43,26 @@ throughout.
 
 ## `_AdkState`: the lifecycle
 
+`_AdkState` accretes per-run state through a fixed sequence of
+ADK-callback boundaries. The state-machine view of those boundaries —
+construction, first invocation, the per-turn loop, and teardown:
+
+```mermaid
+stateDiagram-v2
+  [*] --> Constructed: _AdkState(client, planner)
+  Constructed --> InvocationOpen: on_invocation_start (before_run)
+  InvocationOpen --> Planned: maybe_run_planner — _active_plan_by_session set
+  Planned --> Turn: before_model_callback
+  Turn --> Turn: on_model_end + on_tool_start/end<br/>on_event partials / state_delta
+  Turn --> Refining: refine_plan_on_drift
+  Refining --> Turn: _apply_refined_plan
+  Turn --> InvocationClosing: after_run_callback
+  InvocationClosing --> Constructed: on_invocation_end<br/>plan snapshot, clear forced
+  Constructed --> [*]: process exit
+```
+
+
+
 `_AdkState` is defined at `adk.py:1591`. Its constructor (`adk.py:1597`)
 takes the harmonograf `Client`, an optional `PlannerHelper`, a planner model
 override, and a `refine_on_events` flag. Those four inputs are everything it
@@ -138,6 +158,28 @@ The actual telemetry-emitting methods live on `_AdkState`:
 - `on_event` (`adk.py:4466`) dispatches to `_on_event_partial`,
   `_on_event_state_delta`, `_on_event_transfer`, `_on_event_escalate`.
 
+### Callback invocation order for one model turn
+
+The eight callback hooks fire in a fixed order around a single LLM
+turn, with `on_event_callback` interleaving partial / state_delta /
+transfer events between `before_model_callback` and
+`after_model_callback`.
+
+```mermaid
+flowchart TD
+  BR[before_run_callback<br/>on_invocation_start + maybe_run_planner] --> BM[before_model_callback<br/>plan ctx + on_model_start]
+  BM --> EV[on_event_callback<br/>partials, state_delta, transfer, escalate]
+  EV --> BT[before_tool_callback<br/>on_tool_start + reporting tool intercept]
+  BT --> AT[after_tool_callback<br/>on_tool_end + result-shape check]
+  AT --> ERR{tool error?}
+  ERR -->|yes| OTE[on_tool_error_callback<br/>span FAILED + tool_error drift]
+  ERR -->|no| AM
+  OTE --> AM[after_model_callback<br/>_observe_response_signals → drift]
+  AM --> NXT{another turn?}
+  NXT -->|yes| BM
+  NXT -->|no| AR[after_run_callback<br/>on_invocation_end]
+```
+
 ## `_forced_task_id_var` and why AgentTool needs it
 
 ```python
@@ -173,6 +215,33 @@ Read sites that honor the forced binding:
 - `on_tool_end` error tracking (`adk.py:4443`).
 - The drift-detection site at `adk.py:1268` uses it to attribute drift to
   the right task when the coordinator's response does not name one.
+
+### How AgentTool sub-runs inherit the forced id
+
+The ContextVar inheritance is what makes a coordinator's forced binding
+flow into a sub-agent's spans without explicit plumbing. The sequence
+shows where the forced id is set, copied, and consumed.
+
+```mermaid
+sequenceDiagram
+  participant HA as HarmonografAgent (parallel walker)
+  participant CV as _forced_task_id_var
+  participant AT as AgentTool (coordinator → sub_agent)
+  participant SA as sub_agent.run_async
+  participant ST as _stamp_attrs_with_task
+  HA->>CV: set("t3") in _run_single_task_isolated
+  HA->>HA: set_forced_task_id mirrors to _forced_current_task_id
+  HA->>AT: await coordinator.run_async
+  AT->>SA: invoke on same asyncio task<br/>(ContextVar inherited)
+  SA->>ST: emit LLM_CALL → _stamp_attrs_with_task
+  ST->>CV: get() → "t3"
+  alt task t3 present and non-terminal
+    ST-->>SA: attrs["hgraf.task_id"] = "t3"
+  else terminal
+    ST->>HA: increment _stamp_mismatch_count
+  end
+  HA->>HA: mark_forced_task_completed → CV.set(None)
+```
 
 ## Task stamping: `_stamp_attrs_with_task`
 
@@ -233,6 +302,34 @@ Every drift kind — named constant or bare string — is enumerated in
 a new one, read that doc first to understand the severity/recoverability
 conventions and the frontend icon mapping.
 
+### Drift dispatch flowchart
+
+`detect_drift` (`adk.py:2916-3137`) checks signals in priority order
+and returns at the first match. The branch table:
+
+```mermaid
+flowchart TD
+  D[detect_drift event] --> S1{function_call from<br/>wrong agent?}
+  S1 -->|yes| R1[tool_call_wrong_agent]
+  S1 -->|no| S2{transfer_to_agent<br/>not in plan?}
+  S2 -->|yes| R2[transfer_to_unplanned_agent]
+  S2 -->|no| S3{span FAILED while<br/>task RUNNING?}
+  S3 -->|yes| R3[failed_span]
+  S3 -->|no| S4{COMPLETED with<br/>PENDING dep?}
+  S4 -->|yes| R4[task_completion_out_of_order]
+  S4 -->|no| S5{finish_reason in<br/>CONTEXT_PRESSURE set?}
+  S5 -->|yes| R5[context_pressure]
+  S5 -->|no| S6{response text<br/>marker?}
+  S6 -->|refusal| R6[llm_refused]
+  S6 -->|merge/split/reorder| R7[llm_merged/split/reordered]
+  S6 -->|none| S7{stamp_mismatch ≥ 3?}
+  S7 -->|yes| R8[multiple_stamp_mismatches]
+  S7 -->|no| N[None — no drift]
+```
+
+See [`drift-taxonomy-catalog.md`](drift-taxonomy-catalog.md) for the
+complete kind list and severity/recoverable matrix.
+
 ## The refine pipeline
 
 `refine_plan_on_drift` (`adk.py:3255-3459`) is the single entry point every
@@ -265,6 +362,38 @@ task), rebuilds `tasks_by_id`, swaps `plan_state.plan` and
 `plan_state.tasks`, appends to `plan_state.revisions`, and submits the new
 plan via `client.submit_plan`. The frontend then receives the diff via the
 WatchSession stream and paints the banner.
+
+### Refine pipeline sequence
+
+The full path from a fired drift through throttle, planner call, and
+plan apply, including the unrecoverable cascade fork:
+
+```mermaid
+sequenceDiagram
+  participant Caller as call site (callback / tool)
+  participant ST as _AdkState
+  participant PL as PlannerHelper
+  participant CL as Client
+  Caller->>ST: refine_plan_on_drift(drift)
+  alt recoverable=False
+    ST->>ST: _fail_and_cascade_unrecoverable
+    ST-->>CL: status updates (FAILED/CANCELLED)
+  else recoverable
+    ST->>ST: throttle check<br/>_last_refine_by_kind
+    alt within 2s of same kind
+      ST-->>Caller: drop (collapsed)
+    else not throttled
+      ST->>ST: _snapshot_plan_with_current_statuses
+      ST->>PL: planner.refine(plan, drift_context)
+      PL-->>ST: new plan or None
+      alt new plan
+        ST->>ST: _apply_refined_plan<br/>(canonicalize, preserve terminals,<br/>stamp revision_*)
+        ST->>CL: submit_plan(new)
+        ST->>ST: append plan_state.revisions
+      end
+    end
+  end
+```
 
 ## Planner integration
 

@@ -75,6 +75,33 @@ is also listed in ADR 0011 as the motivation for the pivot.
   point at and say "here is the transition that was incorrect" — the
   state was an emergent property of several async callbacks racing.
 
+**Iter14 (rejected) vs iter15 (chosen)** — the span-lifecycle path on the
+left races on parallel mode and lies on long-running tool calls; the
+reporting-tool path on the right declares state from a single
+synchronous intercept.
+
+```mermaid
+flowchart LR
+    subgraph I14["iter14 — span-lifecycle inference (superseded)"]
+      direction TB
+      I1[span starts] -->|infer| I2[task RUNNING]
+      I3[span COMPLETED] -->|infer| I4[task COMPLETED]
+      I5[prose 'task complete'] -->|fallback| I4
+      I6[parallel close races] -->|reorder| I4
+    end
+    subgraph I15["iter15 — reporting tools (chosen, ADR 0011)"]
+      direction TB
+      J1[LLM calls report_task_*] --> J2[before_tool_callback]
+      J2 --> J3[_AdkState monotonic transition]
+    end
+    I14 -. lies on long tool calls,<br/>races in parallel mode .-> I15
+
+    classDef bad fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class I14,I1,I2,I3,I4,I5,I6 bad
+    class I15,J1,J2,J3 good
+```
+
 ## What replaced it
 
 ADR 0011 describes the replacement: explicit reporting tools intercepted

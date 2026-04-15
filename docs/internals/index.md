@@ -12,6 +12,36 @@ doubt about what a field *means* on the wire, read protocol; when in doubt
 about *why* a file on one side of the wire does what it does at runtime, read
 internals.
 
+The map below shows which subsystem each tour describes and how the docs
+relate to one another and to the wire-protocol docs.
+
+```mermaid
+flowchart LR
+  subgraph Client["Client (client/harmonograf_client/)"]
+    ADK["adk-plugin-tour"]
+    AGENT["harmonograf-agent-tour"]
+    DRIFT["drift-taxonomy-catalog"]
+    INV["invariant-validator"]
+  end
+  subgraph Frontend["Frontend (frontend/src/)"]
+    SS["session-store-task-registry"]
+    REND["renderer-pipeline"]
+  end
+  subgraph Server["Server (server/harmonograf_server/)"]
+    BUS["server-ingest-bus"]
+    SQL["storage-sqlite"]
+  end
+  PROTO["docs/protocol/*"]
+  AGENT --> ADK
+  ADK --> DRIFT
+  ADK --> INV
+  ADK -.wire.-> PROTO
+  BUS -.wire.-> PROTO
+  SS -.wire.-> PROTO
+  BUS --> SQL
+  SS --> REND
+```
+
 ## Reading order
 
 If you are new to the codebase, read in this order:

@@ -62,6 +62,28 @@ not plans, tasks, annotations, or control events. Adopting OTLP for half the
 protocol would leave us with two wire formats for one product and no shared
 schema for concepts like `TaskPlan` and `ControlEvent`.
 
+**One proto, three languages, two listeners** — the schema in
+`proto/harmonograf/v1/` regenerates into all three components, and the server
+runs gRPC and gRPC-Web on separate ports speaking the same service.
+
+```mermaid
+flowchart LR
+    P[proto/harmonograf/v1/<br/>service.proto + types.proto] --> Gen{make proto}
+    Gen --> PyS[Python server stubs]
+    Gen --> PyC[Python client lib stubs]
+    Gen --> TS[TypeScript frontend stubs]
+    PyS --> Srv[Harmonograf server]
+    Srv --> L1[":7531 gRPC<br/>(native clients)"]
+    Srv --> L2[":7532 gRPC-Web<br/>(browser via sonora)"]
+    PyC --> Agent[Agent / ADK process]
+    TS --> Front[Browser SPA]
+    Agent -- StreamTelemetry / SubscribeControl --> L1
+    Front -- WatchSession / unary --> L2
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class P,Gen good
+```
+
 ## Consequences
 
 **Good.**

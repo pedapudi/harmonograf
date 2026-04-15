@@ -64,6 +64,32 @@ callbacks (`on_tool_error_callback`), and event observer pattern matches
 on model output. In every case the result is the same: call planner
 refine, submit new `TaskPlan`, let the frontend diff and render.
 
+**Drift → refine → diff pipeline** — multiple drift sources funnel into one
+deferential refine call; the resulting `TaskPlan` revision is diffed by the
+frontend and rendered as a banner + side-by-side drawer.
+
+```mermaid
+flowchart LR
+    subgraph Sources["Drift sources"]
+      direction TB
+      D1[report_new_work_discovered]
+      D2[report_plan_divergence]
+      D3[on_tool_error_callback]
+      D4[event observer prose match]
+      D5[user_steer / user_cancel]
+      D6[context_pressure heartbeat]
+    end
+    Sources --> Detect[detect_drift<br/>kind + severity]
+    Detect --> Refine[planner.refine<br/>(LLM call)]
+    Refine --> Submit[submit_plan<br/>revision_index++]
+    Submit --> Reg[server TaskRegistry upsert]
+    Reg --> Diff[computePlanDiff<br/>frontend/src/gantt/index.ts]
+    Diff --> UI[Banner + drawer side-by-side]
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class Refine,Submit,Diff,UI good
+```
+
 ## Consequences
 
 **Good.**

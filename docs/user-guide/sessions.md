@@ -32,6 +32,21 @@ is no fancy syntax — just type a word.
 
 Clear the search field to see the full list again.
 
+## How a session moves through the picker
+
+A session is bucketed by its server status plus the age of its last activity. Live rows have at least one connected client; once every client disconnects the row falls into Recent, and 24h later it ages into Archive.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Live : first agent Hello
+    Live --> Recent : last agent Goodbye
+    Recent --> Archive : 24h since activity
+    Live --> Live : more agents join
+    note right of Live
+      pulsing dot in picker
+    end note
+```
+
 ## Live / Recent / Archive — how a session is bucketed
 
 Sessions come from `ListSessions` on the server and are classified by

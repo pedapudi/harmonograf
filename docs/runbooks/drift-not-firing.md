@@ -4,6 +4,27 @@ A tool failed, the agent refused, or the user sent a steer — and
 nothing happened. No `drift observed` log line, no refine, no plan
 revision.
 
+**Triage decision tree** — drift detection runs from ADK callbacks; if the
+right callback never fires for the event class, the detector is blind.
+
+```mermaid
+flowchart TD
+    Start([Expected drift,<br/>nothing detected]):::sym --> Q1{ADK callback fired<br/>at all? before/after_tool,<br/>on_event}
+    Q1 -- "no" --> F1[ADK version skipped<br/>callback for this event;<br/>upgrade ADK or add hook]:::fix
+    Q1 -- "yes" --> Q2{Tool actually raised<br/>or returned error obj?}
+    Q2 -- "returned obj" --> F2[Tool swallowed exception:<br/>let it propagate so<br/>on_tool_end sees error=]:::fix
+    Q2 -- "raised" --> Q3{detect_drift raised<br/>and was swallowed?<br/>(needs DEBUG log)}
+    Q3 -- "yes" --> F3[Fix detector exception,<br/>add unit test]:::fix
+    Q3 -- "no" --> Q4{task_plans count<br/>for session = 0?}
+    Q4 -- "yes" --> F4[Drift fired before<br/>first plan — submit plan<br/>first]:::fix
+    Q4 -- "no" --> Q5{LOG_LEVEL = DEBUG?}
+    Q5 -- "no" --> F5[severity=debug drifts hide<br/>at INFO; raise log level]:::fix
+    Q5 -- "yes" --> F6[Drift kind not on the<br/>scanner's path —<br/>add detector for it]:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **Client log**: absence of

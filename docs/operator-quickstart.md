@@ -4,6 +4,18 @@ A minimal walkthrough for getting a local Harmonograf instance running end-to-en
 
 For deeper architectural context see [docs/design/03-server.md](design/03-server.md) and [docs/design/02-client-library.md](design/02-client-library.md).
 
+The path from clone to live demo, with the network bindings each step opens up:
+
+```mermaid
+flowchart LR
+    Clone[clone repo<br/>+ third_party/adk-python] --> Install[make install<br/>uv sync · pnpm install]
+    Install --> Server[make server-run<br/>:7531 gRPC · :7532 gRPC-Web]
+    Install --> Frontend[make frontend-dev<br/>Vite → :7532]
+    Server --> Demo[make demo-presentation<br/>agent → :7531]
+    Frontend --> UI([browser at Vite URL])
+    Demo --> UI
+```
+
 ## 1. Prerequisites
 
 - Python 3.11+ with [`uv`](https://github.com/astral-sh/uv) on `PATH`

@@ -36,6 +36,30 @@ one of the regions below. Mentally tag them as you read.
 Most panels are live-subscribing: they repaint whenever a span, agent, task,
 or annotation mutates in the backing store. You do not need to refresh.
 
+## How the pages relate
+
+The user guide is a map of the UI. Most pages start from the Gantt and branch outward into the inspector drawer or the graph view; a few are reference (shortcuts, troubleshooting) you grab when you need them.
+
+```mermaid
+flowchart TD
+    Sessions[sessions.md<br/>open the picker]
+    Gantt[gantt-view.md]
+    Graph[graph-view.md]
+    Drawer[drawer.md]
+    Tasks[tasks-and-plans.md]
+    Control[control-actions.md]
+    Annot[annotations.md]
+    Sessions --> Gantt
+    Gantt --> Graph
+    Gantt --> Drawer
+    Drawer --> Tasks
+    Drawer --> Control
+    Drawer --> Annot
+    Cookbook[cookbook.md] -. recipes touch .-> Drawer
+    Trouble[troubleshooting.md] -. when stuck .-> Sessions
+    Keys[keyboard-shortcuts.md] -. reference .-> Gantt
+```
+
 ## Contents
 
 1. [Sessions — picker, filters, attention badges](sessions.md)

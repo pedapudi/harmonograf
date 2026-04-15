@@ -4,6 +4,30 @@ The server or an agent crashed mid-run. You need to bring the system
 back into a consistent state, decide what to replay, and understand
 what was lost.
 
+**Recovery decision tree** — who died, who survives, what to restart.
+The store is non-authoritative; agents replay from `resume_token`.
+
+```mermaid
+flowchart TD
+    Start([Something crashed,<br/>state inconsistent]):::sym --> Q1{What died?}
+    Q1 -- "server only" --> S1[Restart server.<br/>Watch for 'stream opened'<br/>on each agent]:::fix
+    Q1 -- "agent only" --> S2[Restart agent with same<br/>session_id; same agent_id<br/>= reconnect, new = new row]:::fix
+    Q1 -- "everything" --> S3[Server first, then agents.<br/>Gap between crash and<br/>last resume_token is lost]:::fix
+    S1 --> Q2{integrity_check ok?}
+    Q2 -- "no" --> N1[See sqlite-errors.md;<br/>or rm data/harmonograf.db*<br/>nuclear option]:::fix
+    Q2 -- "yes" --> Q3{end_time IS NULL spans<br/>from dead agents?}
+    Q3 -- "yes, won't reconnect" --> N2[Spans stay RUNNING forever —<br/>no auto-rollup sweeper today]:::warn
+    Q3 -- "no, all agents back" --> Done([Healthy: agents resume<br/>from their tokens]):::ok
+    S2 --> Q4{Tasks RUNNING in plan<br/>for dead agent?}
+    Q4 -- "yes" --> N3[Plan stuck at RUNNING<br/>until agent re-reports]:::warn
+    S3 --> Done
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+    classDef warn fill:#fff3cd,stroke:#f39c12,color:#000
+    classDef ok fill:#cce5ff,stroke:#3498db,color:#000
+```
+
 ## Symptoms
 
 - **Server died** — `systemctl status harmonograf-server` shows failed;

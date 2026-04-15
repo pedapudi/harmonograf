@@ -20,7 +20,31 @@ telemetry came up on.
 
 ## Three doors
 
-There are three kinds of reader who walk into harmonograf. Pick yours:
+There are three kinds of reader who walk into harmonograf. The diagram below sketches the reading paths — pick the door that matches why you're here, or take the tour first and decide afterwards.
+
+```mermaid
+flowchart TD
+    Start([You're here])
+    Tour[15-minute tour<br/>+ mental model]
+    UserDoor[I want to use<br/>harmonograf]
+    DevDoor[I want to develop<br/>harmonograf itself]
+    ProtoDoor[I want to understand<br/>the protocol]
+    UserDocs[quickstart<br/>+ user guide]
+    DevDocs[dev guide]
+    ProtoDocs[protocol reference]
+    Start -. unsure? .-> Tour
+    Start --> UserDoor
+    Start --> DevDoor
+    Start --> ProtoDoor
+    Tour --> UserDoor
+    Tour --> DevDoor
+    Tour --> ProtoDoor
+    UserDoor --> UserDocs
+    DevDoor --> DevDocs
+    ProtoDoor --> ProtoDocs
+```
+
+The three readers:
 
 ### I want to *use* harmonograf on my own agents
 

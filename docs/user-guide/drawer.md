@@ -40,6 +40,22 @@ This section exists alongside the [CurrentTaskStrip](tasks-and-plans.md#currentt
 at the top of the shell: both read from the same source, the header is
 specific to the drawer so you can see the task without leaving the drawer.
 
+## The seven tabs at a glance
+
+The drawer's body is a tab strip. Each tab answers a different question about the selected span — what it is, what task it belongs to, what payloads it carried, what it spawned, what links to it, what humans said about it, and what you can do to it.
+
+```mermaid
+flowchart LR
+    Span([selected span])
+    Span --> Summary[Summary<br/>what is this span?]
+    Span --> Task[Task<br/>which plan task?]
+    Span --> Payload[Payload<br/>attached bytes]
+    Span --> Timeline[Timeline<br/>child waterfall]
+    Span --> Links[Links<br/>cross-span edges]
+    Span --> Annot[Annotations<br/>human notes]
+    Span --> Control[Control<br/>steer · pause · approve]
+```
+
 ## Tabs
 
 | Tab | Contents |

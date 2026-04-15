@@ -78,6 +78,25 @@ message Hello {
 | `resume_token` | no | Last span_id the server confirmed before disconnect. Hint for future replay-from logic. v0 server does not currently replay. |
 | `session_title` | no | Title to stamp on the session **if this Hello is what creates it**. Ignored when joining an existing session. |
 
+The Hello/Welcome handshake — note that the client must not send any other `TelemetryUp` until `Welcome` returns:
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant I as IngestPipeline
+    participant Store as Store
+    C->>I: TelemetryUp{ hello }
+    I->>I: validate agent_id, session_id regex
+    I->>Store: get_session(session_id)
+    alt session missing
+        I->>Store: create_session(...)
+    end
+    I->>Store: register_agent(...)
+    I->>I: allocate stream_id = str_<unix>_<seq>
+    I-->>C: TelemetryDown{ welcome{ accepted, assigned_session_id, assigned_stream_id } }
+    Note over C: now safe to open SubscribeControl<br/>and send span_start, payload, etc.
+```
+
 ### `SpanStart` (oneof tag 2)
 
 Full span minus `end_time`. See [`span-lifecycle.md`](span-lifecycle.md)
@@ -125,6 +144,25 @@ message SpanEnd {
 ```
 
 `end_time` is optional; when absent, ingest stamps server wall-clock.
+
+A typical span travels upstream as three messages — start, optional updates, then end. The server merges them into one row in the store:
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant I as IngestPipeline
+    participant Store
+    participant Bus as SessionBus
+    C->>I: span_start{ Span{ id, kind, attrs } }
+    I->>Store: append_span (idempotent on id)
+    I->>Bus: publish_span_start
+    C->>I: span_update{ id, attrs?, status?, payload_refs? }
+    I->>Store: update_span (additive merge)
+    I->>Bus: publish_span_update
+    C->>I: span_end{ id, end_time, status, error? }
+    I->>Store: end_span / update_span
+    I->>Bus: publish_span_end
+```
 
 ### `PayloadUpload` (oneof tag 5)
 
@@ -190,6 +228,22 @@ Server behaviour:
   writing them. Non-zero samples are persisted and fan out as
   `ContextWindowSample` deltas on `WatchSession`.
 
+Heartbeat handling and the stuck-detection state machine — `progress_counter` must change between beats or the server escalates after `STUCK_THRESHOLD_BEATS` consecutive identical values:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Healthy
+    Healthy --> Healthy: heartbeat<br/>counter advanced<br/>(reset stuck count)
+    Healthy --> Watching: heartbeat<br/>counter unchanged<br/>(count = 1)
+    Watching --> Watching: heartbeat<br/>counter unchanged<br/>(count++)
+    Watching --> Healthy: heartbeat<br/>counter advanced
+    Watching --> Stuck: count >= STUCK_THRESHOLD_BEATS (3)
+    Stuck --> Healthy: heartbeat<br/>counter advanced
+    Healthy --> Disconnected: no heartbeat for<br/>HEARTBEAT_TIMEOUT_S (15s)
+    Watching --> Disconnected: no heartbeat for<br/>HEARTBEAT_TIMEOUT_S
+    Stuck --> Disconnected: no heartbeat for<br/>HEARTBEAT_TIMEOUT_S
+```
+
 ### `ControlAck` (oneof tag 7)
 
 Response to a `ControlEvent` that the server delivered on
@@ -239,6 +293,26 @@ Server behaviour (`_handle_goodbye` → `close_stream`): removes the
 stream from the registry. If the agent had no other live streams, the
 agent row flips to `AGENT_STATUS_DISCONNECTED`. Client should close the
 RPC after sending `Goodbye`.
+
+Goodbye handling and the resume-on-reconnect path — note that the agent row only flips to DISCONNECTED when the *last* live stream for that agent_id closes:
+
+```mermaid
+sequenceDiagram
+    participant C as Client (old stream)
+    participant I as IngestPipeline
+    participant C2 as Client (reconnect)
+    C->>I: goodbye{ reason }
+    I->>I: close_stream(ctx)
+    alt no other streams for agent_id
+        I->>I: agent → DISCONNECTED, publish AgentStatusChanged
+    else other streams remain
+        I->>I: keep agent CONNECTED
+    end
+    Note over C2: process restarts; reuses agent_id<br/>persists last seen span_id
+    C2->>I: hello{ agent_id, resume_token=last_span_id }
+    I-->>C2: welcome{ assigned_stream_id }
+    Note over I,C2: v0 server ignores resume_token; client<br/>resends any unconfirmed spans (dedup by id)
+```
 
 ### `TaskPlan` (oneof tag 9)
 

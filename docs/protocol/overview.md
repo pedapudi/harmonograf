@@ -29,6 +29,26 @@ Conceptually the RPCs split into three tiers:
 +-------------------------+    SendControl / PostAnnotation
 ```
 
+The same picture as a rendered diagram — note the asymmetric pairing of `SubscribeControl` (server→agent events) with `StreamTelemetry` (agent→server acks):
+
+```mermaid
+flowchart TB
+    Agent["Agent process<br/>(client library)"]
+    FE["Frontend<br/>(Gantt console)"]
+    subgraph Server["harmonograf.v1.Harmonograf"]
+        ST["StreamTelemetry<br/>(bidirectional)"]
+        SC["SubscribeControl<br/>(server-streaming)"]
+        UI["Frontend RPCs<br/>(unary + streaming)"]
+    end
+    Agent -- "TelemetryUp: spans, payloads,<br/>heartbeats, control_ack" --> ST
+    ST -- "TelemetryDown: Welcome,<br/>PayloadRequest" --> Agent
+    SC -- "ControlEvent" --> Agent
+    FE -- "SendControl / PostAnnotation" --> UI
+    FE -- "WatchSession / GetPayload" --> UI
+    UI -- "SessionUpdate deltas" --> FE
+    UI -. "fans out" .-> SC
+```
+
 The three tiers are:
 
 1. **Telemetry (`StreamTelemetry`)** — agent → server, bidirectional.
@@ -132,3 +152,17 @@ clients that don't recognize the flag must tolerate its absence.
 Anything in the protos marked `// Reserved for future use` or `// v0
 does not emit these` is a stable extension point: existing clients must
 not crash if a server does begin emitting it.
+
+How a future capability negotiation lands on a current client without breaking it:
+
+```mermaid
+flowchart TD
+    Hello["Agent sends Hello<br/>(no version field)"]
+    Welcome["Server replies Welcome<br/>flags: map<string,string>"]
+    Inspect{Client recognizes<br/>each flag?}
+    Use["Enable advertised feature<br/>(e.g. per-span ack replay)"]
+    Ignore["Ignore unknown flag<br/>fall back to v0 behavior"]
+    Hello --> Welcome --> Inspect
+    Inspect -- yes --> Use
+    Inspect -- no --> Ignore
+```

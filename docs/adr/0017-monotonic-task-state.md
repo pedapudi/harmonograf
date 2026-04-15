@@ -68,6 +68,29 @@ The guard lives in `_set_task_status` (the per-write enforcement) and
 is cross-checked by `check_plan_state` (the aggregate invariant, see
 ADR 0015).
 
+**Task state machine** — only forward edges; terminal states absorb. A
+late retransmit cannot un-complete a COMPLETED task or un-fail a FAILED
+one.
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING
+    PENDING --> PENDING
+    PENDING --> RUNNING
+    PENDING --> CANCELLED
+    PENDING --> FAILED
+    RUNNING --> RUNNING
+    RUNNING --> COMPLETED
+    RUNNING --> FAILED
+    RUNNING --> CANCELLED
+    COMPLETED --> COMPLETED : absorb
+    FAILED --> FAILED : absorb
+    CANCELLED --> CANCELLED : absorb
+    note right of COMPLETED
+      terminal — no outgoing edges
+    end note
+```
+
 ## Consequences
 
 **Good.**

@@ -67,6 +67,40 @@ immediately, without any cross-process hop.
 | gRPC-Web (sonora) | 5174 | `FRONTEND_PORT` | Browser via Connect-RPC |
 | Vite dev server | 5173 | — | Developer workflow only |
 
+The composition root and its two listeners:
+
+```mermaid
+flowchart TD
+    cfg[ServerConfig]
+    fc[Harmonograf.from_config]
+    store[Storage<br/>sqlite or memory]
+    bus[SessionBus]
+    router[ControlRouter]
+    ingest[IngestPipeline]
+    svc[TelemetryServicer<br/>Telemetry + Control + Frontend mixins]
+    grpc[Native gRPC :7531<br/>for agents]
+    web[gRPC-Web :5174<br/>sonora ASGI<br/>for browsers]
+    sweep[heartbeat sweeper]
+    ret[retention sweeper]
+
+    cfg --> fc
+    fc --> store
+    fc --> bus
+    fc --> router
+    fc --> ingest
+    store --> ingest
+    bus --> ingest
+    router --> ingest
+    ingest --> svc
+    store --> svc
+    bus --> svc
+    router --> svc
+    svc --> grpc
+    svc --> web
+    fc --> sweep
+    fc --> ret
+```
+
 ## The ingest pipeline
 
 `IngestPipeline` at `server/harmonograf_server/ingest.py:135` is the engine.
@@ -99,6 +133,36 @@ main entry. It inspects the oneof and dispatches:
 | `control_ack` | `_handle_control_ack` | Forward to `ControlRouter` so the waiting frontend RPC can return. |
 | `task_plan` | `_handle_task_plan` | Upsert `TaskPlan`; publish `plan_delta` via the bus. |
 | `updated_task_status` | `_handle_updated_task_status` | Upsert `Task`; publish `task_delta`. |
+
+Ingest fans each `TelemetryUp` variant into the store and the bus:
+
+```mermaid
+flowchart LR
+    msg[TelemetryUp]
+    disp{WhichOneof}
+    hello[hello → _handle_hello]
+    spans[span_start / span_update / span_end]
+    pay[payload_upload]
+    hb[heartbeat]
+    ctrl[control_ack]
+    plan[task_plan / updated_task_status]
+    bye[goodbye]
+    store[(Storage)]
+    bus[SessionBus.publish_*]
+    router[ControlRouter]
+
+    msg --> disp
+    disp --> hello --> store
+    disp --> spans --> store
+    spans --> bus
+    disp --> pay --> store
+    disp --> hb --> store
+    hb --> bus
+    disp --> ctrl --> router
+    disp --> plan --> store
+    plan --> bus
+    disp --> bye --> store
+```
 
 ### Payloads and deduplication
 
@@ -177,6 +241,30 @@ reverse path: frontend → agent.
    bidi stream.
 5. Ingest receives the `control_ack`, forwards to router, router resolves
    the original Future, and `SendControl` returns to the frontend.
+
+Control event ack correlation: the frontend's `SendControl` future is unblocked only when the agent's ack rides back up the telemetry stream.
+
+```mermaid
+sequenceDiagram
+    participant FE as Frontend
+    participant Svc as TelemetryServicer<br/>(SendControl handler)
+    participant Router as ControlRouter
+    participant Sub as SubscribeControl<br/>stream
+    participant Agent
+    participant Ing as IngestPipeline<br/>(_handle_control_ack)
+
+    FE->>Svc: SendControl(event, control_id=X)
+    Svc->>Router: send_control(event)
+    Router->>Router: stash Future keyed by X
+    Router->>Sub: enqueue ControlEvent
+    Sub-->>Agent: deliver event
+    Agent->>Agent: on_control handler
+    Agent-->>Ing: TelemetryUp.control_ack(control_id=X)
+    Ing->>Router: forward ack
+    Router->>Router: resolve Future X
+    Router-->>Svc: result
+    Svc-->>FE: SendControlResponse
+```
 
 Two control event kinds matter most today:
 

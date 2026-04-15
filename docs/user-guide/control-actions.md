@@ -9,6 +9,25 @@ This page is the reference: what each action does, where you invoke it,
 and what "capability negotiation" means when your agent doesn't implement
 some of them.
 
+## The control lifecycle
+
+A control action is a small round-trip: a UI surface emits a `ControlEvent`, the server routes it to the right agent over `SubscribeControl`, the agent acts at its next safe boundary, and the ack rides back upstream on the telemetry stream where the UI sees it.
+
+```mermaid
+sequenceDiagram
+    participant You
+    participant UI as Frontend
+    participant Server as harmonograf-server
+    participant Agent
+    You->>UI: click Pause / Steer / Approve
+    UI->>Server: SendControl(kind, target, payload)
+    Server->>Agent: ControlEvent (SubscribeControl)
+    Agent->>Agent: act at next safe boundary
+    Agent-->>Server: ControlAck (telemetry stream)
+    Server-->>UI: ack arrives
+    UI-->>You: button settles · error or OK
+```
+
 ## The control kinds
 
 `ControlKind` — the wire enum the frontend can send:

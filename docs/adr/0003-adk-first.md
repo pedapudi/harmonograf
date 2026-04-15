@@ -56,6 +56,37 @@ reasons, in order of weight:
    free" for anyone already using ADK (see the class docstring at
    `client/harmonograf_client/agent.py`).
 
+**ADK seam map** — every harmonograf hook lands on an official ADK callback.
+Nothing is monkey-patched; `_AdkState` is the convergence point that the
+reporting tools, the planner, and the drift detector all read from.
+
+```mermaid
+flowchart LR
+    subgraph ADK["ADK runtime"]
+      direction TB
+      A1[Runner] --> A2[before_run_callback]
+      A2 --> A3[before_model_callback]
+      A3 --> A4[before_tool_callback]
+      A4 --> A5[after_tool_callback]
+      A5 --> A6[on_event_callback]
+    end
+    subgraph H["harmonograf adk.py"]
+      direction TB
+      H1[_AdkState] --> H2[reporting tool dispatch]
+      H1 --> H3[planner / refine]
+      H1 --> H4[drift detector]
+      H1 --> H5[span emit]
+    end
+    A2 -. session bootstrap .-> H1
+    A3 -. LLM_CALL span .-> H5
+    A4 -. report_task_* intercept .-> H2
+    A5 -. tool span close .-> H5
+    A6 -. state_delta read .-> H1
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class H,H1,H2,H3,H4,H5 good
+```
+
 At the same time, the client library's *core* is framework-agnostic. Transport,
 buffering, span schema, task-state machine, invariants, and planner protocols
 all live outside `adk.py`. A future Strands or OpenAI Agents adapter is a

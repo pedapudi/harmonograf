@@ -9,6 +9,31 @@ intentionally out of scope, and where the project is going.
 If you want to get a demo running first and read later, start at
 [docs/quickstart.md](quickstart.md).
 
+The four primitives below are what the rest of the document keeps coming back to. Read this map first; the prose under each design principle is just expansion of these relationships.
+
+```mermaid
+flowchart LR
+    Plan[Plan<br/>tasks + edges]
+    Task[Task<br/>state machine]
+    Span[Span<br/>telemetry]
+    Drift[Drift<br/>~26 kinds]
+    Plan --> Task
+    Task -. binds .-> Span
+    Span -. observed .-> Drift
+    Drift -. fires refine .-> Plan
+```
+
+And the three processes that share the data model — one canonical timeline, many agents reporting in, many viewers subscribing.
+
+```mermaid
+flowchart LR
+    A1[agent 1] -- telemetry / control --> S[harmonograf-server<br/>SQLite store]
+    A2[agent 2] -- telemetry / control --> S
+    A3[agent N] -- telemetry / control --> S
+    S -- gRPC-Web --> UI1[browser tab 1]
+    S -- gRPC-Web --> UI2[browser tab 2]
+```
+
 ---
 
 ## Motivation — why span-based observability isn't enough

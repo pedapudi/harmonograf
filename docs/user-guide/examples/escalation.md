@@ -6,6 +6,23 @@ not confident about, and escalates to human review via a `WAIT_FOR_HUMAN`
 span. You approve from the drawer's Control tab, the writer unblocks,
 the plan completes.
 
+The whole arc — coordinator delegates twice, the writer escalates, you approve, the writer finishes, control returns:
+
+```mermaid
+sequenceDiagram
+    participant You
+    participant Coord as coordinator
+    participant Res as researcher
+    participant Wri as writer
+    Coord->>Res: TRANSFER (research)
+    Res-->>Coord: return
+    Coord->>Wri: TRANSFER (draft)
+    Wri->>You: WAIT_FOR_HUMAN<br/>(red pulse)
+    You->>Wri: APPROVE
+    Wri-->>Coord: return
+    Coord-->>You: COMPLETED
+```
+
 ## Set-up
 
 - Agents: `coordinator` (sequential), `researcher`, `writer`.

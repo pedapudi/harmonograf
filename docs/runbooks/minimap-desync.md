@@ -5,6 +5,27 @@ shows a viewport rectangle that doesn't match the main Gantt's
 viewport. Panning the main view doesn't update the minimap, or
 dragging on the minimap doesn't move the main view.
 
+**Triage decision tree** — minimap state lives in two surfaces; desync is
+almost always one source-of-truth bug.
+
+```mermaid
+flowchart TD
+    Start([Minimap viewport<br/>≠ main Gantt viewport]):::sym --> Q1{localStorage.clear()<br/>fixes it?}
+    Q1 -- "yes" --> F1[Persisted viewport bled<br/>across sessions: key by<br/>session_id]:::fix
+    Q1 -- "no" --> Q2{Main and minimap viewport<br/>numbers off by ~1000×?}
+    Q2 -- "yes" --> F2[Time-unit mismatch:<br/>milliseconds everywhere]:::fix
+    Q2 -- "no" --> Q3{Resize browser:<br/>minimap redraws?}
+    Q3 -- "no" --> F3[Missing ResizeObserver<br/>on container]:::fix
+    Q3 -- "yes" --> Q4{Hide / unhide agent rows:<br/>vertical scale updates?}
+    Q4 -- "no" --> F4[Cached row-count;<br/>read live]:::fix
+    Q4 -- "yes" --> Q5{Press 'f': both surfaces<br/>jump in same frame?}
+    Q5 -- "no" --> F5[Subscription gap:<br/>minimap reads derived copy.<br/>Subscribe to main store]:::fix
+    Q5 -- "yes" --> F6[Two stores own viewport:<br/>unify, delete duplicate]:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **UI**: the minimap's highlighted rectangle is offset, wrong

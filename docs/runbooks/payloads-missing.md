@@ -4,6 +4,28 @@ A span is displayed in the UI but its payload is unavailable, either
 as "not preserved (client under backpressure)" or "no payload attached"
 or a spinner that never resolves.
 
+**Triage decision tree** — distinguish "client never uploaded" from
+"server has it but RPC is hanging" from "span never had a payload".
+
+```mermaid
+flowchart TD
+    Start([Drawer Payload tab<br/>missing / spinner]):::sym --> Q1{spans.payload_digest<br/>NULL for this span?}
+    Q1 -- "yes" --> F1[Span never carried payload —<br/>not a bug. Or enable<br/>capture for the kind]:::fix
+    Q1 -- "no" --> Q2{payloads row exists<br/>for that digest?}
+    Q2 -- "no" --> Q2a{heartbeat<br/>payloads_evicted > 0?}
+    Q2a -- "yes" --> F2a[Backpressure eviction —<br/>raise buffer cap, shrink<br/>payloads]:::fix
+    Q2a -- "no" --> Q2b{Server log:<br/>'payload digest mismatch'?}
+    Q2b -- "yes" --> F2b[Client hash bug —<br/>disable capture for tool,<br/>fix hashing]:::fix
+    Q2b -- "no" --> Q2c{retention swept<br/>recently?}
+    Q2c -- "yes" --> F2c[Retention GC; lengthen<br/>horizon or accept loss]:::fix
+    Q2c -- "no" --> F2d[Partial upload (client crashed<br/>mid-stream); resend or<br/>shrink chunks]:::fix
+    Q2 -- "yes, evicted=true" --> F3[Stored as evicted —<br/>summary only, bytes gone]:::fix
+    Q2 -- "yes, evicted=false" --> F4[GetPayload RPC hanging:<br/>see sqlite-errors locks]:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **UI** (drawer Payload tab):

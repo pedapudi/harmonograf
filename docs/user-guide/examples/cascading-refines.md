@@ -6,6 +6,19 @@ work, the third hits a context pressure wall, the fourth is an operator
 steer. This scenario is about **reading the cascade** without losing the
 thread of what happened.
 
+Four drifts hit one long session, each producing a plan revision. Use this as a map for the timeline below.
+
+```mermaid
+timeline
+    title Cascading refines over ~35 minutes
+    t=0 : session picked : 12 tasks pending
+    t=4m : llm_refused (red) : +1 ~1 reframe
+    t=8m : new_work_discovered (green) : +2
+    t=16m : context_pressure (grey-blue) : split draft
+    t=27m : user_steer (blue) : operator redirect
+    t=35m : COMPLETED
+```
+
 ## Set-up
 
 - Agents: `writer-coordinator` (`SEQ`), `drafter`, `fact-checker`,

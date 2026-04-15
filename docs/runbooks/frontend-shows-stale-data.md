@@ -4,6 +4,29 @@ The server has fresh data (visible in sqlite, in server logs, in
 `make stats`) but the UI is showing an older state. Refreshing the
 page fixes it temporarily.
 
+**Triage decision tree** — server vs frontend split. The cheap test is
+"does reload fix it?": if yes, a subscription is broken; if no, it's deeper.
+
+```mermaid
+flowchart TD
+    Start([UI ≠ sqlite]):::sym --> Q1{DevTools: WatchSession<br/>still 'pending'?}
+    Q1 -- "no, errored / closed" --> F1[Stream detached —<br/>fix reconnect in rpc/hooks.ts;<br/>workaround: reload]:::fix
+    Q1 -- "yes, open" --> Q2{Server log shows<br/>publish_* for the delta?}
+    Q2 -- "no" --> R1[Server didn't publish —<br/>see source-of-truth runbook<br/>(plan-revisions-not-appearing)]:::fix
+    Q2 -- "yes" --> Q3{Reload fixes it?}
+    Q3 -- "yes" --> F2[Subscriber missing —<br/>wire component to<br/>TaskRegistry.subscribe]:::fix
+    Q3 -- "no" --> Q4{SessionStore minTimeMs /<br/>maxTimeMs = ±Infinity?}
+    Q4 -- "yes" --> F3[Window collapsed —<br/>press 'f' to fit-to-data]:::fix
+    Q4 -- "no" --> Q5{URL ?session= matches<br/>uiStore selection?}
+    Q5 -- "no" --> F4[Session ID drift —<br/>force reload]:::fix
+    Q5 -- "yes" --> Q6{Frontend bundle built<br/>against current proto?}
+    Q6 -- "no" --> F5[Old proto descriptor —<br/>rebuild frontend]:::fix
+    Q6 -- "yes" --> F6[Agent row hidden /<br/>viewport locked — press L]:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **UI**: a plan, task, span, or agent status in the UI disagrees

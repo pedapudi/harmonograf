@@ -3,6 +3,28 @@
 The server is running but sqlite is raising. Symptoms range from "one
 ingest failed" to "the whole server fell over".
 
+**Triage decision tree** — sqlite error class → file inspection → cause → fix.
+Two-process is the dominant cause of `database is locked`; check it first.
+
+```mermaid
+flowchart TD
+    Start([sqlite error in<br/>server log]):::sym --> Q1{Which error class?}
+    Q1 -- "database is locked" --> Q2{Two server PIDs<br/>holding the file?}
+    Q2 -- "yes" --> F2[Stop the imposter,<br/>never run two on one DB]:::fix
+    Q2 -- "no" --> F2b[Long write txn:<br/>shrink batches /<br/>raise busy_timeout]:::fix
+    Q1 -- "no such table" --> Q3{Schema matches<br/>storage/sqlite.py?}
+    Q3 -- "missing columns" --> F3[Migration didn't run:<br/>restart, or wipe + restart]:::fix
+    Q1 -- "disk image malformed" --> Q4{integrity_check<br/>output?}
+    Q4 -- "not ok" --> F4[Recover via .recover<br/>or wipe DB — store is<br/>non-authoritative]:::fix
+    Q1 -- "disk I/O error" --> F5[Disk full: free space,<br/>restart]:::fix
+    Q1 -- "hang on startup" --> Q6{DB on NFS / FUSE?}
+    Q6 -- "yes" --> F6[Move to local disk —<br/>WAL + NFS doesn't work]:::fix
+    Q6 -- "no" --> F7[Check ownership of<br/>.db / -wal / -shm files]:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **Server log**:

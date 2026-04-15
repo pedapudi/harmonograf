@@ -30,6 +30,40 @@ all three before you start.
          many agents                          one server                         one UI (N tabs)
 ```
 
+The same picture as a structured diagram showing the three components and their cross-process channels:
+
+```mermaid
+flowchart LR
+    subgraph A[Agent process N]
+        runner[ADK Runner +<br/>user LlmAgent]
+        hagent[HarmonografAgent<br/>+ AdkAdapter<br/>+ _AdkState]
+        buf[EventRingBuffer<br/>+ Transport]
+        runner -- callbacks --> hagent --> buf
+    end
+    subgraph S[Harmonograf server]
+        ingest[IngestPipeline]
+        store[Storage<br/>sqlite]
+        bus[SessionBus]
+        router[ControlRouter]
+        watch[WatchSession<br/>stream]
+        ingest --> store
+        ingest --> bus
+        bus --> watch
+        router <--> ingest
+    end
+    subgraph F[Frontend browser]
+        sstore[SessionStore<br/>TaskRegistry]
+        renderer[GanttRenderer<br/>canvas]
+        ui[uiStore<br/>zustand]
+        sstore --> renderer
+        renderer --> ui
+    end
+    buf -- gRPC StreamTelemetry --> ingest
+    router -- gRPC SubscribeControl --> hagent
+    watch -- gRPC-Web WatchSession --> sstore
+    ui -- SendControl/PostAnnotation --> router
+```
+
 Three things to notice in this picture:
 
 1. **Fan-in.** Many agents, one server, one UI. The server is the only
@@ -154,6 +188,29 @@ carry it, then (if it needs to reach the UI) teach
 `frontend/src/rpc/convert.ts` and the renderer. Skipping any layer silently
 drops the field.
 
+### Process boundaries and trust
+
+Every arrow above crosses a process boundary; here are the boundaries side-by-side with what crosses each:
+
+```mermaid
+flowchart LR
+    subgraph AP[Agent process<br/>untrusted LLM inside]
+        a1[client lib]
+    end
+    subgraph SP[Server process<br/>central fan-in]
+        s1[servicer]
+    end
+    subgraph BP[Browser process<br/>semi-trusted viewer]
+        b1[Gantt + Drawer]
+    end
+    a1 -- TelemetryUp:<br/>spans, payloads,<br/>heartbeats, plans --> s1
+    s1 -- TelemetryDown:<br/>Welcome, PayloadRequest --> a1
+    s1 -- ControlEvent<br/>SubscribeControl --> a1
+    a1 -- ControlAck<br/>via TelemetryUp --> s1
+    s1 -- SessionUpdate<br/>WatchSession stream --> b1
+    b1 -- SendControl<br/>PostAnnotation unary --> s1
+```
+
 ## Span taxonomy
 
 Every ADK lifecycle callback produces a span. The kinds are defined once in
@@ -221,6 +278,27 @@ The full list of drift reasons lives at `client/harmonograf_client/adk.py:352-36
 (search for `DRIFT_KIND_*` constants). New drift kinds go in that table plus
 `frontend/src/gantt/driftKinds.ts` for the UI mapping.
 
+### Data flow overview
+
+Same data, viewed as a flow rather than a topology:
+
+```mermaid
+flowchart LR
+    cb[ADK callback<br/>before_model_callback] --> span[SpanEnvelope]
+    span --> ring[EventRingBuffer]
+    ring --> tx[Transport<br/>gRPC bidi]
+    tx --> ingest[IngestPipeline.handle_message]
+    ingest --> conv[pb_span_to_storage]
+    conv --> store[(SQLite spans table)]
+    ingest --> pub[bus.publish_span]
+    pub --> sub[Subscription queue]
+    sub --> ws[WatchSession stream]
+    ws --> hook[useSessionWatch]
+    hook --> ss[SessionStore.upsertSpan]
+    ss --> raf[requestAnimationFrame]
+    raf --> draw[GanttRenderer.render]
+```
+
 ## End-to-end walk-through: one span, one view
 
 Here is a single `LLM_CALL` span on its way from a model call in the agent
@@ -263,6 +341,35 @@ have to touch.
     which reads `SessionStore` and draws the new rectangle using the
     `layout.ts` and `viewport.ts` transforms. Spatial index
     (`spatialIndex.ts`) is updated so the span is hit-testable.
+
+The same ten steps as a sequence:
+
+```mermaid
+sequenceDiagram
+    participant ADK as ADK Runner
+    participant Plug as harmonograf plugin<br/>(adk.py)
+    participant Buf as EventRingBuffer
+    participant Tx as Transport
+    participant Ing as IngestPipeline
+    participant Db as SqliteStore
+    participant Bus as SessionBus
+    participant Front as rpc/frontend.py
+    participant Hook as useSessionWatch
+    participant Store as SessionStore
+    participant Renderer as GanttRenderer
+
+    ADK->>Plug: before_model_callback
+    Plug->>Buf: enqueue SpanEnvelope
+    Buf->>Tx: drain batch
+    Tx->>Ing: TelemetryUp(span_start)
+    Ing->>Db: upsert_span
+    Ing->>Bus: publish_span(Delta)
+    Bus->>Front: subscription queue
+    Front->>Hook: SessionUpdate (server-stream)
+    Hook->>Store: upsertSpan
+    Renderer->>Store: read on next RAF
+    Renderer-->>Renderer: drawBlocks
+```
 
 Reversing the flow (for control events): a click on a steering button →
 `SendControl` unary RPC → `ControlRouter.send_control()` → `SubscribeControl`

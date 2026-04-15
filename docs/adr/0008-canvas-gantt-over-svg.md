@@ -45,6 +45,24 @@ Interaction points that *need* DOM for accessibility or text input
 components positioned over the canvas using DOM coordinates derived
 from the renderer's transform.
 
+**Render pipeline** — React mounts the canvas once and stays out of the
+interior; the renderer's RAF loop owns redraws, hit-tests via the spatial
+index, and lets DOM overlays handle the parts that need a11y/text input.
+
+```mermaid
+flowchart LR
+    Store[SessionStore<br/>spans + plans] --> Model[Gantt model<br/>frontend/src/gantt/]
+    Model --> Idx[spatialIndex.ts]
+    Model --> Loop[renderer.ts<br/>RAF loop]
+    Loop --> Cv[(HTMLCanvasElement)]
+    Idx --> Hit[click / keyboard hit-test]
+    Hit --> Overlay[React DOM overlays<br/>popover · drawer · tooltip]
+    Cv --- Overlay
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class Loop,Cv,Idx good
+```
+
 ## Consequences
 
 **Good.**

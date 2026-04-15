@@ -21,6 +21,17 @@ stream ahead of it. See
 [`wire-ordering.md#control-ack-happens-before`](wire-ordering.md#control-ack-happens-before)
 for the full argument.
 
+A `SubscribeControl` subscription's lifecycle in the router — note that subscriptions are *not* queued across reconnects:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Opening: agent calls SubscribeControl<br/>after Welcome
+    Opening --> Live: router.subscribe()<br/>adds to subs[agent_id][stream_id]
+    Live --> Live: ControlEvent enqueued<br/>(deliver pushes to queue)
+    Live --> Closing: stream EOF / cancel /<br/>telemetry stream dropped
+    Closing --> [*]: router.unsubscribe()<br/>resolve pending deliveries<br/>clear stale aliases
+```
+
 ## Request
 
 ```proto
@@ -149,6 +160,34 @@ stream to ack (or a timeout). The result is:
 
 See `ControlRouter._maybe_resolve` in `control_router.py` for the
 exact logic.
+
+How the router resolves a fan-out delivery — the `require_all_acks` flag picks between first-success and full-quorum semantics:
+
+```mermaid
+flowchart TD
+    Start["deliver(agent_id, kind, require_all_acks)"]
+    Lookup["lookup subs[agent_id]<br/>(or follow alias)"]
+    None{any live<br/>subscriptions?}
+    Unavail["return UNAVAILABLE"]
+    Fan["enqueue ControlEvent on every<br/>live subscription's queue"]
+    Pending["create _PendingDelivery<br/>expected_stream_ids = live ids"]
+    Wait["await acks via record_ack"]
+    Mode{require_all_acks?}
+    First{any SUCCESS<br/>received?}
+    All{all expected<br/>streams ack'd?}
+    Done["resolve future:<br/>SUCCESS / FAILED"]
+    Timeout["timeout → DEADLINE_EXCEEDED<br/>+ partial acks"]
+    Start --> Lookup --> None
+    None -- no --> Unavail
+    None -- yes --> Fan --> Pending --> Wait --> Mode
+    Mode -- false --> First
+    First -- yes --> Done
+    First -- no --> Wait
+    Mode -- true --> All
+    All -- yes --> Done
+    All -- no --> Wait
+    Wait -- timeout_s elapses --> Timeout
+```
 
 ### Stream drop during in-flight delivery
 

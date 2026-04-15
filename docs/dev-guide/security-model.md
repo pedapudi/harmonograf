@@ -35,6 +35,27 @@ Three processes, three directions of trust.
      developer's process        it is told)
 ```
 
+A structured view of the same boundaries, with what crosses each:
+
+```mermaid
+flowchart LR
+    subgraph A[Agent process<br/>untrusted LLM<br/>inside trusted dev]
+        ac[client lib]
+    end
+    subgraph S[harmonograf-server<br/>central fan-in]
+        sv[servicer]
+    end
+    subgraph B[Browser<br/>semi-trusted viewer]
+        bv[Gantt + Drawer]
+    end
+    ac -- "TELE: Hello, spans, payloads,<br/>heartbeats, plans" --> sv
+    sv -- "Welcome, PayloadRequest, FlowControl" --> ac
+    sv -- "CTRL: ControlEvent (SubscribeControl)" --> ac
+    ac -- "ControlAck (via TelemetryUp)" --> sv
+    sv -- "WATCH: SessionUpdate stream" --> bv
+    bv -- "CTRL: SendControl, PostAnnotation,<br/>DeleteSession" --> sv
+```
+
 | Boundary | Direction | What crosses | Trust level today |
 |---|---|---|---|
 | Agent → server | Up | `TelemetryUp`: Hello, spans, payloads, heartbeats, task plans, task status updates, control acks, goodbye | Server trusts the client unconditionally |
@@ -258,6 +279,37 @@ Harmonograf's threat model assumes:
    should not be able to forge agent state back at other viewers.
    In v0 this is an unsolved problem — if you can reach the
    gRPC-Web port you can `PostAnnotation` with any author string.
+
+A map of the threat surface — what each actor can do today, and what would block them in a hardened deployment:
+
+```mermaid
+flowchart TD
+    net[Network attacker<br/>reaches gRPC-Web port]
+    rogue[Rogue dev<br/>on shared box]
+    bad[Malicious client<br/>with bearer token]
+    op[Untrusted operator<br/>on the server host]
+
+    impersonate[Impersonate any agent_id]
+    write[Write to any session_id]
+    steer[SendControl / PostAnnotation<br/>any session]
+    forge[Forge annotation author]
+    read[Read payloads on disk]
+    inj[SQL injection via session_id]
+
+    net --> steer
+    net --> write
+    rogue --> impersonate
+    rogue --> forge
+    bad --> impersonate
+    bad --> write
+    bad --> steer
+    op --> read
+
+    inj -. blocked by .-> regex[regex + parameterized SQL]
+    impersonate -. blocked by .-> auth[per-client identity NOT in v0]
+    steer -. blocked by .-> tls[reverse proxy + real auth NOT in v0]
+    read -. blocked by .-> fs[OS filesystem perms]
+```
 
 ### Explicit non-threats (out of scope for v0)
 

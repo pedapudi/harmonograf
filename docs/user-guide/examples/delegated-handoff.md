@@ -9,6 +9,26 @@ fires a `transfer_to_unplanned_agent` drift. Harmonograf only observes
 This is the canonical example of how harmonograf acts as a monitor
 rather than an orchestrator.
 
+The chain you'll watch unfold — coordinator delegates down the planned path, then a specialist jumps to an unplanned agent and the planner flags the drift.
+
+```mermaid
+sequenceDiagram
+    participant Coord as coordinator (OBS)
+    participant Res as researcher
+    participant Web as web_developer
+    participant Rev as reviewer
+    participant Dbg as debugger
+    Coord->>Res: AgentTool (planned)
+    Res-->>Coord: result
+    Coord->>Web: AgentTool (planned)
+    Web->>Dbg: AgentTool (UNPLANNED)
+    Note over Dbg: drift:<br/>transfer_to_unplanned_agent
+    Dbg-->>Web: result
+    Web-->>Coord: result
+    Coord->>Rev: AgentTool (planned)
+    Rev-->>Coord: result
+```
+
 ## Set-up
 
 - Agents (all ADK):

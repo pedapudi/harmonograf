@@ -79,6 +79,29 @@ message WatchSessionRequest {
 - The stream never terminates on its own while the session is LIVE.
   Clients close it themselves.
 
+A `WatchSession` stream's two phases — bursty replay first, then live deltas indefinitely until the client closes:
+
+```mermaid
+sequenceDiagram
+    participant UI
+    participant Server
+    participant Bus as SessionBus
+    UI->>Server: WatchSession(session_id, window?)
+    Note over Server: phase 1 — initial burst
+    Server-->>UI: SessionUpdate{ session }
+    Server-->>UI: SessionUpdate{ agent } (one per agent)
+    Server-->>UI: SessionUpdate{ initial_span } (×N)
+    Server-->>UI: SessionUpdate{ initial_annotation } (×M)
+    Server-->>UI: SessionUpdate{ burst_complete{ spans_sent, agents_sent } }
+    Note over Server,Bus: phase 2 — live deltas via SessionBus
+    Bus->>Server: span_start published
+    Server-->>UI: SessionUpdate{ new_span }
+    Bus->>Server: heartbeat / status change
+    Server-->>UI: SessionUpdate{ agent_status_changed{ stuck, current_activity } }
+    Bus->>Server: task plan published
+    Server-->>UI: SessionUpdate{ task_plan / updated_task_status }
+```
+
 ### `SessionUpdate` oneof — initial burst
 
 | Tag | Variant | When |
@@ -211,6 +234,27 @@ message PayloadChunk {
   client-evicted and never reuploaded. The server may have also
   attempted a `PayloadRequest` → re-upload cycle before returning
   not_found; that's transparent to the caller.
+
+A `GetPayload` call delivers either a one-shot summary, a chunked body, or a `not_found` marker — the inspector drawer drives all three:
+
+```mermaid
+sequenceDiagram
+    participant UI
+    participant Server
+    participant Store
+    UI->>Server: GetPayload{ digest, summary_only? }
+    Server->>Store: lookup digest
+    alt summary_only
+        Server-->>UI: PayloadChunk{ summary, chunk=b"", last=true }
+    else bytes available
+        Server-->>UI: PayloadChunk{ summary, chunk=..., last=false }
+        Server-->>UI: PayloadChunk{ chunk=..., last=false }
+        Server-->>UI: PayloadChunk{ chunk=..., last=true }
+    else evicted, never reuploaded
+        Note over Server: optional PayloadRequest cycle<br/>(see payload-flow.md)
+        Server-->>UI: PayloadChunk{ not_found=true, last=true }
+    end
+```
 
 See [`payload-flow.md`](payload-flow.md) for the upload side.
 

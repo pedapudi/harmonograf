@@ -23,6 +23,68 @@ metadata (`frontend/src/gantt/driftKinds.ts:30-58`) must be updated in
 the same change; otherwise the frontend shows a fallback "Plan revised"
 badge for the new kind.
 
+All 29 kinds, grouped by the frontend `category` from
+`frontend/src/gantt/driftKinds.ts`. Kinds whose constant lives in
+`adk.py` are marked with `*`; bare-string kinds are unmarked. The two
+"unknown" entries fall back to the "Plan revised" badge because they
+have no explicit `driftKinds.ts` row.
+
+```mermaid
+classDiagram
+  class DriftKind {
+    +kind: str
+    +severity: info|warning|critical
+    +recoverable: bool
+  }
+  class Error {
+    llm_refused*
+    failed_span
+    task_blocked
+    task_failed
+    task_empty_result
+    tool_error*
+    tool_returned_error
+    tool_unexpected_result
+  }
+  class Divergence {
+    agent_escalated*
+    agent_reported_divergence*
+    coordinator_early_stop*
+    multiple_stamp_mismatches*
+    plan_divergence
+    transfer_to_unplanned_agent
+    unexpected_transfer*
+    task_result_contradicts_plan
+  }
+  class Structural {
+    context_pressure*
+    llm_merged_tasks*
+    llm_split_task*
+    llm_reordered_work*
+    task_completion_out_of_order
+    tool_call_wrong_agent
+  }
+  class Discovery {
+    new_work_discovered
+    task_result_new_work
+  }
+  class User {
+    user_steer*
+    user_cancel*
+    external_signal*
+  }
+  class Unknown {
+    task_failed_by_agent
+    upstream_failed
+  }
+  DriftKind <|-- Error
+  DriftKind <|-- Divergence
+  DriftKind <|-- Structural
+  DriftKind <|-- Discovery
+  DriftKind <|-- User
+  DriftKind <|-- Unknown
+```
+
 ## Central mechanics
 
 Before the catalog, some mechanics that every entry depends on.
@@ -63,6 +125,27 @@ with `revised_at`, `kind`, `detail`, `severity`, `reason`, and
 `revision_kind` / `revision_severity` / `revision_index` fields are
 updated. The frontend reads these to render the "Plan revised"
 banner.
+
+### Severity × recoverable decision matrix
+
+The two fields determine what `refine_plan_on_drift` does on receipt.
+`recoverable=False` is the only path that bypasses the planner entirely
+and runs `_fail_and_cascade_unrecoverable`. The 2-second per-kind
+throttle only applies when both fields are "soft": recoverable AND
+non-critical.
+
+```mermaid
+flowchart TD
+  D[DriftReason fired] --> R{recoverable?}
+  R -->|no| C[_fail_and_cascade_unrecoverable<br/>e.g. user_cancel]
+  R -->|yes| S{severity}
+  S -->|critical| BP[bypass throttle → refine immediately]
+  S -->|warning| TH{within 2s of last<br/>same-kind refine?}
+  S -->|info| TH
+  TH -->|yes| DR[drop — collapsed into prior refine]
+  TH -->|no| RP[call refine_plan_on_drift → planner]
+  RP --> RV[append plan_state.revisions entry]
+```
 
 ### The unrecoverable cascade
 

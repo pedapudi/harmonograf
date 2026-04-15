@@ -74,6 +74,29 @@ only**. See the "Plan execution protocol" section of `AGENTS.md`:
 The original iter14 inference approach is filed as ADR 0011a (Superseded by
 this ADR) — it remains for historical record but should not guide new work.
 
+**Reporting-tool intercept path** — the LLM calls a normal ADK tool;
+`before_tool_callback` recognises the name in `REPORTING_TOOL_NAMES` and
+applies the transition to `_AdkState` synchronously, *before* the no-op tool
+body returns `{"acknowledged": True}`.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant LLM
+    participant ADK as ADK runtime
+    participant CB as before_tool_callback (adk.py)
+    participant ST as _AdkState
+    participant Body as tool body (no-op)
+    LLM->>ADK: call report_task_completed(task_id=T)
+    ADK->>CB: dispatch
+    CB->>CB: name in REPORTING_TOOL_NAMES?
+    CB->>ST: transition T → COMPLETED (monotonic)
+    CB->>Body: continue
+    Body-->>ADK: {"acknowledged": True}
+    ADK-->>LLM: tool result
+    Note over CB,ST: state is declared, not inferred —<br/>belt-and-suspenders prose paths are secondary
+```
+
 ## Consequences
 
 **Good.**

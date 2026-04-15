@@ -5,6 +5,32 @@ tasks advance in unexpected ways, refines don't fire, or a sub-agent
 takes over planning when it shouldn't. Often traces back to running
 in a mode the code wasn't designed for.
 
+**Triage decision tree** — first determine which of the three modes is
+actually configured, then check that runtime behaviour matches that mode.
+
+```mermaid
+flowchart TD
+    Start([Behaviour ≠ documented<br/>mode]):::sym --> Q1{HarmonografAgent ctor<br/>flags?}
+    Q1 -- "orchestrator_mode=True<br/>parallel_mode=False" --> M1[Sequential]
+    Q1 -- "orchestrator_mode=True<br/>parallel_mode=True" --> M2[Parallel]
+    Q1 -- "orchestrator_mode=False" --> M3[Delegated]
+    M1 --> S1{Seeing report_task_*<br/>tool calls at boundaries?}
+    S1 -- "no" --> F1[Inner agent skipping tools;<br/>tighten prompt or rely on<br/>observer fallback]:::fix
+    S1 -- "yes" --> Done([Matches])
+    M2 --> P1{walker / _forced_task_id_var<br/>traces in DEBUG log?}
+    P1 -- "no" --> F2[Walker not running;<br/>verify run_parallel called]:::fix
+    P1 -- "yes" --> P2{Sub-agents reentrant?}
+    P2 -- "no" --> F3[Sub-agents not safe for<br/>concurrent dispatch — make<br/>stateless]:::fix
+    P2 -- "yes" --> Done
+    M3 --> D1{on_event_callback<br/>activity in log?}
+    D1 -- "no" --> F4[Observer never wired;<br/>drift detection blind]:::fix
+    D1 -- "yes" --> Done
+    Q1 -- "two ctors with<br/>orchestrator_mode=True" --> F5[Two hosts in one process —<br/>only one may own planning]:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **Client log** (at DEBUG):

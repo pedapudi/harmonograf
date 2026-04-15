@@ -23,6 +23,35 @@ and
 
 ## The envelope pipeline (`ingest.py`)
 
+The pipeline is a flat dispatch on the TelemetryUp oneof, with every
+branch following the same *dedup → persist → publish* pattern. The
+`control_ack` branch is the one outlier — it forwards into the
+ControlRouter instead of touching storage.
+
+```mermaid
+flowchart TD
+  RPC[StreamTelemetry RPC loop] --> H{first message?}
+  H -->|yes| HH[handle_hello → register session+agent+stream]
+  HH --> Pub1[bus.publish_agent_upsert]
+  H -->|no| HM[handle_message dispatch on oneof]
+  HM --> SS[span_start / update / end]
+  HM --> PL[payload]
+  HM --> HB[heartbeat]
+  HM --> CA[control_ack → ControlRouter.record_ack]
+  HM --> TP[task_plan / task_status_update]
+  HM --> GB[goodbye → close_stream]
+  SS --> ST[Store.append_span]
+  PL --> ST2[Store.write_payload]
+  TP --> ST3[Store.upsert_task_plan]
+  ST --> BUS[SessionBus.publish]
+  ST2 --> BUS
+  ST3 --> BUS
+```
+
+For the wire-level message shapes, see
+[`../protocol/telemetry-stream.md`](../protocol/telemetry-stream.md).
+
+
 The RPC entry point for the `StreamTelemetry` bidi is in
 `server/harmonograf_server/rpc/telemetry.py` (not covered here). That
 module opens a `StreamContext`, calls `handle_hello` on the first
@@ -221,6 +250,28 @@ falling behind, and can request a resync via WatchSession.
 wrap the underlying `publish(Delta(session_id, kind, payload))`
 call; the convenience is the per-kind type signature.
 
+### Subscriber fan-out
+
+`SessionBus.publish` snapshots the per-session subscriber list outside
+the async lock, then calls `put_nowait` on each. Slow subscribers do not
+block ingest — instead, the full-queue case enqueues a synthetic
+`backpressure` Delta on that one subscriber and increments its `dropped`
+counter.
+
+```mermaid
+flowchart TD
+  P[publish Delta] --> SN[snapshot _subs<br/>session_id]
+  SN --> L{for each subscriber}
+  L --> CL{closed?}
+  CL -->|yes| L
+  CL -->|no| Q[sub.queue.put_nowait]
+  Q --> OK{queue full?}
+  OK -->|no| L
+  OK -->|yes| D[sub.dropped += 1]
+  D --> BP[enqueue DELTA_BACKPRESSURE<br/>silent if also full]
+  BP --> L
+```
+
 ## WatchSession replay + initial burst
 
 The `WatchSession` RPC (defined in the frontend RPC handler, not
@@ -242,6 +293,27 @@ Delta that's live on the bus is guaranteed to also be present (or
 imminently present) in storage. The burst phase will observe the
 newer state and the live phase will re-send the same deltas — the
 frontend dedups by span id on the `SpanIndex.append` path.
+
+Sequence of a fresh WatchSession from the frontend's perspective:
+
+```mermaid
+sequenceDiagram
+  participant FE as Frontend
+  participant RPC as WatchSession RPC
+  participant Store
+  participant Bus as SessionBus
+  FE->>RPC: WatchSession(session_id)
+  RPC->>Bus: subscribe(session_id)
+  Bus-->>RPC: Subscription (queue starts buffering live deltas)
+  RPC->>Store: list_agents / list_spans / list_task_plans
+  Store-->>RPC: rows
+  RPC-->>FE: initial burst (agent / span / taskPlan messages)
+  RPC-->>FE: burstComplete marker
+  loop live phase
+    Bus-->>RPC: Delta from queue
+    RPC-->>FE: matching wire message
+  end
+```
 
 The `initialBurstComplete` flag in the frontend's `useSessionWatch`
 (hooks.ts:257-261) is what flips the "connecting..." UI into
@@ -335,6 +407,35 @@ the delivery is done:
 
 On resolution, it sets the pending's future and pops the entry
 from `_pending`.
+
+The full deliver→ack→resolve loop, with the ack arriving back on the
+*telemetry* stream (not on the control stream itself):
+
+```mermaid
+sequenceDiagram
+  participant Caller as deliver()
+  participant CR as ControlRouter
+  participant Sub as ControlSubscription
+  participant Cli as Client agent
+  participant Ing as Ingest pipeline
+  Caller->>CR: deliver(agent_id, kind, ...)
+  CR->>CR: build _PendingDelivery<br/>expected={live stream_ids}
+  CR->>Sub: queue.put_nowait(ControlEvent)
+  Sub-->>Cli: drain SubscribeControl stream
+  Cli->>Ing: TelemetryUp.control_ack
+  Ing->>CR: record_ack(ack, stream_id)
+  CR->>CR: discard stream_id from expected
+  CR->>CR: _maybe_resolve(pending)
+  alt require_all OR all done OR any SUCCESS
+    CR-->>Caller: future.set_result(DeliveryOutcome)
+  else still waiting
+    CR-->>CR: keep accumulating
+  end
+```
+
+For the wire shape of ControlEvent / ControlAck and the
+require_all_acks semantics, see
+[`../protocol/control-stream.md`](../protocol/control-stream.md).
 
 ### STATUS_QUERY hook
 

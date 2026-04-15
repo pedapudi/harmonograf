@@ -28,6 +28,17 @@ skim it first — every recipe refers to regions by name.
 **Goal.** Catch the moment a sub-agent blocks on a human decision, inspect
 what it's asking, and approve or reject it from the UI.
 
+The flow you'll walk: spot the red-pulsing bar, drill into it, decide, send the verdict.
+
+```mermaid
+flowchart LR
+    Spot[red-pulsing<br/>WAIT_FOR_HUMAN bar] --> Click[click the bar<br/>drawer opens]
+    Click --> Read[Summary + Payload<br/>tabs]
+    Read --> Decide{approve or<br/>reject?}
+    Decide -- approve --> OK[span → OK]
+    Decide -- reject --> Cancel[span → CANCELLED]
+```
+
 **Prerequisites.**
 
 - A session with at least one agent that has built-in
@@ -400,6 +411,19 @@ kind X" filter today.
 
 **Goal.** Follow a delegation chain visually from the originating agent
 through to the return.
+
+A typical chain looks like this on the Graph view — orange arrows for transfers, dashed grey for returns:
+
+```mermaid
+sequenceDiagram
+    participant Coord as coordinator
+    participant Res as researcher
+    participant Web as web_developer
+    Coord->>Res: TRANSFER (orange)
+    Res-->>Coord: return (grey dashed)
+    Coord->>Web: TRANSFER
+    Web-->>Coord: return
+```
 
 **Prerequisites.** A session with at least two agents and at least one
 explicit `TRANSFER` span (or an inferred delegation — both work).

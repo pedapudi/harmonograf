@@ -48,26 +48,19 @@ Harmonograf keeps the story first-class:
 
 ## Architecture
 
-Harmonograf is three components that share one data model:
+Harmonograf is three components that share one data model. Telemetry flows up from agents through the server to the browser; control messages flow back down on the same connections.
 
-```
-          ┌──────────────────────────┐
-          │      Frontend (React)    │
-          │   Gantt + Graph + Diff   │
-          └─────────────┬────────────┘
-                        │ gRPC-Web (:7532)
-          ┌─────────────▼────────────┐
-          │   harmonograf-server     │
-          │  fan-in, store, control  │
-          └─────────────┬────────────┘
-                        │ gRPC (:7531)
-         ┌──────────────┼──────────────┐
-         │              │              │
-   ┌─────▼─────┐  ┌─────▼─────┐  ┌─────▼─────┐
-   │  agent A  │  │  agent B  │  │  agent C  │
-   │ (ADK +    │  │ (ADK +    │  │ (ADK +    │
-   │  client)  │  │  client)  │  │  client)  │
-   └───────────┘  └───────────┘  └───────────┘
+```mermaid
+flowchart TD
+    UI[Frontend<br/>Gantt + Graph + Diff]
+    Server[harmonograf-server<br/>fan-in · store · control]
+    A[agent A<br/>ADK + client]
+    B[agent B<br/>ADK + client]
+    C[agent C<br/>ADK + client]
+    UI <-- "gRPC-Web :7532" --> Server
+    Server <-- "gRPC :7531" --> A
+    Server <-- "gRPC :7531" --> B
+    Server <-- "gRPC :7531" --> C
 ```
 
 | Component | Path | Language | Role |

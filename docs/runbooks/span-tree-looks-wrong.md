@@ -4,6 +4,27 @@ Spans display in the UI with nonsense parenting: orphans, spans with
 parents that don't exist, cross-agent links that look random, or a
 tree whose shape doesn't match what the agent actually did.
 
+**Triage decision tree** — the orphan/cross-agent SQL queries below split
+the cases. Buffer drops account for most "vanished parent" symptoms.
+
+```mermaid
+flowchart TD
+    Start([Span tree malformed:<br/>orphans / wrong agent /<br/>impossible parents]):::sym --> Q1{Orphan SQL returns rows?<br/>parent_span_id NOT IN spans}
+    Q1 -- "yes" --> Q1a{dropped_spans_critical<br/>> 0 in heartbeat?}
+    Q1a -- "yes" --> F1a[Buffer dropped a parent —<br/>see agent-disconnects-repeatedly]:::fix
+    Q1a -- "no" --> F1b[Span ID collision: check<br/>GROUP BY id HAVING COUNT>1]:::fix
+    Q1 -- "no" --> Q2{Cross-agent parent<br/>SQL returns rows?}
+    Q2 -- "yes" --> Q2a{Multi-agent on one<br/>stream by design?}
+    Q2a -- "no" --> F2a[OTEL context bled through<br/>asyncio.create_task —<br/>fork w/ fresh context]:::fix
+    Q2a -- "yes" --> F2b[Control alias collision:<br/>give sub-agents unique names]:::fix
+    Q2 -- "no" --> Q3{Server log: 'ignoring<br/>hgraf.task_id on non-leaf'?}
+    Q3 -- "yes" --> F3[Wrapper-span binding:<br/>only stamp task_id on<br/>LLM_CALL / TOOL_CALL]:::fix
+    Q3 -- "no" --> F4[Out-of-order ingest;<br/>usually harmless cosmetic]:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **UI (Gantt / drawer)**:

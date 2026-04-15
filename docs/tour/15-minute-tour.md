@@ -63,6 +63,23 @@ Every primitive you need to know fits on one page. Memorize these, and the
 rest of the UI is self-explanatory. The deep version lives in
 [mental-model.md](mental-model.md).
 
+Here is the concept map — nine nouns, the relationships you'll see on the wire and in the UI:
+
+```mermaid
+flowchart TD
+    Session --> Agent
+    Session --> Plan
+    Plan --> Task
+    Agent -- emits --> Span
+    Agent -- calls --> Reporting[Reporting tools]
+    Reporting -- transitions --> Task
+    Plan -- drift fires refine --> Plan
+    Session --> State[session.state]
+    State -. read by .-> Agent
+    UI[Frontend] -- ControlEvent --> Agent
+```
+
+
 - **Session.** A single agent run. Has an id, a title, a start time, maybe
   an end time, and a list of agents that participated. One harmonograf
   session corresponds to one user-facing invocation — one prompt, one roll-out.
@@ -110,24 +127,17 @@ around these.
 
 Harmonograf is three processes that share one data model.
 
-```
-          +--------------------------+
-          |     Frontend (React)     |
-          |   Gantt + Graph + Diff   |
-          +-------------+------------+
-                        | gRPC-Web (:7532)
-          +-------------v------------+
-          |   harmonograf-server     |
-          |  fan-in, store, control  |
-          +-------------+------------+
-                        | gRPC (:7531)
-         +--------------+--------------+
-         |              |              |
-   +-----v-----+  +-----v-----+  +-----v-----+
-   |  agent A  |  |  agent B  |  |  agent C  |
-   |  (ADK +   |  |  (ADK +   |  |  (ADK +   |
-   |   client) |  |   client) |  |   client) |
-   +-----------+  +-----------+  +-----------+
+```mermaid
+flowchart TD
+    UI[Frontend<br/>Gantt + Graph + Diff]
+    Server[harmonograf-server<br/>fan-in · store · control]
+    A[agent A<br/>ADK + client]
+    B[agent B<br/>ADK + client]
+    C[agent C<br/>ADK + client]
+    UI <-- "gRPC-Web :7532" --> Server
+    Server <-- "gRPC :7531" --> A
+    Server <-- "gRPC :7531" --> B
+    Server <-- "gRPC :7531" --> C
 ```
 
 **Client library** (`client/`). Embedded inside each agent process. Ships an
@@ -161,8 +171,31 @@ the ADK web UI at `http://127.0.0.1:8080` and typed:
 > Build a slide deck about the Python programming language with five slides,
 > including an example snippet.
 
-Here is what happens, in order, at a level of detail you can see in the
-harmonograf UI.
+Here is the same rollout at a glance, before the prose walk-through. Each step is one beat in the timeline; drift and intervention are points where the loop diverges from the happy path.
+
+```mermaid
+sequenceDiagram
+    participant You
+    participant ADK as ADK web
+    participant Coord as coordinator_agent
+    participant Sub as research_agent
+    participant Server as harmonograf-server
+    participant UI as harmonograf UI
+    You->>ADK: prompt
+    ADK->>Coord: invocation
+    Coord->>Server: upsertPlan(plan)
+    Server-->>UI: plan arrives
+    Coord->>Sub: transfer task t1
+    Sub->>Server: report_task_started(t1)
+    Sub->>Server: tool_call spans
+    Sub->>Server: report_task_completed(t1)
+    Note over Server,UI: drift? → refine → plan diff
+    You->>UI: Space (pause)
+    UI->>Server: SendControl(PAUSE)
+    Server->>Coord: control event
+```
+
+Now in detail, at a level you can see in the harmonograf UI:
 
 **Step 1 — the coordinator plans.** ADK routes your prompt to
 `presentation_agent`, which is wrapped by `HarmonografAgent`. The

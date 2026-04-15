@@ -11,6 +11,27 @@ flow-optimized.
 
 ![TODO: screenshot of the Graph view with labeled agent headers, activation boxes, and three transfer arrows](_screenshots/graph-view.png)
 
+## Example topology
+
+A typical multi-agent run looks like the diagram below: a coordinator delegates to specialists, each specialist may invoke its own tools or transfer onward, and returns flow back up the chain. The Graph view is this topology with time running downward.
+
+```mermaid
+flowchart TD
+    Coord[coordinator_agent]
+    Research[research_agent]
+    Writer[writer_agent]
+    Reviewer[reviewer_agent]
+    Debugger[debugger_agent]
+    Coord -- transfer --> Research
+    Research -. return .-> Coord
+    Coord -- transfer --> Writer
+    Writer -. return .-> Coord
+    Coord -- transfer --> Reviewer
+    Reviewer -- transfer · drift --> Debugger
+    Debugger -. return .-> Reviewer
+    Reviewer -. return .-> Coord
+```
+
 ## Layout
 
 - **Time label column** — the narrow strip on the left with `m:ss` marks.

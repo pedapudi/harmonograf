@@ -24,6 +24,20 @@ message SpanEnd    { string span_id = 1; google.protobuf.Timestamp end_time = 2;
                      repeated PayloadRef payload_refs = 6; }
 ```
 
+A span's lifecycle as seen by the server — note that updates and ends after a terminal end are silent no-ops:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Started: SpanStart{ span }
+    Started --> Started: SpanStart with same id<br/>(silent dedup)
+    Started --> Updating: SpanUpdate{ attrs / status / payloads }
+    Updating --> Updating: more SpanUpdates
+    Updating --> Ended: SpanEnd{ end_time, status }
+    Started --> Ended: SpanEnd
+    Ended --> Ended: late SpanUpdate / SpanEnd<br/>(silent no-op)
+    Ended --> [*]
+```
+
 ### `SpanStart`
 
 Carries the full `Span` minus `end_time`. Invariants:
@@ -89,6 +103,23 @@ def merge(acc, delta):
     return acc
 ```
 
+The merge decision per incoming attribute key — the "no oneof set" sentinel is how clients delete an attribute:
+
+```mermaid
+flowchart TD
+    In["incoming attribute (k, v)"]
+    HasOneof{v has<br/>oneof value?}
+    Drop["acc.pop(k)<br/>(clear the key)"]
+    Has{k already<br/>in acc?}
+    Overwrite["acc[k] = v<br/>(overwrite scalar / list / map)"]
+    Add["acc[k] = v<br/>(add new key)"]
+    In --> HasOneof
+    HasOneof -- no --> Drop
+    HasOneof -- yes --> Has
+    Has -- yes --> Overwrite
+    Has -- no --> Add
+```
+
 Key namespacing:
 
 - Framework-level attributes should use a dotted prefix (e.g.
@@ -142,6 +173,29 @@ if task_id and ended.kind in _TASK_BINDING_SPAN_KINDS:
 `_bind_task_to_span` is monotonic — once a task is terminal, further
 binds are rejected (via the same `_set_task_status` guard used on the
 client).
+
+How a leaf span carrying `hgraf.task_id` flips its planned task to RUNNING — wrapper spans (INVOCATION/TRANSFER) never bind:
+
+```mermaid
+sequenceDiagram
+    participant Walker as parallel walker
+    participant Agent as sub-agent code
+    participant Client as transport
+    participant Ingest
+    participant Store
+    participant Bus
+    Walker->>Walker: _forced_task_id_var.set(task_id)
+    Walker->>Agent: run task body
+    Agent->>Client: emit LLM_CALL span<br/>(client stamps hgraf.task_id from contextvar)
+    Client->>Ingest: SpanStart{ span, attrs.hgraf.task_id }
+    Ingest->>Ingest: kind in {LLM_CALL, TOOL_CALL}?
+    alt leaf kind
+        Ingest->>Store: _bind_task_to_span(task_id, span_id, RUNNING)
+        Ingest->>Bus: publish_task_status delta
+    else wrapper kind
+        Ingest->>Ingest: log debug, ignore
+    end
+```
 
 ### How the `hgraf.task_id` gets onto the span
 

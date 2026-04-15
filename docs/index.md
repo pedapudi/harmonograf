@@ -14,6 +14,24 @@ Top-level entry points:
 - **[docs/tour/](tour/index.md)** — newcomer tour: three doors, a
   15-minute walkthrough, a mental-model primer, and a terminology map.
 
+The site is organized by audience. Pick a starting point based on what you came here to do; every section eventually cross-links into the others.
+
+```mermaid
+flowchart TD
+    Tour[Tour<br/>start here if new]
+    Users[User docs<br/>quickstart · user-guide]
+    Devs[Dev guide<br/>building from source]
+    Proto[Protocol reference<br/>wire-level]
+    Design[Design notes<br/>+ ADRs]
+    Internals[Internals<br/>hot-path tours]
+    Tour --> Users
+    Tour --> Devs
+    Tour --> Proto
+    Devs --> Internals
+    Devs --> Design
+    Proto --> Design
+```
+
 ---
 
 ## Tour (start here if you're new)

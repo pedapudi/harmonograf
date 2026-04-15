@@ -4,6 +4,30 @@
 nothing works: either the UI is blank, the agent never connects, or
 processes exit silently.
 
+**Triage decision tree** — three demo processes, three port lookups, three failure modes.
+
+```mermaid
+flowchart TD
+    Start([make demo broken]):::sym --> Q1{Which port is<br/>not LISTENING?}
+    Q1 -- "7531 (server)" --> Q1a{Port already<br/>in use?}
+    Q1a -- "yes" --> F1a[Kill squatter or<br/>set SERVER_PORT]:::fix
+    Q1a -- "no" --> F1b[Server crash:<br/>see sqlite-errors /<br/>check uv env]:::fix
+    Q1 -- "5173 (Vite)" --> Q2{pnpm install<br/>clean?}
+    Q2 -- "no" --> F2a[cd frontend && pnpm install]:::fix
+    Q2 -- "yes" --> F2b[Port collision; set<br/>FRONTEND_PORT]:::fix
+    Q1 -- "8080 (adk web)" --> Q3{LLM env vars<br/>set / reachable?}
+    Q3 -- "no" --> F3a[Set KIKUCHI_LLM_URL,<br/>OPENAI_API_BASE]:::fix
+    Q3 -- "yes" --> Q3b{.demo-agents staging<br/>looks valid?}
+    Q3b -- "no" --> F3b[rm -rf .demo-agents<br/>make .demo-agents-stage]:::fix
+    Q3b -- "yes" --> F3c[uv sync --extra demo;<br/>fix Python imports]:::fix
+    Q1 -- "all listening, UI blank" --> Q4{HARMONOGRAF_SERVER<br/>in agent env right?}
+    Q4 -- "no" --> F4[Unset stale shell var,<br/>let Makefile inject]:::fix
+    Q4 -- "yes" --> F5[Browser DevTools:<br/>check CORS / _cors.py<br/>allow list]:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **Terminal**: `make demo` prints one of:

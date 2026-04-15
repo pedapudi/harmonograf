@@ -3,6 +3,31 @@
 The agent process is running but never appears in the session picker,
 or appears as "0 agents" and stays that way.
 
+**Triage decision tree** — symptom → check → most-likely cause → fix path.
+Walk top-to-bottom; the candidates are ordered by frequency.
+
+```mermaid
+flowchart TD
+    Start([Agent absent / 0 agents]):::sym --> Q1{HARMONOGRAF_SERVER<br/>set correctly?}
+    Q1 -- "points at 5174 / wrong host" --> F1[Set 127.0.0.1:7531<br/>restart agent]:::fix
+    Q1 -- "looks right" --> Q2{Server port 7531<br/>open? lsof}
+    Q2 -- "no listener" --> F2[Start server:<br/>make server-run]:::fix
+    Q2 -- "listening" --> Q3{Server log mentions<br/>auth: ...?}
+    Q3 -- "yes" --> F3[Match HARMONOGRAF_AUTH_TOKEN<br/>on both sides]:::fix
+    Q3 -- "no" --> Q4{Client log shows<br/>UNAVAILABLE / HTTP/2?}
+    Q4 -- "yes" --> F4[TLS mismatch: align<br/>plaintext vs TLS]:::fix
+    Q4 -- "no" --> Q5{Server log:<br/>Hello.agent_id required?}
+    Q5 -- "yes" --> F5[Clear identity file<br/>under DATA_DIR]:::fix
+    Q5 -- "no" --> Q6{lsof shows wrong<br/>process on 7531?}
+    Q6 -- "yes" --> F6[Kill imposter,<br/>restart server]:::fix
+    Q6 -- "no" --> Q7{Client log:<br/>circuit breaker OPEN?}
+    Q7 -- "yes" --> F7[Restart agent<br/>or wait cooldown]:::fix
+    Q7 -- "no" --> F8[Check head of agent log<br/>for import-time crash]:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **Server log** — one of:

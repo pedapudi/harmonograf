@@ -67,6 +67,27 @@ plan-shaped object. A stateful `InvariantChecker` variant is offered
 for callers that want cross-turn history (the monotonic-state check
 needs to see transitions, not just current state).
 
+**Validator topology** — per-write guards block illegal *single*
+transitions; `check_plan_state` runs at end of every walker turn to catch
+*aggregate* incoherence the per-write guards missed.
+
+```mermaid
+flowchart LR
+    Wr[reporting tool /<br/>walker write] --> G1[per-write guard<br/>_set_task_status]
+    G1 -- legal --> S[(plan state)]
+    G1 -- illegal --> Drop[silently dropped<br/>(monotonic)]
+    S --> Turn[walker turn end]
+    Turn --> Val[check_plan_state<br/>invariants.py]
+    Val --> Vio[InvariantViolation list<br/>severity=warn|error]
+    Vio --> Log[log at v.log_level()]
+    Vio --> Test{tests?}
+    Test -- yes --> Assert[assert no error]
+    Test -- no --> Continue[production: log + continue]
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class Val,Vio good
+```
+
 ## Consequences
 
 **Good.**

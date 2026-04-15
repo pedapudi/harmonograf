@@ -115,6 +115,44 @@ pointing straight at the bad transition.
 
 ## Common failure modes
 
+A symptom-first triage flow. Each branch points at the section below that covers it.
+
+```mermaid
+flowchart TD
+    start{Symptom?}
+    empty[Gantt empty]
+    stuck[Agent stuck]
+    miss[Span missing]
+    task[Task won't advance]
+    stale[Stale plan after refine]
+    demo[make demo broken]
+    proto[Old client broke]
+
+    start --> empty
+    start --> stuck
+    start --> miss
+    start --> task
+    start --> stale
+    start --> demo
+    start --> proto
+
+    empty --> e1{WatchSession 200?}
+    e1 -- no --> e2[Check FRONTEND_PORT,<br/>CORS, server up]
+    e1 -- yes --> e3[Check session selected<br/>+ viewport range]
+
+    stuck --> s1{progress_counter<br/>incrementing?}
+    s1 -- no --> s2[Check transport reconnect<br/>+ stuck_reason]
+    s1 -- yes --> s3[Check current_activity<br/>+ context pressure]
+
+    miss --> m1{dropped_events > 0?}
+    m1 -- yes --> m2[Buffer pressure;<br/>raise capacity]
+    m1 -- no --> m3[Grep ingest log<br/>+ sqlite spans table]
+
+    task --> t1{reporting tool<br/>called?}
+    t1 -- no --> t2[Fix instruction<br/>via augment_instruction]
+    t1 -- yes --> t3[Check InvariantViolation<br/>+ _forced_task_id_var]
+```
+
 ### 1. "The Gantt is empty"
 
 **Check, in order:**

@@ -3,6 +3,27 @@
 The agent's model is hitting its context window limit. LLM calls
 start failing, get truncated, or are refused outright.
 
+**Triage decision tree** — separate "real overflow" from "tokenizer lying"
+from "history bloat".
+
+```mermaid
+flowchart TD
+    Start([context_window_tokens<br/>≥ limit_tokens]):::sym --> Q1{provider tokenizer ==<br/>client tokenizer?}
+    Q1 -- "no" --> F1[Tokenizer mismatch:<br/>swap to provider tokenizer]:::fix
+    Q1 -- "yes" --> Q2{Configured limit<br/>matches model docs?}
+    Q2 -- "no" --> F2[Wrong constant:<br/>fix context_window_limit]:::fix
+    Q2 -- "yes" --> Q3{session.state biggest<br/>key is task_results?}
+    Q3 -- "yes" --> F3[State bloat: only inject<br/>relevant completed results]:::fix
+    Q3 -- "no" --> Q4{Tool output payloads<br/>> 50KB?}
+    Q4 -- "yes" --> F4[Truncate tool outputs at<br/>emit; reference by URL]:::fix
+    Q4 -- "no" --> Q5{System prompt /<br/>retrieval bloated?}
+    Q5 -- "yes" --> F5[Compress / chunk retrieval]:::fix
+    Q5 -- "no" --> F6[Genuine long session —<br/>split via steer-restart<br/>with summary]:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **UI**: drawer's context-window visualization shows

@@ -41,6 +41,25 @@ The client library generates ids locally the moment a span begins (inside
 server's ingest path is structured as "upsert by id" — a replay simply
 overwrites or is deduped.
 
+**UUIDv7 layout** — leading 48 bits are a Unix-millisecond timestamp, so
+ids sort by creation time without a central allocator; the random tail keeps
+two agents on the same millisecond from colliding.
+
+```mermaid
+flowchart LR
+    subgraph U7["UUIDv7 (128 bits)"]
+      direction LR
+      T["unix_ms (48 bits)<br/>creation time → sortable"] --> V["ver (4)"] --> R1["rand_a (12)"] --> Var["var (2)"] --> R2["rand_b (62)<br/>collision-free across agents"]
+    end
+    Agent1[Agent A] -- mints locally --> U7
+    Agent2[Agent B] -- mints locally --> U7
+    U7 --> Buf[client buffer<br/>(offline-safe)]
+    Buf --> Srv[Server upsert by id<br/>dedup on replay]
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class U7,Buf,Srv good
+```
+
 ## Consequences
 
 **Good.**

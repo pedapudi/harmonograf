@@ -52,6 +52,29 @@ cd client && uv sync
 cd frontend && pnpm install --frozen-lockfile
 ```
 
+The fan-out from `make install` to the per-component installers:
+
+```mermaid
+flowchart LR
+    mi[make install]
+    server[server/<br/>uv sync]
+    client[client/<br/>uv sync]
+    frontend[frontend/<br/>pnpm install]
+    adk[third_party/adk-python/<br/>local clone]
+    sv[server/.venv]
+    cv[client/.venv]
+    nm[frontend/node_modules]
+    rv[root .venv<br/>e2e + demo extras]
+
+    mi --> server --> sv
+    mi --> client --> cv
+    mi --> frontend --> nm
+    adk -.editable.-> server
+    adk -.editable.-> client
+    server -.workspace.-> rv
+    client -.workspace.-> rv
+```
+
 `uv sync` is authoritative — it reads `uv.lock` and creates a `.venv` per
 package. Never run `pip install` in this repo. If you need to add a dependency,
 edit the relevant `pyproject.toml` and re-run `uv sync`; uv will rewrite the
@@ -114,6 +137,35 @@ long-running process. Kill and re-run it manually. Frontend has hot module
 reloading through Vite.
 
 ## Repository layout tour
+
+The top-level directories at a glance:
+
+```mermaid
+flowchart TD
+    root[harmonograf/]
+    proto[proto/harmonograf/v1/<br/>canonical wire schema]
+    client[client/<br/>harmonograf_client]
+    server[server/<br/>harmonograf_server]
+    frontend[frontend/<br/>React + Vite]
+    tests[tests/<br/>e2e + integration<br/>+ reference_agents/presentation_agent]
+    docs[docs/<br/>dev-guide + protocol]
+    third[third_party/adk-python/<br/>gitignored]
+    data[data/<br/>runtime sqlite]
+    mk[Makefile + pyproject.toml]
+
+    root --> proto
+    root --> client
+    root --> server
+    root --> frontend
+    root --> tests
+    root --> docs
+    root --> third
+    root --> data
+    root --> mk
+    proto -. make proto .-> client
+    proto -. make proto .-> server
+    proto -. buf generate .-> frontend
+```
 
 ```
 harmonograf/

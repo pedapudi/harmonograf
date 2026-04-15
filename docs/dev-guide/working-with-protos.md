@@ -53,6 +53,32 @@ emits stub files twice — once into server's `pb/`, once into client's
 `pb/`. This duplication is intentional: the two packages must not depend on
 each other.
 
+A proto edit fans out into three generated trees plus their consumers:
+
+```mermaid
+flowchart LR
+    edit[proto/harmonograf/v1/<br/>*.proto edit]
+    mp[make proto]
+    pp[proto-python<br/>grpc_tools.protoc]
+    pt[proto-ts<br/>buf generate]
+    spy[server/harmonograf_server/pb/]
+    cpy[client/harmonograf_client/pb/]
+    tspb[frontend/src/pb/]
+    sconv[server convert.py + ingest.py]
+    cconv[client transport / adk]
+    fconv[frontend rpc/convert.ts + renderer]
+
+    edit --> mp
+    mp --> pp
+    mp --> pt
+    pp --> spy
+    pp --> cpy
+    pt --> tspb
+    spy --> sconv
+    cpy --> cconv
+    tspb --> fconv
+```
+
 ### Generated files are committed
 
 This matters:
@@ -185,6 +211,22 @@ If the field needs to appear in the UI:
 - Commit the proto change, generated stubs, dataclass updates, converters,
   storage migrations, client producer, and frontend consumer all in one
   PR. A proto change that skips a layer is hard to review piecewise.
+
+A field's lifecycle from add through deprecate to reserved removal:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Added: pick fresh number,<br/>regen, ship
+    Added --> InUse: clients writing,<br/>server reading
+    InUse --> Deprecated: mark [deprecated=true]
+    Deprecated --> Drained: stop writing on client,<br/>server still reads
+    Drained --> Reserved: delete + reserved N, "name"
+    Reserved --> [*]
+    note right of Reserved
+        Number can never
+        be reused
+    end note
+```
 
 ## Forward compatibility rules
 

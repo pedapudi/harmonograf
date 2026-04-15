@@ -9,6 +9,30 @@ If in doubt about a glyph or color, open the **legend** from the `?` button
 on the app bar — it is the authoritative visual reference and mirrors every
 renderer symbol.
 
+## Region map
+
+The Gantt view stacks a few panels around a central plot. Use this map to find what each region is called when you read the rest of the page.
+
+```mermaid
+flowchart TB
+    subgraph Top
+      Live[Live activity panel]
+    end
+    subgraph Body
+      Gutter[Agent gutter]
+      Plot[Plot · spans · cross-agent edges]
+      Mini[Minimap<br/>bottom-left of plot]
+    end
+    subgraph Bottom
+      Transport[Transport bar]
+      Tasks[Task panel]
+    end
+    Top --> Body
+    Gutter --- Plot
+    Plot --- Mini
+    Body --> Bottom
+```
+
 ## Layout recap
 
 ![TODO: screenshot of the Gantt view with labels: agent gutter, time axis, spans, minimap, transport bar, task panel](_screenshots/gantt-view.png)
@@ -21,6 +45,25 @@ renderer symbol.
 | **Minimap** (bottom-left, inside plot) | Full-session overview with a viewport rectangle. |
 | **Transport bar** (below plot) | Pause / resume / follow-live / zoom. See [Control actions](control-actions.md). |
 | **Task panel** (bottom) | Collapsible at-a-glance task list. Resize by dragging the top edge. |
+
+## Reading the axes
+
+Time runs horizontally; agents are stacked vertically, one row each. A bar represents a span on its agent's row, positioned by its start and end time. Cross-agent edges (the bezier curves) connect a TRANSFER on one row to the invocation it kicked off on another row.
+
+```mermaid
+flowchart LR
+    subgraph rows[Vertical = agents]
+      direction TB
+      R1[coordinator_agent]
+      R2[research_agent]
+      R3[writer_agent]
+    end
+    subgraph time[Horizontal = time →]
+      direction LR
+      T0[t = 0] --> T1[t = 30s] --> T2[live edge]
+    end
+    rows -. spans plotted across .-> time
+```
 
 ## Reading a bar — kinds, status, decorations
 

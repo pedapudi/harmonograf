@@ -4,6 +4,24 @@ The agent's hot path is slow. Spans take a long time to end, the
 client buffer backs up, the UI feels laggy. Py-spy shows most time
 inside `harmonograf_client.adk` callbacks.
 
+**Triage decision tree** — py-spy first; the dominant frame names the cause.
+
+```mermaid
+flowchart TD
+    Start([Hot path slow,<br/>buffered_events climbing]):::sym --> Q1{py-spy top: dominant<br/>frame?}
+    Q1 -- "tiktoken / tokenizer / encode" --> F1[Tokenizer-heavy: sample less,<br/>cache stable prefix tokens]:::fix
+    Q1 -- "planner.refine" --> F2[Move refine off event loop<br/>or set refine_on_events=False]:::fix
+    Q1 -- "logging / format" --> F3[LOG_LEVEL=DEBUG in prod;<br/>switch to INFO]:::fix
+    Q1 -- "hashlib / sha256" --> F4[Big payload hashing —<br/>stop capturing full bodies]:::fix
+    Q1 -- "before_tool_callback" --> F5[Sync IO in handler;<br/>make async / queue]:::fix
+    Q1 -- "detect_drift" --> F6[O(events) scan: add cursor<br/>events_since_last_scan]:::fix
+    Q1 -- "check_plan_state /<br/>_check_*" --> F7[Invariant checker hot —<br/>only run in dev/CI]:::fix
+    Q1 -- "looks normal but slow" --> F8[Network slow: see<br/>agent-disconnects-repeatedly]:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **Client heartbeat**: `buffered_events` climbs, `cpu_self_pct` high,

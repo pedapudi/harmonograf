@@ -69,6 +69,32 @@ The shape that falls out of the four forcing functions above:
 - Integration with ADK goes through official seams only — callbacks, session
   state, tool injection — never monkey-patching (ADR 0003, ADR 0014).
 
+**The shape that falls out** — span-tracer model on the left, harmonograf's
+plan-aware bidirectional model on the right. The arrows for *intervention* are
+the part the left column doesn't have.
+
+```mermaid
+flowchart LR
+    subgraph Tracer["Span-tracer model"]
+      direction TB
+      T1[Agents] -->|spans| T2[Trace store]
+      T2 --> T3[Waterfall UI<br/>read-only]
+    end
+    subgraph Hgraf["Harmonograf model"]
+      direction TB
+      H1[Agents] -->|spans + plans +<br/>task reports| H2[Server]
+      H2 --> H3[Gantt + plan view]
+      H3 -->|control / steer /<br/>approve| H2
+      H2 -->|SubscribeControl| H1
+    end
+    Tracer -. "fails on:<br/>plan revisions,<br/>parallel races,<br/>intervention" .-> Hgraf
+
+    classDef bad fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class Tracer bad
+    class Hgraf good
+```
+
 ## Consequences
 
 **Good.**

@@ -5,6 +5,23 @@ two worker sub-agents, then a single reduce task. The walker pins each
 map task to a specific sub-agent via `forced_task_id` and fans them out
 respecting the DAG edges.
 
+The DAG is the classic fan-out / fan-in: eight map tasks pinned to two workers, then one reduce on the orchestrator.
+
+```mermaid
+flowchart LR
+    O([orchestrator])
+    O --> M1[m1<br/>worker-a]
+    O --> M2[m2<br/>worker-b]
+    O --> M3[m3<br/>worker-a]
+    O --> M4[m4<br/>worker-b]
+    O --> Mn[m5..m8]
+    M1 --> R[r1 · reduce<br/>orchestrator]
+    M2 --> R
+    M3 --> R
+    M4 --> R
+    Mn --> R
+```
+
 ## Set-up
 
 - Agents:

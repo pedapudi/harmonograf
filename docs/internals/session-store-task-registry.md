@@ -39,6 +39,55 @@ will need to rethink this.
 
 ## SessionStore composition
 
+`SessionStore` is a thin container — its real value is the four child
+registries it holds and the relationship those have to the renderer and
+to the React DOM components that need presence-only reads.
+
+```mermaid
+classDiagram
+  class SessionStore {
+    +agents: AgentRegistry
+    +spans: SpanIndex
+    +tasks: TaskRegistry
+    +contextSeries: ContextSeriesRegistry
+    +wallClockStartMs
+    +nowMs
+    +listOrchestrationEvents()
+    +getCurrentTask()
+  }
+  class AgentRegistry {
+    -agents Agent[]
+    +upsert() / setStatus() / subscribe()
+  }
+  class SpanIndex {
+    +append() / range() / all() / queryAgent()
+  }
+  class TaskRegistry {
+    -plans TaskPlan[]
+    -_revisionsByPlan
+    +upsertPlan() / updateTaskStatus() / subscribe()
+  }
+  class ContextSeriesRegistry {
+    -byAgent Map
+    +append() / forAgent()
+  }
+  class GanttRenderer {
+    +attach()
+    -draw()
+  }
+  class ReactComponent {
+    +useSyncExternalStore
+  }
+  SessionStore *-- AgentRegistry
+  SessionStore *-- SpanIndex
+  SessionStore *-- TaskRegistry
+  SessionStore *-- ContextSeriesRegistry
+  GanttRenderer ..> SessionStore : direct reads / subscribe
+  ReactComponent ..> SessionStore : presence subscribe only
+```
+
+
+
 `SessionStore` is defined at `index.ts:455-593`. It owns:
 
 - `agents: AgentRegistry` — active agents, status, metadata.
@@ -98,6 +147,36 @@ Fields:
   revision reason so we can skip duplicate entries.
 
 ### `upsertPlan(plan)` — the critical path (`index.ts:204-252`)
+
+The full critical-path sequence — from a `task_plan` Delta arriving in
+`useSessionWatch` through diff computation, in-place replacement, and
+synchronous subscriber notification:
+
+```mermaid
+sequenceDiagram
+  participant H as useSessionWatch
+  participant TR as TaskRegistry
+  participant Diff as computePlanDiff
+  participant L as Listeners (renderer + DOM)
+  H->>TR: upsertPlan(newPlan)
+  TR->>TR: scan plans by invocationSpanId<br/>(de-dup sibling)
+  TR->>TR: lookup byId[newPlan.id]
+  alt existing plan
+    TR->>TR: replace in plans[idx], byId[id]
+  else first time
+    TR->>TR: push + sort by createdAtMs
+  end
+  TR->>TR: read prev/next revisionReason
+  alt revisionReason changed
+    TR->>Diff: computePlanDiff(prev, next)
+    Diff-->>TR: PlanDiff{added,removed,modified,edgesChanged}
+    TR->>TR: append PlanRevision (cap 20)
+  end
+  TR->>L: emit() — synchronous fan-out
+  L-->>H: control returns once all listeners ran
+```
+
+
 
 The contract: given a new `TaskPlan` from the server (via
 `task_plan` Delta), incorporate it into the registry. It handles three
@@ -171,6 +250,34 @@ subtle bugs when the planner reordered tasks without changing them.
 The diff is what powers the "Plan revised" banner on the frontend:
 the banner lists added / modified / removed tasks and lets the user
 expand to see exactly what changed.
+
+### Revision diff classification
+
+`computePlanDiff` (`index.ts:130-182`) classifies every task in the new
+plan against the previous one. The flow shows the four buckets the diff
+fills and the separate edge-set comparison.
+
+```mermaid
+flowchart TD
+  S[computePlanDiff prev next] --> M[build prev id→Task map]
+  M --> NL{for each task in next}
+  NL --> EX{id in prev?}
+  EX -->|no| AD[added.push task]
+  EX -->|yes| FC{title/desc/<br/>assignee/status<br/>differ?}
+  FC -->|yes| MO[modified.push with changes]
+  FC -->|no| NL
+  AD --> NL
+  MO --> NL
+  NL --> RL{for each task in prev}
+  RL --> RM{still in next?}
+  RM -->|no| RD[removed.push id+title]
+  RM -->|yes| RL
+  RL --> EC[build edge key sets prev,next]
+  EC --> EE{sets equal?}
+  EE -->|no| EM[edgesChanged = true]
+  EE -->|yes| OUT[return PlanDiff]
+  EM --> OUT
+```
 
 ## Observer notification ordering
 

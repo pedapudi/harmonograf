@@ -8,6 +8,18 @@ across reloads.
 There are three annotation **kinds**, and the distinction matters because
 the server and client libraries treat them differently.
 
+Picking the right kind comes down to who you're writing for: yourself, the agent, or a gate the agent is waiting on. The decision tree below covers every case.
+
+```mermaid
+flowchart TD
+    Start([writing a note on a span])
+    Start --> Q1{is the span<br/>AWAITING_HUMAN?}
+    Q1 -- yes --> HR[HUMAN_RESPONSE<br/>unblocks the gate]
+    Q1 -- no --> Q2{do you want the agent<br/>to read and act on it?}
+    Q2 -- yes --> ST[STEERING<br/>durable steer]
+    Q2 -- no --> CM[COMMENT<br/>note for humans]
+```
+
 ## The three kinds
 
 | Kind | Semantics | Typical use |

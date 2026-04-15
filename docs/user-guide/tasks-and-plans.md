@@ -15,6 +15,22 @@ status, optional `predictedStartMs` / `predictedDurationMs`, optional
 `boundSpanId`. Tasks have `PENDING` / `RUNNING` / `COMPLETED` / `FAILED` /
 `CANCELLED` status.
 
+Task state is monotonic — it only moves forward. The diagram below shows the legal transitions; you'll never see a task move backwards on the task panel.
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING
+    PENDING --> RUNNING : report_task_started
+    RUNNING --> RUNNING : report_task_progress
+    RUNNING --> COMPLETED : report_task_completed
+    RUNNING --> FAILED : report_task_failed
+    RUNNING --> CANCELLED : user CANCEL control
+    COMPLETED --> [*]
+    FAILED --> [*]
+    CANCELLED --> [*]
+```
+
+
 A **plan** is an ordered (and possibly DAG-shaped) collection of tasks
 plus `edges` expressing task dependencies. A plan also carries a
 `revisionReason` — the drift kind + detail that caused the most recent
@@ -128,6 +144,18 @@ planner decided to revise. The full table (`frontend/src/gantt/driftKinds.ts`):
 | `external_signal` | ⟶ | External | user |
 | `coordinator_early_stop` | ⏸ | Early stop | divergence |
 
+The drift taxonomy clusters into five categories, each with its own color in the UI. Use this map when you're triaging a noisy session — start by deciding which category bucket the most-recent pill belongs to, then drill into the specific kind.
+
+```mermaid
+flowchart TD
+    Drift([drift kind])
+    Drift --> Error[error · red<br/>tool_error · task_failed<br/>llm_refused · failed_span]
+    Drift --> Diverge[divergence · amber<br/>plan_divergence · unexpected_transfer<br/>agent_escalated]
+    Drift --> Discover[discovery · green<br/>new_work_discovered]
+    Drift --> User[user · blue<br/>user_steer · user_cancel<br/>external_signal]
+    Drift --> Struct[structural · grey-blue<br/>llm_merged_tasks · llm_split_task<br/>llm_reordered_work · context_pressure]
+```
+
 **Category** groups the kinds by color:
 
 - `error` (red) — something went wrong mechanically.
@@ -164,6 +192,19 @@ See [Graph view → Task plan overlay](graph-view.md#task-plan-overlay). The
 overlay comes in three modes (`pre-strip`, `ghost`, `hybrid`) persisted to
 `localStorage`, with hover cards and clickable task chips that hop into
 the drawer when a span binding exists.
+
+## How a plan revision happens
+
+A revision is a small loop: an agent calls a reporting tool, the client library detects drift, the planner emits a new plan, the registry diffs it against the previous revision, and a pill plus drawer entry surface in the UI.
+
+```mermaid
+flowchart LR
+    Agent[sub-agent calls<br/>reporting tool] --> Detect[client detects drift<br/>tags drift_kind]
+    Detect --> Refine[planner refine<br/>returns revised plan]
+    Refine --> Diff[TaskRegistry.upsertPlan<br/>computes PlanDiff]
+    Diff --> Banner[PlanRevisionBanner pill<br/>+4s auto-dismiss]
+    Diff --> History[Drawer · Task tab<br/>plan revisions section]
+```
 
 ## Plan revisions — live replans
 

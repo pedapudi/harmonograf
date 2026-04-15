@@ -136,6 +136,22 @@ spans to tasks without agents having to know about task ids.
    PENDING → FAILED    (cascade when the forced-task stamp path can't bind)
 ```
 
+The same machine as a rendered state diagram — terminal states are absorbing and any attempt to leave them is rejected by `_set_task_status`:
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING
+    PENDING --> RUNNING: report_task_started
+    PENDING --> CANCELLED: cascade from<br/>upstream unrecoverable drift
+    PENDING --> FAILED: forced-task<br/>stamp can't bind
+    RUNNING --> COMPLETED: report_task_completed
+    RUNNING --> FAILED: report_task_failed<br/>or terminal failed span
+    RUNNING --> CANCELLED: user_cancel /<br/>upstream cascade
+    COMPLETED --> [*]
+    FAILED --> [*]
+    CANCELLED --> [*]
+```
+
 Terminal states are **absorbing** — any attempt to transition out of
 one is rejected by `_set_task_status` and logged at WARNING. The
 invariant validator enforces the same rule at aggregate level:
@@ -294,6 +310,24 @@ sequenceDiagram
     Note over UI: computePlanDiff() computes added/removed/modified tasks for the banner
 ```
 
+The downstream half — once a refined plan is submitted, how it becomes a UI banner:
+
+```mermaid
+sequenceDiagram
+    participant AS as _AdkState
+    participant T as transport.submit_plan
+    participant Server as ingest._handle_task_plan
+    participant Bus as SessionBus
+    participant UI as Frontend
+    AS->>AS: bump revision_index, stamp revision_kind/severity/reason
+    AS->>T: TaskPlan{ plan_id, revision_index, revision_kind, revision_severity }
+    T->>Server: TelemetryUp{ task_plan }
+    Server->>Server: store.put_task_plan (replaces by id)
+    Server->>Bus: publish_task_plan
+    Bus->>UI: SessionUpdate{ task_plan }
+    Note over UI: gantt computePlanDiff → drift banner shows<br/>"plan revised: <kind> (<severity>)"
+```
+
 Throttling rule (`_DRIFT_REFINE_THROTTLE_SECONDS = 2.0`):
 
 - Recoverable, non-critical drifts are throttled per `(session_id,
@@ -337,6 +371,32 @@ Checks, in order:
 | `task_results_keys` | warning | `harmonograf.completed_task_results` has keys not in the plan. |
 | `revision_history_monotone` | warning | `plan.revision_index` went backwards. |
 | `span_bindings` | warning | `task.bound_span_id` references a span that never existed. |
+
+How the invariant checker fans across the per-turn plan snapshot — every check is read-only and runs against the same in-memory `plan_state`:
+
+```mermaid
+flowchart TD
+    Turn["walker turn ends"]
+    Snap["plan_state snapshot"]
+    Check["InvariantChecker.check_plan_state"]
+    R1[monotonic_state]
+    R2[dependency_consistency]
+    R3[assignee_validity]
+    R4[plan_id_uniqueness]
+    R5[forced_task]
+    R6[task_results_keys]
+    R7[revision_history_monotone]
+    R8[span_bindings]
+    Errors["any errors?"]
+    Warn["log warnings"]
+    Fail["raise AssertionError<br/>(test mode)"]
+    Pass["continue"]
+    Turn --> Snap --> Check
+    Check --> R1 & R2 & R3 & R4 & R5 & R6 & R7 & R8
+    R1 & R2 & R3 & R4 & R5 & R6 & R7 & R8 --> Errors
+    Errors -- yes --> Fail
+    Errors -- no --> Warn --> Pass
+```
 
 Errors fail pytest assertions; warnings log loudly but do not stop the
 run. Use `InvariantChecker()` directly for cross-turn history tracking

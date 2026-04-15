@@ -30,6 +30,21 @@ are:
 | Bus fan-out | `server/harmonograf_server/bus.py:98` (`publish`) | One `put_nowait` per subscriber |
 | Frontend frame | `frontend/src/gantt/renderer.ts:508` (`frame`) | `drawBlocks` — per-agent `queryAgent` + `fillRect` loop |
 
+The hot-path map, end to end, with the dominant cost at each hop:
+
+```mermaid
+flowchart LR
+    cb[ADK callback<br/>plan lookup + invariant]
+    push[Ring buffer push<br/>deque + lock]
+    drain[Transport drain<br/>marshal + gRPC]
+    ingest[Server ingest<br/>convert + upsert + publish]
+    sql[SQLite write<br/>aiosqlite INSERT]
+    fan[Bus fan-out<br/>put_nowait per sub]
+    frame[Frontend frame<br/>drawBlocks per agent]
+    cb --> push --> drain --> ingest --> sql
+    ingest --> fan --> frame
+```
+
 If you do not know which of these is hot for the workload you are
 tuning, you are tuning the wrong thing. Measure first. See "Profiling
 the callback hot path" and "Frontend frame budget" below for how.
@@ -263,6 +278,31 @@ refs, tier-3 drops span envelopes. The agent watches its own
 `BufferStats` via the heartbeat. The server watches its own subscriber
 queues via `Subscription.dropped` (`bus.py:54`) and fires a
 `DELTA_BACKPRESSURE` event at the slow consumer (`bus.py:109`).
+
+A decision tree for diagnosing backpressure:
+
+```mermaid
+flowchart TD
+    obs[Observed slowness<br/>or backpressure]
+    bs{BufferStats.dropped_total > 0<br/>in heartbeats?}
+    sub{Subscription.dropped > 0<br/>or DELTA_BACKPRESSURE?}
+    rdr{lastFrameMs > 16ms<br/>on still viewport?}
+    sql{SQLite WAL > 1 GiB<br/>or ingest stuck?}
+    netfix[Network is bottleneck<br/>raise buffer capacity<br/>or fix latency]
+    rdrfix[Renderer is bottleneck<br/>profile drawBlocks<br/>fix density merge]
+    sqlfix[SQLite contention<br/>find lock holder<br/>do not raise queue]
+    cb[Profile callback hot path<br/>via test_callback_perf.py]
+
+    obs --> bs
+    bs -- yes --> netfix
+    bs -- no --> sub
+    sub -- yes --> rdr
+    rdr -- yes --> rdrfix
+    rdr -- no --> sql
+    sql -- yes --> sqlfix
+    sql -- no --> cb
+    sub -- no --> cb
+```
 
 **What to do today** when you see backpressure:
 

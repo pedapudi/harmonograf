@@ -4,6 +4,29 @@ The plan is rendered, tasks are visible in the Gantt and drawer, but
 they never transition to RUNNING. The current-task strip stays empty
 or keeps displaying "no current task".
 
+**Triage decision tree** — plan exists, tasks frozen at PENDING. The dominant
+cause is the LLM never calling `report_task_started`; check that first.
+
+```mermaid
+flowchart TD
+    Start([Tasks visible but never<br/>enter RUNNING]):::sym --> Q1{Client log mentions<br/>report_task_started /<br/>on_reporting_tool?}
+    Q1 -- "no" --> Q1a{Reporting tool<br/>registration skipped?}
+    Q1a -- "yes" --> F1a[Fix exception in adk.py:189;<br/>usually ADK version mismatch]:::fix
+    Q1a -- "no" --> F1b[Augmented instruction missing<br/>or model ignoring tool —<br/>verify tools.augment_instruction]:::fix
+    Q1 -- "yes, but no movement" --> Q2{parallel_mode=True?}
+    Q2 -- "yes" --> Q2a{Walker activity<br/>in log?}
+    Q2a -- "no" --> F2[Restart agent; walker<br/>crashed mid-plan]:::fix
+    Q2a -- "yes" --> Q3
+    Q2 -- "no" --> Q3{Server log: 'has no matching<br/>plan in session'?}
+    Q3 -- "yes" --> F3[Plan ID mismatch /<br/>stale task_index:<br/>restart agent to resubmit]:::fix
+    Q3 -- "no" --> Q4{assignee_agent_id ⊆<br/>agents in session?}
+    Q4 -- "no" --> F4[Start missing agent<br/>or fix assignee in plan]:::fix
+    Q4 -- "yes" --> F5[Set orchestrator_mode=True<br/>or check observer fallback<br/>parses model output]:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **UI**: task rows are greyed out in the Gantt; drawer says

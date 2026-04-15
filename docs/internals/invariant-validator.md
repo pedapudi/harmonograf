@@ -48,7 +48,31 @@ constant update. `log_level()` (`invariants.py:74`) returns
 ## The eight invariants
 
 All eight run in a fixed order from `InvariantChecker.check`
-(`invariants.py:93`).
+(`invariants.py:93`). The fan-out below is the literal call order — each
+arm independently appends to the shared `violations` list.
+
+```mermaid
+flowchart TD
+  E[check_plan_state] --> R[_resolve_plan_state]
+  R -->|None| Z[return empty]
+  R --> C[InvariantChecker.check]
+  C --> I1[1. _check_monotonic]
+  C --> I2[2. _check_dependency_consistency]
+  C --> I3[3. _check_assignee_validity]
+  C --> I4[4. _check_plan_id_uniqueness]
+  C --> I5[5. _check_forced_task]
+  C --> I6[6. _check_task_results_keys]
+  C --> I7[7. _check_revision_history_monotone]
+  C --> I8[8. _check_span_bindings]
+  I1 --> V[(violations list)]
+  I2 --> V
+  I3 --> V
+  I4 --> V
+  I5 --> V
+  I6 --> V
+  I7 --> V
+  I8 --> V
+```
 
 ### 1. Monotonic status transitions (`_check_monotonic`, line 124)
 
@@ -171,6 +195,23 @@ checker is always on, and the severity of the response escalates in
 tests. It also means test failures are loud and structural — if a test
 runs the coordinator and an invariant catches a bad transition, the
 test fails on the invariant, not on the downstream symptom.
+
+## `enforce()` decision tree
+
+`enforce()` (`invariants.py:402`) is the policy gate that turns a list of
+violations into either "log and continue" or "raise and crash the test".
+
+```mermaid
+flowchart TD
+  S[enforce violations] --> E{violations empty?}
+  E -->|yes| R[return]
+  E -->|no| L[log each at v.log_level]
+  L --> T{in_test_mode<br/>PYTEST_CURRENT_TEST?}
+  T -->|no| R2[return — prod just logs]
+  T -->|yes| F{any severity == error?}
+  F -->|no| R3[return — warnings only]
+  F -->|yes| A[raise AssertionError<br/>with summary]
+```
 
 ## Performance: cheap enough for production
 

@@ -26,6 +26,38 @@ components and every client has its own upgrade schedule. Sqlite
 schema is easier because there is only one reader (the server). State
 keys are the easiest because they are in-process only.
 
+A compatibility matrix for the kinds of proto changes you might make — green is safe, red is breaking:
+
+```mermaid
+flowchart TD
+    change[Proto change]
+    add[Add field at fresh number]
+    addEnum[Add enum value with fresh number]
+    addOneof[Add new oneof case]
+    addFlag[Add Welcome.flags key]
+    rename[Rename field<br/>same number]
+    remove[Remove field in place]
+    reuse[Reuse retired number]
+    enumRm[Delete enum value]
+    oneofRm[Remove oneof case]
+    typeChg[Change singular ↔ repeated]
+
+    safe[SAFE forward + backward]
+    semi[Generated names break;<br/>wire OK]
+    unsafe[BREAKING — old data corrupts]
+
+    change --> add --> safe
+    change --> addEnum --> safe
+    change --> addOneof --> safe
+    change --> addFlag --> safe
+    change --> rename --> semi
+    change --> remove --> unsafe
+    change --> reuse --> unsafe
+    change --> enumRm --> unsafe
+    change --> oneofRm --> unsafe
+    change --> typeChg --> unsafe
+```
+
 ## Proto evolution: the forward-compat rules
 
 The proto wire format is designed to survive field additions without

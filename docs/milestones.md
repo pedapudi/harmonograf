@@ -6,6 +6,18 @@ Inside each milestone, 4–5 streams run in parallel.
 
 Auth is deferred to its own project — local-only for now.
 
+The roadmap at a glance — five milestones, each ending in a thing the user can run and react to:
+
+```mermaid
+timeline
+    title Harmonograf milestones
+    A : Drive presentation_agent from adk : see it live
+    B : Richer multi-agent presentation_agent : five sub-agents
+    C : Interact with running agents : pause / steer / approve
+    D : Durable + observable single-node : sqlite + stress + GC
+    E : Polish + package : error states + theme + CI smoke
+```
+
 ## Milestone A — "Drive presentation_agent from adk, see it live in harmonograf"
 
 End state: `make demo` boots harmonograf-server + frontend + `adk web

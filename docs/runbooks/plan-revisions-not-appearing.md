@@ -4,6 +4,29 @@ A refine was triggered (drift, steer, tool error) but the UI still
 shows the old plan; the drawer's "Plan revisions" history has no new
 entry; the amber "Plan revised" pill never shows.
 
+**Triage decision tree** — the refine path emits a strict sequence of log
+lines; find the last one and that names the failure point.
+
+```mermaid
+flowchart TD
+    Start([Expected refine,<br/>plan unchanged]):::sym --> Q1{Log: 'refine: entry'?}
+    Q1 -- "no" --> R1[Drift never fired —<br/>see drift-not-firing]:::fix
+    Q1 -- "yes" --> Q2{'refine: throttled'<br/>line follows?}
+    Q2 -- "yes" --> F2[Detector loop firing fast;<br/>fix detector, not throttle]:::fix
+    Q2 -- "no" --> Q3{'planner.refine raised'?}
+    Q3 -- "yes" --> F3[Fix LLM /<br/>prompt /<br/>parser]:::fix
+    Q3 -- "no" --> Q4{'returned None (no-op)'?}
+    Q4 -- "yes" --> F4[Planner judged plan<br/>still valid — tune prompt]:::fix
+    Q4 -- "no" --> Q5{'submit_plan (drift...) raised'?}
+    Q5 -- "yes" --> F5[Transport down:<br/>see agent-disconnects-repeatedly]:::fix
+    Q5 -- "no" --> Q6{Server log:<br/>'task plan received'?}
+    Q6 -- "yes" --> F6[UI not refreshing:<br/>see frontend-shows-stale-data]:::fix
+    Q6 -- "no" --> F7[Same revision_reason as<br/>previous: banner deduped,<br/>drawer still has it]:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **UI**: current plan stamp reads the previous `revision_index`;

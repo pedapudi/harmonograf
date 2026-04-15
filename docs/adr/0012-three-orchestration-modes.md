@@ -58,6 +58,20 @@ section and in the `HarmonografAgent` class docstring in
   agent owns its own task sequencing entirely. Good for: wrapping an
   existing agent without taking over its control flow.
 
+**Mode selection by flag pair** — two orthogonal `HarmonografAgent` flags
+pick one of three execution shapes; auto-detection was rejected as brittle.
+
+```mermaid
+flowchart TD
+    Start([HarmonografAgent ctor]) --> Q1{orchestrator_mode?}
+    Q1 -- "False" --> M3[Delegated mode<br/>single delegation +<br/>event observer for drift]:::mode
+    Q1 -- "True" --> Q2{parallel_mode?}
+    Q2 -- "False" --> M1[Sequential mode (default)<br/>plan → coordinator LLM<br/>re-invoke up to 3×]:::mode
+    Q2 -- "True" --> M2[Parallel mode<br/>DAG batch walker<br/>forced task_id ContextVar<br/>cap = 20]:::mode
+
+    classDef mode fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Consequences
 
 **Good.**

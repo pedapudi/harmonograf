@@ -5,6 +5,22 @@ it's telling you nothing at all. Symptoms first, then causes, then
 remedies. When you have to look at code, file paths are relative to the
 repo root.
 
+When something looks wrong, work through the questions below in order. Each branch lands in the section that walks through likely causes and fixes.
+
+```mermaid
+flowchart TD
+    Start([something is off])
+    Start --> Q1{do you see<br/>any sessions?}
+    Q1 -- no --> A1[Agents aren't<br/>showing up]
+    Q1 -- yes --> Q2{is the Gantt<br/>showing bars?}
+    Q2 -- no --> A2[Gantt is empty]
+    Q2 -- yes --> Q3{is a task<br/>making progress?}
+    Q3 -- no --> A3[Plan stuck /<br/>not progressing]
+    Q3 -- yes --> Q4{drawer or<br/>payload broken?}
+    Q4 -- yes --> A4[Drawer / Payload<br/>sections]
+    Q4 -- no --> A5[Drift / banner /<br/>theme sections]
+```
+
 ## Agents aren't showing up
 
 **Symptom:** The session picker is empty (`Waiting for agents to

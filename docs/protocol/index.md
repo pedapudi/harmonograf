@@ -15,6 +15,27 @@ documents semantics, invariants, and sequencing the protos cannot
 express. Where snippets appear below, they are cited verbatim from the
 protos — if they ever disagree, the protos win.
 
+The three RPC tiers and how they connect agents, the server, and the frontend at a glance:
+
+```mermaid
+flowchart LR
+    Agent["Agent (client lib)"]
+    FE["Frontend (Gantt UI)"]
+    subgraph Server["Harmonograf server"]
+        Ingest["Ingest pipeline"]
+        Router["Control router"]
+        Watch["WatchSession fan-out"]
+    end
+    Agent -- "StreamTelemetry up: spans, payloads, acks, heartbeats" --> Ingest
+    Ingest -- "Welcome / PayloadRequest" --> Agent
+    Router -- "SubscribeControl: ControlEvents" --> Agent
+    Ingest -- "ControlAck (folded upstream)" --> Router
+    FE -- "SendControl / PostAnnotation" --> Router
+    FE -- "WatchSession / GetPayload / GetSpanTree" --> Watch
+    Watch -- "SessionUpdate deltas" --> FE
+    Ingest -- "publishes deltas" --> Watch
+```
+
 ## Map
 
 | Doc | Topic |

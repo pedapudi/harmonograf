@@ -14,6 +14,23 @@ flaky, or useless tests.
 | End-to-end | `pytest` + real server + real ADK | `tests/e2e/` | `cd tests/e2e && uv run --with google-adk pytest` (or `make e2e`) | Full stack. Client → gRPC → server → store → bus → (optional) frontend via Playwright. |
 | Frontend E2E | Playwright | `tests/integration/` | `pnpm --dir tests/integration test` | UI interop with a live server. |
 
+The test pyramid — wider tiers at the bottom run on every commit; narrower tiers at the top run only when the code they cover changes:
+
+```mermaid
+flowchart TB
+    e2e[End-to-end<br/>tests/e2e/<br/>real ADK + real server<br/>SLOW, manual / nightly]
+    integ[Integration<br/>client/tests/test_*_real_adk.py<br/>real ADK + FakeLlm]
+    unit_py[Python unit<br/>client/tests + server/tests<br/>pytest, in-memory store]
+    unit_ts[TypeScript unit<br/>frontend/src/__tests__<br/>vitest, no canvas]
+    pwt[Frontend E2E<br/>tests/integration/<br/>Playwright + real server]
+
+    unit_py --- unit_ts
+    unit_py --> integ
+    unit_ts --> pwt
+    integ --> e2e
+    pwt --> e2e
+```
+
 ## Running tests
 
 | Command | What it runs |
@@ -231,6 +248,28 @@ Two perf tools exist:
    cd server && uv run python -m harmonograf_server.stress --agents 10 --spans-per-sec 100
    ```
    Not wired into CI.
+
+## How a pytest invocation reaches CI
+
+The path from a local pytest command to a CI job:
+
+```mermaid
+flowchart LR
+    dev[developer]
+    pt[pytest -k name]
+    mt[make target<br/>server-test / client-test / frontend-test]
+    mall[make test]
+    ci[CI workflow]
+    push[git push / PR]
+
+    dev --> pt
+    dev --> mt
+    mt --> mall
+    push --> ci
+    ci --> mall
+    mall --> mt
+    mt --> pt
+```
 
 ## CI expectations
 

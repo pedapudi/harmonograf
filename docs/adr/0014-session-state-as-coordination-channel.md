@@ -68,6 +68,23 @@ live in `state_protocol.py`. All keys are under `HARMONOGRAF_PREFIX` so
 the diff helper can pull out just the harmonograf-owned writes without
 touching user-owned state.
 
+**Bidirectional flow over one ADK dict** — harmonograf writes the active
+task before each model call; the agent writes back via `state_delta`, and
+`extract_agent_writes` filters for the `harmonograf.*` prefix.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Orch as Harmonograf orchestrator
+    participant State as session.state (ADK)
+    participant Agent as Sub-agent (LLM turn)
+    Orch->>State: write harmonograf.current_task_*<br/>plan_id, available_tasks, completed_task_results
+    State-->>Agent: rendered into prompt<br/>(before_model_callback)
+    Agent->>State: state_delta { harmonograf.task_progress, .agent_note, .divergence_flag }
+    State-->>Orch: extract_agent_writes(pre, post)<br/>filtered by HARMONOGRAF_PREFIX
+    Note over Orch,State: schema lives in state_protocol.py;<br/>readers fall back to typed defaults
+```
+
 ## Consequences
 
 **Good.**

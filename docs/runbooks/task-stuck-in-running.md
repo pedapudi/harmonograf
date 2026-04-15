@@ -4,6 +4,29 @@ A task entered RUNNING and never completes. The agent row has an amber
 "stuck" marker; heartbeats still arrive; spans still end, but the task
 itself never progresses.
 
+**Triage decision tree** — distinguish "actually slow" from "actually wedged".
+Heartbeats arriving + `progress_counter` frozen is the canonical wedge signal.
+
+```mermaid
+flowchart TD
+    Start([Task RUNNING with<br/>amber 'stuck' marker]):::sym --> Q1{Heartbeats still<br/>arriving?}
+    Q1 -- "no" --> R1[See agent-disconnects-repeatedly]:::fix
+    Q1 -- "yes" --> Q2{Open TOOL_CALL span<br/>older than minutes?}
+    Q2 -- "yes" --> F2[Tool hung: py-spy dump,<br/>kill subprocess, add timeout]:::fix
+    Q2 -- "no" --> Q3{current_activity says<br/>'thinking' / large tokens?}
+    Q3 -- "yes" --> F3[False positive — long model<br/>think; raise sweep interval]:::fix
+    Q3 -- "no" --> Q4{progress_counter bumped<br/>only on reporting tools?}
+    Q4 -- "yes" --> F4[Counter frozen: bump inside<br/>tool body / long loops]:::fix
+    Q4 -- "no" --> Q5{py-spy top: hot frame<br/>outside ADK?}
+    Q5 -- "yes" --> F5[Infinite loop in agent code:<br/>send CANCEL, fix bug]:::fix
+    Q5 -- "no" --> Q6{Two parallel sub-agents<br/>fighting on session.state?}
+    Q6 -- "yes" --> F6[Deadlock: STEER cancel,<br/>fix state-flag contract]:::fix
+    Q6 -- "no" --> F7[LLM emitted prose 'Task<br/>complete' instead of tool —<br/>tighten instruction]:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **UI**: agent header shows `⚠ stuck` (liveness tracker flagged it);

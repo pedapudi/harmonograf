@@ -10,6 +10,23 @@ The split is the core reason the timeline stays responsive under
 multi-MiB LLM workloads — the Gantt never waits on a payload upload to
 render a block.
 
+The hot-path `PayloadRef` and the cold-path bytes travel on different code paths so the timeline never blocks on an upload:
+
+```mermaid
+flowchart LR
+    Span["Span emit"]
+    Ref["PayloadRef<br/>{digest, size, mime, summary, role}"]
+    Bytes["raw bytes (multi-MiB)"]
+    SpanMsg["SpanStart/Update/End<br/>(carries refs)"]
+    Upload["PayloadUpload chunks<br/>(content-addressed by digest)"]
+    Watch["WatchSession deltas<br/>(immediate)"]
+    Store["Store.put_payload<br/>(after sha256 verify)"]
+    Avail["PayloadAvailable delta"]
+    GP["GetPayload (lazy fetch)"]
+    Span --> Ref --> SpanMsg --> Watch
+    Span --> Bytes --> Upload --> Store --> Avail --> GP
+```
+
 ## Payload refs (the hot path)
 
 ```proto

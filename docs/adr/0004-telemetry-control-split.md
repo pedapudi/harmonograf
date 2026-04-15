@@ -49,6 +49,29 @@ versa. In practice the two streams usually die together (the network blip
 affects everything), but the decoupling means neither side of the client is
 forced to re-open both streams as a single atomic operation.
 
+**One stream vs two streams** — left: a 10 MB payload upload starves a PAUSE
+control event behind its bytes. Right: control gets its own gRPC flow window
+and arrives immediately.
+
+```mermaid
+flowchart LR
+    subgraph One["Bidi: one stream"]
+      direction TB
+      O1[Agent] -- "10MB payload<br/>chunks (head-of-line)" --> O2[Server]
+      O2 -- "PAUSE<br/>(blocked behind payload)" --> O1
+    end
+    subgraph Two["Two RPCs (chosen)"]
+      direction TB
+      T1[Agent] -- "StreamTelemetry<br/>spans + payloads + acks" --> T2[Server]
+      T2 -- "SubscribeControl<br/>independent flow window" --> T1
+    end
+
+    classDef bad fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class One bad
+    class Two good
+```
+
 ## Consequences
 
 **Good.**

@@ -61,6 +61,22 @@ SQLite is chosen because it matches every v0 constraint:
 The interface is behind an abstraction so a future Postgres backend is a
 drop-in sibling, not a rewrite.
 
+**Store abstraction** — the server talks to one interface; SQLite is the
+default, MemoryStore covers tests, Postgres is a future sibling.
+
+```mermaid
+flowchart TB
+    Srv[Harmonograf server<br/>ingest + subscribers + frontend RPCs] --> Iface[Store interface]
+    Iface --> S1[SqliteStore<br/>default, on-disk WAL]
+    Iface --> S2[MemoryStore<br/>tests + ephemeral runs]
+    Iface -. future .-> S3[PostgresStore<br/>HA / multi-tenant]
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    classDef future fill:#fef3c7,stroke:#b45309,color:#000
+    class S1,S2 good
+    class S3 future
+```
+
 ## Consequences
 
 **Good.**

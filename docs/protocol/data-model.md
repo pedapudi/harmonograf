@@ -251,6 +251,23 @@ is intra-agent.
 | `LINK_RELATION_FOLLOWS` | Sequential dependency across agents |
 | `LINK_RELATION_REPLACES` | This span supersedes a prior one (e.g. after rewind) |
 
+The five `LinkRelation` values shown as the cross-span edges they produce — INVOKED and TRIGGERED_BY are inverses of each other, REPLACES is rewind-only:
+
+```mermaid
+flowchart LR
+    A["Span A<br/>(orchestrator)"]
+    B["Span B<br/>(callee)"]
+    C["Span C<br/>(blocked work)"]
+    D["Span D<br/>(downstream)"]
+    E["Span E (old)"]
+    F["Span F (replacement)"]
+    A -- "INVOKED" --> B
+    B -- "TRIGGERED_BY" --> A
+    C -- "WAITING_ON" --> B
+    B -- "FOLLOWS" --> D
+    F -- "REPLACES (after rewind)" --> E
+```
+
 Links become rendered arrows on the Gantt. See
 [`span-lifecycle.md#links`](span-lifecycle.md#links).
 

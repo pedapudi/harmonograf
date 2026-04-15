@@ -46,6 +46,27 @@ first — a non-LlmAgent in the tree is silently skipped.
 
 ## `_run_async_impl` dispatch
 
+The dispatch is a literal three-way branch on the two boolean fields
+`orchestrator_mode` and `parallel_mode`. Every branch is followed by
+the same invariant check + cancellation safety block.
+
+```mermaid
+flowchart TD
+  E[_run_async_impl] --> P[state.maybe_run_planner]
+  P --> M{orchestrator_mode?}
+  M -->|false| D[_run_delegated]
+  M -->|true| PM{parallel_mode?}
+  PM -->|false| S[_run_sequential]
+  PM -->|true| R[_run_parallel<br/>walker loop]
+  D --> V[_validate_invariants]
+  S --> V
+  R --> V
+  V --> CA[try/except CancelledError<br/>cleanup forced binding]
+  CA --> FN[finally — clear plan snapshot]
+```
+
+
+
 The entry point is at `agent.py:379`. The flow:
 
 1. `state.maybe_run_planner()` at `agent.py:408`. This produces the initial
@@ -103,6 +124,33 @@ reporting tools. The structure:
    `detect_drift` first, then `detect_semantic_drift`, and calls
    `refine_plan_on_drift` if either signals.
 
+The full sequential pass, with the partial-retry loop and the final
+drift scan:
+
+```mermaid
+sequenceDiagram
+  participant HA as HarmonografAgent
+  participant ST as _AdkState
+  participant IA as inner_agent
+  HA->>ST: maybe_run_planner(host_agent=inner)
+  HA->>ST: _write_plan_context_if_possible
+  HA->>HA: build plan overview nudge
+  HA->>IA: run_async (turn 1)
+  IA-->>HA: stream events
+  HA->>ST: classify_and_sweep_running_tasks
+  loop while partial AND budget > 0
+    HA->>HA: build continue prompt
+    HA->>IA: run_async (re-nudge)
+    IA-->>HA: events
+    HA->>ST: classify_and_sweep_running_tasks
+  end
+  alt PENDING tasks remain
+    HA->>ST: refine_plan_on_drift(coordinator_early_stop)
+  end
+  HA->>ST: detect_drift / detect_semantic_drift
+  ST-->>HA: refine_plan_on_drift if signal
+```
+
 ## `_run_parallel`: rigid DAG walker
 
 At `agent.py:1068-1268`. Parallel mode drives the plan by topological
@@ -143,6 +191,27 @@ Key pieces:
   mechanism would cause spans from concurrent tasks to clobber each
   other's bindings.
 
+The walker loop, including the safety cap, the repeat-batch guard, and
+the per-stage size-1-vs-multi branch:
+
+```mermaid
+flowchart TD
+  W[_run_parallel] --> I[iter = 0]
+  I --> CAP{iter ≥ 20<br/>safety cap?}
+  CAP -->|yes| ERR[ERROR log + break]
+  CAP -->|no| B[_pick_next_batch<br/>PENDING with deps COMPLETED]
+  B --> EM{batch empty?}
+  EM -->|yes| DONE[done]
+  EM -->|no| RP{batch == prev batch?}
+  RP -->|yes| ERR2[ERROR log + break]
+  RP -->|no| SZ{len batch == 1?}
+  SZ -->|yes| RT[_run_task_inplace serial]
+  SZ -->|no| GR[group by assignee →<br/>asyncio.gather _run_single_task_isolated]
+  RT --> NXT[iter += 1]
+  GR --> NXT
+  NXT --> CAP
+```
+
 ## `_run_delegated`: single pass, observer only
 
 At `agent.py:470-570`. Delegated mode is the lightest — it runs the inner
@@ -156,6 +225,24 @@ incorrectly fail.
 
 Drift detection at `agent.py:558-570` runs the same two-layer check
 (structural then semantic) as sequential.
+
+```mermaid
+sequenceDiagram
+  participant HA as HarmonografAgent
+  participant ST as _AdkState
+  participant IA as inner_agent
+  HA->>ST: snapshot pre_running task ids
+  HA->>IA: run_async (single pass)
+  IA-->>HA: stream events
+  HA->>ST: classify_and_sweep_running_tasks(exclude=pre_running)
+  HA->>ST: detect_drift (structural)
+  alt structural drift
+    ST-->>HA: refine_plan_on_drift
+  else
+    HA->>ST: detect_semantic_drift
+    ST-->>HA: refine_plan_on_drift if signal
+  end
+```
 
 ## The `Aclosing` wrapper
 

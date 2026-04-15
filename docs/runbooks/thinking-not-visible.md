@@ -4,6 +4,27 @@ The agent's LLM is emitting reasoning ("thinking") content but the UI
 isn't rendering it. Either the bars are missing from the Gantt's
 thinking track, or the drawer's Thinking tab is empty.
 
+**Triage decision tree** — split producer (model emits → adapter captures →
+attribute stamped) from consumer (frontend reads the right key).
+
+```mermaid
+flowchart TD
+    Start([Thinking absent in UI]):::sym --> Q1{Model exposes<br/>reasoning channel?}
+    Q1 -- "no" --> F1[Model doesn't surface<br/>thinking — switch model<br/>or accept]:::fix
+    Q1 -- "yes" --> Q2{Log: emit_thinking_<br/>as_task_report?}
+    Q2 -- "no" --> Q2a{record_llm_thought<br/>failed in DEBUG log?}
+    Q2a -- "yes" --> F2a[Fix exception in<br/>record_llm_thought]:::fix
+    Q2a -- "no" --> F2b[capture_thinking opt-in<br/>not enabled in config]:::fix
+    Q2 -- "yes" --> Q3{Span attributes carry<br/>llm.thought / task_report?}
+    Q3 -- "no" --> F3[emit_span_update raised:<br/>fix attribute stamp]:::fix
+    Q3 -- "yes" --> Q4{Frontend reads same key<br/>(grep frontend/src)?}
+    Q4 -- "no" --> F4[Producer/consumer key drift —<br/>canonicalise the name]:::fix
+    Q4 -- "yes" --> F5[Routing mismatch task_report<br/>vs llm.thought; pick one]:::fix
+
+    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
+    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
+```
+
 ## Symptoms
 
 - **UI**: Gantt shows LLM_CALL spans but no accompanying thinking

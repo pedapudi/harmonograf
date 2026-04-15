@@ -22,6 +22,28 @@ Most changes follow this loop:
 6. **Open a PR.** Short title, descriptive body, link the relevant issue
    or task.
 
+The full path from local edit to merged PR:
+
+```mermaid
+flowchart LR
+    edit[edit + test locally]
+    fmt[make format]
+    lint[make lint]
+    test[make test]
+    proto[make proto<br/>git diff --exit-code]
+    commit[git commit<br/>imperative message]
+    push[git push / open PR]
+    ci[CI: lint / proto / tests]
+    review[reviewer<br/>approve or block]
+    merge[merge to main]
+
+    edit --> fmt --> lint --> test --> proto --> commit --> push --> ci
+    ci -- pass --> review
+    ci -- fail --> edit
+    review -- approve --> merge
+    review -- block --> edit
+```
+
 ## Commit style
 
 - **Imperative mood, short first line.** `feat: add cpu_percent_peak to
