@@ -176,5 +176,4 @@ alongside the source change.
 
 ## License
 
-TBD — add once the repository settles on a license. Do not redistribute prior to
-that decision.
+Apache License 2.0. See [`LICENSE`](LICENSE) for the full text.
