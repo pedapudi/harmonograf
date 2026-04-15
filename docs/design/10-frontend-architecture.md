@@ -151,3 +151,9 @@ Instead of plain REST mutators, interaction intents execute bi-directional calls
 ## 7. Conclusions
 
 The Harmonograf frontend minimizes React render cycles, adopting an ECS-like game-engine loop for data rendering via HTML5 Canvas. By securely interleaving DOM elements exclusively for native text/form inputs, the topology maintains flawless 60 FPS frame rates processing potentially millions of unstructured telemetry events visually correctly.
+
+---
+
+## Related ADRs
+
+- [ADR 0008 — Canvas rendering for the Gantt chart](../adr/0008-canvas-gantt-over-svg.md)

@@ -16,7 +16,7 @@ Harmonograf cannot be meaningfully useful on top of *all* of them at once.
 The instrumentation layer — where task state transitions, where session state
 flows, where tools get injected — is unavoidably framework-specific. A shim
 that works with every framework would be so shallow it could not drive the
-plan-execution protocol (ADR 0011) at all, because the reporting-tool
+plan-execution protocol ([ADR 0011](0011-reporting-tools-over-span-inference.md)) at all, because the reporting-tool
 interception depends on framework-native tool callbacks.
 
 The design question is which framework to commit to first, and how
@@ -36,7 +36,7 @@ reasons, in order of weight:
 
 2. **ADK has `session.state`.** ADK agents share a mutable dict across turns.
    This gives harmonograf a bidirectional coordination channel that already
-   exists in the framework — we did not invent it (see ADR 0014). Agents read
+   exists in the framework — we did not invent it (see [ADR 0014](0014-session-state-as-coordination-channel.md)). Agents read
    the active task out of `session.state["harmonograf.*"]`; when they write
    back via ADK's `state_delta` event mechanism, we pick up the writes in
    `on_event_callback`. No other mainstream framework has this exact pattern.
@@ -123,3 +123,8 @@ sibling module, not a rewrite.
 The bet is that shipping one deep integration now is more valuable than
 shipping three shallow ones. The core stays agnostic so the bet is
 reversible.
+
+## Implemented in
+
+- [Design 02 — Client library](../design/02-client-library.md)
+- [Design 12 — Client library + ADK integration](../design/12-client-library-and-adk.md)

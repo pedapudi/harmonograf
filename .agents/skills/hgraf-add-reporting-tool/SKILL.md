@@ -16,7 +16,7 @@ Do **not** add a reporting tool when the equivalent can be done via an existing 
 
 ## Prerequisites
 
-1. Read the full reporting-tools reference at `docs/reporting-tools.md` and the protocol section of `AGENTS.md`.
+1. Read the full reporting-tools reference at [`docs/reporting-tools.md`](../../../docs/reporting-tools.md) and the protocol section of `AGENTS.md`.
 2. Read `client/harmonograf_client/tools.py` end-to-end (it is only ~200 lines) so you understand the `REPORTING_TOOL_FUNCTIONS` tuple, `build_reporting_function_tools()`, and `SUB_AGENT_INSTRUCTION_APPENDIX`.
 3. Read `client/harmonograf_client/state_protocol.py` — specifically the constants at lines 89-103 and the ALL_KEYS tuple at 112-126.
 
@@ -102,7 +102,7 @@ The tool name flows from span attributes (set by `before_tool_callback`) through
 
 ### 8. Documentation
 
-Update `docs/reporting-tools.md` with a reference entry for the new tool. Keep the structure consistent with the existing entries (signature, when to call, state it writes, example).
+Update [`docs/reporting-tools.md`](../../../docs/reporting-tools.md) with a reference entry for the new tool. Keep the structure consistent with the existing entries (signature, when to call, state it writes, example).
 
 ## Verification
 
@@ -126,7 +126,7 @@ In the demo UI: open the Drawer → Orchestration Timeline → confirm the new t
 
 - **Tool body does real work.** The body **must** return `{"acknowledged": True}` only. The real effect happens in `before_tool_callback` interception so that `_AdkState` is the single writer to task status. If you do work in the tool body, you bypass the state-machine lock and create race conditions under `parallel_mode=True`.
 - **Auto-registration is subtree-wide.** `agent.py:335-355` walks the full sub-agent tree at `HarmonografAgent` construction and appends your tool to every `LlmAgent`. Every agent pays the system-prompt cost of your new tool. Be parsimonious with the tools you add and with the instruction appendix prose.
-- **Instruction appendix bloat.** Each new bullet multiplies across every agent's instruction. Aim for ≤15 words per bullet. Prefer examples in `docs/reporting-tools.md` over verbose in-prompt instructions.
+- **Instruction appendix bloat.** Each new bullet multiplies across every agent's instruction. Aim for ≤15 words per bullet. Prefer examples in [`docs/reporting-tools.md`](../../../docs/reporting-tools.md) over verbose in-prompt instructions.
 - **Not going through `_set_task_status`.** Direct `task.status = ...` assignments skip the monotonic-transition guard at `adk.py:242-280`. The invariant checker (`invariants.py`) will flag the resulting state on the next sweep and log a violation, but by then you've already written wrong state to the server.
 - **Forgetting ALL_KEYS.** If you add a `KEY_*` constant but don't add it to `ALL_KEYS` at `state_protocol.py:112-126`, the diff helper will silently not pick it up, and the delta stream to the server will miss writes.
 - **Frontend mapping lag.** You can ship client-only and the tool will still work — the timeline just shows a generic `Unknown` entry. Many new tools get stuck in that state because nobody goes back and adds the mapping. Do both sides in the same PR.

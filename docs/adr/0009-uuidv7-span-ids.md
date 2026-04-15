@@ -103,3 +103,7 @@ flowchart LR
 The dedup-on-reconnect requirement plus the no-central-allocator goal
 together eliminate options 1 and 2 in practice. UUIDv7 is the only
 option that ticks both boxes without us reinventing one.
+
+## Implemented in
+
+- [Design 01 — Data model & RPC](../design/01-data-model-and-rpc.md)

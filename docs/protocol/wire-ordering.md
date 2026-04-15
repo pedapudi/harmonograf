@@ -142,7 +142,7 @@ server sees them in that order.
   happens-before guarantee gets harder: telemetry and the ack now
   travel on different streams, so you'd need an explicit barrier.
 
-See `docs/design/01-data-model-and-rpc.md §4.2.1` for the original
+See [`docs/design/01-data-model-and-rpc.md`](../design/01-data-model-and-rpc.md) §4.2.1 for the original
 argument.
 
 ### What about SendControl responses?

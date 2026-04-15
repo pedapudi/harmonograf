@@ -14,7 +14,7 @@ Read this skill *before* you open the file. If it's too long, the minimum versio
 ## Prerequisites
 
 1. Read `AGENTS.md` → *Plan execution protocol* section.
-2. Read `docs/design/12-client-library-and-adk.md` end-to-end.
+2. Read [`docs/design/12-client-library-and-adk.md`](../../../docs/design/12-client-library-and-adk.md) end-to-end.
 3. Read `client/harmonograf_client/invariants.py` (short, ~100 lines) — that is the validator that will catch you if you break monotonicity.
 4. Have the file open at these anchor points so you can jump between them:
 

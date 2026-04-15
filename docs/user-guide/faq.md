@@ -33,7 +33,7 @@ Harmonograf allows **multiple concurrent telemetry streams under one
 restarted agent reclaims its gutter row, but each physical stream gets its
 own `stream_id` from `Welcome`. This is the normal path when an agent
 forks worker processes that all share one identity. See
-`docs/protocol/data-model.md :: Agent.id`.
+[`docs/protocol/data-model.md`](../protocol/data-model.md) :: Agent.id.
 
 ### Why does my session say `0 agents`?
 
@@ -165,7 +165,7 @@ calls it out as in-progress. Until it lands, the reliable signal is the
 INVOCATION and fires a `context_pressure` revision. Look for the `⚡
 Context limit` pill and revision row.
 
-See `docs/protocol/data-model.md :: Span.attributes` for the
+See [`docs/protocol/data-model.md`](../protocol/data-model.md) :: Span.attributes for the
 `finish_reason` key.
 
 ## Orchestration modes
@@ -221,7 +221,7 @@ Three flavors of "missing":
 
 `sha256` of the payload bytes as hex. Identical bytes share one digest
 across sessions; the server only frees the bytes when no refs remain. See
-`docs/protocol/data-model.md :: PayloadRef`.
+[`docs/protocol/data-model.md`](../protocol/data-model.md) :: PayloadRef.
 
 ## Controls and steering
 
@@ -386,7 +386,7 @@ routed as a synthesized `STEER` control and may be picked up by the
 client on the next turn. `HUMAN_RESPONSE` is routed as an `APPROVE`
 control targeting an `AWAITING_HUMAN` span. See
 [annotations.md → the three kinds](annotations.md#the-three-kinds) and
-`docs/protocol/data-model.md :: Annotation`.
+[`docs/protocol/data-model.md`](../protocol/data-model.md) :: Annotation.
 
 ### Can I edit or delete an annotation?
 

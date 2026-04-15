@@ -21,30 +21,30 @@ None. All files referenced are in-repo.
 
 1. **`AGENTS.md`** — project vision + high-level architecture + the *Plan execution protocol* section. The protocol section is load-bearing: it explains the three coordinated channels (session.state / reporting tools / ADK callback inspection) and the three orchestration modes (Sequential / Parallel / Delegated). If you skip this you will end up fighting the state machine.
 2. **`README.md`** — external framing. Usually less useful than AGENTS.md but occasionally has setup quirks that the dev docs omit.
-3. **`docs/operator-quickstart.md`** — how to boot the stack, the prompt you drive, what you should see. Complement to the `hgraf-run-demo` skill.
-4. **`docs/reporting-tools.md`** — full reference for the reporting tools (see `hgraf-add-reporting-tool`). Read this before touching anything in `client/harmonograf_client/tools.py` or `before_tool_callback`.
+3. **[`docs/operator-quickstart.md`](../../../docs/operator-quickstart.md)** — how to boot the stack, the prompt you drive, what you should see. Complement to the `hgraf-run-demo` skill.
+4. **[`docs/reporting-tools.md`](../../../docs/reporting-tools.md)** — full reference for the reporting tools (see `hgraf-add-reporting-tool`). Read this before touching anything in `client/harmonograf_client/tools.py` or `before_tool_callback`.
 
 ### Layer 2 — subsystem docs (pick based on task)
 
 `docs/design/` contains numbered design documents. Start with the one closest to your task area:
 
-- **`01-data-model-and-rpc.md`** — the shared data model (agent/span/task/plan/annotation) and the proto-level RPC shape. Required reading before `hgraf-add-proto-field`.
-- **`02-client-library.md`** — the pre-ADK design of the client library. Historical but still accurate for the transport layer.
-- **`03-server.md`** — server architecture intent (pre-ingest refactor). Read alongside `11-server-architecture.md`.
-- **`04-frontend-and-interaction.md`** — early UX intent. Read alongside `10-frontend-architecture.md` and `13-human-interaction-model.md`.
-- **`10-frontend-architecture.md`** — the **current** Gantt + shell architecture. This is the authoritative reference for frontend changes. Cross-reference with `hgraf-update-frontend-component` and `hgraf-add-gantt-overlay`.
-- **`11-server-architecture.md`** — the **current** server architecture (ingest / bus / storage / control router). Authoritative for `server/harmonograf_server/` edits.
-- **`12-client-library-and-adk.md`** — the **current** client architecture including the ADK adapter, the `_AdkState` design, and why `adk.py` is 5700 lines. **Mandatory reading** before touching `adk.py` — see `hgraf-safely-modify-adk-py`.
-- **`13-human-interaction-model.md`** — the "what does a user actually do with this console" document. Read when designing new UI affordances.
-- **`14-information-flow.md`** — the end-to-end data path: agent emits → client buffers → server ingests → bus fans out → frontend renders. Best single document for understanding a bug that crosses component boundaries.
+- **[`01-data-model-and-rpc.md`](../../../docs/design/01-data-model-and-rpc.md)** — the shared data model (agent/span/task/plan/annotation) and the proto-level RPC shape. Required reading before `hgraf-add-proto-field`.
+- **[`02-client-library.md`](../../../docs/design/02-client-library.md)** — the pre-ADK design of the client library. Historical but still accurate for the transport layer.
+- **[`03-server.md`](../../../docs/design/03-server.md)** — server architecture intent (pre-ingest refactor). Read alongside [`11-server-architecture.md`](../../../docs/design/11-server-architecture.md).
+- **[`04-frontend-and-interaction.md`](../../../docs/design/04-frontend-and-interaction.md)** — early UX intent. Read alongside [`10-frontend-architecture.md`](../../../docs/design/10-frontend-architecture.md) and [`13-human-interaction-model.md`](../../../docs/design/13-human-interaction-model.md).
+- **[`10-frontend-architecture.md`](../../../docs/design/10-frontend-architecture.md)** — the **current** Gantt + shell architecture. This is the authoritative reference for frontend changes. Cross-reference with `hgraf-update-frontend-component` and `hgraf-add-gantt-overlay`.
+- **[`11-server-architecture.md`](../../../docs/design/11-server-architecture.md)** — the **current** server architecture (ingest / bus / storage / control router). Authoritative for `server/harmonograf_server/` edits.
+- **[`12-client-library-and-adk.md`](../../../docs/design/12-client-library-and-adk.md)** — the **current** client architecture including the ADK adapter, the `_AdkState` design, and why `adk.py` is 5700 lines. **Mandatory reading** before touching `adk.py` — see `hgraf-safely-modify-adk-py`.
+- **[`13-human-interaction-model.md`](../../../docs/design/13-human-interaction-model.md)** — the "what does a user actually do with this console" document. Read when designing new UI affordances.
+- **[`14-information-flow.md`](../../../docs/design/14-information-flow.md)** — the end-to-end data path: agent emits → client buffers → server ingests → bus fans out → frontend renders. Best single document for understanding a bug that crosses component boundaries.
 
 ### Layer 3 — research + rationale
 
-- **`docs/research/hci-orchestration-paper.md`** — the HCI paper that informs the console's interaction model. Read when deciding whether a new feature is aligned with the project's theoretical grounding (e.g. "should this be pull-based or push-based").
+- **[`docs/research/hci-orchestration-paper.md`](../../../docs/research/hci-orchestration-paper.md)** — the HCI paper that informs the console's interaction model. Read when deciding whether a new feature is aligned with the project's theoretical grounding (e.g. "should this be pull-based or push-based").
 
 ### Layer 4 — milestones + changelog
 
-- **`docs/milestones.md`** — the sequence of iteration goals. Useful to understand "why was X merged in iter12 with a rough edge that iter14 cleaned up." Check this before rewriting something — the history is often why it is what it is.
+- **[`docs/milestones.md`](../../../docs/milestones.md)** — the sequence of iteration goals. Useful to understand "why was X merged in iter12 with a rough edge that iter14 cleaned up." Check this before rewriting something — the history is often why it is what it is.
 
 ## What to read for common tasks
 
@@ -56,7 +56,7 @@ None. All files referenced are in-repo.
 | Add Gantt overlay | `10-frontend-architecture.md` → `14-information-flow.md` → existing ContextWindowSample implementation |
 | Modify orchestration | AGENTS.md (protocol section) → `12-client-library-and-adk.md` → `adk.py` (see `hgraf-safely-modify-adk-py`) |
 | Debug stuck task | AGENTS.md → `hgraf-debug-task-stuck` skill → `invariants.py` |
-| Design new UX | `13-human-interaction-model.md` → `docs/research/hci-orchestration-paper.md` |
+| Design new UX | [`13-human-interaction-model.md`](../../../docs/design/13-human-interaction-model.md) → [`docs/research/hci-orchestration-paper.md`](../../../docs/research/hci-orchestration-paper.md) |
 
 ## Cross-references to code ground truth
 

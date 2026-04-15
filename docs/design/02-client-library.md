@@ -545,3 +545,11 @@ Lives in the e2e test suite (task #15), not here, because it requires a real ADK
 - Frontend → `04-frontend-and-interaction.md`
 - The wire protocol itself → `01-data-model-and-rpc.md`
 - Auth (v0 is local-trust only; client passes no credentials) → revisit when v1 lands
+
+---
+
+## Related ADRs
+
+- [ADR 0003 — ADK as the first-class integration target](../adr/0003-adk-first.md)
+- [ADR 0014 — `session.state` is the coordination channel](../adr/0014-session-state-as-coordination-channel.md)
+- [ADR 0019 — `HarmonografAgent` and `HarmonografAdkPlugin` are separate](../adr/0019-plugin-agent-split.md)

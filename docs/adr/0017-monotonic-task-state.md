@@ -66,7 +66,7 @@ Rules in plain English:
 
 The guard lives in `_set_task_status` (the per-write enforcement) and
 is cross-checked by `check_plan_state` (the aggregate invariant, see
-ADR 0015).
+[ADR 0015](0015-invariants-as-safety-net.md)).
 
 **Task state machine** — only forward edges; terminal states absorb. A
 late retransmit cannot un-complete a COMPLETED task or un-fail a FAILED
@@ -98,7 +98,7 @@ stateDiagram-v2
   RUNNING after the task has reached COMPLETED is ignored, not
   applied. This matters more than it sounds — reconnect replay
   + parallel races made this a frequent failure mode in iter14
-  (see ADR 0011a).
+  (see [ADR 0011a](0011a-span-lifecycle-inference-superseded.md)).
 - **Terminal states mean something.** When the UI shows a task
   COMPLETED, the operator can trust that no later message will
   un-complete it. The Gantt does not have to render "was
@@ -134,6 +134,10 @@ stateDiagram-v2
   loud. The invariant validator at least logs it, but only if the
   validator is running in the mode that saw the transition.
 
-Monotonicity is the property the iter14 pivot was missing (see ADR
-0011 and 0011a). Shipping it is what made the state machine reliable
+Monotonicity is the property the iter14 pivot was missing (see [ADR 0011](0011-reporting-tools-over-span-inference.md) and [0011a](0011a-span-lifecycle-inference-superseded.md)). Shipping it is what made the state machine reliable
 at all.
+
+## Implemented in
+
+- [Design 11 — Server architecture deep-dive](../design/11-server-architecture.md)
+- [Design 12 — Client library + ADK integration](../design/12-client-library-and-adk.md)

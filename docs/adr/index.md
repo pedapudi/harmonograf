@@ -12,15 +12,15 @@ history or reverse-engineer proto files.
 
 If you are new to harmonograf, read in this order:
 
-1. ADR 0001 (motivation) and ADR 0002 (component split) together — they
+1. [ADR 0001](0001-why-harmonograf.md) (motivation) and [ADR 0002](0002-three-component-architecture.md) (component split) together — they
    give the "why does this project exist" and "what are the parts" view.
-2. ADR 0003 (ADK first) and ADR 0014 (session.state) — how we integrate
+2. [ADR 0003](0003-adk-first.md) (ADK first) and [ADR 0014](0014-session-state-as-coordination-channel.md) (session.state) — how we integrate
    with the host framework.
-3. ADR 0010 (task vs span), ADR 0011 (reporting tools), and ADR 0017
+3. [ADR 0010](0010-span-is-not-task.md) (task vs span), [ADR 0011](0011-reporting-tools-over-span-inference.md) (reporting tools), and [ADR 0017](0017-monotonic-task-state.md)
    (monotonic task state) — the core of the plan-execution protocol.
-   ADR 0011a is the superseded predecessor of ADR 0011 and explains
+   [ADR 0011a](0011a-span-lifecycle-inference-superseded.md) is the superseded predecessor of [ADR 0011](0011-reporting-tools-over-span-inference.md) and explains
    what was tried and why it broke.
-4. ADR 0004, 0005, 0006 — the wire protocol shape (telemetry/control
+4. [ADR 0004](0004-telemetry-control-split.md), [0005](0005-acks-ride-telemetry.md), [0006](0006-grpc-over-other-transports.md) — the wire protocol shape (telemetry/control
    split, ack riding semantics, gRPC choice).
 5. Everything else, by interest.
 
@@ -54,7 +54,7 @@ If you are new to harmonograf, read in this order:
 - [0011 — Reporting tools drive task state, not span lifecycle](0011-reporting-tools-over-span-inference.md)
   — the iter15 pivot: declared transitions over inferred ones.
 - [0011a — Span-lifecycle inference (Superseded)](0011a-span-lifecycle-inference-superseded.md)
-  — the predecessor of ADR 0011; what iter14 tried and why it broke.
+  — the predecessor of [ADR 0011](0011-reporting-tools-over-span-inference.md); what iter14 tried and why it broke.
 - [0012 — Three orchestration modes](0012-three-orchestration-modes.md)
   — sequential, parallel, delegated — each appropriate for a different
   execution pattern.
@@ -97,7 +97,7 @@ When a non-trivial design decision ships, add an ADR. Rules of thumb:
   reversed, mark the original `Superseded by ADR-N` and write the new
   ADR explaining what replaced it and why. Do not delete the
   superseded ADR — the reason it was wrong is load-bearing for future
-  readers considering the same shortcut (see ADR 0011a as the
+  readers considering the same shortcut (see [ADR 0011a](0011a-span-lifecycle-inference-superseded.md) as the
   template).
 - **Ground truth is code + proto comments + AGENTS.md + git history.**
   Cite file paths and commit SHAs where it helps.

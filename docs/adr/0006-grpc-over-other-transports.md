@@ -26,7 +26,7 @@ Candidates considered:
    and browser clients, streaming everywhere, strong typing via proto.
 2. **Plain HTTP/WebSockets with JSON or MessagePack** — lighter, no
    codegen, but we'd reinvent the schema, the streaming framing, and the
-   bidirectional ordering guarantees we lean on in ADR 0005.
+   bidirectional ordering guarantees we lean on in [ADR 0005](0005-acks-ride-telemetry.md).
 3. **Server-Sent Events for the frontend + raw TCP protocol for agents** —
    splits the stack in two and doubles schema maintenance.
 4. **OTLP (OpenTelemetry protocol) for telemetry + a separate custom RPC
@@ -52,7 +52,7 @@ Specifically:
 - The browser uses the sonora-based gRPC-Web gateway.
 
 gRPC was chosen over plain HTTP/JSON primarily because happens-before on the
-telemetry stream (ADR 0005) and the payload-chunk protocol
+telemetry stream ([ADR 0005](0005-acks-ride-telemetry.md)) and the payload-chunk protocol
 (`telemetry.proto#PayloadUpload`) both rely on in-order bytes on a single
 stream. gRPC gives us that for free; WebSockets would require us to frame
 messages ourselves and recreate flow-control semantics.
@@ -91,7 +91,7 @@ flowchart LR
   Python client library, and TypeScript frontend with one command. The
   schema cannot drift between components because there is only one.
 - Native gRPC gets us real streaming with real flow control, which the
-  happens-before ack guarantee (ADR 0005) relies on.
+  happens-before ack guarantee ([ADR 0005](0005-acks-ride-telemetry.md)) relies on.
 - gRPC-Web lets the browser open a `WatchSession` stream that looks
   identical to a server-streaming RPC a native client would open. The
   frontend code does not have to know it's speaking gRPC-Web.
@@ -118,3 +118,7 @@ The gRPC decision compounds nicely with the proto-first data model — the
 same `Span` type is wire format and in-memory model on all three sides.
 Without gRPC we would still have wanted protobuf for the schema discipline,
 and at that point half the value of gRPC is already captured.
+
+## Implemented in
+
+- [Design 01 — Data model & RPC](../design/01-data-model-and-rpc.md)

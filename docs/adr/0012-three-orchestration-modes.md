@@ -110,3 +110,7 @@ flowchart TD
 
 The complexity is load-bearing. Collapsing to a single mode would force
 each of the three use cases to bend to it, and each would bend badly.
+
+## Implemented in
+
+- [Design 12 — Client library + ADK integration](../design/12-client-library-and-adk.md)

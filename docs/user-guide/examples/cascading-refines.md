@@ -54,7 +54,7 @@ UI:
 
 The fact-checker finds two dates that need additional primary sources
 and calls `report_new_work_discovered` (see
-`docs/reporting-tools.md`). The planner accepts and splits the
+[`docs/reporting-tools.md`](../../reporting-tools.md)). The planner accepts and splits the
 check-sources work into two new tasks.
 
 UI:

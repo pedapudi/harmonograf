@@ -97,7 +97,7 @@ drift_severity   = "warning"
 
 The `drift_kind` is also stamped on the **active INVOCATION** span, not
 just the failed tool — this is how the planner knows to fire a refine.
-See `docs/protocol/data-model.md :: Span.attributes`.
+See [`docs/protocol/data-model.md`](../../protocol/data-model.md) :: Span.attributes.
 
 ### t=5.2s — PlanRevisionBanner fires
 
@@ -135,7 +135,7 @@ results, then a summarizer LLM call closes out.
 The task panel walks through the statuses as the agent reports each
 transition via the reporting tools (`report_task_started`,
 `report_task_completed`). See `AGENTS.md` for the full protocol and
-`docs/reporting-tools.md` for the tool contract.
+[`docs/reporting-tools.md`](../../reporting-tools.md) for the tool contract.
 
 ### t=22s — invocation completes
 
@@ -178,4 +178,4 @@ RUNNING. See [tasks-and-plans.md → currenttaskstrip](../tasks-and-plans.md#cur
 - [cookbook.md → compare two plan revisions](../cookbook.md#4-compare-two-plan-revisions)
 - [faq.md → why did the plan get revised mid-run](../faq.md#why-did-the-plan-get-revised-mid-run)
 - [tasks-and-plans.md → drift kinds](../tasks-and-plans.md#drift-kinds)
-- `docs/protocol/task-state-machine.md`
+- [`docs/protocol/task-state-machine.md`](../../protocol/task-state-machine.md)

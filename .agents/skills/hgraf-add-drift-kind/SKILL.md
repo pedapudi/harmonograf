@@ -15,7 +15,7 @@ You are expanding the drift taxonomy that drives dynamic replanning. A new drift
    - `client/harmonograf_client/adk.py:326-378` — `DriftReason` dataclass + all `DRIFT_KIND_*` constants + throttling constants.
    - `frontend/src/gantt/driftKinds.ts:30-58` — `DRIFT_KIND_META` record (category, icon, severity, human label).
    - `client/tests/test_drift_taxonomy.py` — the duck-typed unit tests that cover every kind.
-2. Skim `docs/design/10-frontend-architecture.md` and `AGENTS.md` → *Plan execution protocol* section to confirm the new kind fits the "callback-driven drift → refine → computePlanDiff → banner" pipeline.
+2. Skim [`docs/design/10-frontend-architecture.md`](../../../docs/design/10-frontend-architecture.md) and `AGENTS.md` → *Plan execution protocol* section to confirm the new kind fits the "callback-driven drift → refine → computePlanDiff → banner" pipeline.
 
 ## Step-by-step
 

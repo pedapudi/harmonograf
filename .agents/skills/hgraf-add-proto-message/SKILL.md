@@ -13,7 +13,7 @@ You need a brand-new wire concept (e.g. a new envelope on a stream, a new top-le
 
 1. `make install` ran at least once. Proto toolchain (`grpcio-tools`, `mypy-protobuf`, `@bufbuild/protoc-gen-es`) available. Verify via `make proto` clean run.
 2. You know whether the message flows on `StreamTelemetry` (client→server, upstream), `SubscribeControl` (server→client), `WatchSession` / `GetSession` (server→frontend), or is a shared type used by multiple streams.
-3. Read `docs/protocol/data-model.md` and `docs/protocol/wire-ordering.md` — new top-level messages must honor the happens-before rules there.
+3. Read [`docs/protocol/data-model.md`](../../../docs/protocol/data-model.md) and [`docs/protocol/wire-ordering.md`](../../../docs/protocol/wire-ordering.md) — new top-level messages must honor the happens-before rules there.
 
 ## Step-by-step
 

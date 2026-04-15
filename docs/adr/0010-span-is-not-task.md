@@ -31,13 +31,13 @@ We tried the conflation (in earlier iterations) and it broke. The reasons:
    actually work, or (b) pick one of the child spans as "the task," which
    is arbitrary and fragile.
 
-3. **Tasks move.** During a replan (see ADR 0013), a task can be reordered,
+3. **Tasks move.** During a replan (see [ADR 0013](0013-drift-as-first-class.md)), a task can be reordered,
    reassigned to a different agent, or removed entirely. A span is an
    append-only record of something that already happened — it cannot be
    "moved" in any sensible sense. Plan diffs would be unrepresentable.
 
 4. **Task state is not span state.** Task status is a monotonic state
-   machine with COMPLETED as terminal (see ADR 0017). Span status is also a
+   machine with COMPLETED as terminal (see [ADR 0017](0017-monotonic-task-state.md)). Span status is also a
    lifecycle, but COMPLETED on a span means "the span stopped recording" —
    not "the thing the span was trying to do succeeded." An LLM call span
    can reach COMPLETED while the task it was working on stays RUNNING
@@ -60,7 +60,7 @@ in `Task`), and a span may optionally carry a task reference as an attribute
 (`hgraf.task_id`, as documented in `types.proto`'s `TaskPlan` comment block)
 so the server and frontend can group spans by task. But neither is derived
 from the other — the task's status transitions come from reporting tools
-(ADR 0011), not from inspecting `bound_span_id`'s span status.
+([ADR 0011](0011-reporting-tools-over-span-inference.md)), not from inspecting `bound_span_id`'s span status.
 
 **Two primitives, one-way binding** — Task carries intent and is mutable;
 Span records activity and is append-only. The only edge between them is
@@ -128,3 +128,8 @@ classDiagram
 The conflation looks cheap on the whiteboard and blows up on first contact
 with real agent behavior. Keeping the two separate is the price of not
 lying about task state.
+
+## Implemented in
+
+- [Design 01 — Data model & RPC](../design/01-data-model-and-rpc.md)
+- [Design 12 — Client library + ADK integration](../design/12-client-library-and-adk.md)

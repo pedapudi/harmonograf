@@ -18,7 +18,7 @@ its own model turn). The channel has to convey:
   explicit divergence flags.
 
 The options, given that harmonograf must operate inside ADK's sandbox
-without monkey-patching (ADR 0003):
+without monkey-patching ([ADR 0003](0003-adk-first.md)):
 
 1. **Inject context into the system prompt each turn.** Works, but the
    system prompt is one-way (prompt → model, not model → prompt), so the
@@ -132,3 +132,8 @@ sequenceDiagram
 The channel exists because ADK gave it to us. If ADK didn't have
 `session.state`, we would have invented something clumsier. This
 decision is a cheerful use of a feature that happens to exist.
+
+## Implemented in
+
+- [Design 02 — Client library](../design/02-client-library.md)
+- [Design 12 — Client library + ADK integration](../design/12-client-library-and-adk.md)

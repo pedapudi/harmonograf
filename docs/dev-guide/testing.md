@@ -173,7 +173,7 @@ Guidelines:
 Some e2e tests require a real LLM. To avoid burning through hosted API
 keys, point them at a local OpenAI-compatible endpoint via
 `OPENAI_API_BASE` / `OPENAI_API_KEY` / `USER_MODEL_NAME`. See
-`docs/operator-quickstart.md` for how to set it up. Tests that need a
+[`docs/operator-quickstart.md`](../operator-quickstart.md) for how to set it up. Tests that need a
 real LLM use `pytest.mark.skipif` to bail if the env is missing.
 
 **Guideline:** prefer `FakeLlm` over a real endpoint unless the test is

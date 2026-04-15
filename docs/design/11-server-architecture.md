@@ -124,3 +124,15 @@ Large swarms of active autonomous agents flood bounding limitations frequently. 
 ## 6. Conclusion 
 
 By splitting synchronous database persistence (`SqliteStorage`) away from transient volatile memory routings (`SessionBus`), the Harmonograf architecture achieves microsecond ingest latencies scaling massively linearly without inducing architectural blocks organically natively globally completely.
+
+---
+
+## Related ADRs
+
+- [ADR 0002 — Three-component architecture](../adr/0002-three-component-architecture.md)
+- [ADR 0007 — SQLite as the v0 timeline store](../adr/0007-sqlite-over-postgres.md)
+- [ADR 0015 — Ship the invariant validator to production](../adr/0015-invariants-as-safety-net.md)
+- [ADR 0016 — Content-addressed payloads with eviction](../adr/0016-content-addressed-payloads.md)
+- [ADR 0017 — Task state is monotonic; terminal states absorb](../adr/0017-monotonic-task-state.md)
+- [ADR 0018 — Heartbeat + progress_counter for stuck detection](../adr/0018-heartbeat-stuck-detection.md)
+- [ADR 0020 — No authentication or multi-tenancy in v0](../adr/0020-no-auth-in-v0.md)

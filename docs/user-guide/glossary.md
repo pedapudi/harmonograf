@@ -416,7 +416,7 @@ plan-state reporting: `report_task_started`, `report_task_progress`,
 `report_task_completed`, `report_task_failed`, `report_task_blocked`,
 `report_new_work_discovered`, `report_plan_divergence`. Intercepted in
 `before_tool_callback` and applied directly in `_AdkState`. See
-`AGENTS.md` and `docs/reporting-tools.md`.
+`AGENTS.md` and [`docs/reporting-tools.md`](../reporting-tools.md).
 
 ### `REPLACES`
 `LinkRelation` value indicating this span supersedes a prior one — e.g.

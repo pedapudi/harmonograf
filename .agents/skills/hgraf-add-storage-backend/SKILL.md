@@ -17,7 +17,7 @@ the actual limiter.
 
 ## Prerequisites
 
-1. Read `docs/dev-guide/storage-backends.md` end to end. It is the
+1. Read [`docs/dev-guide/storage-backends.md`](../../../docs/dev-guide/storage-backends.md) end to end. It is the
    canonical contract — every method, every idempotency requirement,
    every bus delta the ingest layer expects.
 2. Read `server/harmonograf_server/storage/base.py` for the `Store`
@@ -157,7 +157,7 @@ available — wrap the `build` lambda in a check or use
 Do **not** publish on the `SessionBus` from inside your backend. The
 ingest pipeline (`server/harmonograf_server/ingest.py`) is the one and
 only publisher. The mapping is in
-`docs/dev-guide/storage-backends.md` — if your backend tries to
+[`docs/dev-guide/storage-backends.md`](../../../docs/dev-guide/storage-backends.md) — if your backend tries to
 publish too, you'll get duplicate deltas in the frontend and the
 retention sweeper will spam watchers.
 

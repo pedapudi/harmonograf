@@ -16,7 +16,7 @@ span lifecycle events. The rule set was roughly:
   "✅ done"): task → COMPLETED as a fallback
 
 This broke on every real multi-agent run. The specific failure modes are
-documented in `docs/overview.md` and in the module docstring of
+documented in [`docs/overview.md`](../overview.md) and in the module docstring of
 `client/harmonograf_client/adk.py`:
 
 1. **Spans don't close when tasks finish.** A sub-agent whose top-level
@@ -26,7 +26,7 @@ documented in `docs/overview.md` and in the module docstring of
 2. **Prose parsing is ambiguous.** An LLM writing "I will complete the
    task" and an LLM writing "task complete" look almost identical to a
    regex. False positives were common.
-3. **Parallel mode races.** In the DAG walker (ADR 0012), multiple
+3. **Parallel mode races.** In the DAG walker ([ADR 0012](0012-three-orchestration-modes.md)), multiple
    sub-agents run concurrently. Span-close callbacks fire in arbitrary
    order, and tying state transitions to them produced ordering bugs
    where a later task's COMPLETED overwrote an earlier task's
@@ -71,7 +71,7 @@ only**. See the "Plan execution protocol" section of `AGENTS.md`:
 > longer drive task state. The state machine is monotonic, walker-owned
 > for parallel mode, and callback-driven for sequential/delegated modes.
 
-The original iter14 inference approach is filed as ADR 0011a (Superseded by
+The original iter14 inference approach is filed as [ADR 0011a](0011a-span-lifecycle-inference-superseded.md) (Superseded by
 this ADR) — it remains for historical record but should not guide new work.
 
 **Reporting-tool intercept path** — the LLM calls a normal ADK tool;
@@ -104,7 +104,7 @@ sequenceDiagram
 - Parallel races disappear because the reporting tools are intercepted in
   the synchronous `before_tool_callback`, and the walker owns the state
   transitions per task with no cross-task ordering ambiguity.
-- Drift kinds (ADR 0013) have a natural home: the tools
+- Drift kinds ([ADR 0013](0013-drift-as-first-class.md)) have a natural home: the tools
   `report_task_blocked`, `report_new_work_discovered`, and
   `report_plan_divergence` each fire a refine with a specific drift kind,
   something inference had no mechanism for.
@@ -128,10 +128,14 @@ sequenceDiagram
   state_delta. These have been retained for robustness but add surface
   area and have their own failure modes (the same prose ambiguity that
   killed iter14 is not gone, only demoted).
-- **One more thing to document.** `docs/reporting-tools.md` exists because
+- **One more thing to document.** [`docs/reporting-tools.md`](../reporting-tools.md) exists because
   without it, nobody would know what the tools do or when to call them.
   Every new drift kind is a doc update in two places.
 
 The pivot was the single biggest rewrite in harmonograf's history. It
 replaces a comfortable architectural shortcut with an explicit protocol,
 and the explicit protocol is correct where the shortcut was not.
+
+## Implemented in
+
+- [Design 12 — Client library + ADK integration](../design/12-client-library-and-adk.md)

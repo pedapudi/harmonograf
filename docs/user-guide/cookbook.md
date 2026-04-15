@@ -121,7 +121,7 @@ during the outage.
    the same state on the agent header (red dot, red border).
 5. If the client reconnected after the crash, it will replay its buffered
    spans through `SpanStart`/`SpanUpdate`/`SpanEnd`. The server dedups on
-   `span.id` (see `docs/protocol/data-model.md :: Span.id`) so you will not
+   `span.id` (see [`docs/protocol/data-model.md`](../protocol/data-model.md) :: Span.id) so you will not
    see duplicates.
 6. Scroll to the gap in the timeline where the crash happened. Spans that
    were `RUNNING` at the time are typically either:
@@ -246,7 +246,7 @@ Plan revisions section is authoritative.
   Task tab falls back to the current RUNNING plan. To pin the drawer to a
   specific plan, click a span whose `hgraf.task_id` attribute points at
   that plan's task — see [drawer.md → task tab](drawer.md#task-tab) and
-  `docs/protocol/data-model.md :: Span.attributes`.
+  [`docs/protocol/data-model.md`](../protocol/data-model.md) :: Span.attributes.
 
 ---
 
@@ -342,7 +342,7 @@ What you can do:
    server-side and show as pins over the Gantt on reload, so your
    narrative survives the session ending.
 6. For programmatic export, read the server's `ListSessions` /
-   `WatchSession` RPCs directly (`docs/protocol/frontend-rpcs.md`).
+   `WatchSession` RPCs directly ([`docs/protocol/frontend-rpcs.md`](../protocol/frontend-rpcs.md)).
    The frontend does not layer anything between the wire and the UI
    beyond what is documented there.
 

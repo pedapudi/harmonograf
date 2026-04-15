@@ -13,12 +13,12 @@ but "what set of constraints does harmonograf operate under right now."
 
 Constraints:
 
-- **Single server process.** See ADR 0002. One canonical timeline, no
+- **Single server process.** See [ADR 0002](0002-three-component-architecture.md). One canonical timeline, no
   clustering, no multi-writer story. A store that assumes a single writer
   is fine.
 - **Local-loopback first.** v0 runs on the same machine as the agents or
   on a trusted LAN. Latency to the store is on the order of a disk seek,
-  not a network round-trip. ADR 0020 (no auth in v0) reinforces this.
+  not a network round-trip. [ADR 0020](0020-no-auth-in-v0.md) (no auth in v0) reinforces this.
 - **Session-scoped lifetimes.** The retention sweeper deletes terminal
   sessions after a configurable window; the absolute data volume is
   bounded by "how many concurrent sessions × how chatty an agent is."
@@ -109,3 +109,8 @@ process needs to write; (b) a cross-session analytics feature needs
 indexed queries at sizes SQLite starts to struggle with; (c) auth v1
 requires per-tenant isolation at the storage layer. Until one of those
 holds, SQLite stays. The store interface is the insurance policy.
+
+## Implemented in
+
+- [Design 03 — Server](../design/03-server.md)
+- [Design 11 — Server architecture deep-dive](../design/11-server-architecture.md)

@@ -485,3 +485,14 @@ The protocol is designed so v0 → v1 is additive: v1 adds metadata fields; v0 c
 - Server internals, storage schema, session lifecycle daemon → see `03-server.md`.
 - Python client library API surface, ADK integration code structure → see `02-client-library.md`.
 - Frontend rendering, interaction design, color palette → see `04-frontend-and-interaction.md`.
+
+---
+
+## Related ADRs
+
+- [ADR 0004 — Telemetry and control are separate RPCs](../adr/0004-telemetry-control-split.md)
+- [ADR 0005 — Control acks ride upstream on the telemetry stream](../adr/0005-acks-ride-telemetry.md)
+- [ADR 0006 — gRPC as the wire transport](../adr/0006-grpc-over-other-transports.md)
+- [ADR 0009 — UUIDv7 for span identifiers](../adr/0009-uuidv7-span-ids.md)
+- [ADR 0010 — A span is not a task](../adr/0010-span-is-not-task.md)
+- [ADR 0016 — Content-addressed payloads with eviction](../adr/0016-content-addressed-payloads.md)

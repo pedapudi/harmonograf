@@ -85,14 +85,14 @@ If you are new to the codebase, read in this order:
 
 | If you are about to… | Read |
 | --- | --- |
-| Add a new ADK callback hook, change stamping, or add a drift kind | `adk-plugin-tour.md`, `drift-taxonomy-catalog.md` |
-| Change orchestration behavior (sequential / parallel / delegated) | `harmonograf-agent-tour.md` |
-| Add a field to `PlanState`, `Task`, or `Span` | `invariant-validator.md`, `session-store-task-registry.md`, `storage-sqlite.md` |
-| Touch frontend rendering, hit-test, or minimap | `renderer-pipeline.md`, `session-store-task-registry.md` |
-| Wire a new RPC or change a Delta kind | `server-ingest-bus.md`, and `docs/protocol/frontend-rpcs.md` |
-| Debug a dropped-event / backpressure issue | `server-ingest-bus.md` |
-| Change the storage schema | `storage-sqlite.md` |
-| Investigate why a run kept refining | `drift-taxonomy-catalog.md` |
+| Add a new ADK callback hook, change stamping, or add a drift kind | [`adk-plugin-tour.md`](adk-plugin-tour.md), [`drift-taxonomy-catalog.md`](drift-taxonomy-catalog.md) |
+| Change orchestration behavior (sequential / parallel / delegated) | [`harmonograf-agent-tour.md`](harmonograf-agent-tour.md) |
+| Add a field to `PlanState`, `Task`, or `Span` | [`invariant-validator.md`](invariant-validator.md), [`session-store-task-registry.md`](session-store-task-registry.md), [`storage-sqlite.md`](storage-sqlite.md) |
+| Touch frontend rendering, hit-test, or minimap | [`renderer-pipeline.md`](renderer-pipeline.md), [`session-store-task-registry.md`](session-store-task-registry.md) |
+| Wire a new RPC or change a Delta kind | [`server-ingest-bus.md`](server-ingest-bus.md), and [`docs/protocol/frontend-rpcs.md`](../protocol/frontend-rpcs.md) |
+| Debug a dropped-event / backpressure issue | [`server-ingest-bus.md`](server-ingest-bus.md) |
+| Change the storage schema | [`storage-sqlite.md`](storage-sqlite.md) |
+| Investigate why a run kept refining | [`drift-taxonomy-catalog.md`](drift-taxonomy-catalog.md) |
 
 ## Source-reference conventions
 

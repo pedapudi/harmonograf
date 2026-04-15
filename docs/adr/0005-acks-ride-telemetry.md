@@ -6,7 +6,7 @@ Accepted.
 
 ## Context
 
-With telemetry and control on separate RPCs (see ADR 0004), the remaining
+With telemetry and control on separate RPCs (see [ADR 0004](0004-telemetry-control-split.md)), the remaining
 question is where the *acknowledgement* for a control event goes. When the
 server pushes a `PAUSE` ControlEvent to an agent over `SubscribeControl`,
 the agent's "paused" ack needs to travel back upstream. There are three
@@ -100,7 +100,7 @@ sequenceDiagram
   practice the client is expected to keep the telemetry upstream drained
   (see the buffer design in `client/harmonograf_client/buffer.py`).
 - Conceptually "control" and "telemetry" mix on one stream, even though the
-  protocol split in ADR 0004 tried to keep them separate. The split is
+  protocol split in [ADR 0004](0004-telemetry-control-split.md) tried to keep them separate. The split is
   therefore one-way: control flows down on its own stream, but acks flow up
   on telemetry. Anyone reading the service definition has to understand both
   decisions together.
@@ -117,3 +117,8 @@ sequenceDiagram
 The guarantee is worth the coupling. Fixing ordering after the fact via
 server-side reordering would require buffering, reconciliation, and
 clock-skew tolerance that we would rather not own.
+
+## Implemented in
+
+- [Design 01 — Data model & RPC](../design/01-data-model-and-rpc.md)
+- [Design 14 — Information flow](../design/14-information-flow.md)

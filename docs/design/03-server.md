@@ -570,3 +570,12 @@ The full ADK end-to-end is task #15 and tests the client library against this se
 - Frontend → `04-frontend-and-interaction.md`
 - Auth → v1 (see doc 01 §4.7)
 - Multi-tenant deployments, clustering, replication → not v0
+
+---
+
+## Related ADRs
+
+- [ADR 0002 — Three-component architecture](../adr/0002-three-component-architecture.md)
+- [ADR 0007 — SQLite as the v0 timeline store](../adr/0007-sqlite-over-postgres.md)
+- [ADR 0015 — Ship the invariant validator to production](../adr/0015-invariants-as-safety-net.md)
+- [ADR 0020 — No authentication or multi-tenancy in v0](../adr/0020-no-auth-in-v0.md)

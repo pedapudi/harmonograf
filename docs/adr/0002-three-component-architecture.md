@@ -33,8 +33,7 @@ Harmonograf is three components, named by who they run under:
    process as the agent so it sees every callback synchronously.
 
 2. **Server** — a single process per deployment. Terminates all client
-   telemetry streams, persists the canonical timeline (SQLite today; see ADR
-   0007), fans out live updates to any number of frontend subscribers, and
+   telemetry streams, persists the canonical timeline (SQLite today; see [ADR 0007](0007-sqlite-over-postgres.md)), fans out live updates to any number of frontend subscribers, and
    routes control events from the frontend back to the correct agent. One
    server, many clients, many viewers.
 
@@ -78,9 +77,9 @@ flowchart LR
 **Bad.**
 - The server is a single point of failure. If it dies, live telemetry has
   nowhere to land. The client library buffers up to a configurable limit and
-  reconnects (see ADR 0005 on ack semantics), but a long outage drops data.
-  v0 accepts this — HA is explicitly a non-goal (see ADR 0020 and
-  overview.md non-goals).
+  reconnects (see [ADR 0005](0005-acks-ride-telemetry.md) on ack semantics), but a long outage drops data.
+  v0 accepts this — HA is explicitly a non-goal (see [ADR 0020](0020-no-auth-in-v0.md) and
+  [overview](../overview.md#non-goals)).
 - "Library in every agent" means any fix to the instrumentation layer requires
   re-deploying the agent, not just the server. We mitigate by keeping the wire
   protocol additive and evolving the server independently where possible.
@@ -93,3 +92,8 @@ only thing that can own "one canonical timeline," and the library is the only
 thing close enough to the agent to catch synchronous ADK callbacks. The
 frontend being web-based means an operator can open it anywhere without
 installing anything.
+
+## Implemented in
+
+- [Design 03 — Server](../design/03-server.md)
+- [Design 11 — Server architecture deep-dive](../design/11-server-architecture.md)

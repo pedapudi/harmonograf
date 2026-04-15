@@ -36,7 +36,7 @@ actually needs:
       in arbitrary order, producing task-state orderings that contradict the
       true happens-before of the plan.
     Harmonograf's own earlier iterations tried each of these heuristics and
-    broke on each of them (see ADR 0011 for the iter15 pivot that killed the
+    broke on each of them (see [ADR 0011](0011-reporting-tools-over-span-inference.md) for the iter15 pivot that killed the
     approach entirely).
 
 3. **Observability is not the job.** An operator who can see a stuck agent but
@@ -61,13 +61,13 @@ product with a different data model.
 The shape that falls out of the four forcing functions above:
 
 - Plans are canonical objects in the data model, separate from spans and able
-  to be *revised* live (see ADR 0013).
+  to be *revised* live (see [ADR 0013](0013-drift-as-first-class.md)).
 - Task state is a monotonic state machine driven by agents calling explicit
-  reporting tools, not inferred from span lifecycle (ADR 0011, ADR 0017).
+  reporting tools, not inferred from span lifecycle ([ADR 0011](0011-reporting-tools-over-span-inference.md), [ADR 0017](0017-monotonic-task-state.md)).
 - The wire protocol is bidirectional so the UI can send control events back to
-  agents (ADR 0004, ADR 0005).
+  agents ([ADR 0004](0004-telemetry-control-split.md), [ADR 0005](0005-acks-ride-telemetry.md)).
 - Integration with ADK goes through official seams only — callbacks, session
-  state, tool injection — never monkey-patching (ADR 0003, ADR 0014).
+  state, tool injection — never monkey-patching ([ADR 0003](0003-adk-first.md), [ADR 0014](0014-session-state-as-coordination-channel.md)).
 
 **The shape that falls out** — span-tracer model on the left, harmonograf's
 plan-aware bidirectional model on the right. The arrows for *intervention* are

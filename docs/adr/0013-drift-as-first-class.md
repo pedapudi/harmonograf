@@ -123,10 +123,14 @@ flowchart LR
   proportional to refine count.
 - **Drift detection is heuristic.** Not every drift signal is reliable —
   prose-based kinds (model says "I think the plan is wrong") have the
-  same ambiguity problems that killed span-lifecycle inference (ADR
-  0011). We treat prose signals as secondary and prefer explicit
+  same ambiguity problems that killed span-lifecycle inference ([ADR 0011](0011-reporting-tools-over-span-inference.md)). We treat prose signals as secondary and prefer explicit
   reporting-tool drift.
 
 Drift as a first-class event is what distinguishes harmonograf's plan
 view from "here is the original plan, good luck." It turns replanning
 from a failure mode into a product surface.
+
+## Implemented in
+
+- [Design 04 — Frontend and interaction](../design/04-frontend-and-interaction.md)
+- [Design 13 — Human interaction model](../design/13-human-interaction-model.md)

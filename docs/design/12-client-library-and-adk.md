@@ -162,3 +162,16 @@ When an agent flags a requirement natively intelligently, it sleeps structurally
 
 ## 5. Summary
 The client securely protects execution limits strictly seamlessly organically buffering Protobuf variables securely reliably cleanly explicitly reliably globally.
+
+---
+
+## Related ADRs
+
+- [ADR 0003 — ADK as the first-class integration target](../adr/0003-adk-first.md)
+- [ADR 0010 — A span is not a task](../adr/0010-span-is-not-task.md)
+- [ADR 0011 — Reporting tools drive task state, not span lifecycle](../adr/0011-reporting-tools-over-span-inference.md)
+- [ADR 0011a — Span-lifecycle inference (Superseded)](../adr/0011a-span-lifecycle-inference-superseded.md)
+- [ADR 0012 — Three orchestration modes](../adr/0012-three-orchestration-modes.md)
+- [ADR 0014 — `session.state` is the coordination channel](../adr/0014-session-state-as-coordination-channel.md)
+- [ADR 0017 — Task state is monotonic; terminal states absorb](../adr/0017-monotonic-task-state.md)
+- [ADR 0019 — `HarmonografAgent` and `HarmonografAdkPlugin` are separate](../adr/0019-plugin-agent-split.md)

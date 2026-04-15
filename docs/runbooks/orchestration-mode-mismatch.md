@@ -38,7 +38,7 @@ flowchart TD
     (`adk.py:1884`) — the agent decided not to plan.
   - Traces of the walker (`_forced_task_id_var`) in sequential mode,
     or absence of walker traces in parallel mode.
-- **UI**: task lifecycle doesn't match `docs/protocol/task-state.md`
+- **UI**: task lifecycle doesn't match [`docs/protocol/task-state-machine.md`](../protocol/task-state-machine.md)
   — e.g. tasks advance even though no reporting tool was called
   (callback fallback kicked in, suggesting sequential mode); or
   multiple tasks are RUNNING simultaneously in what you thought was

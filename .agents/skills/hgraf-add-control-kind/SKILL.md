@@ -15,7 +15,7 @@ For pure observability (no agent response required), prefer an annotation kind i
 
 1. Read `proto/harmonograf/v1/types.proto:345-403` — the `ControlKind` enum, `ControlEvent`, `ControlAck`, `ControlAckResult`.
 2. Read `proto/harmonograf/v1/control.proto` — there is no control envelope there beyond `SubscribeControlRequest`; control payload itself lives in `types.proto`.
-3. Understand happens-before: acks ride upstream on `StreamTelemetry` (folded into `TelemetryUp.control_ack`), not on `SubscribeControl`. See `docs/protocol/control-stream.md`.
+3. Understand happens-before: acks ride upstream on `StreamTelemetry` (folded into `TelemetryUp.control_ack`), not on `SubscribeControl`. See [`docs/protocol/control-stream.md`](../../../docs/protocol/control-stream.md).
 4. Decide whether the new kind requires a new `Capability` (it probably does — advertise new verbs so the frontend greys out agents that don't support them).
 
 ## Step-by-step

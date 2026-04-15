@@ -11,7 +11,7 @@ responsibilities:
 
 1. **Orchestration.** Wrap a user-written coordinator agent and drive
    the plan: read the plan at run start, decide whether to run it
-   sequential / parallel / delegated (ADR 0012), inject reporting
+   sequential / parallel / delegated ([ADR 0012](0012-three-orchestration-modes.md)), inject reporting
    tools, enforce the task state machine, fire refines on drift.
 2. **Telemetry and state tracking.** Translate every ADK lifecycle
    callback into a harmonograf span, maintain `_AdkState` (task
@@ -61,7 +61,7 @@ independent-by-design. Specifically: a user who wants observability
 without orchestration (delegated mode, or just watching a
 third-party agent run) wants the plugin without the agent. Forcing
 them to take both is the same failure as forcing a single
-orchestration mode (ADR 0012).
+orchestration mode ([ADR 0012](0012-three-orchestration-modes.md)).
 
 **Two ADK extension points, one App** — `HarmonografAgent` subclasses
 `BaseAgent` (orchestration), `HarmonografAdkPlugin` subclasses `BasePlugin`
@@ -131,4 +131,9 @@ flowchart TB
 The split is worth the friction because it matches ADK's own
 extension-point split. A single-class design would fight the
 framework, and the framework is the thing we are trying not to fight
-(ADR 0003).
+([ADR 0003](0003-adk-first.md)).
+
+## Implemented in
+
+- [Design 02 — Client library](../design/02-client-library.md)
+- [Design 12 — Client library + ADK integration](../design/12-client-library-and-adk.md)

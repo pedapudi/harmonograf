@@ -48,7 +48,7 @@ Harmonograf v0:
   SubscribeControl (task #17 client side)`). When set, every RPC
   (both agent-facing and frontend-facing) requires the header.
 - **No OAuth, no SSO, no per-user RBAC, no audit log.** Explicitly
-  listed as non-goals in `docs/overview.md`.
+  listed as non-goals in [`docs/overview.md`](../overview.md).
 - **Health probes (`/healthz`, `/readyz`) are always open**, no auth.
 
 v0 operators who need auth at all use the bearer token; everyone else
@@ -123,3 +123,8 @@ warning and gets pwned is a bad outcome. The cost of over-engineering
 auth for v0 would have been delaying every other feature in the
 overview by weeks. We take the risk knowingly, document it loudly,
 and plan auth v1 for after the v0 scope.
+
+## Implemented in
+
+- [Design 03 — Server](../design/03-server.md)
+- [Design 11 — Server architecture deep-dive](../design/11-server-architecture.md)

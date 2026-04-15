@@ -122,9 +122,15 @@ sequenceDiagram
   payload. For very chatty agents this is measurable CPU. We have
   not profiled it as a problem, but it is a cost that inline bytes
   would not pay.
-- **No replication.** One server, one disk (see ADR 0007). Payloads
+- **No replication.** One server, one disk (see [ADR 0007](0007-sqlite-over-postgres.md)). Payloads
   persist only as long as the session does.
 
 The content-address + eviction design is what keeps the telemetry
 channel from either OOMing or stalling under real agent load. It
 costs us some metadata discipline and is worth it.
+
+## Implemented in
+
+- [Design 01 — Data model & RPC](../design/01-data-model-and-rpc.md)
+- [Design 11 — Server architecture deep-dive](../design/11-server-architecture.md)
+- [Design 14 — Information flow](../design/14-information-flow.md)

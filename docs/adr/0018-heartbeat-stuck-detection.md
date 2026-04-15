@@ -144,3 +144,8 @@ flowchart TD
 The progress-counter + heartbeat design is the least assumption-heavy
 way to reconcile the two failure modes. It doesn't require agent
 cooperation and it reuses a channel we already had.
+
+## Implemented in
+
+- [Design 11 — Server architecture deep-dive](../design/11-server-architecture.md)
+- [Design 14 — Information flow](../design/14-information-flow.md)

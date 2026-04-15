@@ -15,7 +15,7 @@ Harmonograf needs two logical channels between an agent and the server:
   messages, human-in-the-loop responses, status queries. A few bytes, a few
   times a session, but must arrive *now* when they arrive.
 
-Both channels run over the same gRPC transport (see ADR 0006). The design
+Both channels run over the same gRPC transport (see [ADR 0006](0006-grpc-over-other-transports.md)). The design
 question is whether they share one bidirectional RPC or live on two separate
 RPCs.
 
@@ -32,7 +32,7 @@ Options considered:
 Two RPCs: `StreamTelemetry` (bidirectional, but the downstream is reserved
 for handshake + flow control) and `SubscribeControl` (server-streaming,
 server → agent only). Acks ride back upstream on `StreamTelemetry` instead
-of a third RPC (see ADR 0005). The split is declared in
+of a third RPC (see [ADR 0005](0005-acks-ride-telemetry.md)). The split is declared in
 `proto/harmonograf/v1/service.proto` and explained in the file header of
 `proto/harmonograf/v1/control.proto`.
 
@@ -106,3 +106,8 @@ The split is cheap to build and pays for itself the first time a large
 payload upload coincides with a needed PAUSE. It also leaves room for
 SubscribeControl to become a distinct auth or rate-limit unit later if we
 want, without disturbing telemetry.
+
+## Implemented in
+
+- [Design 01 — Data model & RPC](../design/01-data-model-and-rpc.md)
+- [Design 14 — Information flow](../design/14-information-flow.md)

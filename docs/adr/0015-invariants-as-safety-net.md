@@ -12,7 +12,7 @@ must hold at all times:
 - Every task status is one of {PENDING, RUNNING, COMPLETED, FAILED,
   CANCELLED}.
 - Terminal statuses (COMPLETED, FAILED, CANCELLED) have no outgoing
-  transitions — once terminal, always terminal (see ADR 0017).
+  transitions — once terminal, always terminal (see [ADR 0017](0017-monotonic-task-state.md)).
 - A task can only transition RUNNING → anything; a task cannot go from
   COMPLETED back to RUNNING.
 - A task's `bound_span_id` should refer to a span that exists and
@@ -130,3 +130,8 @@ flowchart LR
 The validator pays for itself every time it catches a compounding bug
 the per-write guards missed. The runtime cost is the price we pay to
 sleep at night.
+
+## Implemented in
+
+- [Design 03 — Server](../design/03-server.md)
+- [Design 11 — Server architecture deep-dive](../design/11-server-architecture.md)

@@ -105,3 +105,8 @@ target workload, and the accessibility cost is real but mitigable with
 effort in the interaction layer. The renderer abstraction keeps the
 Gantt decoupled from React enough that swapping to WebGL later is not a
 rewrite.
+
+## Implemented in
+
+- [Design 04 — Frontend and interaction](../design/04-frontend-and-interaction.md)
+- [Design 10 — Frontend architecture deep-dive](../design/10-frontend-architecture.md)

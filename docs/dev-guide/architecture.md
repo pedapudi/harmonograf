@@ -378,7 +378,7 @@ server-stream → agent's `on_control` handler → back into ADK land.
 ## Protocol-level details
 
 For byte-level message shapes (every field in every `TelemetryUp` oneof,
-every field in `Span`, every enum value) see `docs/protocol/` (task #8).
+every field in `Span`, every enum value) see [`../protocol/`](../protocol/).
 This guide deliberately stays at the architectural level — if we duplicated
 the wire schema here it would rot.
 

@@ -453,3 +453,10 @@ If any scenario drops below 60fps, it's a bug.
 - Anything behind the server API (fanout, persistence, control routing) → `03-server.md`
 - Anything inside the agent process (emit API, ADK hooks, buffering internals) → `02-client-library.md`
 - The span schema itself → `01-data-model-and-rpc.md`
+
+---
+
+## Related ADRs
+
+- [ADR 0008 — Canvas rendering for the Gantt chart](../adr/0008-canvas-gantt-over-svg.md)
+- [ADR 0013 — Drift is a first-class event](../adr/0013-drift-as-first-class.md)
