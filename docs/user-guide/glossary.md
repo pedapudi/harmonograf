@@ -309,9 +309,9 @@ Fixed 240×120 overview in the bottom-left of the Gantt plot. Click or
 drag to seek. See [gantt-view.md → minimap](gantt-view.md#minimap).
 
 ### Minimap (Graph)
-Pending in iter16 (task #1). When it lands, it mirrors the Gantt
-minimap for the Graph view. See
-[graph-view.md → zoom and minimap](graph-view.md#zoom-and-minimap-in-this-release).
+Mirrors the Gantt minimap for the Graph view, with click/drag to pan and
+a viewport rectangle showing the currently-visible region. See
+[graph-view.md → zoom and minimap](graph-view.md#zoom-and-minimap).
 
 ### Mode chip
 `SEQ` / `PAR` / `OBS` chip on the [current task strip](tasks-and-plans.md#currenttaskstrip)

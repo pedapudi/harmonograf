@@ -265,8 +265,8 @@ the live milestone plan.
   health probes.
 - [docs/reporting-tools.md](reporting-tools.md) — the reporting-tool protocol.
 - [docs/design/](design/) — per-component design notes.
-- [docs/user-guide/](user-guide/) — *(task #6)* navigating the UI.
-- [docs/dev-guide/](dev-guide/) — *(task #7)* building from source, contributing.
-- [docs/protocol/](protocol/) — *(task #8)* wire protocol and state-key reference.
+- [docs/user-guide/](user-guide/) — navigating the UI.
+- [docs/dev-guide/](dev-guide/) — building from source, contributing.
+- [docs/protocol/](protocol/) — wire protocol and state-key reference.
 - [AGENTS.md](../AGENTS.md) — project vision + plan-execution protocol, checked
   into the repo as durable guidance.

@@ -51,7 +51,7 @@ mismatch, firewall). See [troubleshooting.md → is the server reachable](troubl
 
 ### Can I delete or archive a session from the UI?
 
-No. The picker is read-only in iter16 (see
+No. The picker is read-only in the current release (see
 [sessions.md → deleting / replaying sessions](sessions.md#deleting--replaying-sessions)).
 Session lifecycle is driven server-side. The **Archive** bucket is just a
 classification (older than 24 h), not a deletable state.
@@ -156,12 +156,13 @@ off for LLM_CALL spans.
 
 ### How do I know the context window is full?
 
-iter16 is wiring up a per-agent context-window overlay at the bottom of
-each agent row on the Gantt. It is not yet live at every call site —
-[gantt-view.md → context window overlay](gantt-view.md#context-window-overlay-in-this-release)
-calls it out as in-progress. Until it lands, the reliable signal is the
-`context_pressure` drift kind: if the planner sees the LLM hit
-`MAX_TOKENS` or `LENGTH` as its `finish_reason`, it stamps the active
+The Gantt renders a per-agent context-window overlay at the bottom of
+each agent row — see
+[gantt-view.md → context window overlay](gantt-view.md#context-window-overlay).
+The ratio also lands on the per-agent header chip for an at-a-glance read.
+For programmatic detection, the `context_pressure` drift kind fires when
+the planner sees the LLM hit `MAX_TOKENS` or `LENGTH` as its `finish_reason`
+and stamps the active
 INVOCATION and fires a `context_pressure` revision. Look for the `⚡
 Context limit` pill and revision row.
 
@@ -236,7 +237,7 @@ Explained in [annotations.md → steering from the popover](annotations.md#steer
 
 ### Why does the `s` / `a` shortcut do nothing?
 
-Both are **stubs** in `frontend/src/lib/shortcuts.ts` pending task #14.
+Both are **stubs** in `frontend/src/lib/shortcuts.ts` and not yet wired.
 Use the span popover's Steer / Annotate actions, or the drawer's
 Control / Annotations tabs. See
 [keyboard-shortcuts.md](keyboard-shortcuts.md).
@@ -390,15 +391,15 @@ control targeting an `AWAITING_HUMAN` span. See
 
 ### Can I edit or delete an annotation?
 
-No. Annotations are append-only in iter16. If you need to retract
+No. Annotations are append-only in the current release. If you need to retract
 something, post a follow-up annotation. See
 [annotations.md → deleting / editing](annotations.md#deleting--editing).
 
 ### Who is listed as the author of my annotation?
 
 The default author is `user`, set client-side. A deployment with auth
-can override the author string server-side; iter16 has no user-identity
-system in the frontend itself. See
+can override the author string server-side; the current release has no
+user-identity system in the frontend itself. See
 [annotations.md → who wrote what](annotations.md#who-wrote-what).
 
 ## Performance and scale

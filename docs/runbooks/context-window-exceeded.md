@@ -162,7 +162,7 @@ provider's.
 
 - [`dev-guide/debugging.md`](../dev-guide/debugging.md) §"An agent is
   stuck" — context pressure often shows up as stuckness first.
-- Docs on context-window visualization (task #3 / task #2 milestones)
-  for how the UI renders this state.
+- [`user-guide/gantt-view.md`](../user-guide/gantt-view.md) §"Context window
+  overlay" — how the UI renders this state.
 - `server/harmonograf_server/ingest.py:587-609` — context-window
   telemetry ingest path.

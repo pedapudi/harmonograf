@@ -116,9 +116,10 @@ If none of the first four blocks has content, the tab shows
 `No task information available.` and still renders the plan-revisions and
 orchestration-events sections.
 
-In this release: iter16's thinking-integration task (#4) is widening the
-set of attributes this tab reads and surfacing deeper summaries. Assume the
-layout may grow.
+The tab also surfaces LLM thinking content when the span carries a
+payload with role `thinking` — see the Trajectory subtab below for the
+per-task feed, and the brain-icon badge on Gantt LLM_CALL blocks for an
+at-a-glance indicator.
 
 #### Plan revisions section
 

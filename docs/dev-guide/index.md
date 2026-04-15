@@ -49,7 +49,7 @@ flowchart TD
 ```
 
 A dedicated wire-protocol reference lives in a sibling tree under
-`docs/protocol/` (see task #8). This guide covers *internals, workflow, and
+[`docs/protocol/`](../protocol/). This guide covers *internals, workflow, and
 architecture* — for byte-level message shapes and the gRPC surface, cross-link
 into `docs/protocol/` at the relevant anchor.
 

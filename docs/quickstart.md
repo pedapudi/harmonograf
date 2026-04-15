@@ -284,9 +284,8 @@ make install
   probes, retention, bearer-token auth.
 - [reporting-tools.md](reporting-tools.md) — the canonical agent ↔ harmonograf
   protocol.
-- [docs/user-guide/](user-guide/) — *(task #6, in progress)* the UI walk-through
-  with screenshots and keyboard shortcuts.
-- [docs/dev-guide/](dev-guide/) — *(task #7, in progress)* building from source,
-  adding a storage backend, writing tests, contribution workflow.
-- [docs/protocol/](protocol/) — *(task #8, in progress)* proto reference,
-  session-state schema, drift taxonomy, plan-diff semantics.
+- [docs/user-guide/](user-guide/) — the UI walk-through with keyboard shortcuts.
+- [docs/dev-guide/](dev-guide/) — building from source, adding a storage
+  backend, writing tests, contribution workflow.
+- [docs/protocol/](protocol/) — proto reference, session-state schema, drift
+  taxonomy, plan-diff semantics.

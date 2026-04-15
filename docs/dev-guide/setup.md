@@ -235,7 +235,7 @@ harmonograf/
 │   └── integration/           #   Playwright harness for frontend-server interop
 ├── docs/
 │   ├── dev-guide/             #   You are here
-│   ├── protocol/              #   Wire protocol reference (task #8)
+│   ├── protocol/              #   Wire protocol reference
 │   ├── design/                #   Design notes & ADRs
 │   ├── research/              #   Exploratory docs
 │   ├── milestones.md          #   Roadmap

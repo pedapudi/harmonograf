@@ -231,11 +231,11 @@ the attention-needing session.
 - Shortcuts are suppressed inside input fields and textareas
   (including Material Web's `md-*-text-field` custom elements) except
   `Esc` and `⌘K`.
-- The `a` and `s` shortcuts (annotate / steer) are **stubs** pending
-  task #14. They won't do anything yet. See
+- The `a` and `s` shortcuts (annotate / steer) are **stubs** and not
+  yet wired. They won't do anything yet. See
   [keyboard-shortcuts.md](keyboard-shortcuts.md).
-- The arrow-key pan shortcuts are **stubs** pending task #11. Use
-  `+`/`-` or the minimap until they land.
+- The arrow-key pan shortcuts are also **stubs**. Use `+`/`-` or the
+  minimap until they land.
 
 ## Session picker won't open
 

@@ -195,8 +195,8 @@ current invocation.
 - *Steer button does nothing when pressed.* The handler requires you to
   pick a mode first; the Send button is disabled until then. See
   [control-actions.md → confirmation policy](control-actions.md#confirmation-policy).
-- *The `s` shortcut does not steer.* The `s` key is a stub pending
-  task #14. Use the popover or drawer Control tab — see
+- *The `s` shortcut does not steer.* The `s` key is a stub and not yet
+  wired. Use the popover or drawer Control tab — see
   [keyboard-shortcuts.md](keyboard-shortcuts.md).
 - *Steer control/annotation — which do I want?* See
   [annotations.md → steering from the popover](annotations.md#steering-from-the-popover-is-a-control-not-an-annotation).

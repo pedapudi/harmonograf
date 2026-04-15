@@ -78,9 +78,9 @@ flowchart TD
   `frontend/src/lib/shortcuts.ts` is the source of truth for the keyboard map.
 - **Screenshots** are marked `TODO` and live under `_screenshots/`. Descriptive
   alt-text accompanies every one so you can follow along without images.
-- **In this release** means a feature that is being built in iter16 (the
-  sequence-diagram minimap/zoom, deeper thinking surfacing, context-window
-  overlay) and may be only partly wired up by the time you read this.
+- **In this release** means a feature that recently shipped (the sequence-
+  diagram minimap/zoom, deeper thinking surfacing, context-window overlay)
+  and may still be rough at the edges.
 - The UI calls the main view "Sessions" in the nav rail and "Gantt" everywhere
   else. Both refer to the same page (`navSection === 'sessions'`).
 

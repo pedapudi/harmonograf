@@ -198,8 +198,8 @@ into the agent's task report line on the header box. See
 - Steering is the primary way to push back on a long-running agent
   without cancelling.
 - Note: the `a` and `s` global shortcuts (annotate / steer) are reserved
-  in `shortcuts.ts` but their handlers are stubbed pending task #14.
-  Use the popover or drawer until that lands.
+  in `shortcuts.ts` but their handlers are still stubs. Use the popover
+  or drawer until they get wired.
 
 ### Approve / Reject
 

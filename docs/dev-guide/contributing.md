@@ -55,8 +55,8 @@ flowchart LR
 - **Explain *why*, not *what*.** The diff shows what. The commit message
   explains why you chose this approach over an obvious alternative.
 - **One logical change per commit.** If you can split it, split it.
-- **Reference issues or tasks** in the body, not the title: `Closes #42`
-  or `Refs task #7`.
+- **Reference issues** in the body, not the title: `Closes #42` or
+  `Refs #123`.
 
 ## PR expectations
 

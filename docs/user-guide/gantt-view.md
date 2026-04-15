@@ -123,7 +123,7 @@ The Gantt-specific subset:
 
 | Key | Action |
 |---|---|
-| `←` / `→` | Pan 10% (wiring up in iter16 — see note below). |
+| `←` / `→` | Pan 10% — handler reserved, not yet wired. |
 | `+` / `=` / `-` | Zoom in / out. |
 | `f` | Fit session to viewport (resets zoom to 1 hour window). |
 | `l` | Return to live cursor. |
@@ -178,12 +178,20 @@ agents are persisted in the UI store and the renderer filters them out of
 the plot (but not the minimap, so you can still see they exist). `showAll`
 on the UI store clears the hidden set.
 
-## Context window overlay (in this release)
+## Context window overlay
 
-iter16 is adding a per-agent context-window overlay that renders the model's
-prompt window along the bottom of the agent row. When it lands this page
-will describe how to read it and how the overlay maps to the context
-telemetry being added in tasks #2 and #3. Treat this paragraph as a stub.
+Each agent row can show a per-agent context-window overlay along the bottom
+of its gutter, rendering the model's prompt-token usage across session time.
+The overlay is driven by heartbeat samples the client library stamps with
+`context_window_tokens` / `context_window_limit_tokens` — see
+[protocol/telemetry-stream.md](../protocol/telemetry-stream.md#heartbeat) for
+the wire shape.
+
+Colors cross the 0.5 / 0.75 / 0.9 thresholds (green → yellow → orange → red)
+so a glance at the Gantt tells you which agents are under budget pressure.
+Toggle the overlay off from the drawer's **View** tab if you want to see only
+spans. The per-agent header chip next to the agent name always shows the
+current ratio regardless of the overlay toggle.
 
 ## When the plot is empty
 

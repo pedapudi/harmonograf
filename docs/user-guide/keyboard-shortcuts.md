@@ -24,14 +24,14 @@ textareas (including Material Web's `md-filled-text-field` /
 | `⌘K` / `Ctrl+K` | Open session picker | Aliased to `/` below. |
 | `/` | Open session picker (aliased to search) | |
 | `Space` | Toggle live-follow | Also stops pausing the viewport when on. Pause *agents* is on the transport bar. |
-| `←` | Pan 10% left | **Stub** — handler reserved, wiring lands in task #11. |
+| `←` | Pan 10% left | **Stub** — handler reserved, not yet wired. |
 | `→` | Pan 10% right | **Stub** — same. |
 | `+` | Zoom in | |
 | `=` | Zoom in | Alias for `+` so US keyboards don't need Shift. |
 | `-` | Zoom out | |
 | `f` | Fit session to viewport | Resets `zoomSeconds` to 3600 (1 hour). |
 | `l` | Return to live cursor | Same as the transport bar's **↩ Follow live** button. |
-| `a` | Annotate selected span | **Stub** — handler reserved, wiring lands in task #14. Use the [drawer](drawer.md#annotations-tab) or the [popover](drawer.md#span-popover) until then. |
+| `a` | Annotate selected span | **Stub** — handler reserved, not yet wired. Use the [drawer](drawer.md#annotations-tab) or the [popover](drawer.md#span-popover) until then. |
 | `s` | Steer selected span | **Stub** — same. Use the [popover](control-actions.md#1-span-popover-quick-look) or the [drawer Control tab](drawer.md#control-tab) until then. |
 | `j` | Select next span | Spans are sorted by `(startMs, id)` across all agents. |
 | `k` | Select previous span | |

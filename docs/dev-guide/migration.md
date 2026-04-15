@@ -226,7 +226,7 @@ handled by a hand-rolled `PRAGMA table_info` check followed by
 The canonical pattern is visible at `sqlite.py:193-223`:
 
 ```python
-# Backfill payload_* columns on pre-existing DBs created before task #7.
+# Backfill payload_* columns on pre-existing DBs created before PayloadRef metadata was tracked.
 async with self._db.execute("PRAGMA table_info(spans)") as cur:
     cols = {row[1] for row in await cur.fetchall()}
 for name, ddl in (

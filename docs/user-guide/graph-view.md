@@ -132,13 +132,17 @@ span, opens the drawer on that span.
 Dependency edges between tasks draw as dashed grey bezier curves between the
 corresponding chips or ghost boxes.
 
-## Zoom and minimap (in this release)
+## Zoom and minimap
 
-Task #1 of iter16 is adding minimap and zoom controls to the Graph view,
-mirroring the Gantt minimap and transport-bar zoom. When it ships this page
-will describe the controls; today the Graph is scroll-only. Use the browser
-scrollbar on the plot container to pan vertically, and rely on the Graph's
-fixed-column layout for horizontal navigation.
+The Graph view has an embedded minimap in the corner showing the full agent
+topology with a viewport rectangle over the currently-visible region. Click
+or drag on the minimap to pan. Wheel-zoom in the main plot is cursor-anchored
+(range 0.25x–4x); keyboard shortcuts `⌘+` / `⌘-` / `⌘0` also zoom and reset.
+Pan via primary-button drag on empty space, middle-click drag, or spacebar +
+drag. Viewport state (zoom level, scroll offset) persists across session
+switches via `uiStore.graphViewport`.
+
+Fit-to-content and fit-to-selection buttons live in the overlay toolbar.
 
 ## When the Graph is empty
 

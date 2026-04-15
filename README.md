@@ -37,7 +37,7 @@ Harmonograf keeps the story first-class:
 
 ### Screenshots
 
-> **TODO (task #6 / user guide):** drop in canonical screenshots here.
+> **TODO:** drop in canonical screenshots here.
 >
 > - `docs/images/readme-gantt.png` — headline Gantt view of a running presentation_agent session.
 > - `docs/images/readme-diff.png` — replan banner with plan diff drawer open.
@@ -84,7 +84,7 @@ components via `make proto`.
 | **Parallel** | `orchestrator_mode=True, parallel_mode=True` | A rigid-DAG batch walker drives sub-agents directly, respecting plan edges as dependencies and using a forced `task_id` ContextVar so parallel branches never race. |
 | **Delegated** | `orchestrator_mode=False` | A single delegation with an event observer scanning for drift afterward; the inner agent is in charge of its own task sequencing. |
 
-Full protocol reference: [docs/protocol/](docs/protocol/) (task #8, in progress).
+Full protocol reference: [docs/protocol/](docs/protocol/).
 
 ---
 
@@ -133,9 +133,9 @@ materialise live in the harmonograf tab. Ctrl-C tears all three down.
 | [docs/quickstart.md](docs/quickstart.md) | Step-by-step from clone to running demo, with troubleshooting and local-LLM wiring. |
 | [docs/operator-quickstart.md](docs/operator-quickstart.md) | Flags, retention, health probes, bearer-token auth — the ops-facing reference. |
 | [docs/reporting-tools.md](docs/reporting-tools.md) | The reporting-tool protocol agents use to communicate task state. |
-| [docs/user-guide/](docs/user-guide/) | *(task #6, in progress)* Navigating the UI: Gantt, graph, inspector, diff drawer, transport bar, keyboard shortcuts. |
-| [docs/dev-guide/](docs/dev-guide/) | *(task #7, in progress)* Building from source, adding a storage backend, wiring a new framework adapter, writing tests. |
-| [docs/protocol/](docs/protocol/) | *(task #8, in progress)* Wire protocol, proto reference, session-state schema, drift taxonomy, plan-diff semantics. |
+| [docs/user-guide/](docs/user-guide/) | Navigating the UI: Gantt, graph, inspector, diff drawer, transport bar, keyboard shortcuts. |
+| [docs/dev-guide/](docs/dev-guide/) | Building from source, adding a storage backend, wiring a new framework adapter, writing tests. |
+| [docs/protocol/](docs/protocol/) | Wire protocol, proto reference, session-state schema, drift taxonomy, plan-diff semantics. |
 | [docs/design/](docs/design/) | Per-component design notes — data model, client library, server, frontend, human-interaction model, information flow. |
 | [docs/milestones.md](docs/milestones.md) | Incremental delivery plan. |
 

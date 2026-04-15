@@ -81,8 +81,8 @@ Right-clicking a span also exposes an **Annotate** entry via
 ### Global `a` shortcut
 
 `a` is reserved in `shortcuts.ts` for "annotate selected span" and will
-open an inline editor when task #14 lands. Today the handler is a stub —
-use the drawer or the popover instead.
+open an inline editor once wired. Today the handler is a stub — use the
+drawer or the popover instead.
 
 ### Steering from the popover is a control, not an annotation
 
@@ -116,7 +116,7 @@ Once posted, annotations are visible in these places:
 Each annotation stores an `author` field. The default author is `user`,
 set client-side when you post from the frontend. A deployment that
 authenticates multiple operators can override the author string
-server-side; as of iter16 there is no user-identity system in the
+server-side; the current release has no user-identity system in the
 frontend itself.
 
 ## Deleting / editing

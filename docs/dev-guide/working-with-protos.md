@@ -326,7 +326,7 @@ This forces the compiler to refuse reuse and documents the history.
 ## Wire format reference
 
 This chapter is the workflow. The byte-level wire format — every message,
-every field, every enum value — lives in `docs/protocol/` (task #8).
+every field, every enum value — lives in [`docs/protocol/`](../protocol/).
 
 ## Next
 
