@@ -30,6 +30,8 @@ from harmonograf_server.convert import (
     attr_map_to_dict,
     hello_to_agent,
     pb_span_to_storage,
+    pb_task_plan_to_storage,
+    pb_task_status_from_pb,
     span_status_from_pb,
     ts_to_float,
 )
@@ -40,8 +42,18 @@ from harmonograf_server.storage import (
     Framework,
     Session,
     SessionStatus,
+    SpanKind,
+    SpanStatus,
     Store,
+    TaskStatus,
 )
+
+# Only leaf execution spans can bind a plan task to a lifecycle status.
+# Wrapper spans (INVOCATION, TRANSFER) don't represent task work and
+# their lifecycles must never flip task state — binding an INVOCATION
+# to a task would mark the task COMPLETED the moment the outer agent
+# finishes its first turn, long before the actual work runs.
+_TASK_BINDING_SPAN_KINDS = frozenset({SpanKind.LLM_CALL, SpanKind.TOOL_CALL})
 
 
 logger = logging.getLogger(__name__)
@@ -146,6 +158,11 @@ class IngestPipeline:
         # daily session counter for auto-generated session ids
         self._session_day_counters: dict[str, int] = {}
 
+        # In-memory index: session_id -> {task_id: plan_id}. Populated as
+        # TaskPlan messages arrive; used to resolve `hgraf.task_id` span
+        # attributes without a full table scan on every span start.
+        self._task_index: dict[str, dict[str, str]] = {}
+
     # ---- public API ---------------------------------------------------
 
     @property
@@ -239,6 +256,10 @@ class IngestPipeline:
             await self._handle_heartbeat(ctx, msg.heartbeat)
         elif kind == "control_ack":
             self._control_sink.record_ack(msg.control_ack, stream_id=ctx.stream_id)
+        elif kind == "task_plan":
+            await self._handle_task_plan(ctx, msg.task_plan)
+        elif kind == "task_status_update":
+            await self._handle_task_status_update(ctx, msg.task_status_update)
         elif kind == "goodbye":
             await self._handle_goodbye(ctx, msg.goodbye)
         elif kind == "hello":
@@ -333,6 +354,26 @@ class IngestPipeline:
             if task_report_attr is not None and task_report_attr.HasField("string_value"):
                 self._bus.publish_task_report(session_id, agent_id, task_report_attr.string_value)
 
+            # Span-to-task binding: spans that execute a planned task carry
+            # an `hgraf.task_id` string attribute. Transition the matching
+            # task to RUNNING and record the span id. Only leaf execution
+            # spans (LLM_CALL / TOOL_CALL) can bind — wrapper spans like
+            # INVOCATION / TRANSFER are ignored even if stamped, because
+            # their lifecycles don't correspond to task execution.
+            task_id_attr = pb_span.attributes.get("hgraf.task_id")
+            if task_id_attr is not None and task_id_attr.HasField("string_value"):
+                task_id_val = task_id_attr.string_value
+                if task_id_val and span.kind in _TASK_BINDING_SPAN_KINDS:
+                    await self._bind_task_to_span(
+                        session_id, task_id_val, pb_span.id, TaskStatus.RUNNING
+                    )
+                elif task_id_val:
+                    logger.debug(
+                        "ignoring hgraf.task_id=%s on non-leaf span kind=%s",
+                        task_id_val,
+                        span.kind,
+                    )
+
     async def _ensure_route(
         self,
         ctx: StreamContext,
@@ -393,6 +434,15 @@ class IngestPipeline:
                 session_id,
                 agent_id,
             )
+            # If the span's agent_id differs from the transport's registered
+            # agent_id (e.g. ADK sub-agent name vs identity-file UUID), tell
+            # the control router so controls for the sub-agent name are
+            # forwarded to the stream that actually owns it.
+            if agent_id != ctx.agent_id and hasattr(self._control_sink, "register_alias"):
+                self._control_sink.register_alias(agent_id, ctx.agent_id)
+                logger.debug(
+                    "control alias registered sub=%s stream=%s", agent_id, ctx.agent_id
+                )
 
     async def _handle_span_update(
         self, ctx: StreamContext, msg: telemetry_pb2.SpanUpdate
@@ -441,6 +491,29 @@ class IngestPipeline:
                 msg.span_id, attributes=attrs, **payload_kwargs
             ) or ended
         self._bus.publish_span_end(ended)
+
+        # Task completion is driven EXCLUSIVELY by explicit client
+        # ``task_status_update`` messages — a single LLM/TOOL span ending
+        # is one of N calls while executing the task, not "task done".
+        # Terminal FAILED/CANCELLED still propagates: an errored leaf
+        # span is a real signal that the task itself failed.
+        task_id_val = (ended.attributes or {}).get("hgraf.task_id")
+        if (
+            isinstance(task_id_val, str)
+            and task_id_val
+            and ended.kind in _TASK_BINDING_SPAN_KINDS
+        ):
+            task_status = _span_status_to_task_status(ended.status)
+            if task_status in (TaskStatus.FAILED, TaskStatus.CANCELLED):
+                await self._bind_task_to_span(
+                    ended.session_id, task_id_val, ended.id, task_status
+                )
+        elif isinstance(task_id_val, str) and task_id_val:
+            logger.debug(
+                "ignoring hgraf.task_id=%s on ended non-leaf span kind=%s",
+                task_id_val,
+                ended.kind,
+            )
 
     async def _handle_payload(
         self, ctx: StreamContext, msg: telemetry_pb2.PayloadUpload
@@ -508,6 +581,33 @@ class IngestPipeline:
                 stuck=ctx.is_stuck,
             )
 
+        # Context-window telemetry: persist + fan out. Zero-valued
+        # samples mean "client has no current LLM context observation"
+        # and are intentionally skipped so the series stays signal-only.
+        tokens = int(msg.context_window_tokens)
+        limit_tokens = int(msg.context_window_limit_tokens)
+        if tokens > 0 or limit_tokens > 0:
+            from harmonograf_server.storage.base import ContextWindowSample
+
+            sample = ContextWindowSample(
+                session_id=ctx.session_id,
+                agent_id=ctx.agent_id,
+                recorded_at=now,
+                tokens=tokens,
+                limit_tokens=limit_tokens,
+            )
+            try:
+                await self._store.append_context_window_sample(sample)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("append_context_window_sample failed: %s", exc)
+            self._bus.publish_context_window_sample(
+                ctx.session_id,
+                ctx.agent_id,
+                tokens,
+                limit_tokens,
+                now,
+            )
+
         self._bus.publish_heartbeat(
             ctx.session_id,
             ctx.agent_id,
@@ -525,10 +625,123 @@ class IngestPipeline:
             },
         )
 
+    async def _handle_task_plan(
+        self, ctx: StreamContext, pb_plan: types_pb2.TaskPlan
+    ) -> None:
+        if not pb_plan.id:
+            raise ValueError("TaskPlan.id is required")
+        session_id = pb_plan.session_id or ctx.session_id
+        plan = pb_task_plan_to_storage(pb_plan, session_id=session_id)
+        # If planner didn't stamp a created_at, use server time.
+        if not plan.created_at:
+            plan.created_at = self._now()
+
+        # Auto-register routes for planner and assignees so the frontend
+        # can render rows for them even before any telemetry arrives.
+        if plan.planner_agent_id:
+            await self._ensure_route(
+                ctx, session_id, plan.planner_agent_id, name=plan.planner_agent_id
+            )
+        for task in plan.tasks:
+            if task.assignee_agent_id:
+                await self._ensure_route(
+                    ctx,
+                    session_id,
+                    task.assignee_agent_id,
+                    name=task.assignee_agent_id,
+                )
+
+        stored = await self._store.put_task_plan(plan)
+
+        # Populate the task->plan index for this session.
+        idx = self._task_index.setdefault(session_id, {})
+        for task in stored.tasks:
+            idx[task.id] = stored.id
+
+        self._bus.publish_task_plan(stored)
+        logger.info(
+            "task plan received session_id=%s plan_id=%s tasks=%d",
+            session_id,
+            stored.id,
+            len(stored.tasks),
+        )
+
+    async def _handle_task_status_update(
+        self, ctx: StreamContext, pb: types_pb2.UpdatedTaskStatus
+    ) -> None:
+        plan_id, task_id, status, bound_span_id = pb_task_status_from_pb(pb)
+        if not plan_id or not task_id:
+            logger.debug("ignoring UpdatedTaskStatus with missing ids")
+            return
+        updated = await self._store.update_task_status(
+            plan_id, task_id, status, bound_span_id=bound_span_id
+        )
+        if updated is None:
+            logger.warning(
+                "task_status_update for unknown task plan_id=%s task_id=%s",
+                plan_id,
+                task_id,
+            )
+            return
+        # Look up the session id of this plan to route the delta.
+        plan = await self._store.get_task_plan(plan_id)
+        session_id = plan.session_id if plan else ctx.session_id
+        self._bus.publish_task_status(session_id, plan_id, updated)
+
+    async def _bind_task_to_span(
+        self,
+        session_id: str,
+        task_id: str,
+        span_id: str,
+        status: TaskStatus,
+    ) -> None:
+        """Resolve which plan owns `task_id` in `session_id`, update its
+        status + bound_span_id, and publish a task_status delta."""
+        plan_id = self._task_index.get(session_id, {}).get(task_id)
+        if plan_id is None:
+            # Fall back to a storage scan in case the plan was persisted
+            # before this pipeline instance started (e.g. after a restart).
+            plans = await self._store.list_task_plans_for_session(session_id)
+            for p in plans:
+                for t in p.tasks:
+                    if t.id == task_id:
+                        plan_id = p.id
+                        self._task_index.setdefault(session_id, {})[task_id] = plan_id
+                        break
+                if plan_id is not None:
+                    break
+        if plan_id is None:
+            logger.debug(
+                "hgraf.task_id=%s on span=%s has no matching plan in session=%s",
+                task_id,
+                span_id,
+                session_id,
+            )
+            return
+        updated = await self._store.update_task_status(
+            plan_id, task_id, status, bound_span_id=span_id
+        )
+        if updated is not None:
+            self._bus.publish_task_status(session_id, plan_id, updated)
+
     async def _handle_goodbye(
         self, ctx: StreamContext, msg: telemetry_pb2.Goodbye
     ) -> None:
         await self.close_stream(ctx, reason=msg.reason or "goodbye")
+
+
+def _span_status_to_task_status(status: SpanStatus) -> Optional[TaskStatus]:
+    """Map a terminal span status to the equivalent task status.
+    Returns None for non-terminal states (RUNNING, PENDING, AWAITING_HUMAN)
+    so that intermediate span updates don't flip a task to a terminal state.
+    """
+    if status == SpanStatus.COMPLETED:
+        return TaskStatus.COMPLETED
+    if status == SpanStatus.FAILED:
+        return TaskStatus.FAILED
+    if status == SpanStatus.CANCELLED:
+        return TaskStatus.CANCELLED
+    return None
 
 
 def _payload_ref_kwargs(refs) -> dict:

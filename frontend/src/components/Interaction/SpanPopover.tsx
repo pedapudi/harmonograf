@@ -1,9 +1,14 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { OverlayContext } from '../../gantt/GanttCanvas';
 import { usePopoverStore, type SpanPopover as SpanPopoverState } from '../../state/popoverStore';
 import { useUiStore } from '../../state/uiStore';
-import { getSessionStore, usePostAnnotation, useSendControl } from '../../rpc/hooks';
-import type { AttributeValue, Span, SpanKind } from '../../gantt/types';
+import { useAgentLive, usePostAnnotation, useSendControl } from '../../rpc/hooks';
+import type { Span, SpanKind } from '../../gantt/types';
+import {
+  extractThinkingText,
+  formatThinkingPreview,
+  hasThinking as spanHasThinking,
+} from '../../lib/thinking';
 
 // Floating quick-look popover anchored to a span block. Separate from the
 // full Inspector Drawer: the drawer is the deep-dive surface, this is the
@@ -134,16 +139,26 @@ function PopoverCard({
   const selectSpan = useUiStore((s) => s.selectSpan);
   const send = useSendControl();
   const post = usePostAnnotation();
-  const agent = getSessionStore(sessionId)?.agents.get(span.agentId);
+  const agent = useAgentLive(sessionId, span.agentId);
   const agentName = agent?.name || span.agentId;
   const duration =
     span.endMs != null ? `${Math.max(0, span.endMs - span.startMs).toFixed(0)}ms` : '…';
 
-  const summary =
-    agent?.taskReport || agent?.currentActivity
-      ? (agent?.taskReport || agent?.currentActivity)!
-      : spanSummary(span.kind, span.name, agentName);
-  const thinking = extractThinking(span);
+  // Prefer the span-level task_report attribute (most specific; set directly from
+  // ADK callbacks with the correct agent_id). Fall back to agent-level taskReport
+  // from the heartbeat (aggregated), then to a static summary string.
+  const spanTaskReport = span.attributes?.['task_report']?.kind === 'string'
+    ? (span.attributes['task_report'] as { kind: 'string'; value: string }).value
+    : undefined;
+  const liveStatus = spanTaskReport || agent?.taskReport || agent?.currentActivity;
+  const summary = liveStatus || spanSummary(span.kind, span.name, agentName);
+  // Collapsible thinking section — closed by default to keep the quick-look
+  // card compact. The chevron + brain icon header hints it can be expanded.
+  // When only has_thinking=true is set (pre-text, streaming phase), we still
+  // show the section header with a live indicator.
+  const thinkingText = extractThinkingText(span);
+  const thinkingHint = spanHasThinking(span);
+  const [thinkingOpen, setThinkingOpen] = useState(false);
 
   const copyId = () => {
     void navigator.clipboard?.writeText(span.id).catch(() => {});
@@ -154,18 +169,30 @@ function PopoverCard({
     onClose();
   };
 
-  const steer = () => {
-    const text = window.prompt('Steer this span — instruction:');
+  const [steerOpen, setSteerOpen] = useState(false);
+  const [steerText, setSteerText] = useState('');
+  const [steerSending, setSteerSending] = useState(false);
+  const [steerMode, setSteerMode] = useState<'cancel' | 'append'>('cancel');
+
+  const sendSteer = async () => {
+    const text = steerText.trim();
     if (!text) return;
+    setSteerSending(true);
     const encoder = new TextEncoder();
-    void send({
+    const payload = JSON.stringify({ mode: steerMode, text });
+    await send({
       sessionId,
       agentId: span.agentId,
       spanId: span.id,
       kind: 'STEER',
-      payload: encoder.encode(text),
+      payload: encoder.encode(payload),
     }).catch(() => {});
+    setSteerText('');
+    setSteerOpen(false);
+    setSteerSending(false);
   };
+
+  const toggleSteer = () => setSteerOpen((o) => !o);
 
   const annotate = () => {
     const text = window.prompt('Add a note for this span:');
@@ -245,22 +272,84 @@ function PopoverCard({
           {duration}
         </div>
       </div>
-      {thinking && (
+      {thinkingHint && (
         <div
+          data-testid="span-popover-thinking"
+          data-open={thinkingOpen ? 'true' : 'false'}
           style={{
             marginTop: 8,
             padding: '6px 8px',
-            background: 'var(--md-sys-color-surface-container, #1d1f27)',
+            background: 'rgba(168,200,255,0.06)',
+            border: '1px solid rgba(168,200,255,0.15)',
             borderRadius: 6,
-            fontStyle: 'italic',
-            opacity: 0.7,
             fontSize: 11,
             lineHeight: 1.4,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
           }}
         >
-          {thinking}
+          <button
+            type="button"
+            onClick={() => setThinkingOpen((v) => !v)}
+            data-testid="span-popover-thinking-toggle"
+            style={{
+              all: 'unset',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              width: '100%',
+              fontSize: 10,
+              opacity: 0.75,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+            }}
+            aria-expanded={thinkingOpen}
+          >
+            <span style={{ fontSize: 11 }}>{thinkingOpen ? '▾' : '▸'}</span>
+            <span aria-hidden="true">🧠</span>
+            <span>
+              Thinking{span.endMs == null ? ' (live)' : ''}
+            </span>
+            {!thinkingOpen && thinkingText && (
+              <span
+                style={{
+                  marginLeft: 'auto',
+                  fontSize: 10,
+                  fontStyle: 'italic',
+                  opacity: 0.65,
+                  textTransform: 'none',
+                  letterSpacing: 0,
+                  maxWidth: 180,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {formatThinkingPreview(thinkingText, 60)}
+              </span>
+            )}
+          </button>
+          {thinkingOpen && (
+            thinkingText ? (
+              <div
+                style={{
+                  marginTop: 6,
+                  fontStyle: 'italic',
+                  opacity: 0.85,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  maxHeight: 180,
+                  overflow: 'auto',
+                }}
+              >
+                {formatThinkingPreview(thinkingText, 1200)}
+              </div>
+            ) : (
+              <div style={{ marginTop: 6, fontStyle: 'italic', opacity: 0.6 }}>
+                <span className="hg-transport__live-dot" style={{ display: 'inline-block', marginRight: 6 }} />
+                Thinking…
+              </div>
+            )
+          )}
         </div>
       )}
       <div
@@ -273,13 +362,91 @@ function PopoverCard({
           borderTop: '1px solid var(--md-sys-color-outline-variant, #43474e)',
         }}
       >
-        <ActionButton onClick={steer}>Steer</ActionButton>
+        <ActionButton onClick={toggleSteer} primary={steerOpen}>Steer</ActionButton>
         <ActionButton onClick={annotate}>Annotate</ActionButton>
         <ActionButton onClick={copyId}>Copy id</ActionButton>
         <ActionButton onClick={openInDrawer} primary>
           Open drawer
         </ActionButton>
       </div>
+      {steerOpen && (
+        <div
+          style={{
+            marginTop: 8,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+          }}
+        >
+          {/* Mode toggle */}
+          <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+            <button
+              onClick={() => setSteerMode('cancel')}
+              style={{
+                fontSize: 10,
+                padding: '3px 8px',
+                borderRadius: 4,
+                border: '1px solid',
+                cursor: 'pointer',
+                background: steerMode === 'cancel' ? 'rgba(168,200,255,0.2)' : 'transparent',
+                borderColor: steerMode === 'cancel' ? '#a8c8ff' : 'rgba(255,255,255,0.2)',
+                color: steerMode === 'cancel' ? '#a8c8ff' : 'rgba(226,226,233,0.6)',
+              }}
+            >
+              ⚡ Cancel &amp; redirect
+            </button>
+            <button
+              onClick={() => setSteerMode('append')}
+              style={{
+                fontSize: 10,
+                padding: '3px 8px',
+                borderRadius: 4,
+                border: '1px solid',
+                cursor: 'pointer',
+                background: steerMode === 'append' ? 'rgba(168,200,255,0.2)' : 'transparent',
+                borderColor: steerMode === 'append' ? '#a8c8ff' : 'rgba(255,255,255,0.2)',
+                color: steerMode === 'append' ? '#a8c8ff' : 'rgba(226,226,233,0.6)',
+              }}
+            >
+              + Add to queue
+            </button>
+          </div>
+          <textarea
+            autoFocus
+            value={steerText}
+            onChange={(e) => setSteerText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void sendSteer();
+              if (e.key === 'Escape') setSteerOpen(false);
+            }}
+            placeholder="Steering instruction… (⌘↵ to send)"
+            rows={2}
+            style={{
+              width: '100%',
+              resize: 'vertical',
+              background: 'var(--md-sys-color-surface-container, #1d1f27)',
+              color: 'inherit',
+              border: '1px solid var(--md-sys-color-outline-variant, #43474e)',
+              borderRadius: 6,
+              padding: '4px 8px',
+              fontSize: 11,
+              fontFamily: 'inherit',
+              boxSizing: 'border-box',
+            }}
+          />
+          <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+            <ActionButton onClick={() => setSteerOpen(false)}>Cancel</ActionButton>
+            <ActionButton
+              onClick={() => void sendSteer()}
+              primary
+              disabled={steerSending || !steerText.trim()}
+              title={steerMode === 'cancel' ? 'Cancel current run and redirect with this message' : 'Queue this message for next model boundary'}
+            >
+              {steerSending ? 'Sending…' : 'Send'}
+            </ActionButton>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -297,23 +464,6 @@ function spanSummary(kind: SpanKind, name: string, agentName: string): string {
     default:
       return `${agentName} is handling ${name}`;
   }
-}
-
-function attrString(attr: AttributeValue | undefined): string | null {
-  if (!attr) return null;
-  if (attr.kind === 'string') return attr.value;
-  return null;
-}
-
-function extractThinking(span: Span): string | null {
-  const attrs = span.attributes;
-  const text =
-    attrString(attrs['streaming_text']) ||
-    attrString(attrs['last_response']) ||
-    attrString(attrs['tool_args']) ||
-    attrString(attrs['args']);
-  if (text) return text.length > 200 ? text.slice(0, 200) + '...' : text;
-  return null;
 }
 
 function IconButton({
@@ -356,16 +506,22 @@ function IconButton({
 function ActionButton({
   onClick,
   primary,
+  disabled,
+  title,
   children,
 }: {
   onClick: () => void;
   primary?: boolean;
+  disabled?: boolean;
+  title?: string;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
+      title={title}
       style={{
         background: primary
           ? 'var(--md-sys-color-primary-container, #00468a)'
@@ -377,7 +533,8 @@ function ActionButton({
         borderRadius: 6,
         padding: '4px 10px',
         fontSize: 11,
-        cursor: 'pointer',
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
       }}
     >
       {children}

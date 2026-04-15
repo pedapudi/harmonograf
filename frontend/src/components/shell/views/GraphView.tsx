@@ -1,10 +1,32 @@
 import './views.css';
-import { useEffect, useMemo, useCallback, useState } from 'react';
-import { useUiStore } from '../../../state/uiStore';
+import { useEffect, useMemo, useCallback, useRef, useState } from 'react';
+import type React from 'react';
+import { useUiStore, type TaskPlanMode } from '../../../state/uiStore';
 import { useSessionWatch, sendStatusQuery } from '../../../rpc/hooks';
 import { colorForAgent } from '../../../theme/agentColors';
-import type { Span } from '../../../gantt/types';
+import type { Span, Task, TaskPlan } from '../../../gantt/types';
 import type { SessionStore } from '../../../gantt/index';
+import {
+  DEFAULT_VIEWPORT,
+  MIN_SCALE,
+  MAX_SCALE,
+  type Viewport,
+  type Rect as ViewRect,
+  type Size as ViewSize,
+  zoomAt,
+  fitRect,
+  visibleContentRect,
+  centerOn,
+  minimapViewportRect,
+  minimapPointToContent,
+  zoomStep,
+  wheelZoomFactor,
+} from './graphViewport';
+
+const MINIMAP_W = 200;
+const MINIMAP_H = 140;
+const MINIMAP_PAD = 6;
+const PAN_THRESHOLD_PX = 3;
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 const TIME_LABEL_W = 56;
@@ -14,6 +36,14 @@ const ACT_W = 16;
 const MIN_PX_PER_SEC = 60;
 const MAX_PLOT_H = 2400;
 const MIN_PLOT_H = 400;
+// Width of the pre-t=0 "task plan" strip per agent column. Reserved to the
+// left of each column in 'pre-strip' and 'hybrid' modes so planned tasks do
+// not overlap the t=0 axis or the activation boxes.
+const TASK_STRIP_W = 44;
+const TASK_STRIP_HYBRID_W = 28;
+const TASK_BOX_H = 18;
+const TASK_BOX_H_HYBRID = 12;
+const TASK_BOX_GAP = 4;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,6 +63,8 @@ interface ActivationBox {
   startMs: number;
   endMs: number | null; // null = still running
   isRunning: boolean;
+  spanId: string;      // for span lookup
+  thinking: boolean;   // true if has_thinking attribute set
 }
 
 interface SeqLayout {
@@ -74,19 +106,51 @@ function computeSequence(store: SessionStore): SeqLayout {
   const transferArrows: RawEdge[] = [];
   const coveredPairs = new Set<string>(); // "fromId→toId@approxMs" to dedup
 
-  // Method 1 — TRANSFER spans with INVOKED links
+  // Method 1 — INVOCATION spans whose `links` carry an INVOKED reference back
+  // to a TRANSFER span on the caller agent. This is the pattern the client
+  // emits: the SOURCE agent starts a TRANSFER span, the DESTINATION agent
+  // starts an INVOCATION whose link points to that TRANSFER. The arrow runs
+  // from (source, target-invocation.startMs) to (dest, target-invocation.startMs)
+  // so the head lands on the top edge of the destination's activation box.
+  for (const s of allSpans) {
+    if (s.kind !== 'INVOCATION') continue;
+    for (const link of s.links) {
+      if (link.relation !== 'INVOKED') continue;
+      if (!link.targetAgentId || link.targetAgentId === s.agentId) continue;
+      const sourceSpan = link.targetSpanId ? spanById.get(link.targetSpanId) : undefined;
+      const anchorMs = s.startMs;
+      const key = `${link.targetAgentId}→${s.agentId}@${Math.round(anchorMs / 500)}`;
+      coveredPairs.add(key);
+      const rawLabel = sourceSpan?.name || s.name;
+      transferArrows.push({
+        fromId: link.targetAgentId,
+        toId: s.agentId,
+        kind: 'transfer',
+        yMs: anchorMs,
+        label: rawLabel.length > 22 ? rawLabel.slice(0, 21) + '…' : rawLabel,
+        spanId: sourceSpan?.id ?? s.id,
+      });
+    }
+  }
+
+  // Method 1b — legacy/alternate pattern: a TRANSFER span itself carries the
+  // INVOKED link to the destination invocation. Some clients emit this shape
+  // instead; handle both so the view is robust.
   for (const s of allSpans) {
     if (s.kind !== 'TRANSFER') continue;
     for (const link of s.links) {
       if (link.relation !== 'INVOKED') continue;
       if (!link.targetAgentId || link.targetAgentId === s.agentId) continue;
-      const key = `${s.agentId}→${link.targetAgentId}@${Math.round(s.startMs / 500)}`;
+      const targetSpan = link.targetSpanId ? spanById.get(link.targetSpanId) : undefined;
+      const anchorMs = targetSpan ? targetSpan.startMs : s.startMs;
+      const key = `${s.agentId}→${link.targetAgentId}@${Math.round(anchorMs / 500)}`;
+      if (coveredPairs.has(key)) continue;
       coveredPairs.add(key);
       transferArrows.push({
         fromId: s.agentId,
         toId: link.targetAgentId,
         kind: 'transfer',
-        yMs: s.startMs,
+        yMs: anchorMs,
         label: s.name.length > 22 ? s.name.slice(0, 21) + '…' : s.name,
         spanId: s.id,
       });
@@ -218,11 +282,17 @@ function computeSequence(store: SessionStore): SeqLayout {
     if (s.kind !== 'INVOCATION') continue;
     const idx = colIdx.get(s.agentId);
     if (idx === undefined) continue;
+    const thinkingAttr = s.attributes?.['has_thinking'];
+    const thinking = thinkingAttr !== undefined && thinkingAttr !== null &&
+      (thinkingAttr.kind === 'bool' ? thinkingAttr.value === true :
+       thinkingAttr.kind === 'string' ? thinkingAttr.value === 'true' : false);
     activations.push({
       agentIdx: idx,
       startMs: s.startMs,
       endMs: s.endMs,
       isRunning: s.endMs === null,
+      spanId: s.id,
+      thinking,
     });
   }
 
@@ -249,22 +319,285 @@ const STATUS_COLOR: Record<string, string> = {
 export function GraphView() {
   const sessionId = useUiStore((s) => s.currentSessionId);
   const selectSpan = useUiStore((s) => s.selectSpan);
+  const selectTask = useUiStore((s) => s.selectTask);
+  const selectedSpanId = useUiStore((s) => s.selectedSpanId);
+  const selectedTaskId = useUiStore((s) => s.selectedTaskId);
+  const taskPlanMode = useUiStore((s) => s.taskPlanMode);
+  const taskPlanVisible = useUiStore((s) => s.taskPlanVisible);
+  const setTaskPlanMode = useUiStore((s) => s.setTaskPlanMode);
+  const toggleTaskPlanVisible = useUiStore((s) => s.toggleTaskPlanVisible);
+  const persistedViewport = useUiStore((s) => s.graphViewport);
+  const setGraphViewport = useUiStore((s) => s.setGraphViewport);
+  const setGraphActions = useUiStore((s) => s.setGraphActions);
   const watch = useSessionWatch(sessionId);
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
   const [askingAgents, setAskingAgents] = useState<Set<string>>(new Set());
+  const [hoveredTask, setHoveredTask] = useState<{
+    task: Task;
+    plan: TaskPlan;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  // ─── Viewport state (zoom + pan) ────────────────────────────────────────
+  // `viewport` is the live, reactive state; `viewportRef` mirrors it so the
+  // pointer/wheel/keyboard handlers can read the latest without re-binding
+  // on every change. Persisted to uiStore on every commit.
+  const [viewport, setViewportState] = useState<Viewport>(
+    () => persistedViewport ?? DEFAULT_VIEWPORT,
+  );
+  const viewportRef = useRef<Viewport>(viewport);
+  const commitViewport = useCallback(
+    (vp: Viewport) => {
+      viewportRef.current = vp;
+      setViewportState(vp);
+      setGraphViewport(vp);
+    },
+    [setGraphViewport],
+  );
+
+  // Container size for fit/center math. Tracked via ResizeObserver.
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [containerSize, setContainerSize] = useState<ViewSize>({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => {
+      const rect = el.getBoundingClientRect();
+      setContainerSize({ w: rect.width, h: rect.height });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Spacebar held → panning mode (show grab cursor + drag-to-pan without
+  // requiring middle-click). Installed on window so focus isn't required.
+  const spaceDownRef = useRef(false);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  useEffect(() => {
+    const onDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !spaceDownRef.current) {
+        const t = e.target as HTMLElement | null;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
+          return;
+        }
+        spaceDownRef.current = true;
+        setSpaceHeld(true);
+        e.preventDefault();
+      }
+    };
+    const onUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        spaceDownRef.current = false;
+        setSpaceHeld(false);
+      }
+    };
+    window.addEventListener('keydown', onDown);
+    window.addEventListener('keyup', onUp);
+    return () => {
+      window.removeEventListener('keydown', onDown);
+      window.removeEventListener('keyup', onUp);
+    };
+  }, []);
 
   useEffect(() => {
     if (!sessionId) return;
     const u1 = watch.store.spans.subscribe(() => setTick((n) => n + 1));
     const u2 = watch.store.agents.subscribe(() => setTick((n) => n + 1));
-    return () => { u1(); u2(); };
+    const u3 = watch.store.tasks.subscribe(() => setTick((n) => n + 1));
+    return () => { u1(); u2(); u3(); };
   }, [sessionId, watch.store]);
 
+  // ── Viewport handlers (depend on refs, not reactive state) ──────────────
+  // `contentSizeRef` is written each render once the SVG dimensions are
+  // computed; `selectionBoxRef` holds the bbox of the currently selected
+  // span/task (or null). Handlers read these refs so they never close over
+  // stale values.
+  const contentSizeRef = useRef<ViewSize>({ w: 0, h: 0 });
+  const selectionBoxRef = useRef<ViewRect | null>(null);
+  const didInitFitRef = useRef(false);
+  const minimapRef = useRef<HTMLDivElement | null>(null);
+  const minimapDragRef = useRef(false);
+
+  const handleWheel = useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const el = containerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      commitViewport(zoomAt(viewportRef.current, wheelZoomFactor(e.deltaY), cx, cy));
+    },
+    [commitViewport],
+  );
+
+  // Pan state. `panning` becomes true once the pointer has moved past the
+  // threshold (for primary button) or immediately (for middle-click and
+  // space-held primary). When `panning` was true we block the trailing click
+  // so that a pan-drag doesn't accidentally select whatever was underneath
+  // where the press started.
+  const panStateRef = useRef({
+    active: false,
+    panning: false,
+    startClientX: 0,
+    startClientY: 0,
+    startVp: DEFAULT_VIEWPORT,
+    pointerId: -1,
+  });
+  const clickBlockedRef = useRef(false);
+
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const middle = e.button === 1;
+      const primary = e.button === 0;
+      if (!primary && !middle) return;
+      const forced = middle || spaceDownRef.current;
+      panStateRef.current = {
+        active: true,
+        panning: forced,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startVp: viewportRef.current,
+        pointerId: e.pointerId,
+      };
+      if (forced) {
+        e.preventDefault();
+        try {
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        } catch {
+          /* ignore */
+        }
+      }
+    },
+    [],
+  );
+
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const st = panStateRef.current;
+      if (!st.active) return;
+      const dx = e.clientX - st.startClientX;
+      const dy = e.clientY - st.startClientY;
+      if (!st.panning) {
+        if (dx * dx + dy * dy < PAN_THRESHOLD_PX * PAN_THRESHOLD_PX) return;
+        st.panning = true;
+        try {
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        } catch {
+          /* ignore */
+        }
+      }
+      commitViewport({
+        scale: st.startVp.scale,
+        tx: st.startVp.tx + dx,
+        ty: st.startVp.ty + dy,
+      });
+    },
+    [commitViewport],
+  );
+
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const st = panStateRef.current;
+      if (st.panning) {
+        clickBlockedRef.current = true;
+      }
+      st.active = false;
+      st.panning = false;
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+    },
+    [],
+  );
+
+  const handleClickCapture = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (clickBlockedRef.current) {
+      clickBlockedRef.current = false;
+      e.stopPropagation();
+      e.preventDefault();
+      return;
+    }
+    setHoveredTask(null);
+  }, []);
+
+  const fitContent = useCallback(() => {
+    if (containerSize.w <= 0 || containerSize.h <= 0) return;
+    const cs = contentSizeRef.current;
+    if (cs.w <= 0 || cs.h <= 0) return;
+    commitViewport(fitRect({ x: 0, y: 0, w: cs.w, h: cs.h }, containerSize));
+  }, [commitViewport, containerSize]);
+
+  const fitSelection = useCallback(() => {
+    if (containerSize.w <= 0 || containerSize.h <= 0) return;
+    const box = selectionBoxRef.current;
+    if (!box) return;
+    // Pad the selection box so the selected shape isn't flush against the
+    // viewport edge — makes the "snap to selection" feel less cramped.
+    const pad = 60;
+    commitViewport(
+      fitRect(
+        { x: box.x - pad, y: box.y - pad, w: box.w + pad * 2, h: box.h + pad * 2 },
+        containerSize,
+      ),
+    );
+  }, [commitViewport, containerSize]);
+
+  const zoomBy = useCallback(
+    (dir: 'in' | 'out' | 'reset') => {
+      commitViewport(zoomStep(viewportRef.current, dir, containerSize));
+    },
+    [commitViewport, containerSize],
+  );
+
+  // Fit-to-content on first mount if no viewport was persisted.
+  useEffect(() => {
+    if (didInitFitRef.current) return;
+    if (persistedViewport !== null) {
+      didInitFitRef.current = true;
+      return;
+    }
+    if (containerSize.w === 0 || contentSizeRef.current.w === 0) return;
+    fitContent();
+    didInitFitRef.current = true;
+  }, [containerSize, persistedViewport, fitContent, tick]);
+
+  // Publish imperative handles so the global keyboard shortcut handler can
+  // reach the zoom/pan functions without a direct component reference.
+  useEffect(() => {
+    setGraphActions({
+      zoomIn: () => zoomBy('in'),
+      zoomOut: () => zoomBy('out'),
+      zoomReset: () => zoomBy('reset'),
+      fitContent,
+      fitSelection,
+    });
+    return () => setGraphActions(null);
+  }, [setGraphActions, zoomBy, fitContent, fitSelection]);
+
+  // Depend on `tick` (bumped by store subscriptions above) rather than on the
+  // collection sizes, which stay constant when existing spans mutate in place
+  // (e.g. endMs/status updates). A stale layout would leave `isRunning`
+  // true after a span completes and leave return arrows missing — manifesting
+  // as a wrong "active agent" indicator and misaligned arrows.
   const layout = useMemo(
     () => computeSequence(watch.store),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [watch.store, watch.store.spans.size, watch.store.agents.size],
+    [watch.store, tick],
   );
+
+  // How much to pad the left of each agent column for the pre-strip. Zero if
+  // the mode is ghost, if tasks are hidden, or if there are no plans at all.
+  const hasPlans = watch.store.tasks.size > 0;
+  const stripEnabled = taskPlanVisible && hasPlans && (taskPlanMode === 'pre-strip' || taskPlanMode === 'hybrid');
+  const stripWidth = stripEnabled
+    ? (taskPlanMode === 'hybrid' ? TASK_STRIP_HYBRID_W : TASK_STRIP_W)
+    : 0;
 
   const handleAgentClick = useCallback(
     (agentId: string) => {
@@ -276,6 +609,28 @@ export function GraphView() {
     },
     [watch.store, selectSpan],
   );
+
+  // Auto-poll STATUS_QUERY for agents with running activations
+  useEffect(() => {
+    if (!sessionId || layout.agentIds.length === 0) return;
+
+    const runningAgentIds = layout.agentIds.filter((_agentId, idx) =>
+      layout.activations.some((a) => a.agentIdx === idx && a.isRunning)
+    );
+
+    if (runningAgentIds.length === 0) return;
+
+    const poll = () => {
+      for (const agentId of runningAgentIds) {
+        sendStatusQuery(sessionId, agentId).catch(() => {});
+      }
+    };
+
+    // Fire once immediately, then every 8 seconds
+    poll();
+    const interval = setInterval(poll, 8000);
+    return () => clearInterval(interval);
+  }, [sessionId, layout.agentIds, layout.activations]);
 
   if (!sessionId) {
     return (
@@ -319,11 +674,19 @@ export function GraphView() {
   const plotH = Math.min(MAX_PLOT_H, Math.max(MIN_PLOT_H, rawPlotH));
   const pxPerMs = plotH / effectiveTotalMs;
 
-  const svgW = Math.max(600, TIME_LABEL_W + agentIds.length * COL_W);
+  // Effective column pitch: each agent gets COL_W for its activations plus
+  // stripWidth reserved on the left. colCx points to the activation column's
+  // center; chips now anchor directly off colCx, no separate strip-left helper.
+  const colPitch = COL_W + stripWidth;
+  const svgW = Math.max(600, TIME_LABEL_W + agentIds.length * colPitch);
   const svgH = HEADER_H + plotH + 40;
+  // Expose content dimensions to the top-level viewport handlers through a
+  // ref so they can read the latest size without a dependency wire-up.
+  contentSizeRef.current = { w: svgW, h: svgH };
 
-  // Column center x for each agent
-  const colCx = (idx: number) => TIME_LABEL_W + idx * COL_W + COL_W / 2;
+  // Column center x for each agent (for activation boxes / lifelines / arrows).
+  const colCx = (idx: number) =>
+    TIME_LABEL_W + idx * colPitch + stripWidth + COL_W / 2;
   const timeY = (ms: number) => HEADER_H + ms * pxPerMs;
 
   // Time label positions: at each arrow + at regular intervals
@@ -343,9 +706,204 @@ export function GraphView() {
     }
   }
 
+  // ── Task plan layout ─────────────────────────────────────────────────────
+  // Build per-task rectangles for the strip and/or ghost boxes. Each entry
+  // holds the rendering coordinates plus the source task/plan so the click
+  // handler can look up bound spans or show the tooltip.
+  interface TaskRect {
+    taskId: string;
+    planId: string;
+    task: Task;
+    plan: TaskPlan;
+    agentIdx: number;
+    mode: 'strip' | 'ghost';
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  }
+  const plans = watch.store.tasks.listPlans();
+  const taskRectsById = new Map<string, TaskRect[]>(); // taskId → rects (strip+ghost)
+  const stripRects: TaskRect[] = [];
+  const ghostRects: TaskRect[] = [];
+  const taskToAgentIdx = new Map<string, number>();
+
+  // Pre-compute: all tasks across all plans, with a stable order inside each
+  // agent's strip (plan order → task order within plan).
+  if (taskPlanVisible && hasPlans) {
+    // Build per-agent strip stacks.
+    if (taskPlanMode === 'pre-strip' || taskPlanMode === 'hybrid') {
+      const boxH = taskPlanMode === 'hybrid' ? TASK_BOX_H_HYBRID : TASK_BOX_H;
+      const stripInnerW = stripWidth - 6;
+      const stripY0 = HEADER_H + 6;
+      const perAgentCursor = new Map<number, number>();
+      for (const plan of plans) {
+        for (const task of plan.tasks) {
+          const aidx = agentIds.indexOf(task.assigneeAgentId);
+          if (aidx < 0) continue;
+          const yCursor = perAgentCursor.get(aidx) ?? stripY0;
+          // Anchor chips immediately to the LEFT of the target agent's
+          // activation column so they visually "belong" to that agent.
+          // Previously they were pinned to the far-left of the column pitch,
+          // which put them in the gap between columns rather than next to
+          // the assigned agent.
+          const activationLeft = colCx(aidx) - ACT_W / 2;
+          const rect: TaskRect = {
+            taskId: task.id,
+            planId: plan.id,
+            task,
+            plan,
+            agentIdx: aidx,
+            mode: 'strip',
+            x: activationLeft - stripInnerW - 4,
+            y: yCursor,
+            w: stripInnerW,
+            h: boxH,
+          };
+          stripRects.push(rect);
+          taskToAgentIdx.set(task.id, aidx);
+          const arr = taskRectsById.get(task.id) ?? [];
+          arr.push(rect);
+          taskRectsById.set(task.id, arr);
+          perAgentCursor.set(aidx, yCursor + boxH + TASK_BOX_GAP);
+        }
+      }
+    }
+    // Ghost activation boxes.
+    if (taskPlanMode === 'ghost' || taskPlanMode === 'hybrid') {
+      for (const plan of plans) {
+        for (const task of plan.tasks) {
+          const aidx = agentIds.indexOf(task.assigneeAgentId);
+          if (aidx < 0) continue;
+          const ghostStart = task.predictedStartMs;
+          const ghostDur = Math.max(100, task.predictedDurationMs);
+          const y1 = timeY(ghostStart);
+          const y2 = timeY(ghostStart + ghostDur);
+          const rect: TaskRect = {
+            taskId: task.id,
+            planId: plan.id,
+            task,
+            plan,
+            agentIdx: aidx,
+            mode: 'ghost',
+            x: colCx(aidx) - ACT_W / 2,
+            y: y1,
+            w: ACT_W,
+            h: Math.max(4, y2 - y1),
+          };
+          ghostRects.push(rect);
+          taskToAgentIdx.set(task.id, aidx);
+          const arr = taskRectsById.get(task.id) ?? [];
+          arr.push(rect);
+          taskRectsById.set(task.id, arr);
+        }
+      }
+    }
+  }
+
+  // Task dependency edges: pair each (fromTaskId, toTaskId) with the first
+  // rect pair available (strip↔strip in strip/hybrid, ghost↔ghost in ghost).
+  interface TaskEdgeLine {
+    id: string;
+    x1: number; y1: number; x2: number; y2: number;
+  }
+  const taskEdgeLines: TaskEdgeLine[] = [];
+  if (taskPlanVisible && hasPlans) {
+    const preferStrip = taskPlanMode === 'pre-strip' || taskPlanMode === 'hybrid';
+    for (const plan of plans) {
+      for (const edge of plan.edges) {
+        const fromRects = taskRectsById.get(edge.fromTaskId);
+        const toRects = taskRectsById.get(edge.toTaskId);
+        if (!fromRects || !toRects) continue;
+        const pickMode: TaskRect['mode'] = preferStrip ? 'strip' : 'ghost';
+        const from = fromRects.find((r) => r.mode === pickMode) ?? fromRects[0];
+        const to = toRects.find((r) => r.mode === pickMode) ?? toRects[0];
+        if (!from || !to) continue;
+        taskEdgeLines.push({
+          id: `te-${plan.id}-${edge.fromTaskId}-${edge.toTaskId}`,
+          x1: from.x + from.w / 2,
+          y1: from.y + from.h / 2,
+          x2: to.x + to.w / 2,
+          y2: to.y + to.h / 2,
+        });
+      }
+    }
+  }
+
+  // Click handler shared by strip + ghost task boxes.
+  const handleTaskClick = (rect: TaskRect, e: React.MouseEvent) => {
+    e.stopPropagation();
+    selectTask(rect.task.id);
+    if (rect.task.boundSpanId) {
+      selectSpan(rect.task.boundSpanId);
+      return;
+    }
+    setHoveredTask({ task: rect.task, plan: rect.plan, x: rect.x + rect.w + 8, y: rect.y });
+  };
+
   const transferCount = arrows.filter((a) => a.kind === 'transfer').length;
   const delegCount = arrows.filter((a) => a.kind === 'delegation').length;
   const returnCount = arrows.filter((a) => a.kind === 'return').length;
+
+  // ── Current selection bounding box (content coords) ─────────────────────
+  // Used by the "fit selection" button. Null means no selection is available
+  // to snap to in the current view. Prefer span selection (activation box)
+  // over task selection (task rect).
+  let selectionBox: ViewRect | null = null;
+  if (selectedSpanId) {
+    const act = activations.find((a) => a.spanId === selectedSpanId);
+    if (act) {
+      const y1 = timeY(act.startMs);
+      const y2 = timeY(act.endMs ?? Math.max(nowMs, act.startMs + 100));
+      selectionBox = {
+        x: colCx(act.agentIdx) - ACT_W / 2,
+        y: y1,
+        w: ACT_W,
+        h: Math.max(4, y2 - y1),
+      };
+    }
+  } else if (selectedTaskId) {
+    const rects = taskRectsById.get(selectedTaskId);
+    const first = rects?.[0];
+    if (first) {
+      selectionBox = { x: first.x, y: first.y, w: first.w, h: first.h };
+    }
+  }
+  selectionBoxRef.current = selectionBox;
+
+  // ── Transform strings and derived minimap geometry ──────────────────────
+  const vp = viewport;
+  const transform = `matrix(${vp.scale} 0 0 ${vp.scale} ${vp.tx} ${vp.ty})`;
+  const contentBounds: ViewRect = { x: 0, y: 0, w: svgW, h: svgH };
+  const visibleRect = visibleContentRect(vp, containerSize);
+  const minimapRect = minimapViewportRect(
+    visibleRect,
+    contentBounds,
+    { w: MINIMAP_W - MINIMAP_PAD * 2, h: MINIMAP_H - MINIMAP_PAD * 2 },
+  );
+  const minimapScale = Math.min(
+    (MINIMAP_W - MINIMAP_PAD * 2) / Math.max(1, svgW),
+    (MINIMAP_H - MINIMAP_PAD * 2) / Math.max(1, svgH),
+  );
+
+  const handleMinimapSeek = (clientX: number, clientY: number) => {
+    const canvas = minimapRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const mx = clientX - rect.left - MINIMAP_PAD;
+    const my = clientY - rect.top - MINIMAP_PAD;
+    const content = minimapPointToContent(
+      mx,
+      my,
+      contentBounds,
+      { w: MINIMAP_W - MINIMAP_PAD * 2, h: MINIMAP_H - MINIMAP_PAD * 2 },
+    );
+    commitViewport(centerOn(viewportRef.current, content.x, content.y, containerSize));
+  };
+
+  // Cursor hint for the viewport container — `grab` when space is held,
+  // default otherwise. While actively panning we swap to `grabbing` inline.
+  const viewportCursor = spaceHeld ? 'grab' : 'default';
 
   return (
     <section className="hg-panel" data-testid="graph-view">
@@ -356,13 +914,60 @@ export function GraphView() {
           {transferCount > 0 && ` · ${transferCount} transfer${transferCount !== 1 ? 's' : ''}`}
           {delegCount > 0 && ` · ${delegCount} delegation${delegCount !== 1 ? 's' : ''}`}
           {returnCount > 0 && ` · ${returnCount} return${returnCount !== 1 ? 's' : ''}`}
+          {hasPlans && ` · ${plans.length} plan${plans.length !== 1 ? 's' : ''}`}
+        </span>
+        <span
+          style={{
+            marginLeft: 'auto',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 11,
+            color: 'var(--md-sys-color-on-surface-variant, #9da3b4)',
+          }}
+        >
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <input
+              type="checkbox"
+              checked={taskPlanVisible}
+              onChange={toggleTaskPlanVisible}
+            />
+            Plans
+          </label>
+          <select
+            value={taskPlanMode}
+            onChange={(e) => setTaskPlanMode(e.target.value as TaskPlanMode)}
+            disabled={!taskPlanVisible}
+            style={{
+              fontSize: 11,
+              padding: '2px 4px',
+              background: 'var(--md-sys-color-surface, #10131a)',
+              color: 'var(--md-sys-color-on-surface, #e3e6ef)',
+              border: '1px solid var(--md-sys-color-outline-variant, #2a2f3a)',
+              borderRadius: 4,
+            }}
+          >
+            <option value="pre-strip">Pre-strip</option>
+            <option value="ghost">Ghost</option>
+            <option value="hybrid">Hybrid</option>
+          </select>
         </span>
       </header>
-      <div className="hg-panel__body" style={{ overflow: 'auto' }}>
+      <div
+        className="hg-panel__body"
+        style={{
+          overflow: 'hidden',
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+        onClickCapture={handleClickCapture}
+      >
         {/* Legend */}
         <div style={{
           display: 'flex', gap: 20, padding: '0 0 10px',
           fontSize: 11, color: 'var(--md-sys-color-on-surface-variant, #9da3b4)',
+          flex: '0 0 auto',
         }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <svg width={32} height={8}>
@@ -389,11 +994,109 @@ export function GraphView() {
           )}
         </div>
 
-        <svg
-          width={svgW}
-          height={svgH}
-          style={{ display: 'block', minWidth: svgW }}
+        <div
+          ref={containerRef}
+          className="hg-graph__viewport"
+          style={{
+            flex: 1,
+            position: 'relative',
+            minHeight: 0,
+            overflow: 'hidden',
+            background: 'var(--md-sys-color-surface, #10131a)',
+            borderRadius: 6,
+            cursor: viewportCursor,
+            touchAction: 'none',
+          }}
+          role="application"
+          aria-label="Agent sequence diagram — scroll to zoom, drag to pan"
+          tabIndex={0}
+          onWheel={handleWheel}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
         >
+          {/* Toolbar */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              zIndex: 20,
+              display: 'flex',
+              gap: 4,
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={fitContent}
+              title="Fit diagram to viewport"
+              aria-label="Fit diagram to viewport"
+              style={toolbarBtnStyle}
+            >
+              ⊡ Fit
+            </button>
+            <button
+              type="button"
+              onClick={fitSelection}
+              disabled={!selectionBox}
+              title="Fit to selection"
+              aria-label="Fit to selection"
+              style={{ ...toolbarBtnStyle, opacity: selectionBox ? 1 : 0.45 }}
+            >
+              ⊙ Fit selection
+            </button>
+            <button
+              type="button"
+              onClick={() => zoomBy('in')}
+              title="Zoom in (Ctrl + =)"
+              aria-label="Zoom in"
+              style={toolbarBtnStyle}
+              disabled={viewport.scale >= MAX_SCALE}
+            >
+              +
+            </button>
+            <button
+              type="button"
+              onClick={() => zoomBy('out')}
+              title="Zoom out (Ctrl + -)"
+              aria-label="Zoom out"
+              style={toolbarBtnStyle}
+              disabled={viewport.scale <= MIN_SCALE}
+            >
+              −
+            </button>
+            <button
+              type="button"
+              onClick={() => zoomBy('reset')}
+              title="Reset zoom (Ctrl + 0)"
+              aria-label="Reset zoom"
+              style={toolbarBtnStyle}
+            >
+              1:1
+            </button>
+            <span
+              style={{
+                fontSize: 10,
+                alignSelf: 'center',
+                padding: '0 4px',
+                color: 'var(--md-sys-color-on-surface-variant, #9da3b4)',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+              aria-live="polite"
+            >
+              {Math.round(vp.scale * 100)}%
+            </span>
+          </div>
+
+        <svg
+          width="100%"
+          height="100%"
+          style={{ display: 'block' }}
+          preserveAspectRatio="xMinYMin meet"
+        >
+          <g transform={transform}>
           <defs>
             <marker id="arr-transfer" viewBox="0 0 10 10" refX={8} refY={5}
               markerWidth={7} markerHeight={7} orient="auto-start-reverse">
@@ -406,6 +1109,10 @@ export function GraphView() {
             <marker id="arr-return" viewBox="0 0 10 10" refX={8} refY={5}
               markerWidth={6} markerHeight={6} orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#888" />
+            </marker>
+            <marker id="arr-task-dep" viewBox="0 0 10 10" refX={9} refY={5}
+              markerWidth={6} markerHeight={6} orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#9aa3b4" opacity={0.5} />
             </marker>
           </defs>
 
@@ -437,19 +1144,21 @@ export function GraphView() {
             if (!agent) return null;
             const cx = colCx(idx);
             const color = colorForAgent(agentId);
-            const isStuck = agent.stuck === true;
-            const statusDot = isStuck ? '#f59e0b' : (STATUS_COLOR[agent.status] ?? '#777');
             const hasRunning = activations.some((a) => a.agentIdx === idx && a.isRunning);
+            // Only surface "stuck" in the UI if the agent is flagged AND it
+            // currently has an open (RUNNING) INVOCATION. A flagged agent
+            // whose invocation already ended cleanly is no longer stuck —
+            // without this intersection every agent in a completed session
+            // would still show the amber stuck border.
+            const isStuck = agent.stuck === true && hasRunning;
+            const statusDot = isStuck ? '#f59e0b' : (STATUS_COLOR[agent.status] ?? '#777');
             const label = agent.name.length > 18 ? agent.name.slice(0, 17) + '…' : agent.name;
             const hBoxW = COL_W - 24;
             const hBoxX = cx - hBoxW / 2;
             const hBoxY = 4;
-            const hBoxH = 66;
+            const liveStatus = agent.taskReport || agent.currentActivity || '';
+            const hBoxH = liveStatus ? 80 : 66;
             const borderColor = isStuck ? '#f59e0b' : color;
-            const taskReport = agent.taskReport || '';
-            const taskReportTrunc = taskReport.length > 32
-              ? taskReport.slice(0, 32) + '…'
-              : taskReport;
             const isAsking = askingAgents.has(agentId);
 
             const handleAsk = (e: React.MouseEvent) => {
@@ -516,15 +1225,28 @@ export function GraphView() {
                     {isStuck ? '⚠ stuck' : (agent.framework !== 'UNKNOWN' ? agent.framework : '')}
                   </text>
                   {/* Task report line */}
-                  {taskReportTrunc && (
-                    <text
-                      x={cx} y={hBoxY + 50}
-                      textAnchor="middle" dominantBaseline="central"
-                      fill="var(--md-sys-color-on-surface-variant, #9da3b4)"
-                      fontSize={9}
+                  {liveStatus && (
+                    <foreignObject
+                      x={hBoxX + 4} y={hBoxY + 48}
+                      width={hBoxW - 8} height={30}
+                      style={{ pointerEvents: 'none', overflow: 'visible' }}
                     >
-                      {taskReportTrunc}
-                    </text>
+                      <div
+                        style={{
+                          fontSize: 9,
+                          color: 'var(--md-sys-color-on-surface-variant, #9da3b4)',
+                          lineHeight: 1.4,
+                          overflow: 'hidden',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical' as const,
+                          wordBreak: 'break-word',
+                        } as React.CSSProperties}
+                        title={liveStatus}
+                      >
+                        {liveStatus}
+                      </div>
+                    </foreignObject>
                   )}
                   {/* Status dot */}
                   <circle cx={hBoxX + hBoxW - 10} cy={hBoxY + 10} r={4} fill={statusDot} />
@@ -552,7 +1274,7 @@ export function GraphView() {
                       opacity: isAsking ? 0.6 : 1,
                     }}
                   >
-                    {isAsking ? '…' : 'Ask ?'}
+                    {isAsking ? '…' : '↻ Status'}
                   </button>
                 </foreignObject>
               </g>
@@ -568,19 +1290,160 @@ export function GraphView() {
             const y2 = timeY(endMs);
             const boxH = Math.max(4, y2 - y1);
             return (
-              <rect
-                key={`act-${i}`}
-                x={cx - ACT_W / 2}
-                y={y1}
-                width={ACT_W}
-                height={boxH}
-                rx={3}
-                fill={color}
-                fillOpacity={act.isRunning ? 0.85 : 0.55}
-                stroke={color}
-                strokeWidth={act.isRunning ? 1.5 : 0}
-                className={act.isRunning ? 'hg-graph__pulse' : undefined}
+              <g key={`act-${i}`}>
+                <rect
+                  x={cx - ACT_W / 2}
+                  y={y1}
+                  width={ACT_W}
+                  height={boxH}
+                  rx={3}
+                  fill={color}
+                  fillOpacity={act.isRunning ? 0.85 : 0.55}
+                  stroke={color}
+                  strokeWidth={act.isRunning ? 1.5 : 0}
+                  className={act.isRunning ? 'hg-graph__pulse' : undefined}
+                />
+                {act.isRunning && act.thinking && (
+                  <circle
+                    cx={cx}
+                    cy={y1 + Math.min(12, boxH / 2)}
+                    r={3}
+                    fill="#a8c8ff"
+                    className="hg-graph__pulse"
+                  />
+                )}
+              </g>
+            );
+          })}
+
+          {/* Task dependency edges (drawn below transfer arrows) */}
+          {taskPlanVisible && taskEdgeLines.map((e) => {
+            const dx = e.x2 - e.x1;
+            const midY = (e.y1 + e.y2) / 2;
+            const c1x = e.x1 + dx * 0.25;
+            const c2x = e.x1 + dx * 0.75;
+            return (
+              <path
+                key={e.id}
+                d={`M ${e.x1} ${e.y1} C ${c1x} ${midY}, ${c2x} ${midY}, ${e.x2} ${e.y2}`}
+                stroke="#9aa3b4"
+                strokeWidth={1}
+                strokeDasharray="3 3"
+                fill="none"
+                opacity={0.5}
+                markerEnd="url(#arr-task-dep)"
               />
+            );
+          })}
+
+          {/* Pre-strip task boxes */}
+          {taskPlanVisible && stripRects.map((r) => {
+            const color = colorForAgent(agentIds[r.agentIdx] ?? '');
+            const s = r.task.status;
+            const isPending = s === 'PENDING' || s === 'UNSPECIFIED';
+            const isRunning = s === 'RUNNING';
+            const isDone = s === 'COMPLETED';
+            const isFailed = s === 'FAILED';
+            const isCancelled = s === 'CANCELLED';
+            const isSelected = selectedTaskId === r.taskId;
+            const fill = isRunning ? color
+              : isDone ? color
+              : isFailed ? 'transparent'
+              : 'var(--md-sys-color-surface-container, #1a1f2a)';
+            const fillOpacity = isRunning ? 0.85 : isDone ? 0.55 : isPending ? 0.25 : 1;
+            const stroke = isFailed ? '#e06070' : color;
+            const hybrid = taskPlanMode === 'hybrid';
+            const label = r.task.title.length > (hybrid ? 4 : 8)
+              ? r.task.title.slice(0, hybrid ? 3 : 7) + '…'
+              : r.task.title;
+            return (
+              <g
+                key={`tr-${r.planId}-${r.taskId}`}
+                style={{ cursor: 'pointer' }}
+                onClick={(e) => handleTaskClick(r, e)}
+              >
+                {isSelected && (
+                  <rect
+                    x={r.x - 2} y={r.y - 2}
+                    width={r.w + 4} height={r.h + 4}
+                    rx={4}
+                    fill="none"
+                    stroke="var(--md-sys-color-primary, #a8c8ff)"
+                    strokeWidth={2}
+                  />
+                )}
+                <rect
+                  x={r.x} y={r.y} width={r.w} height={r.h}
+                  rx={3}
+                  fill={fill}
+                  fillOpacity={fillOpacity}
+                  stroke={isSelected ? 'var(--md-sys-color-primary, #a8c8ff)' : stroke}
+                  strokeWidth={isSelected ? 1.5 : 1}
+                  strokeDasharray={isFailed ? '2 2' : undefined}
+                />
+                {!hybrid && (
+                  <text
+                    x={r.x + 4} y={r.y + r.h / 2}
+                    dominantBaseline="middle"
+                    fill={isPending
+                      ? 'var(--md-sys-color-on-surface-variant, #9da3b4)'
+                      : '#fff'}
+                    fontSize={9}
+                    style={{
+                      textDecoration: isCancelled ? 'line-through' : undefined,
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    {label}
+                  </text>
+                )}
+                {isDone && (
+                  <text
+                    x={r.x + r.w - 6} y={r.y + r.h / 2}
+                    textAnchor="end" dominantBaseline="middle"
+                    fill="#fff" fontSize={9}
+                    style={{ pointerEvents: 'none' }}
+                  >
+                    ✓
+                  </text>
+                )}
+                <title>
+                  {`${r.task.title}\n${r.task.description}\nStatus: ${r.task.status}`}
+                </title>
+              </g>
+            );
+          })}
+
+          {/* Ghost activation boxes for tasks */}
+          {taskPlanVisible && ghostRects.map((r) => {
+            const color = colorForAgent(agentIds[r.agentIdx] ?? '');
+            const isSelected = selectedTaskId === r.taskId;
+            return (
+              <g key={`gh-${r.planId}-${r.taskId}`}>
+                {isSelected && (
+                  <rect
+                    x={r.x - 2} y={r.y - 2}
+                    width={r.w + 4} height={r.h + 4}
+                    rx={4}
+                    fill="none"
+                    stroke="var(--md-sys-color-primary, #a8c8ff)"
+                    strokeWidth={2}
+                  />
+                )}
+                <rect
+                  x={r.x} y={r.y} width={r.w} height={r.h}
+                  rx={3}
+                  fill={color}
+                  fillOpacity={0.25}
+                  stroke={isSelected ? 'var(--md-sys-color-primary, #a8c8ff)' : color}
+                  strokeWidth={isSelected ? 1.5 : 1}
+                  strokeDasharray="2 2"
+                  style={{ cursor: 'pointer' }}
+                  onClick={(e) => handleTaskClick(r, e)}
+                >
+                  <title>{`${r.task.title} (predicted)`}</title>
+                </rect>
+              </g>
             );
           })}
 
@@ -649,8 +1512,185 @@ export function GraphView() {
               </g>
             );
           })}
+          </g>
         </svg>
+
+          {/* Minimap */}
+          <div
+            ref={minimapRef}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              minimapDragRef.current = true;
+              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+              handleMinimapSeek(e.clientX, e.clientY);
+            }}
+            onPointerMove={(e) => {
+              if (!minimapDragRef.current) return;
+              e.stopPropagation();
+              handleMinimapSeek(e.clientX, e.clientY);
+            }}
+            onPointerUp={(e) => {
+              minimapDragRef.current = false;
+              try {
+                (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+              } catch {
+                /* ignore */
+              }
+            }}
+            onPointerCancel={() => {
+              minimapDragRef.current = false;
+            }}
+            onWheel={(e) => e.stopPropagation()}
+            onClickCapture={(e) => e.stopPropagation()}
+            style={{
+              position: 'absolute',
+              right: 12,
+              bottom: 12,
+              width: MINIMAP_W,
+              height: MINIMAP_H,
+              background: 'var(--md-sys-color-surface-container, #1a1f2a)',
+              border: '1px solid var(--md-sys-color-outline-variant, #2a2f3a)',
+              borderRadius: 6,
+              boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
+              overflow: 'hidden',
+              cursor: 'crosshair',
+              zIndex: 15,
+              touchAction: 'none',
+            }}
+            role="region"
+            aria-label="Agent diagram minimap — click or drag to pan"
+          >
+            <svg
+              width={MINIMAP_W}
+              height={MINIMAP_H}
+              style={{ display: 'block' }}
+            >
+              <g transform={`translate(${MINIMAP_PAD}, ${MINIMAP_PAD}) scale(${minimapScale})`}>
+                {/* Full-content background */}
+                <rect
+                  x={0}
+                  y={0}
+                  width={svgW}
+                  height={svgH}
+                  fill="var(--md-sys-color-surface, #10131a)"
+                  opacity={0.6}
+                />
+                {/* Agent lifelines */}
+                {agentIds.map((_id, idx) => (
+                  <line
+                    key={`mm-life-${idx}`}
+                    x1={colCx(idx)}
+                    y1={HEADER_H}
+                    x2={colCx(idx)}
+                    y2={HEADER_H + plotH}
+                    stroke={colorForAgent(agentIds[idx] ?? '')}
+                    strokeWidth={1 / Math.max(minimapScale, 0.01)}
+                    opacity={0.4}
+                  />
+                ))}
+                {/* Activation boxes */}
+                {activations.map((act, i) => {
+                  const color = colorForAgent(agentIds[act.agentIdx] ?? '');
+                  const y1 = timeY(act.startMs);
+                  const endMs = act.endMs ?? Math.max(nowMs, act.startMs + 100);
+                  const y2 = timeY(endMs);
+                  return (
+                    <rect
+                      key={`mm-act-${i}`}
+                      x={colCx(act.agentIdx) - ACT_W / 2}
+                      y={y1}
+                      width={ACT_W}
+                      height={Math.max(2, y2 - y1)}
+                      fill={color}
+                      fillOpacity={0.7}
+                    />
+                  );
+                })}
+                {/* Agent header dots */}
+                {agentIds.map((agentId, idx) => (
+                  <circle
+                    key={`mm-hd-${idx}`}
+                    cx={colCx(idx)}
+                    cy={HEADER_H - 8}
+                    r={6 / Math.max(minimapScale, 0.01)}
+                    fill={colorForAgent(agentId)}
+                    opacity={0.85}
+                  />
+                ))}
+              </g>
+              {/* Viewport rectangle (in minimap pixel space). */}
+              <rect
+                x={Math.max(0, Math.min(MINIMAP_W - MINIMAP_PAD * 2, minimapRect.x)) + MINIMAP_PAD}
+                y={Math.max(0, Math.min(MINIMAP_H - MINIMAP_PAD * 2, minimapRect.y)) + MINIMAP_PAD}
+                width={Math.max(
+                  3,
+                  Math.min(MINIMAP_W - MINIMAP_PAD * 2 - Math.max(0, minimapRect.x), minimapRect.w),
+                )}
+                height={Math.max(
+                  3,
+                  Math.min(MINIMAP_H - MINIMAP_PAD * 2 - Math.max(0, minimapRect.y), minimapRect.h),
+                )}
+                fill="rgba(100,140,255,0.15)"
+                stroke="rgba(140,170,255,0.85)"
+                strokeWidth={1}
+              />
+            </svg>
+          </div>
+        {hoveredTask && (
+          <div
+            style={{
+              position: 'absolute',
+              left: hoveredTask.x * vp.scale + vp.tx,
+              top: hoveredTask.y * vp.scale + vp.ty,
+              maxWidth: 260,
+              padding: '8px 10px',
+              background: 'var(--md-sys-color-surface-container-high, #1a1f2a)',
+              border: '1px solid var(--md-sys-color-outline-variant, #2a2f3a)',
+              borderRadius: 6,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+              fontSize: 11,
+              color: 'var(--md-sys-color-on-surface, #e3e6ef)',
+              zIndex: 10,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontWeight: 600, marginBottom: 2 }}>
+              {hoveredTask.task.title}
+            </div>
+            <div style={{ opacity: 0.8, marginBottom: 4 }}>
+              {hoveredTask.task.description || <em>No description</em>}
+            </div>
+            <div style={{ fontSize: 10, opacity: 0.7 }}>
+              Assignee: {hoveredTask.task.assigneeAgentId || '(unassigned)'}
+            </div>
+            <div style={{ fontSize: 10, opacity: 0.7 }}>
+              Status: {hoveredTask.task.status}
+            </div>
+            {hoveredTask.plan.edges.some(
+              (e) => e.toTaskId === hoveredTask.task.id,
+            ) && (
+              <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>
+                Depends on:{' '}
+                {hoveredTask.plan.edges
+                  .filter((e) => e.toTaskId === hoveredTask.task.id)
+                  .map((e) => e.fromTaskId)
+                  .join(', ')}
+              </div>
+            )}
+          </div>
+        )}
+        </div>
       </div>
     </section>
   );
 }
+
+const toolbarBtnStyle: React.CSSProperties = {
+  padding: '4px 8px',
+  fontSize: 11,
+  background: 'var(--md-sys-color-surface-container, #1a1f2a)',
+  color: 'var(--md-sys-color-on-surface, #e3e6ef)',
+  border: '1px solid var(--md-sys-color-outline-variant, #2a2f3a)',
+  borderRadius: 4,
+  cursor: 'pointer',
+};

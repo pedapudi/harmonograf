@@ -101,7 +101,7 @@ The `presentation_agent` coordinator drives five agents:
 
 ```bash
 export USER_MODEL_NAME="openai/qwen3.5:122b"
-export OPENAI_API_BASE="http://kikuchi.lan:8080/v1"
+export OPENAI_API_BASE="http://localhost:8080/v1"
 # OPENAI_API_KEY is optional for local endpoints; the demo target defaults
 # it to "dummy" if unset so LiteLLM stops complaining.
 make demo

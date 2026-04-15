@@ -34,6 +34,11 @@ from harmonograf_server.storage.base import (
     SpanStatus,
     Stats,
     Store,
+    Task,
+    TaskEdge,
+    TaskPlan,
+    TaskStatus,
+    ContextWindowSample,
 )
 
 
@@ -113,6 +118,46 @@ CREATE TABLE IF NOT EXISTS annotations (
 CREATE INDEX IF NOT EXISTS idx_annotations_session ON annotations(session_id);
 CREATE INDEX IF NOT EXISTS idx_annotations_span ON annotations(target_span_id);
 
+CREATE TABLE IF NOT EXISTS task_plans (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    invocation_span_id TEXT,
+    planner_agent_id TEXT,
+    created_at REAL NOT NULL,
+    summary TEXT,
+    edges TEXT,  -- JSON array of {from,to}
+    revision_reason TEXT NOT NULL DEFAULT '',
+    revision_kind TEXT NOT NULL DEFAULT '',
+    revision_severity TEXT NOT NULL DEFAULT '',
+    revision_index INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_task_plans_session ON task_plans(session_id);
+
+CREATE TABLE IF NOT EXISTS tasks (
+    plan_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    title TEXT,
+    description TEXT,
+    assignee_agent_id TEXT,
+    status TEXT NOT NULL,
+    predicted_start_ms INTEGER DEFAULT 0,
+    predicted_duration_ms INTEGER DEFAULT 0,
+    bound_span_id TEXT,
+    PRIMARY KEY (plan_id, id),
+    FOREIGN KEY (plan_id) REFERENCES task_plans(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_session_status ON tasks(plan_id, status);
+
+CREATE TABLE IF NOT EXISTS context_window_samples (
+    session_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    recorded_at REAL NOT NULL,
+    tokens INTEGER NOT NULL,
+    limit_tokens INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ctxwin_session_agent_time
+    ON context_window_samples(session_id, agent_id, recorded_at);
+
 CREATE TABLE IF NOT EXISTS payloads (
     digest TEXT PRIMARY KEY,
     size INTEGER NOT NULL,
@@ -157,6 +202,25 @@ class SqliteStore(Store):
         ):
             if name not in cols:
                 await self._db.execute(ddl)
+        # Backfill revision_reason on pre-existing DBs.
+        async with self._db.execute("PRAGMA table_info(task_plans)") as cur:
+            tp_cols = {row[1] for row in await cur.fetchall()}
+        if "revision_reason" not in tp_cols:
+            await self._db.execute(
+                "ALTER TABLE task_plans ADD COLUMN revision_reason TEXT NOT NULL DEFAULT ''"
+            )
+        if "revision_kind" not in tp_cols:
+            await self._db.execute(
+                "ALTER TABLE task_plans ADD COLUMN revision_kind TEXT NOT NULL DEFAULT ''"
+            )
+        if "revision_severity" not in tp_cols:
+            await self._db.execute(
+                "ALTER TABLE task_plans ADD COLUMN revision_severity TEXT NOT NULL DEFAULT ''"
+            )
+        if "revision_index" not in tp_cols:
+            await self._db.execute(
+                "ALTER TABLE task_plans ADD COLUMN revision_index INTEGER NOT NULL DEFAULT 0"
+            )
         await self._db.commit()
 
     async def close(self) -> None:
@@ -295,6 +359,17 @@ class SqliteStore(Store):
             await self.db.execute("DELETE FROM spans WHERE session_id = ?", (session_id,))
             await self.db.execute("DELETE FROM annotations WHERE session_id = ?", (session_id,))
             await self.db.execute("DELETE FROM agents WHERE session_id = ?", (session_id,))
+            await self.db.execute(
+                "DELETE FROM tasks WHERE plan_id IN (SELECT id FROM task_plans WHERE session_id = ?)",
+                (session_id,),
+            )
+            await self.db.execute(
+                "DELETE FROM task_plans WHERE session_id = ?", (session_id,)
+            )
+            await self.db.execute(
+                "DELETE FROM context_window_samples WHERE session_id = ?",
+                (session_id,),
+            )
             await self.db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
             await self.db.commit()
             for d in set(digests):
@@ -792,6 +867,260 @@ class SqliteStore(Store):
             if orphans:
                 await self.db.commit()
             return len(orphans)
+
+    # task plans ----------------------------------------------------------
+    async def put_task_plan(self, plan: TaskPlan) -> TaskPlan:
+        async with self._lock:
+            # Transactional upsert: replace plan + tasks atomically.
+            await self.db.execute("BEGIN")
+            try:
+                await self.db.execute(
+                    """
+                    INSERT INTO task_plans (id, session_id, invocation_span_id,
+                                            planner_agent_id, created_at, summary, edges,
+                                            revision_reason, revision_kind,
+                                            revision_severity, revision_index)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        session_id=excluded.session_id,
+                        invocation_span_id=excluded.invocation_span_id,
+                        planner_agent_id=excluded.planner_agent_id,
+                        created_at=excluded.created_at,
+                        summary=excluded.summary,
+                        edges=excluded.edges,
+                        revision_reason=excluded.revision_reason,
+                        revision_kind=excluded.revision_kind,
+                        revision_severity=excluded.revision_severity,
+                        revision_index=excluded.revision_index
+                    """,
+                    (
+                        plan.id,
+                        plan.session_id,
+                        plan.invocation_span_id or None,
+                        plan.planner_agent_id or None,
+                        plan.created_at,
+                        plan.summary or None,
+                        json.dumps(
+                            [
+                                {"from": e.from_task_id, "to": e.to_task_id}
+                                for e in plan.edges
+                            ]
+                        ),
+                        plan.revision_reason or "",
+                        plan.revision_kind or "",
+                        plan.revision_severity or "",
+                        int(plan.revision_index or 0),
+                    ),
+                )
+                # Replace tasks for this plan (simplest correct semantics for
+                # re-emitted plans).
+                await self.db.execute(
+                    "DELETE FROM tasks WHERE plan_id = ?", (plan.id,)
+                )
+                for t in plan.tasks:
+                    await self.db.execute(
+                        """
+                        INSERT INTO tasks (plan_id, id, title, description,
+                                           assignee_agent_id, status,
+                                           predicted_start_ms, predicted_duration_ms,
+                                           bound_span_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            plan.id,
+                            t.id,
+                            t.title or None,
+                            t.description or None,
+                            t.assignee_agent_id or None,
+                            t.status.value,
+                            t.predicted_start_ms,
+                            t.predicted_duration_ms,
+                            t.bound_span_id or None,
+                        ),
+                    )
+                await self.db.commit()
+            except Exception:
+                await self.db.rollback()
+                raise
+            return await self._fetch_task_plan(plan.id)  # type: ignore[return-value]
+
+    async def _fetch_task_plan(self, plan_id: str) -> Optional[TaskPlan]:
+        async with self.db.execute(
+            "SELECT * FROM task_plans WHERE id = ?", (plan_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            if row is None:
+                return None
+        edges_json = row["edges"] or "[]"
+        edges = [
+            TaskEdge(from_task_id=e["from"], to_task_id=e["to"])
+            for e in json.loads(edges_json)
+        ]
+        tasks: list[Task] = []
+        async with self.db.execute(
+            "SELECT * FROM tasks WHERE plan_id = ? ORDER BY rowid", (plan_id,)
+        ) as cur:
+            for r in await cur.fetchall():
+                tasks.append(
+                    Task(
+                        id=r["id"],
+                        title=r["title"] or "",
+                        description=r["description"] or "",
+                        assignee_agent_id=r["assignee_agent_id"] or "",
+                        status=TaskStatus(r["status"]),
+                        predicted_start_ms=r["predicted_start_ms"] or 0,
+                        predicted_duration_ms=r["predicted_duration_ms"] or 0,
+                        bound_span_id=r["bound_span_id"],
+                    )
+                )
+        return TaskPlan(
+            id=row["id"],
+            session_id=row["session_id"],
+            invocation_span_id=row["invocation_span_id"] or "",
+            planner_agent_id=row["planner_agent_id"] or "",
+            created_at=row["created_at"],
+            summary=row["summary"] or "",
+            tasks=tasks,
+            edges=edges,
+            revision_reason=(row["revision_reason"] if "revision_reason" in row.keys() else "") or "",
+            revision_kind=(row["revision_kind"] if "revision_kind" in row.keys() else "") or "",
+            revision_severity=(row["revision_severity"] if "revision_severity" in row.keys() else "") or "",
+            revision_index=int(row["revision_index"]) if "revision_index" in row.keys() and row["revision_index"] is not None else 0,
+        )
+
+    async def get_task_plan(self, plan_id: str) -> Optional[TaskPlan]:
+        async with self._lock:
+            return await self._fetch_task_plan(plan_id)
+
+    async def list_task_plans_for_session(
+        self, session_id: str
+    ) -> list[TaskPlan]:
+        async with self._lock:
+            async with self.db.execute(
+                "SELECT id FROM task_plans WHERE session_id = ? ORDER BY created_at",
+                (session_id,),
+            ) as cur:
+                ids = [r["id"] for r in await cur.fetchall()]
+            out: list[TaskPlan] = []
+            for pid in ids:
+                p = await self._fetch_task_plan(pid)
+                if p:
+                    out.append(p)
+            return out
+
+    async def update_task_status(
+        self,
+        plan_id: str,
+        task_id: str,
+        status: TaskStatus,
+        bound_span_id: Optional[str] = None,
+    ) -> Optional[Task]:
+        async with self._lock:
+            async with self.db.execute(
+                "SELECT * FROM tasks WHERE plan_id = ? AND id = ?",
+                (plan_id, task_id),
+            ) as cur:
+                row = await cur.fetchone()
+                if row is None:
+                    return None
+            new_bound = (
+                bound_span_id
+                if bound_span_id is not None
+                else row["bound_span_id"]
+            )
+            await self.db.execute(
+                "UPDATE tasks SET status = ?, bound_span_id = ? WHERE plan_id = ? AND id = ?",
+                (status.value, new_bound, plan_id, task_id),
+            )
+            await self.db.commit()
+            return Task(
+                id=row["id"],
+                title=row["title"] or "",
+                description=row["description"] or "",
+                assignee_agent_id=row["assignee_agent_id"] or "",
+                status=status,
+                predicted_start_ms=row["predicted_start_ms"] or 0,
+                predicted_duration_ms=row["predicted_duration_ms"] or 0,
+                bound_span_id=new_bound,
+            )
+
+    # context window samples ----------------------------------------------
+    async def append_context_window_sample(
+        self, sample: ContextWindowSample
+    ) -> None:
+        async with self._lock:
+            await self.db.execute(
+                """
+                INSERT INTO context_window_samples
+                    (session_id, agent_id, recorded_at, tokens, limit_tokens)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    sample.session_id,
+                    sample.agent_id,
+                    sample.recorded_at,
+                    int(sample.tokens),
+                    int(sample.limit_tokens),
+                ),
+            )
+            await self.db.commit()
+
+    async def list_context_window_samples(
+        self,
+        session_id: str,
+        agent_id: Optional[str] = None,
+        limit_per_agent: int = 200,
+    ) -> list[ContextWindowSample]:
+        async with self._lock:
+            if agent_id is not None:
+                async with self.db.execute(
+                    """
+                    SELECT session_id, agent_id, recorded_at, tokens, limit_tokens
+                    FROM context_window_samples
+                    WHERE session_id = ? AND agent_id = ?
+                    ORDER BY recorded_at DESC
+                    LIMIT ?
+                    """,
+                    (session_id, agent_id, max(1, int(limit_per_agent))),
+                ) as cur:
+                    rows = await cur.fetchall()
+            else:
+                # Per-agent cap without window functions: pull the newest N
+                # per agent_id by scanning grouped-sorted rows. sqlite's
+                # LIMIT is row-global, so group by agent_id first.
+                async with self.db.execute(
+                    """
+                    SELECT DISTINCT agent_id FROM context_window_samples
+                    WHERE session_id = ?
+                    """,
+                    (session_id,),
+                ) as cur:
+                    agent_rows = await cur.fetchall()
+                rows = []
+                for ar in agent_rows:
+                    async with self.db.execute(
+                        """
+                        SELECT session_id, agent_id, recorded_at, tokens, limit_tokens
+                        FROM context_window_samples
+                        WHERE session_id = ? AND agent_id = ?
+                        ORDER BY recorded_at DESC
+                        LIMIT ?
+                        """,
+                        (session_id, ar["agent_id"], max(1, int(limit_per_agent))),
+                    ) as c2:
+                        rows.extend(await c2.fetchall())
+            out = [
+                ContextWindowSample(
+                    session_id=r["session_id"],
+                    agent_id=r["agent_id"],
+                    recorded_at=r["recorded_at"],
+                    tokens=r["tokens"],
+                    limit_tokens=r["limit_tokens"],
+                )
+                for r in rows
+            ]
+            out.sort(key=lambda s: (s.agent_id, s.recorded_at))
+            return out
 
     # stats ---------------------------------------------------------------
     async def stats(self) -> Stats:

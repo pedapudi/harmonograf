@@ -55,3 +55,40 @@ async def harmonograf_server():
         }
     finally:
         await app.stop()
+
+
+@pytest_asyncio.fixture
+async def real_harmonograf_server(tmp_path):
+    """Real gRPC + HTTP harmonograf server backed by sqlite under a
+    tmpdir, on random ports. Same yield shape as ``harmonograf_server``
+    plus a ``db_path`` key.
+    """
+    data_dir = tmp_path / "hg_data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    cfg = ServerConfig(
+        host="127.0.0.1",
+        grpc_port=_free_port(),
+        web_port=_free_port(),
+        store_backend="sqlite",
+        data_dir=str(data_dir),
+        grace_seconds=0.5,
+        log_level="WARNING",
+    )
+    app = await Harmonograf.from_config(cfg)
+    await app.start()
+    try:
+        yield {
+            "app": app,
+            "port": cfg.grpc_port,
+            "web_port": cfg.web_port,
+            "addr": f"127.0.0.1:{cfg.grpc_port}",
+            "http_addr": f"127.0.0.1:{cfg.web_port}",
+            "db_path": str(data_dir),
+            "bus": app.bus,
+            "ingest": app.ingest,
+            "router": app.router,
+            "store": app.store,
+            "servicer": app.servicer,
+        }
+    finally:
+        await app.stop()

@@ -18,7 +18,7 @@ import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2"
 import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
-import type { AttributeValue, Capability, ControlAck, ErrorInfo, Framework, PayloadRef, Span, SpanStatus } from "./types_pb.js";
+import type { AttributeValue, Capability, ControlAck, ErrorInfo, Framework, PayloadRef, Span, SpanStatus, TaskPlan, UpdatedTaskStatus } from "./types_pb.js";
 import { file_harmonograf_v1_types } from "./types_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -26,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file harmonograf/v1/telemetry.proto.
  */
 export const file_harmonograf_v1_telemetry: GenFile = /*@__PURE__*/
-  fileDesc("Ch5oYXJtb25vZ3JhZi92MS90ZWxlbWV0cnkucHJvdG8SDmhhcm1vbm9ncmFmLnYxIssCCgVIZWxsbxIQCghhZ2VudF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEgwKBG5hbWUYAyABKAkSLAoJZnJhbWV3b3JrGAQgASgOMhkuaGFybW9ub2dyYWYudjEuRnJhbWV3b3JrEhkKEWZyYW1ld29ya192ZXJzaW9uGAUgASgJEjAKDGNhcGFiaWxpdGllcxgGIAMoDjIaLmhhcm1vbm9ncmFmLnYxLkNhcGFiaWxpdHkSNQoIbWV0YWRhdGEYByADKAsyIy5oYXJtb25vZ3JhZi52MS5IZWxsby5NZXRhZGF0YUVudHJ5EhQKDHJlc3VtZV90b2tlbhgIIAEoCRIVCg1zZXNzaW9uX3RpdGxlGAkgASgJGi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASIvCglTcGFuU3RhcnQSIgoEc3BhbhgBIAEoCzIULmhhcm1vbm9ncmFmLnYxLlNwYW4ijgIKClNwYW5VcGRhdGUSDwoHc3Bhbl9pZBgBIAEoCRI+CgphdHRyaWJ1dGVzGAIgAygLMiouaGFybW9ub2dyYWYudjEuU3BhblVwZGF0ZS5BdHRyaWJ1dGVzRW50cnkSKgoGc3RhdHVzGAMgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIwCgxwYXlsb2FkX3JlZnMYBCADKAsyGi5oYXJtb25vZ3JhZi52MS5QYXlsb2FkUmVmGlEKD0F0dHJpYnV0ZXNFbnRyeRILCgNrZXkYASABKAkSLQoFdmFsdWUYAiABKAsyHi5oYXJtb25vZ3JhZi52MS5BdHRyaWJ1dGVWYWx1ZToCOAEi4AIKB1NwYW5FbmQSDwoHc3Bhbl9pZBgBIAEoCRIsCghlbmRfdGltZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKgoGc3RhdHVzGAMgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIoCgVlcnJvchgEIAEoCzIZLmhhcm1vbm9ncmFmLnYxLkVycm9ySW5mbxI7CgphdHRyaWJ1dGVzGAUgAygLMicuaGFybW9ub2dyYWYudjEuU3BhbkVuZC5BdHRyaWJ1dGVzRW50cnkSMAoMcGF5bG9hZF9yZWZzGAYgAygLMhouaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlZhpRCg9BdHRyaWJ1dGVzRW50cnkSCwoDa2V5GAEgASgJEi0KBXZhbHVlGAIgASgLMh4uaGFybW9ub2dyYWYudjEuQXR0cmlidXRlVmFsdWU6AjgBIm8KDVBheWxvYWRVcGxvYWQSDgoGZGlnZXN0GAEgASgJEhIKCnRvdGFsX3NpemUYAiABKAMSDAoEbWltZRgDIAEoCRINCgVjaHVuaxgEIAEoDBIMCgRsYXN0GAUgASgIEg8KB2V2aWN0ZWQYBiABKAgi3QEKCUhlYXJ0YmVhdBIXCg9idWZmZXJlZF9ldmVudHMYASABKAMSFgoOZHJvcHBlZF9ldmVudHMYAiABKAMSHgoWZHJvcHBlZF9zcGFuc19jcml0aWNhbBgDIAEoAxIeChZidWZmZXJlZF9wYXlsb2FkX2J5dGVzGAQgASgDEhgKEHBheWxvYWRzX2V2aWN0ZWQYBSABKAMSFAoMY3B1X3NlbGZfcGN0GAYgASgBEi8KC2NsaWVudF90aW1lGAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCIZCgdHb29kYnllEg4KBnJlYXNvbhgBIAEoCSKOAwoLVGVsZW1ldHJ5VXASJgoFaGVsbG8YASABKAsyFS5oYXJtb25vZ3JhZi52MS5IZWxsb0gAEi8KCnNwYW5fc3RhcnQYAiABKAsyGS5oYXJtb25vZ3JhZi52MS5TcGFuU3RhcnRIABIxCgtzcGFuX3VwZGF0ZRgDIAEoCzIaLmhhcm1vbm9ncmFmLnYxLlNwYW5VcGRhdGVIABIrCghzcGFuX2VuZBgEIAEoCzIXLmhhcm1vbm9ncmFmLnYxLlNwYW5FbmRIABIwCgdwYXlsb2FkGAUgASgLMh0uaGFybW9ub2dyYWYudjEuUGF5bG9hZFVwbG9hZEgAEi4KCWhlYXJ0YmVhdBgGIAEoCzIZLmhhcm1vbm9ncmFmLnYxLkhlYXJ0YmVhdEgAEjEKC2NvbnRyb2xfYWNrGAcgASgLMhouaGFybW9ub2dyYWYudjEuQ29udHJvbEFja0gAEioKB2dvb2RieWUYCCABKAsyFy5oYXJtb25vZ3JhZi52MS5Hb29kYnllSABCBQoDbXNnIoACCgdXZWxjb21lEhAKCGFjY2VwdGVkGAEgASgIEhsKE2Fzc2lnbmVkX3Nlc3Npb25faWQYAiABKAkSGgoSYXNzaWduZWRfc3RyZWFtX2lkGAMgASgJEi8KC3NlcnZlcl90aW1lGAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIxCgVmbGFncxgFIAMoCzIiLmhhcm1vbm9ncmFmLnYxLldlbGNvbWUuRmxhZ3NFbnRyeRIYChByZWplY3Rpb25fcmVhc29uGAYgASgJGiwKCkZsYWdzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASIgCg5QYXlsb2FkUmVxdWVzdBIOCgZkaWdlc3QYASABKAkihwEKC0Zsb3dDb250cm9sEjIKBmFjdGlvbhgBIAEoDjIiLmhhcm1vbm9ncmFmLnYxLkZsb3dDb250cm9sLkFjdGlvbiJECgZBY3Rpb24SFgoSQUNUSU9OX1VOU1BFQ0lGSUVEEAASDwoLQUNUSU9OX1NMT1cQARIRCg1BQ1RJT05fUkVTVU1FEAIiHwoNU2VydmVyR29vZGJ5ZRIOCgZyZWFzb24YASABKAki6wEKDVRlbGVtZXRyeURvd24SKgoHd2VsY29tZRgBIAEoCzIXLmhhcm1vbm9ncmFmLnYxLldlbGNvbWVIABI5Cg9wYXlsb2FkX3JlcXVlc3QYAiABKAsyHi5oYXJtb25vZ3JhZi52MS5QYXlsb2FkUmVxdWVzdEgAEjMKDGZsb3dfY29udHJvbBgDIAEoCzIbLmhhcm1vbm9ncmFmLnYxLkZsb3dDb250cm9sSAASNwoOc2VydmVyX2dvb2RieWUYBCABKAsyHS5oYXJtb25vZ3JhZi52MS5TZXJ2ZXJHb29kYnllSABCBQoDbXNnQkRaQmdpdGh1Yi5jb20vYW50aHJvcGljcy9oYXJtb25vZ3JhZi9nZW4vaGFybW9ub2dyYWYvdjE7aGFybW9ub2dyYWZ2MWIGcHJvdG8z", [file_google_protobuf_timestamp, file_harmonograf_v1_types]);
+  fileDesc("Ch5oYXJtb25vZ3JhZi92MS90ZWxlbWV0cnkucHJvdG8SDmhhcm1vbm9ncmFmLnYxIssCCgVIZWxsbxIQCghhZ2VudF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEgwKBG5hbWUYAyABKAkSLAoJZnJhbWV3b3JrGAQgASgOMhkuaGFybW9ub2dyYWYudjEuRnJhbWV3b3JrEhkKEWZyYW1ld29ya192ZXJzaW9uGAUgASgJEjAKDGNhcGFiaWxpdGllcxgGIAMoDjIaLmhhcm1vbm9ncmFmLnYxLkNhcGFiaWxpdHkSNQoIbWV0YWRhdGEYByADKAsyIy5oYXJtb25vZ3JhZi52MS5IZWxsby5NZXRhZGF0YUVudHJ5EhQKDHJlc3VtZV90b2tlbhgIIAEoCRIVCg1zZXNzaW9uX3RpdGxlGAkgASgJGi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASIvCglTcGFuU3RhcnQSIgoEc3BhbhgBIAEoCzIULmhhcm1vbm9ncmFmLnYxLlNwYW4ijgIKClNwYW5VcGRhdGUSDwoHc3Bhbl9pZBgBIAEoCRI+CgphdHRyaWJ1dGVzGAIgAygLMiouaGFybW9ub2dyYWYudjEuU3BhblVwZGF0ZS5BdHRyaWJ1dGVzRW50cnkSKgoGc3RhdHVzGAMgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIwCgxwYXlsb2FkX3JlZnMYBCADKAsyGi5oYXJtb25vZ3JhZi52MS5QYXlsb2FkUmVmGlEKD0F0dHJpYnV0ZXNFbnRyeRILCgNrZXkYASABKAkSLQoFdmFsdWUYAiABKAsyHi5oYXJtb25vZ3JhZi52MS5BdHRyaWJ1dGVWYWx1ZToCOAEi4AIKB1NwYW5FbmQSDwoHc3Bhbl9pZBgBIAEoCRIsCghlbmRfdGltZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKgoGc3RhdHVzGAMgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIoCgVlcnJvchgEIAEoCzIZLmhhcm1vbm9ncmFmLnYxLkVycm9ySW5mbxI7CgphdHRyaWJ1dGVzGAUgAygLMicuaGFybW9ub2dyYWYudjEuU3BhbkVuZC5BdHRyaWJ1dGVzRW50cnkSMAoMcGF5bG9hZF9yZWZzGAYgAygLMhouaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlZhpRCg9BdHRyaWJ1dGVzRW50cnkSCwoDa2V5GAEgASgJEi0KBXZhbHVlGAIgASgLMh4uaGFybW9ub2dyYWYudjEuQXR0cmlidXRlVmFsdWU6AjgBIm8KDVBheWxvYWRVcGxvYWQSDgoGZGlnZXN0GAEgASgJEhIKCnRvdGFsX3NpemUYAiABKAMSDAoEbWltZRgDIAEoCRINCgVjaHVuaxgEIAEoDBIMCgRsYXN0GAUgASgIEg8KB2V2aWN0ZWQYBiABKAgi1QIKCUhlYXJ0YmVhdBIXCg9idWZmZXJlZF9ldmVudHMYASABKAMSFgoOZHJvcHBlZF9ldmVudHMYAiABKAMSHgoWZHJvcHBlZF9zcGFuc19jcml0aWNhbBgDIAEoAxIeChZidWZmZXJlZF9wYXlsb2FkX2J5dGVzGAQgASgDEhgKEHBheWxvYWRzX2V2aWN0ZWQYBSABKAMSFAoMY3B1X3NlbGZfcGN0GAYgASgBEi8KC2NsaWVudF90aW1lGAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIYChBwcm9ncmVzc19jb3VudGVyGAggASgDEhgKEGN1cnJlbnRfYWN0aXZpdHkYCSABKAkSHQoVY29udGV4dF93aW5kb3dfdG9rZW5zGAogASgDEiMKG2NvbnRleHRfd2luZG93X2xpbWl0X3Rva2VucxgLIAEoAyIZCgdHb29kYnllEg4KBnJlYXNvbhgBIAEoCSL+AwoLVGVsZW1ldHJ5VXASJgoFaGVsbG8YASABKAsyFS5oYXJtb25vZ3JhZi52MS5IZWxsb0gAEi8KCnNwYW5fc3RhcnQYAiABKAsyGS5oYXJtb25vZ3JhZi52MS5TcGFuU3RhcnRIABIxCgtzcGFuX3VwZGF0ZRgDIAEoCzIaLmhhcm1vbm9ncmFmLnYxLlNwYW5VcGRhdGVIABIrCghzcGFuX2VuZBgEIAEoCzIXLmhhcm1vbm9ncmFmLnYxLlNwYW5FbmRIABIwCgdwYXlsb2FkGAUgASgLMh0uaGFybW9ub2dyYWYudjEuUGF5bG9hZFVwbG9hZEgAEi4KCWhlYXJ0YmVhdBgGIAEoCzIZLmhhcm1vbm9ncmFmLnYxLkhlYXJ0YmVhdEgAEjEKC2NvbnRyb2xfYWNrGAcgASgLMhouaGFybW9ub2dyYWYudjEuQ29udHJvbEFja0gAEioKB2dvb2RieWUYCCABKAsyFy5oYXJtb25vZ3JhZi52MS5Hb29kYnllSAASLQoJdGFza19wbGFuGAkgASgLMhguaGFybW9ub2dyYWYudjEuVGFza1BsYW5IABI/ChJ0YXNrX3N0YXR1c191cGRhdGUYCiABKAsyIS5oYXJtb25vZ3JhZi52MS5VcGRhdGVkVGFza1N0YXR1c0gAQgUKA21zZyKAAgoHV2VsY29tZRIQCghhY2NlcHRlZBgBIAEoCBIbChNhc3NpZ25lZF9zZXNzaW9uX2lkGAIgASgJEhoKEmFzc2lnbmVkX3N0cmVhbV9pZBgDIAEoCRIvCgtzZXJ2ZXJfdGltZRgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMQoFZmxhZ3MYBSADKAsyIi5oYXJtb25vZ3JhZi52MS5XZWxjb21lLkZsYWdzRW50cnkSGAoQcmVqZWN0aW9uX3JlYXNvbhgGIAEoCRosCgpGbGFnc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiIAoOUGF5bG9hZFJlcXVlc3QSDgoGZGlnZXN0GAEgASgJIocBCgtGbG93Q29udHJvbBIyCgZhY3Rpb24YASABKA4yIi5oYXJtb25vZ3JhZi52MS5GbG93Q29udHJvbC5BY3Rpb24iRAoGQWN0aW9uEhYKEkFDVElPTl9VTlNQRUNJRklFRBAAEg8KC0FDVElPTl9TTE9XEAESEQoNQUNUSU9OX1JFU1VNRRACIh8KDVNlcnZlckdvb2RieWUSDgoGcmVhc29uGAEgASgJIusBCg1UZWxlbWV0cnlEb3duEioKB3dlbGNvbWUYASABKAsyFy5oYXJtb25vZ3JhZi52MS5XZWxjb21lSAASOQoPcGF5bG9hZF9yZXF1ZXN0GAIgASgLMh4uaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlcXVlc3RIABIzCgxmbG93X2NvbnRyb2wYAyABKAsyGy5oYXJtb25vZ3JhZi52MS5GbG93Q29udHJvbEgAEjcKDnNlcnZlcl9nb29kYnllGAQgASgLMh0uaGFybW9ub2dyYWYudjEuU2VydmVyR29vZGJ5ZUgAQgUKA21zZ0JCWkBnaXRodWIuY29tL3BlZGFwdWRpL2hhcm1vbm9ncmFmL2dlbi9oYXJtb25vZ3JhZi92MTtoYXJtb25vZ3JhZnYxYgZwcm90bzM", [file_google_protobuf_timestamp, file_harmonograf_v1_types]);
 
 /**
  * First message on every StreamTelemetry. The server replies with Welcome.
@@ -295,6 +295,43 @@ export type Heartbeat = Message<"harmonograf.v1.Heartbeat"> & {
    * @generated from field: google.protobuf.Timestamp client_time = 7;
    */
   clientTime?: Timestamp;
+
+  /**
+   * Monotonically increasing counter incremented on every meaningful action
+   * (span start/update/end, tool call, LLM call, etc.). The server compares
+   * successive heartbeats: if progress_counter has not changed for
+   * STUCK_THRESHOLD consecutive heartbeats while an INVOCATION span is
+   * RUNNING, the agent is declared stuck and the frontend is notified.
+   *
+   * @generated from field: int64 progress_counter = 8;
+   */
+  progressCounter: bigint;
+
+  /**
+   * One-sentence description of what the agent is currently doing, suitable
+   * for display in the popover summary and graph view tooltip. Set by the
+   * client adapter (e.g. "Calling tool search_web with query: climate change").
+   * Empty string means no current activity description is available.
+   *
+   * @generated from field: string current_activity = 9;
+   */
+  currentActivity: string;
+
+  /**
+   * Most recent snapshot of the LLM context window for this agent. The
+   * client adapter observes each model call (ADK before/after_model_callback)
+   * and updates these fields; the heartbeat loop ships whatever is current.
+   * Both fields default to 0 which is treated as "not populated" — the
+   * server ignores zero-valued samples on ingest rather than persisting them.
+   *
+   * @generated from field: int64 context_window_tokens = 10;
+   */
+  contextWindowTokens: bigint;
+
+  /**
+   * @generated from field: int64 context_window_limit_tokens = 11;
+   */
+  contextWindowLimitTokens: bigint;
 };
 
 /**
@@ -384,6 +421,25 @@ export type TelemetryUp = Message<"harmonograf.v1.TelemetryUp"> & {
      */
     value: Goodbye;
     case: "goodbye";
+  } | {
+    /**
+     * Task plan emitted by the client's PlannerHelper before normal
+     * execution begins. See types.proto TaskPlan.
+     *
+     * @generated from field: harmonograf.v1.TaskPlan task_plan = 9;
+     */
+    value: TaskPlan;
+    case: "taskPlan";
+  } | {
+    /**
+     * Explicit task status delta. Usually statuses are derived server-side
+     * from spans that carry an hgraf.task_id attribute; this is an escape
+     * hatch for cases where no span exists.
+     *
+     * @generated from field: harmonograf.v1.UpdatedTaskStatus task_status_update = 10;
+     */
+    value: UpdatedTaskStatus;
+    case: "taskStatusUpdate";
   } | { case: undefined; value?: undefined };
 };
 

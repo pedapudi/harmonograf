@@ -87,7 +87,7 @@ export function defaultShortcuts(): ShortcutBinding[] {
       id: 'toggle-pause',
       description: 'Toggle pause (all agents)',
       combo: ' ',
-      handler: () => ui().togglePause(),
+      handler: () => ui().toggleLiveFollow(),
     },
     {
       id: 'pan-left',
@@ -103,6 +103,42 @@ export function defaultShortcuts(): ShortcutBinding[] {
       combo: 'arrowright',
       handler: () => {
         /* pan handled by Gantt in task #11 */
+      },
+    },
+    {
+      id: 'graph-zoom-in',
+      description: 'Zoom in (graph view)',
+      combo: 'mod+=',
+      handler: () => {
+        const s = ui();
+        if (s.navSection === 'graph') s.graphActions?.zoomIn();
+      },
+    },
+    {
+      id: 'graph-zoom-in-plus',
+      description: 'Zoom in (graph view)',
+      combo: 'mod++',
+      handler: () => {
+        const s = ui();
+        if (s.navSection === 'graph') s.graphActions?.zoomIn();
+      },
+    },
+    {
+      id: 'graph-zoom-out',
+      description: 'Zoom out (graph view)',
+      combo: 'mod+-',
+      handler: () => {
+        const s = ui();
+        if (s.navSection === 'graph') s.graphActions?.zoomOut();
+      },
+    },
+    {
+      id: 'graph-zoom-reset',
+      description: 'Reset zoom (graph view)',
+      combo: 'mod+0',
+      handler: () => {
+        const s = ui();
+        if (s.navSection === 'graph') s.graphActions?.zoomReset();
       },
     },
     {
@@ -231,6 +267,24 @@ export function defaultShortcuts(): ShortcutBinding[] {
       description: 'Toggle keyboard help',
       combo: 'shift+?',
       handler: () => ui().toggleHelp(),
+    },
+    {
+      id: 'thinking-trajectory',
+      description: 'Open drawer on current span\u2019s Trajectory tab',
+      combo: 't',
+      handler: () => {
+        const s = ui();
+        if (!s.currentSessionId) return;
+        // Prefer the currently selected span; fall back to the first span
+        // in the session so the shortcut always opens something useful
+        // (otherwise first-time users mashing "t" would see a no-op).
+        const spanId =
+          s.selectedSpanId ??
+          listAllSpans(s.currentSessionId)[0]?.id ??
+          null;
+        if (!spanId) return;
+        s.openDrawerOnTrajectory(spanId);
+      },
     },
     {
       id: 'escape',

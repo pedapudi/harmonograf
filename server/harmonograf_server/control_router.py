@@ -96,6 +96,39 @@ class ControlRouter:
         self._lock = asyncio.Lock()
         # callbacks invoked when a STATUS_QUERY ack arrives
         self._status_query_callbacks: list[Callable[[str, str, str, str], Awaitable[None]]] = []
+        # sub_agent_id (ADK name) → stream_agent_id (transport UUID).
+        # Populated by the ingest pipeline when a span arrives for an agent
+        # whose id differs from the transport's registered Hello agent_id.
+        # Lets controls sent to the ADK name reach the correct subscription.
+        self._aliases: dict[str, str] = {}
+
+    def register_alias(self, sub_agent_id: str, stream_agent_id: str) -> None:
+        """Map an ADK sub-agent name to the stream's registered agent_id.
+
+        Called from the ingest pipeline's ``_ensure_route`` whenever a span
+        arrives with an agent_id that differs from the transport's Hello
+        agent_id. Subsequent ``deliver()`` calls for the sub-agent name are
+        forwarded to the stream that owns it.
+        """
+        if sub_agent_id and stream_agent_id and sub_agent_id != stream_agent_id:
+            self._aliases[sub_agent_id] = stream_agent_id
+
+    def clear_aliases_for_stream(self, stream_agent_id: str) -> None:
+        """Remove all aliases that point to stream_agent_id. Thread-safe."""
+        async def _do() -> None:
+            async with self._lock:
+                stale = [k for k, v in self._aliases.items() if v == stream_agent_id]
+                for k in stale:
+                    del self._aliases[k]
+        # This method may be called from a non-async context; schedule if loop is running.
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(_do())
+            else:
+                loop.run_until_complete(_do())
+        except RuntimeError:
+            pass
 
     def on_status_query_response(self, cb: Callable) -> None:
         """Register a callback invoked whenever a STATUS_QUERY ack arrives."""
@@ -131,6 +164,12 @@ class ControlRouter:
                 if sub.stream_id in pending.expected_stream_ids:
                     pending.expected_stream_ids.discard(sub.stream_id)
                     self._maybe_resolve(pending)
+            # Remove aliases that pointed at this (now-dead) stream.
+            if not self._subs.get(sub.agent_id):
+                stale_aliases = [k for k, v in self._aliases.items() if v == sub.agent_id]
+                for k in stale_aliases:
+                    del self._aliases[k]
+                    logger.debug("removed stale alias %s -> %s", k, sub.agent_id)
         logger.info(
             "control unsubscribe agent_id=%s stream_id=%s", sub.agent_id, sub.stream_id
         )
@@ -159,6 +198,15 @@ class ControlRouter:
 
         async with self._lock:
             bucket = dict(self._subs.get(agent_id, {}))
+        # If no direct subscription found, check the alias map.  This handles
+        # the common case where the frontend sends controls to the ADK agent
+        # name ("weather_agent") but the transport subscribed with its
+        # identity-file UUID ("agent_abc123…").
+        if not bucket:
+            aliased_id = self._aliases.get(agent_id, "")
+            if aliased_id:
+                async with self._lock:
+                    bucket = dict(self._subs.get(aliased_id, {}))
         live_ids = [sid for sid, sub in bucket.items() if not sub.closed]
         if not live_ids:
             return DeliveryOutcome(control_id=control_id, result=DeliveryResult.UNAVAILABLE)

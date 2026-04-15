@@ -1,4 +1,35 @@
-# React + TypeScript + Vite
+# Harmonograf frontend
+
+React + TypeScript + Vite dev server for the Harmonograf console.
+
+## Running against a server
+
+`pnpm dev` starts Vite on `http://127.0.0.1:5173`. The app talks gRPC-Web to
+`harmonograf_server` at the URL in `VITE_HARMONOGRAF_API`; if that env var is
+unset, it falls back to `http://127.0.0.1:7532`, which matches the server's
+default `--web-port`. So:
+
+```bash
+# Terminal 1
+python -m harmonograf_server           # binds 127.0.0.1:7532 (gRPC-Web)
+# Terminal 2
+pnpm dev                               # Vite on :5173, talks to :7532
+```
+
+To point the frontend at a non-default server (different port or host), set
+`VITE_HARMONOGRAF_API` before launching Vite:
+
+```bash
+VITE_HARMONOGRAF_API=http://127.0.0.1:17532 pnpm dev
+```
+
+The env var name is `VITE_HARMONOGRAF_API` (the `VITE_` prefix is required so
+Vite exposes it to the browser bundle). If the URL is unreachable the session
+picker falls back to a "Server unreachable — showing demo sessions" view.
+
+---
+
+## Vite template notes
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 

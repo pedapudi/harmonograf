@@ -15,7 +15,7 @@ package harmonograf.v1;
 import "google/protobuf/timestamp.proto";
 import "harmonograf/v1/types.proto";
 
-option go_package = "github.com/anthropics/harmonograf/gen/harmonograf/v1;harmonografv1";
+option go_package = "github.com/pedapudi/harmonograf/gen/harmonograf/v1;harmonografv1";
 
 // ---------------------------------------------------------------------------
 // ListSessions
@@ -94,7 +94,23 @@ message SessionUpdate {
     PayloadAvailable payload_available = 14;
     // Agent responded to a STATUS_QUERY or proactively emitted a task report.
     TaskReport task_report = 15;
+    // A full task plan (initial burst or newly emitted by a client).
+    TaskPlan task_plan = 16;
+    // Delta: a single task's status changed (or it bound to a span).
+    UpdatedTaskStatus updated_task_status = 17;
+    // Single (timestamp, tokens, limit) sample for one agent's LLM
+    // context window. Delivered both during the initial burst (replaying
+    // the most recent samples from sqlite) and live as each heartbeat
+    // ingests.
+    ContextWindowSample context_window_sample = 18;
   }
+}
+
+message ContextWindowSample {
+  string agent_id = 1;
+  google.protobuf.Timestamp recorded_at = 2;
+  int64 tokens = 3;
+  int64 limit_tokens = 4;
 }
 
 message InitialBurstComplete {

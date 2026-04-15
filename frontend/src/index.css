@@ -142,14 +142,210 @@ code {
 .hg-shell {
   display: grid;
   grid-template-columns: var(--hg-rail-width) 1fr auto;
-  grid-template-rows: var(--hg-appbar-height) 1fr;
+  grid-template-rows: var(--hg-appbar-height) auto 1fr;
   grid-template-areas:
     'appbar appbar appbar'
+    'strip strip strip'
     'rail main drawer';
   height: 100%;
   width: 100%;
   background: var(--md-sys-color-surface, #10131a);
   color: var(--md-sys-color-on-surface, #e2e2e9);
+}
+
+/* Current task strip — live single-line banner below the AppBar. Collapses
+ * to zero height when no task is active because the component returns
+ * null, so the grid row is auto-sized. */
+.hg-strip {
+  grid-area: strip;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 14px;
+  background: var(--md-sys-color-surface-container, #1c1f26);
+  border-bottom: 1px solid var(--md-sys-color-outline-variant, #43474e);
+  font-size: 12px;
+  line-height: 1.4;
+  min-height: 26px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.hg-strip__label {
+  opacity: 0.55;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.hg-strip__title {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+.hg-strip__agent {
+  background: var(--md-sys-color-surface-container-high, #262931);
+  color: var(--md-sys-color-on-surface-variant, #c3c6cf);
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+}
+.hg-strip__chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.hg-strip__chip--running {
+  background: rgba(120, 220, 150, 0.18);
+  color: #78dc96;
+}
+.hg-strip__chip--pending,
+.hg-strip__chip--unspecified {
+  background: rgba(200, 200, 210, 0.12);
+  color: #c3c6cf;
+}
+.hg-strip__chip--completed {
+  background: rgba(168, 200, 255, 0.18);
+  color: #a8c8ff;
+}
+.hg-strip__chip--failed {
+  background: rgba(255, 120, 120, 0.18);
+  color: #ff8a8a;
+}
+.hg-strip__chip--cancelled {
+  background: rgba(200, 200, 210, 0.12);
+  color: #b0b0b8;
+}
+.hg-strip[data-running='true'] .hg-strip__chip--running {
+  animation: hg-strip-pulse 1.8s ease-in-out infinite;
+}
+@keyframes hg-strip-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.hg-strip__tool {
+  background: rgba(168, 200, 255, 0.14);
+  color: #a8c8ff;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hg-strip__thinking {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #7aa7ff;
+  vertical-align: middle;
+  animation: hg-strip-thinking 1.2s ease-in-out infinite;
+}
+.hg-strip__mode {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  cursor: help;
+}
+.hg-strip__mode--sequential {
+  background: rgba(122, 167, 255, 0.16);
+  color: #a8c8ff;
+  border-color: rgba(122, 167, 255, 0.4);
+}
+.hg-strip__mode--parallel {
+  background: rgba(120, 200, 140, 0.16);
+  color: #b7e8c1;
+  border-color: rgba(120, 200, 140, 0.4);
+}
+.hg-strip__mode--delegated {
+  background: rgba(200, 200, 210, 0.12);
+  color: #b0b0b8;
+  border-color: rgba(200, 200, 210, 0.3);
+}
+@keyframes hg-strip-thinking {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
+/* Plan revision banner — absolutely-positioned toast strip below the
+ * CurrentTaskStrip. Pointer-events pass through so it never blocks clicks on
+ * the Gantt underneath, and individual pills auto-dismiss after 4s. */
+.hg-revision-banner {
+  position: absolute;
+  top: calc(var(--hg-appbar-height) + 26px);
+  left: var(--hg-rail-width);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 6px 14px 0;
+  pointer-events: none;
+  z-index: 40;
+}
+.hg-shell:has(.hg-rail--collapsed) .hg-revision-banner {
+  left: var(--hg-rail-width-collapsed);
+}
+.hg-revision-banner__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 4px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  background: var(--md-sys-color-surface-container-high, #262a33);
+  color: var(--md-sys-color-on-surface, #e2e2e9);
+  border-left: 2px solid var(--md-sys-color-primary, #a8c8ff);
+  border-radius: 3px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  animation: hg-revision-slide 180ms ease-out;
+}
+.hg-revision-banner__label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 9px;
+  opacity: 0.85;
+}
+.hg-revision-banner__icon {
+  font-size: 13px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+}
+.hg-revision-banner__reason {
+  max-width: 480px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes hg-revision-slide {
+  from { transform: translateY(-4px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Currently-RUNNING task row in the Gantt bottom task panel. */
+.hg-task-row--running {
+  box-shadow: inset 2px 0 0 var(--md-sys-color-primary, #a8c8ff);
+  animation: hg-task-row-pulse 1.8s ease-in-out infinite;
+}
+@keyframes hg-task-row-pulse {
+  0%, 100% { background-color: rgba(168, 200, 255, 0.06); }
+  50% { background-color: rgba(168, 200, 255, 0.18); }
 }
 
 .hg-main {
@@ -316,8 +512,8 @@ code {
 .hg-transport {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
+  gap: 8px;
+  padding: 0 12px;
   background: var(--md-sys-color-surface-container, #1c1f26);
   border-top: 1px solid var(--md-sys-color-outline-variant, #43474e);
   height: var(--hg-transport-height);
@@ -331,46 +527,91 @@ code {
   cursor: pointer;
   color: inherit;
   font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
 }
-.hg-transport__btn:hover {
+.hg-transport__btn:hover:not(:disabled) {
   background: var(--md-sys-color-surface-container-highest, #31333c);
+}
+.hg-transport__btn:disabled {
+  opacity: 0.38;
+  cursor: default;
 }
 .hg-transport__group {
   display: flex;
+  align-items: center;
   gap: 4px;
+}
+.hg-transport__divider {
+  width: 1px;
+  height: 20px;
+  background: var(--md-sys-color-outline-variant, #43474e);
+  flex-shrink: 0;
+}
+/* Live/paused group: badge + clock + action button */
+.hg-transport__live-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hg-transport__live-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--md-sys-color-primary, #a8c8ff);
+}
+.hg-transport__paused-badge {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  opacity: 0.55;
 }
 .hg-transport__clock {
   font-family: ui-monospace, Consolas, monospace;
   font-size: 12px;
-  opacity: 0.85;
+  opacity: 0.8;
+}
+.hg-transport__pause-btn {
+  padding: 3px 7px;
+  font-size: 11px;
+}
+.hg-transport__return-live-btn {
+  background: var(--md-sys-color-tertiary-container, #3a3000);
+  border-color: var(--md-sys-color-tertiary, #e8c84c);
+  color: var(--md-sys-color-on-tertiary-container, #e8c84c);
+  font-weight: 600;
+  font-size: 11px;
+  padding: 3px 9px;
+}
+.hg-transport__return-live-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--md-sys-color-tertiary-container, #3a3000) 80%, white);
 }
 .hg-transport__spacer {
   flex: 1;
 }
 .hg-transport__live-dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
-  background: var(--md-sys-color-error, #ffb4ab);
-  box-shadow: 0 0 8px var(--md-sys-color-error, #ffb4ab);
+  background: var(--md-sys-color-primary, #a8c8ff);
+  box-shadow: 0 0 6px var(--md-sys-color-primary, #a8c8ff);
   animation: hg-live-pulse 1.6s ease-in-out infinite;
+  flex-shrink: 0;
 }
 @keyframes hg-live-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }
-.hg-transport__follow-btn {
-  font-family: ui-monospace, Consolas, monospace;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  min-width: 82px;
-  text-align: center;
-}
-.hg-transport__follow-btn[data-active] {
-  background: var(--md-sys-color-primary-container, #00468a);
-  color: var(--md-sys-color-on-primary-container, #d6e3ff);
-  border-color: var(--md-sys-color-primary, #a8c8ff);
+.hg-transport__zoom-label {
+  font-size: 11px;
+  opacity: 0.65;
+  white-space: nowrap;
 }
 
 /* ==========================================================================
@@ -511,6 +752,49 @@ code {
   margin-bottom: 12px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--md-sys-color-outline-variant, #43474e);
+}
+.hg-drawer__current-task {
+  padding: 10px 16px 12px 16px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant, #43474e);
+  background: var(--md-sys-color-surface-container, #1c1f26);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hg-drawer__current-task--highlighted {
+  background: var(--md-sys-color-primary-container, #00468a);
+  color: var(--md-sys-color-on-primary-container, #d6e3ff);
+}
+.hg-drawer__current-task-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.hg-drawer__current-task-label {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.65;
+}
+.hg-drawer__current-task-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.hg-drawer__current-task-desc {
+  font-size: 11px;
+  line-height: 1.5;
+  opacity: 0.8;
+  overflow-wrap: anywhere;
+}
+.hg-drawer__current-task-agent {
+  font-size: 11px;
+  opacity: 0.75;
+}
+.hg-drawer__current-task[data-running='true'] .hg-strip__chip--running {
+  animation: hg-strip-pulse 1.8s ease-in-out infinite;
 }
 .hg-drawer__section-header {
   display: flex;

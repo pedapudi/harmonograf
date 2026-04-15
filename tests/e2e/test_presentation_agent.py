@@ -802,7 +802,10 @@ class TestPresentationAppExport:
         agent_mod.web_developer_agent.model = scripted
         agent_mod.reviewer_agent.model = scripted
         agent_mod.debugger_agent.model = scripted
-        agent_mod.root_agent.model = scripted
+        # root_agent is a HarmonografAgent wrapping the coordinator —
+        # assign the scripted model to the inner coordinator, not the
+        # wrapper (which has no ``model`` field).
+        agent_mod._inner_root_agent.model = scripted
 
         from google.adk.runners import InMemoryRunner
 

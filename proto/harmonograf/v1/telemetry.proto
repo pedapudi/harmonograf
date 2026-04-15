@@ -17,7 +17,7 @@ package harmonograf.v1;
 import "google/protobuf/timestamp.proto";
 import "harmonograf/v1/types.proto";
 
-option go_package = "github.com/anthropics/harmonograf/gen/harmonograf/v1;harmonografv1";
+option go_package = "github.com/pedapudi/harmonograf/gen/harmonograf/v1;harmonografv1";
 
 // ---------------------------------------------------------------------------
 // Upstream messages (client → server)
@@ -113,6 +113,14 @@ message Heartbeat {
   // client adapter (e.g. "Calling tool search_web with query: climate change").
   // Empty string means no current activity description is available.
   string current_activity = 9;
+
+  // Most recent snapshot of the LLM context window for this agent. The
+  // client adapter observes each model call (ADK before/after_model_callback)
+  // and updates these fields; the heartbeat loop ships whatever is current.
+  // Both fields default to 0 which is treated as "not populated" — the
+  // server ignores zero-valued samples on ingest rather than persisting them.
+  int64 context_window_tokens = 10;
+  int64 context_window_limit_tokens = 11;
 }
 
 // Graceful client shutdown — server marks the agent DISCONNECTED without
@@ -134,6 +142,13 @@ message TelemetryUp {
     // telemetry to preserve happens-before. See types.proto ControlAck.
     ControlAck control_ack = 7;
     Goodbye goodbye = 8;
+    // Task plan emitted by the client's PlannerHelper before normal
+    // execution begins. See types.proto TaskPlan.
+    TaskPlan task_plan = 9;
+    // Explicit task status delta. Usually statuses are derived server-side
+    // from spans that carry an hgraf.task_id attribute; this is an escape
+    // hatch for cases where no span exists.
+    UpdatedTaskStatus task_status_update = 10;
   }
 }
 

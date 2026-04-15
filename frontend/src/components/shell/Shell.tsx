@@ -1,15 +1,17 @@
 import { AppBar } from './AppBar';
+import { CurrentTaskStrip } from './CurrentTaskStrip';
+import { PlanRevisionBanner } from './PlanRevisionBanner';
 import { NavRail } from './NavRail';
 import { Drawer } from './Drawer';
-import { GanttPlaceholder } from '../Gantt/GanttPlaceholder';
-import { TransportBar } from '../TransportBar/TransportBar';
 import { SessionPicker } from '../SessionPicker/SessionPicker';
 import { HelpOverlay } from './HelpOverlay';
+import { GanttLegend } from '../Gantt/GanttLegend';
 import { ShellErrorBoundary } from './ErrorBoundary';
 import { SessionsSyncer } from '../../rpc/SessionsSyncer';
 import { useGlobalShortcuts } from '../../lib/shortcuts';
 import { useUiStore } from '../../state/uiStore';
 import { ActivityView } from './views/ActivityView';
+import { GanttView } from './views/GanttView';
 import { GraphView } from './views/GraphView';
 import { NotesView } from './views/NotesView';
 import { SettingsView } from './views/SettingsView';
@@ -21,15 +23,12 @@ export function Shell() {
     <div className="hg-shell">
       <SessionsSyncer />
       <AppBar />
+      <CurrentTaskStrip />
+      <PlanRevisionBanner />
       <NavRail />
       <main className="hg-main" data-testid="main-content" data-view={navSection}>
         <ShellErrorBoundary key={navSection}>
-          {navSection === 'sessions' && (
-            <>
-              <GanttPlaceholder />
-              <TransportBar />
-            </>
-          )}
+          {navSection === 'sessions' && <GanttView />}
           {navSection === 'activity' && <ActivityView />}
           {navSection === 'graph' && <GraphView />}
           {navSection === 'annotations' && <NotesView />}
@@ -39,6 +38,7 @@ export function Shell() {
       <Drawer />
       <SessionPicker />
       <HelpOverlay />
+      <GanttLegend />
     </div>
   );
 }

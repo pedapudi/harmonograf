@@ -31,3 +31,9 @@ presentation_agent/output/
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+
+# Python build artifacts
+client/build/
+
+# Demo output tarballs
+waffle.tar.gz

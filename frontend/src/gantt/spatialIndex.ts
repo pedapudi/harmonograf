@@ -53,6 +53,10 @@ export class SpanIndex {
     return this.byId.get(id);
   }
 
+  all(): IterableIterator<Span> {
+    return this.byId.values();
+  }
+
   append(span: Span): void {
     // Idempotent on span id: WatchSession can deliver the same span via both
     // the initial snapshot and a live-stream delta if the delta lands in the

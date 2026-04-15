@@ -17,6 +17,11 @@ from harmonograf_server.storage.base import (
     AnnotationTarget,
     Capability,
     Framework,
+    Task,
+    TaskEdge,
+    TaskPlan,
+    TaskStatus,
+    ContextWindowSample,
 )
 from harmonograf_server.storage.factory import make_store
 
@@ -39,5 +44,10 @@ __all__ = [
     "AnnotationTarget",
     "Capability",
     "Framework",
+    "Task",
+    "TaskEdge",
+    "TaskPlan",
+    "TaskStatus",
+    "ContextWindowSample",
     "make_store",
 ]

@@ -22,6 +22,12 @@ from typing import Any, Optional
 from google.adk.agents import Agent
 from google.adk.tools import AgentTool, FunctionTool
 
+try:
+    from harmonograf_client.tools import augment_instruction as _hg_augment
+except Exception:  # noqa: BLE001 — keep module importable without the client
+    def _hg_augment(existing: str) -> str:  # type: ignore[misc]
+        return existing
+
 log = logging.getLogger(__name__)
 
 
@@ -113,7 +119,7 @@ MODEL_NAME = os.environ.get("USER_MODEL_NAME", "gemini-2.5-flash")
 research_agent = Agent(
     name="research_agent",
     model=MODEL_NAME,
-    instruction=(
+    instruction=_hg_augment(
         "You are a researcher. Your goal is to gather information about the "
         "topic the user provides.\nThink step-by-step and provide a "
         "comprehensive synthesis of high-quality bullet points and facts "
@@ -129,7 +135,7 @@ research_agent = Agent(
 web_developer_agent = Agent(
     name="web_developer_agent",
     model=MODEL_NAME,
-    instruction=(
+    instruction=_hg_augment(
         "You are an expert Frontend Web Developer. Your goal is to take "
         "research on a topic and generate a stunning, interactive, "
         "single-page presentation slideshow.\nGenerate beautiful semantic "
@@ -152,7 +158,7 @@ web_developer_agent = Agent(
 reviewer_agent = Agent(
     name="reviewer_agent",
     model=MODEL_NAME,
-    instruction=(
+    instruction=_hg_augment(
         "You are a senior frontend code reviewer. You will be given the "
         "topic of a presentation that ``web_developer_agent`` just "
         "generated. Call the ``read_presentation_files`` tool with the "
@@ -172,7 +178,7 @@ reviewer_agent = Agent(
 debugger_agent = Agent(
     name="debugger_agent",
     model=MODEL_NAME,
-    instruction=(
+    instruction=_hg_augment(
         "You are a debugging agent. You are invoked when "
         "``write_webpage`` failed or when ``reviewer_agent`` flagged "
         "critical issues in the generated presentation. Read the issues "
@@ -188,7 +194,7 @@ debugger_agent = Agent(
     tools=[patch_file_tool],
 )
 
-root_agent = Agent(
+_inner_root_agent = Agent(
     name="coordinator_agent",
     model=MODEL_NAME,
     instruction=(
@@ -221,6 +227,30 @@ root_agent = Agent(
         AgentTool(debugger_agent),
     ],
 )
+
+
+# HarmonografAgent wraps the coordinator so ADK's entry points
+# (``adk web`` / ``adk run`` / ``adk api_server``) pick up plan-driven
+# orchestration transparently. ``harmonograf_client`` is late-bound in
+# ``_build_app()`` — the module-level root_agent holds ``None`` until
+# the App is constructed, at which point we mutate the attribute in
+# place. This keeps module import cheap for callers that only need the
+# inner agents.
+try:
+    from harmonograf_client import HarmonografAgent as _HarmonografAgent
+except Exception:  # noqa: BLE001 — keep module importable without the client
+    _HarmonografAgent = None  # type: ignore[assignment,misc]
+
+if _HarmonografAgent is not None:
+    root_agent = _HarmonografAgent(
+        name="harmonograf",
+        description="Harmonograf orchestrator wrapping coordinator_agent",
+        inner_agent=_inner_root_agent,
+        harmonograf_client=None,
+        planner=None,
+    )
+else:
+    root_agent = _inner_root_agent  # type: ignore[assignment]
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +305,17 @@ def _build_app() -> Any:
         if not _ATEXIT_REGISTERED:
             atexit.register(_shutdown_client)
             _ATEXIT_REGISTERED = True
+        # make_adk_plugin auto-wires a default LLMPlanner backed by ADK's
+        # own LLM registry when planner= is left unset, so the
+        # HUMAN_IN_LOOP / STEERING capabilities advertised above are
+        # actually driven by plan generation and mid-run refinement.
         plugins.append(make_adk_plugin(_CLIENT))
+        # Late-bind the harmonograf client onto the wrapper agent so its
+        # orchestration loop can reach the plugin's shared state.
+        if _HarmonografAgent is not None and isinstance(
+            root_agent, _HarmonografAgent
+        ):
+            object.__setattr__(root_agent, "harmonograf_client", _CLIENT)
         log.info(
             "harmonograf: instrumented presentation_agent → %s (agent_id=%s)",
             server_addr,
@@ -300,6 +340,43 @@ def __getattr__(name: str) -> Any:
             _APP = _build_app()
         return _APP
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def make_harmonograf_runner(**kwargs: Any) -> Any:
+    """Build a :class:`HarmonografRunner` wrapping ``root_agent`` with
+    plan enforcement enabled. Callers that bypass ``adk run`` / ``adk web``
+    (e.g. a custom entrypoint or an integration test) can use this to
+    actually drive the agent through the planner-generated DAG rather
+    than relying on the softer plugin-only injection path.
+
+    Returns ``None`` when ``harmonograf_client`` is unavailable so the
+    demo module stays importable in minimal environments.
+    """
+    global _CLIENT, _ATEXIT_REGISTERED
+
+    try:
+        from harmonograf_client import Client
+        from harmonograf_client.runner import HarmonografRunner
+    except Exception as e:  # noqa: BLE001
+        log.warning(
+            "harmonograf_client unavailable (%s); make_harmonograf_runner returning None",
+            e,
+        )
+        return None
+
+    server_addr = os.environ.get("HARMONOGRAF_SERVER", _DEFAULT_SERVER)
+    if _CLIENT is None:
+        _CLIENT = Client(
+            name="presentation",
+            server_addr=server_addr,
+            framework="ADK",
+            capabilities=["HUMAN_IN_LOOP", "STEERING"],
+        )
+        if not _ATEXIT_REGISTERED:
+            atexit.register(_shutdown_client)
+            _ATEXIT_REGISTERED = True
+
+    return HarmonografRunner(agent=root_agent, client=_CLIENT, **kwargs)
 
 
 def _reset_for_testing() -> None:

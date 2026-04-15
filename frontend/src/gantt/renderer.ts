@@ -14,10 +14,16 @@
 // and schedules redraws via requestAnimationFrame.
 
 import { colorForAgent } from '../theme/agentColors';
+import type { TaskPlanMode } from '../state/uiStore';
 import { bucketKey, cssVar, refreshThemeCache, resolveStyle } from './colors';
+import {
+  computeContextBandGeom,
+  contextColorForRatio,
+  contextRatio,
+} from './contextOverlay';
 import type { SessionStore } from './index';
 import type { SpanIndex, DirtyRect } from './spatialIndex';
-import type { Agent, Span, SpanKind } from './types';
+import type { Agent, ContextWindowSample, Span, SpanKind, Task, TaskStatus } from './types';
 import {
   GUTTER_WIDTH_PX,
   ROW_HEIGHT_FOCUSED_PX,
@@ -110,6 +116,12 @@ export class GanttRenderer {
   private focusedAgentId: string | null = null;
   private hiddenAgentIds: Set<string> = new Set();
   private selectedSpanId: string | null = null;
+  // Span id resolved from the UI store's `selectedTaskId` — set by chrome via
+  // setSelectedTaskSpanId so the overlay can draw a bright halo around the bar
+  // that corresponds to the currently selected task. Kept separate from
+  // `selectedSpanId` so a direct click-to-select (thin stroke) and a
+  // task-driven selection (halo + stroke) can coexist and emphasize differently.
+  private selectedTaskSpanId: string | null = null;
   private hoveredSpanId: string | null = null;
   private edges: EdgeLayout[] = [];
   private hoveredEdgeIdx: number | null = null;
@@ -131,6 +143,36 @@ export class GanttRenderer {
     sampleIdx: 0,
     sampleCount: 0,
   };
+
+  // When non-null, the renderer freezes "session-relative now" at this value
+  // instead of advancing from the wall clock. Set via freezeAt().
+  private _frozenNowMs: number | null = null;
+
+  // Task-plan overlay state, pushed from the UI store via setters.
+  private taskPlanMode: TaskPlanMode = 'pre-strip';
+  private taskPlanVisible = true;
+
+  // Context-window overlay visibility, pushed from the UI store. The band
+  // is drawn inside drawBlocks so flipping this only re-renders the blocks
+  // layer, not the background or the overlay cursor.
+  private contextOverlayVisible = true;
+
+  // Cached per-agent band geometry from the last drawBlocks pass. Used by
+  // the hover tooltip code to interpolate the exact sample at the pointer x
+  // without re-walking the sample array.
+  private contextBandByAgent = new Map<
+    string,
+    {
+      samples: readonly ContextWindowSample[];
+      bandTopYAtRatio1: number;
+      baselineY: number;
+    }
+  >();
+
+  // Cache of on-screen task chip rects, populated during chip draw and read
+  // by the dependency-edge pass. Lives on the instance so the two passes can
+  // straddle the span render (chips under spans, dep arrows above).
+  private taskRectsById = new Map<string, { x: number; y: number; w: number; h: number }>();
 
   private store: SessionStore;
   private cb: RendererCallbacks;
@@ -156,6 +198,15 @@ export class GanttRenderer {
       this.store.spans.subscribe((d) => this.onSpanDirty(d)),
       this.store.agents.subscribe(() => {
         this.bgDirty = true;
+        this.blocksDirty = true;
+      }),
+      this.store.tasks.subscribe(() => {
+        // Task plan changes redraw blocks (task chips live alongside spans).
+        this.blocksDirty = true;
+      }),
+      this.store.contextSeries.subscribe(() => {
+        // A new context-window sample always redraws blocks (band geometry
+        // + header chip both live in the blocks pass).
         this.blocksDirty = true;
       }),
     );
@@ -351,6 +402,37 @@ export class GanttRenderer {
     return this.hiddenAgentIds.has(agentId);
   }
 
+  setTaskPlanMode(m: TaskPlanMode): void {
+    if (this.taskPlanMode === m) return;
+    this.taskPlanMode = m;
+    this.blocksDirty = true;
+  }
+
+  setTaskPlanVisible(v: boolean): void {
+    if (this.taskPlanVisible === v) return;
+    this.taskPlanVisible = v;
+    this.blocksDirty = true;
+  }
+
+  setContextOverlayVisible(v: boolean): void {
+    if (this.contextOverlayVisible === v) return;
+    this.contextOverlayVisible = v;
+    this.blocksDirty = true;
+    // Clear cached geometry when the overlay is hidden so the hover tooltip
+    // stops reporting stale samples.
+    if (!v) this.contextBandByAgent.clear();
+  }
+
+  // Push the resolved span id for the currently selected task (if any). The
+  // renderer doesn't know about tasks directly — chrome resolves taskId →
+  // boundSpanId via the TaskRegistry and calls this. Changing only marks the
+  // overlay dirty so the hot block path isn't touched.
+  setSelectedTaskSpanId(spanId: string | null): void {
+    if (this.selectedTaskSpanId === spanId) return;
+    this.selectedTaskSpanId = spanId;
+    this.overlayDirty = true;
+  }
+
   setHiddenAgents(ids: Iterable<string>): void {
     const next = new Set(ids);
     if (
@@ -394,11 +476,43 @@ export class GanttRenderer {
     });
   }
 
+  // --- Freeze / unfreeze ----------------------------------------------------
+
+  /**
+   * Freeze the renderer's "session-relative now" so open spans stop growing
+   * and the live-edge cursor stops moving.
+   * - Pass a number to freeze at a specific session-relative timestamp.
+   * - Pass null to return to live mode (advance from wall clock each frame).
+   * When called with a number, if you want to freeze at the current live edge,
+   * pass the current store.nowMs; the renderer's public getNowMs() returns it.
+   */
+  public freezeAt(ts: number | null): void {
+    if (ts !== null) {
+      // Freeze at the provided session-relative timestamp (or current nowMs if
+      // caller passed the sentinel value we expose via getNowMs()).
+      this._frozenNowMs = ts;
+      this.store.nowMs = ts;
+    } else {
+      // Unfreeze — resume advancing from wall clock next frame.
+      this._frozenNowMs = null;
+    }
+    this.blocksDirty = true;
+    this.overlayDirty = true;
+  }
+
+  /** Returns the current session-relative "now" in ms. */
+  public getNowMs(): number {
+    return this.store.nowMs;
+  }
+
   private frame(): void {
     // Advance "session-relative now" from the wall clock. The renderer owns
     // this — transport only sets wallClockStartMs on session connect.
+    // When frozen, skip the advance so bars and the live cursor stand still.
     const prevNowMs = this.store.nowMs;
-    if (this.store.wallClockStartMs > 0) {
+    if (this._frozenNowMs !== null) {
+      // Frozen — keep store.nowMs at the frozen value (already set in freezeAt).
+    } else if (this.store.wallClockStartMs > 0) {
       this.store.nowMs = Date.now() - this.store.wallClockStartMs;
     }
 
@@ -581,6 +695,16 @@ export class GanttRenderer {
     const agents = this.store.agents.list;
     const spanIndex: SpanIndex = this.store.spans;
 
+    // Context-window overlay — drawn FIRST inside the clipped data area so
+    // every downstream pass (task chips, spans, link curves) paints on top.
+    // It's a background signal, not foreground noise.
+    this.drawContextWindowBands(ctx);
+
+    // Draw task-plan chips + dependency edges BEFORE spans so spans visually
+    // overlay the planned chips. Task chips participate in the same frame as
+    // spans — no parallel React loop. See AGENTS.md: canvas hot path only.
+    this.drawTasksAndEdges(ctx);
+
     // Gather + bucket.
     type Bucket = {
       fill: string;
@@ -601,6 +725,10 @@ export class GanttRenderer {
       h: number;
       ticks: number;
     }> = [];
+    // Task #4: small brain badge painted in the corner of LLM_CALL blocks
+    // whose spans carry reasoning content. The badge is a hint that the
+    // span has a Trajectory worth opening in the drawer.
+    const brainBadges: Array<{ x: number; y: number; w: number; h: number }> = [];
 
     let y = TOP_MARGIN_PX;
     let visibleCount = 0;
@@ -675,6 +803,16 @@ export class GanttRenderer {
                 : 0;
           if (ticks > 0) {
             tickOverlays.push({ x: x1, y: laneTop, w: width, h: rectH, ticks });
+          }
+        }
+        // Brain badge: any LLM_CALL with reasoning content (live or done).
+        // Gate on has_thinking=true to keep the test cheap (no string attr
+        // parse in the hot path) and skip narrow blocks where the badge
+        // would collide with the kind icon label.
+        if (s.kind === 'LLM_CALL' && width >= 14) {
+          const ht = s.attributes['has_thinking'];
+          if (ht && ht.kind === 'bool' && ht.value) {
+            brainBadges.push({ x: x1, y: laneTop, w: width, h: rectH });
           }
         }
         visibleCount++;
@@ -760,6 +898,28 @@ export class GanttRenderer {
       ctx.globalAlpha = 1;
     }
 
+    // Brain badges: 10x10 corner glyphs painted in the top-right corner of
+    // LLM_CALL blocks that carry thinking. Drawn after labels so they stay
+    // visible and crisp. Task #4.
+    if (brainBadges.length > 0) {
+      ctx.save();
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textBaseline = 'top';
+      ctx.textAlign = 'right';
+      ctx.fillStyle = cssVar('--md-sys-color-primary') || '#a8c8ff';
+      ctx.globalAlpha = 0.92;
+      for (const b of brainBadges) {
+        ctx.fillText('🧠', b.x + b.w - 2, b.y + 1);
+      }
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+
+    // Task-plan dependency edges are drawn after the span bucket flush so
+    // their curves + arrowheads render above spans (chips themselves were
+    // laid down earlier in drawTasksAndEdges, before spans, on purpose).
+    this.drawTaskDepEdges(ctx);
+
     // Links layer: cross-agent LINK_INVOKED edges. Drawn inside the clipped
     // data area so curves never bleed into the gutter or axis.
     this.drawLinks(ctx);
@@ -767,6 +927,7 @@ export class GanttRenderer {
     ctx.restore();
     // Expose last-draw count for stress tooling.
     this.lastDrawnCount = visibleCount;
+    this.lastBrainBadgeCount = brainBadges.length;
   }
 
   // --- Links -------------------------------------------------------------
@@ -779,14 +940,24 @@ export class GanttRenderer {
     const agents = this.store.agents.list;
     if (agents.length === 0) return;
 
-    // Row center lookup.
-    const rowCenterY = new Map<string, number>();
+    // Row layout lookup: top, height, center. We need top+height to resolve
+    // per-span lane positions so link anchors land on the actual bar, not the
+    // row's center line.
+    type RowLayout = { top: number; height: number; centerY: number };
+    const rowLayout = new Map<string, RowLayout>();
     let y = TOP_MARGIN_PX;
     for (const agent of agents) {
       const rowH = this.rowHeight(agent.id);
-      rowCenterY.set(agent.id, y + rowH / 2);
+      rowLayout.set(agent.id, { top: y, height: rowH, centerY: y + rowH / 2 });
       y += rowH;
     }
+    const spanCenterY = (s: Span, row: RowLayout): number => {
+      const laneH = Math.max(SUB_LANE_HEIGHT_PX, Math.floor(row.height / 3));
+      const laneTop = row.top + 2 + (s.lane >= 0 ? s.lane : 0) * laneH;
+      const laneBot = Math.min(row.top + row.height - 2, laneTop + laneH - 2);
+      const rectH = Math.max(6, laneBot - laneTop);
+      return laneTop + rectH / 2;
+    };
 
     const dataLeft = GUTTER_WIDTH_PX + 10;
     const dataRight = w;
@@ -799,18 +970,32 @@ export class GanttRenderer {
       this.store.spans.queryAgent(agent.id, vs - margin, ve + margin, scratch);
       for (const s of scratch) {
         if (!s.links || s.links.length === 0) continue;
+        const srcRow = rowLayout.get(s.agentId);
+        if (!srcRow) continue;
         for (const link of s.links) {
           if (link.relation !== 'INVOKED') continue;
           const target = this.store.spans.get(link.targetSpanId);
-          if (!target) continue;
-          const srcY = rowCenterY.get(s.agentId);
-          const tgtY = rowCenterY.get(target.agentId);
-          if (srcY === undefined || tgtY === undefined) continue;
-          // Source anchor: right edge of the transfer span (its endMs, or now
-          // if still running). Target anchor: left edge of the child span.
-          const srcMs = s.endMs ?? target.startMs;
+          // Graceful fallback when the invoked span hasn't started yet: drop
+          // the arrowhead at the target agent row's center at the source's
+          // trailing edge so the user still sees the handoff intent.
+          const tgtAgentId = target?.agentId ?? link.targetAgentId;
+          const tgtRow = rowLayout.get(tgtAgentId);
+          if (!tgtRow) continue;
+          const srcY = spanCenterY(s, srcRow);
+          // Source anchor: right edge of the source span (its endMs, or the
+          // invoked child's start if the source is still running). This marks
+          // the moment of invocation on the source's own bar.
+          const srcMs = s.endMs ?? target?.startMs ?? s.startMs;
           const x1 = msToPx(this.viewport, w, srcMs);
-          const x2 = msToPx(this.viewport, w, target.startMs);
+          let x2: number;
+          let tgtY: number;
+          if (target) {
+            x2 = msToPx(this.viewport, w, target.startMs);
+            tgtY = spanCenterY(target, tgtRow);
+          } else {
+            x2 = x1;
+            tgtY = tgtRow.centerY;
+          }
           // Viewport cull: both endpoints off the same side of the data area.
           if ((x1 < dataLeft && x2 < dataLeft) || (x1 > dataRight && x2 > dataRight)) {
             continue;
@@ -818,7 +1003,7 @@ export class GanttRenderer {
           const color = colorForAgent(s.agentId);
           this.edges.push({
             sourceSpanId: s.id,
-            targetSpanId: target.id,
+            targetSpanId: target?.id ?? link.targetSpanId,
             x1,
             y1: srcY,
             x2,
@@ -840,6 +1025,407 @@ export class GanttRenderer {
       drawEdgePath(ctx, e.x1, e.y1, e.x2, e.y2);
       ctx.stroke();
       drawArrowhead(ctx, e.x2, e.y2, e.x1, e.y1, e.color);
+    }
+    ctx.restore();
+  }
+
+  // --- Context-window overlay -------------------------------------------
+  //
+  // Per-agent area band hugging the bottom of each row, tracing tokens/limit
+  // over time. Drawn before spans (and before task chips) so anything else
+  // in the row reads as foreground. The fill color is driven by the peak
+  // ratio within the visible window so a row that touched critical at any
+  // point reads as a red band even if the current tokens recovered, which
+  // matches the user ask to surface context pressure.
+
+  private drawContextWindowBands(ctx: CanvasRenderingContext2D): void {
+    this.contextBandByAgent.clear();
+    if (!this.contextOverlayVisible) return;
+    const series = this.store.contextSeries;
+    if (!series.hasAny()) return;
+
+    const vs = viewportStart(this.viewport);
+    const ve = this.viewport.endMs;
+    const agents = this.store.agents.list;
+    const w = this.widthCss;
+    const leftClipPx = GUTTER_WIDTH_PX + 10;
+    const rightClipPx = w;
+    const msToPxBound = (ms: number): number => msToPx(this.viewport, w, ms);
+
+    let y = TOP_MARGIN_PX;
+    ctx.save();
+    for (const agent of agents) {
+      const rowH = this.rowHeight(agent.id);
+      if (this.hiddenAgentIds.has(agent.id)) {
+        y += rowH;
+        continue;
+      }
+      const samples = series.forAgent(agent.id);
+      if (samples.length === 0) {
+        y += rowH;
+        continue;
+      }
+      const bandHeight = Math.max(10, Math.floor(rowH * 0.55));
+      const geom = computeContextBandGeom({
+        samples,
+        viewportStartMs: vs,
+        viewportEndMs: ve,
+        msToPx: msToPxBound,
+        leftClipPx,
+        rightClipPx,
+        rowTopY: y,
+        rowHeight: rowH,
+        bandHeight,
+      });
+      if (!geom) {
+        y += rowH;
+        continue;
+      }
+      const color = contextColorForRatio(geom.maxRatio);
+
+      ctx.beginPath();
+      const first = geom.top[0];
+      ctx.moveTo(first.x, first.y);
+      for (let i = 1; i < geom.top.length; i++) {
+        ctx.lineTo(geom.top[i].x, geom.top[i].y);
+      }
+      ctx.lineTo(geom.top[geom.top.length - 1].x, geom.baselineY);
+      ctx.lineTo(first.x, geom.baselineY);
+      ctx.closePath();
+      ctx.fillStyle = color.fill;
+      ctx.globalAlpha = 0.18;
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(first.x, first.y);
+      for (let i = 1; i < geom.top.length; i++) {
+        ctx.lineTo(geom.top[i].x, geom.top[i].y);
+      }
+      ctx.strokeStyle = color.stroke;
+      ctx.globalAlpha = 0.55;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      this.contextBandByAgent.set(agent.id, {
+        samples,
+        bandTopYAtRatio1: geom.baselineY - bandHeight,
+        baselineY: geom.baselineY,
+      });
+
+      y += rowH;
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  // Pointer → context sample. Used by GanttCanvas to render a DOM tooltip
+  // with tokens/limit/% when the user hovers inside a row that has series
+  // data. Binary searches the cached sample array; step-function semantics
+  // mean "last sample whose tMs ≤ pointer time" is the value in effect.
+  contextSampleAt(
+    px: number,
+    py: number,
+  ): { agentId: string; sample: ContextWindowSample; ratio: number } | null {
+    if (!this.contextOverlayVisible) return null;
+    if (px < GUTTER_WIDTH_PX || py < TOP_MARGIN_PX) return null;
+    const agents = this.store.agents.list;
+    let y = TOP_MARGIN_PX;
+    for (const agent of agents) {
+      const rowH = this.rowHeight(agent.id);
+      if (py >= y && py < y + rowH) {
+        const cached = this.contextBandByAgent.get(agent.id);
+        if (!cached || cached.samples.length === 0) return null;
+        const tMs = pxToMs(this.viewport, this.widthCss, px);
+        let lo = 0;
+        let hi = cached.samples.length - 1;
+        let idx = 0;
+        while (lo <= hi) {
+          const mid = (lo + hi) >>> 1;
+          if (cached.samples[mid].tMs <= tMs) {
+            idx = mid;
+            lo = mid + 1;
+          } else {
+            hi = mid - 1;
+          }
+        }
+        const sample = cached.samples[idx];
+        return {
+          agentId: agent.id,
+          sample,
+          ratio: contextRatio(sample.tokens, sample.limitTokens),
+        };
+      }
+      y += rowH;
+    }
+    return null;
+  }
+
+  // --- Task plan chips + dependency edges --------------------------------
+
+  private drawTasksAndEdges(ctx: CanvasRenderingContext2D): void {
+    this.taskRectsById.clear();
+    if (!this.taskPlanVisible) return;
+    if (this.store.tasks.size === 0) return;
+    const mode = this.taskPlanMode;
+    const agents = this.store.agents.list;
+    const w = this.widthCss;
+    const vp = this.viewport;
+
+    const rectsById = this.taskRectsById;
+
+    // Pre-strip chip row lives at the top of each agent row (small pills); ghost
+    // boxes live in a lower lane at predicted-time positions. Hybrid draws both.
+    const stripChipH = 7;
+    const stripChipW = 36;
+    const stripChipGap = 3;
+
+    let y = TOP_MARGIN_PX;
+    for (const agent of agents) {
+      const rowH = this.rowHeight(agent.id);
+      if (this.hiddenAgentIds.has(agent.id)) {
+        y += rowH;
+        continue;
+      }
+      const tasks = this.store.tasks.tasksForAgent(agent.id);
+      if (tasks.length === 0) {
+        y += rowH;
+        continue;
+      }
+      const agentColor = colorForAgent(agent.id);
+
+      if (mode === 'pre-strip' || mode === 'hybrid') {
+        // Horizontal pill rail inside the row, just under the top border.
+        let px = GUTTER_WIDTH_PX + 10;
+        const py = y + 2;
+        for (const task of tasks) {
+          if (px + stripChipW > w) break;
+          this.drawTaskChip(
+            ctx,
+            px,
+            py,
+            stripChipW,
+            stripChipH,
+            task,
+            agentColor,
+            /*compact*/ true,
+          );
+          rectsById.set(task.id, { x: px, y: py, w: stripChipW, h: stripChipH });
+          px += stripChipW + stripChipGap;
+        }
+      }
+
+      if (mode === 'ghost' || mode === 'hybrid') {
+        // Ghost rect at predicted time, bottom lane of the row.
+        const laneH = Math.max(SUB_LANE_HEIGHT_PX, Math.floor(rowH / 3));
+        const ghostH = Math.max(8, laneH - 4);
+        const ghostY = y + rowH - ghostH - 3;
+        for (const task of tasks) {
+          const startMs = task.predictedStartMs || 0;
+          const durMs = Math.max(200, task.predictedDurationMs || 1000);
+          const x1 = msToPx(vp, w, startMs);
+          const x2 = msToPx(vp, w, startMs + durMs);
+          const width = Math.max(MIN_BLOCK_WIDTH_PX, x2 - x1);
+          // Viewport cull: fully off-screen.
+          if (x1 + width < GUTTER_WIDTH_PX || x1 > w) continue;
+          const clippedX = Math.max(GUTTER_WIDTH_PX + 10, x1);
+          this.drawTaskChip(
+            ctx,
+            clippedX,
+            ghostY,
+            Math.max(MIN_BLOCK_WIDTH_PX, x1 + width - clippedX),
+            ghostH,
+            task,
+            agentColor,
+            /*compact*/ false,
+          );
+          // In hybrid mode, prefer the pre-strip pill as the dependency-edge
+          // anchor (already set above) — it's a stable, compact rail that
+          // keeps arrows readable regardless of predicted-time ordering.
+          // Ghost-only mode still needs rects, so fall through when absent.
+          if (!rectsById.has(task.id)) {
+            rectsById.set(task.id, {
+              x: clippedX,
+              y: ghostY,
+              w: Math.max(MIN_BLOCK_WIDTH_PX, x1 + width - clippedX),
+              h: ghostH,
+            });
+          }
+        }
+      }
+
+      y += rowH;
+    }
+
+  }
+
+  // Draw dashed dependency curves + filled arrowheads on top of spans, using
+  // the chip rects populated by drawTasksAndEdges above. Runs post-span so
+  // arrows are never occluded by bar fills.
+  private drawTaskDepEdges(ctx: CanvasRenderingContext2D): void {
+    if (!this.taskPlanVisible) return;
+    const rectsById = this.taskRectsById;
+    if (rectsById.size === 0) return;
+    const plans = this.store.tasks.listPlans();
+    if (plans.length === 0) return;
+
+    const depColor = cssVar('--md-sys-color-on-surface-variant') || '#9aa3b4';
+
+    // Collect curves first; we do two passes (stroke then arrowhead) so dash
+    // state doesn't leak into the filled triangles.
+    type Curve = { x1: number; y1: number; cpx: number; cpy: number; x2: number; y2: number };
+    const curves: Curve[] = [];
+    for (const plan of plans) {
+      for (const edge of plan.edges) {
+        const a = rectsById.get(edge.fromTaskId);
+        const b = rectsById.get(edge.toTaskId);
+        if (!a || !b) continue;
+        const x1 = a.x + a.w;
+        const y1 = a.y + a.h / 2;
+        const x2 = b.x;
+        const y2 = b.y + b.h / 2;
+        // Quadratic with a single control point offset perpendicular to the
+        // straight line. The previous cubic used horizontal handles, which
+        // collapsed onto the rail for pre-strip edges (all pills share a y)
+        // and looped wildly off-canvas when the target sat left of the
+        // source. A perpendicular bulge always produces a visible arc.
+        const mx = (x1 + x2) / 2;
+        const my = (y1 + y2) / 2;
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const len = Math.hypot(dx, dy) || 1;
+        // Rotate the direction 90° CCW to get the perpendicular. Canvas y
+        // grows downward, so a negative y component arcs "up" on screen.
+        let perpX = -dy / len;
+        let perpY = dx / len;
+        if (perpY > 0) {
+          perpX = -perpX;
+          perpY = -perpY;
+        }
+        const bulge = Math.min(32, Math.max(12, len * 0.28));
+        curves.push({
+          x1,
+          y1,
+          cpx: mx + perpX * bulge,
+          cpy: my + perpY * bulge,
+          x2,
+          y2,
+        });
+      }
+    }
+    if (curves.length === 0) return;
+
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = depColor;
+    for (const c of curves) {
+      ctx.beginPath();
+      ctx.moveTo(c.x1, c.y1);
+      ctx.quadraticCurveTo(c.cpx, c.cpy, c.x2, c.y2);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = depColor;
+    for (const c of curves) {
+      // Tangent of a quadratic bezier at t=1 is parallel to (P2 - P1), i.e.
+      // (tip - cp). Fall back to the straight source→target vector if the
+      // control coincides with the endpoint (degenerate zero-length edge).
+      let tx = c.x2 - c.cpx;
+      let ty = c.y2 - c.cpy;
+      let len = Math.hypot(tx, ty);
+      if (len < 0.01) {
+        tx = c.x2 - c.x1;
+        ty = c.y2 - c.y1;
+        len = Math.hypot(tx, ty) || 1;
+      }
+      const ux = tx / len;
+      const uy = ty / len;
+      const size = 8;
+      const base = 7;
+      const bx = c.x2 - ux * size;
+      const by = c.y2 - uy * size;
+      const nx = -uy;
+      const ny = ux;
+      ctx.beginPath();
+      ctx.moveTo(c.x2, c.y2);
+      ctx.lineTo(bx + nx * (base / 2), by + ny * (base / 2));
+      ctx.lineTo(bx - nx * (base / 2), by - ny * (base / 2));
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  private drawTaskChip(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    task: Task,
+    agentColor: string,
+    compact: boolean,
+  ): void {
+    const status: TaskStatus = task.status;
+    const isPending = status === 'PENDING' || status === 'UNSPECIFIED';
+    const isRunning = status === 'RUNNING';
+    const isDone = status === 'COMPLETED';
+    const isFailed = status === 'FAILED';
+    const isCancelled = status === 'CANCELLED';
+
+    ctx.save();
+    if (isFailed) {
+      // Red dashed outline, transparent fill.
+      ctx.strokeStyle = cssVar('--md-sys-color-error') || '#ff6b6b';
+      ctx.setLineDash([3, 2]);
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.85;
+      ctx.strokeRect(x + 0.5, y + 0.5, Math.max(1, w - 1), Math.max(1, h - 1));
+      ctx.setLineDash([]);
+    } else {
+      // Dim outline + faint fill, color from agent.
+      ctx.fillStyle = agentColor;
+      ctx.globalAlpha = isRunning ? 0.55 : isDone ? 0.4 : isCancelled ? 0.15 : 0.2;
+      ctx.fillRect(x, y, w, h);
+      ctx.globalAlpha = isPending ? 0.45 : 0.8;
+      ctx.strokeStyle = agentColor;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, Math.max(1, w - 1), Math.max(1, h - 1));
+    }
+    ctx.globalAlpha = 1;
+
+    if (isDone && w >= 10) {
+      // Checkmark at right edge.
+      ctx.fillStyle = cssVar('--md-sys-color-on-surface') || '#e2e2e9';
+      ctx.font = `${Math.max(8, Math.min(11, h))}px system-ui, sans-serif`;
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'right';
+      ctx.fillText('✓', x + w - 2, y + h / 2);
+      ctx.textAlign = 'start';
+    }
+
+    if (!compact && w > 28 && !isDone) {
+      // Task title label — kept short; clip to the chip.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, w, h);
+      ctx.clip();
+      ctx.fillStyle = cssVar('--md-sys-color-on-surface-variant') || '#c3c6cf';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textBaseline = 'middle';
+      const label = task.title || '(task)';
+      ctx.fillText(label, x + 4, y + h / 2);
+      if (isCancelled) {
+        ctx.strokeStyle = cssVar('--md-sys-color-on-surface-variant') || '#c3c6cf';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x + 2, y + h / 2);
+        ctx.lineTo(x + w - 2, y + h / 2);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
     ctx.restore();
   }
@@ -882,6 +1468,10 @@ export class GanttRenderer {
   }
 
   lastDrawnCount = 0;
+  // Exposed for task #4 tests: how many brain badges were drawn on the
+  // most recent drawBlocks pass. Lets tests assert the LLM_CALL → badge
+  // mapping without having to diff pixels.
+  lastBrainBadgeCount = 0;
 
   // --- Overlay -----------------------------------------------------------
 
@@ -947,8 +1537,26 @@ export class GanttRenderer {
       }
     }
 
-    // Selection highlight
-    if (this.selectedSpanId) {
+    // Selection highlight: draw the task-driven halo first so the canvas-click
+    // selection stroke (below) sits on top. Using whichever span id resolves
+    // first lets a task selection light up the matching bar even when nothing
+    // was directly clicked in the canvas.
+    const haloSpanId = this.selectedTaskSpanId ?? this.selectedSpanId;
+    if (haloSpanId) {
+      const rect = this.rectForSpan(haloSpanId);
+      if (rect) {
+        const primary = cssVar('--md-sys-color-primary') || '#a8c8ff';
+        ctx.save();
+        // Outer glow — canvas shadow blurred outward.
+        ctx.shadowColor = primary;
+        ctx.shadowBlur = 14;
+        ctx.strokeStyle = primary;
+        ctx.lineWidth = 3;
+        ctx.strokeRect(rect.x - 2, rect.y - 2, rect.w + 4, rect.h + 4);
+        ctx.restore();
+      }
+    }
+    if (this.selectedSpanId && this.selectedSpanId !== this.selectedTaskSpanId) {
       const rect = this.rectForSpan(this.selectedSpanId);
       if (rect) {
         ctx.strokeStyle = cssVar('--md-sys-color-primary') || '#a8c8ff';
@@ -1123,6 +1731,7 @@ function drawArrowhead(
   const ux = dx / len;
   const uy = dy / len;
   const size = 7;
+  const base = 6;
   const ax = tipX - ux * size;
   const ay = tipY - uy * size;
   const px = -uy;
@@ -1131,8 +1740,8 @@ function drawArrowhead(
   ctx.fillStyle = color;
   ctx.beginPath();
   ctx.moveTo(tipX, tipY);
-  ctx.lineTo(ax + px * size * 0.5, ay + py * size * 0.5);
-  ctx.lineTo(ax - px * size * 0.5, ay - py * size * 0.5);
+  ctx.lineTo(ax + px * (base / 2), ay + py * (base / 2));
+  ctx.lineTo(ax - px * (base / 2), ay - py * (base / 2));
   ctx.closePath();
   ctx.fill();
   ctx.restore();

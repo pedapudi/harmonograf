@@ -1,0 +1,161 @@
+# Gantt view
+
+The Gantt is the default view (`Sessions` in the nav rail). It is the
+highest-density surface in harmonograf: one row per agent along the
+vertical axis, time on the horizontal axis, and a colored bar ("span") for
+every unit of work the agent reported.
+
+If in doubt about a glyph or color, open the **legend** from the `?` button
+on the app bar — it is the authoritative visual reference and mirrors every
+renderer symbol.
+
+## Layout recap
+
+![TODO: screenshot of the Gantt view with labels: agent gutter, time axis, spans, minimap, transport bar, task panel](_screenshots/gantt-view.png)
+
+| Region | Purpose |
+|---|---|
+| **Live activity panel** (top) | Rolling summary of currently-running invocations across all agents. Collapsible. |
+| **Agent gutter** (left) | One row per agent. Status dot, name, and focus/hide toggles live here. |
+| **Plot** (middle) | The actual Gantt. Spans render as bars; cross-agent edges draw as bezier links. |
+| **Minimap** (bottom-left, inside plot) | Full-session overview with a viewport rectangle. |
+| **Transport bar** (below plot) | Pause / resume / follow-live / zoom. See [Control actions](control-actions.md). |
+| **Task panel** (bottom) | Collapsible at-a-glance task list. Resize by dragging the top edge. |
+
+## Reading a bar — kinds, status, decorations
+
+Each bar is a **span** reported by the client library. The main signals you
+can read off a bar without opening the drawer:
+
+**Color → kind.** Harmonograf uses one hue per span kind. The full palette
+is in the legend; the condensed version:
+
+| Kind | Meaning |
+|---|---|
+| `INVOCATION` | Top-level agent turn. Renders recessed because it's a container. |
+| `LLM_CALL` | A model request. |
+| `TOOL_CALL` | A function/tool invocation. |
+| `USER_MESSAGE` / `AGENT_MESSAGE` | Inbound / outbound conversational turns. |
+| `TRANSFER` | A hand-off to another agent — these are the bars that originate cross-agent edges. |
+| `WAIT_FOR_HUMAN` | Agent is blocked on a human decision. See [Control actions](control-actions.md). |
+| `CUSTOM` / planned | Framework-specific or predicted. Planned spans render dashed at 30% opacity. |
+
+**Fill and outline → status.**
+
+| State | Look |
+|---|---|
+| Running | Bar **breathes** on a 2s loop and extends with live time. `endMs` is still null. |
+| Completed | Solid fill, no animation. |
+| Failed | Fill switches to the MD3 error hue; a red warning glyph overlays. |
+| Cancelled | Diagonal hatch, 30% opacity. |
+| Replaced | 30% opacity solid (superseded by a REPLACES link). |
+| Awaiting human | Red outline, 1s pulse, error-container fill. See [Control actions](control-actions.md#approvereject). |
+
+**Icons and glyphs.** At widths ≥ 12px, the renderer draws a small glyph for
+every kind (◉ invocation, ✦ LLM, ⚙ tool, ↪ transfer, ⏸ wait, 👤/💬 message,
+◌ planned). Below 12px the glyph is omitted to stop the row from looking
+noisy. Running LLM bars also get **streaming ticks** — thin white marks on
+the trailing edge, one per `streaming_tick` the client reported.
+
+**Cross-agent edges.** A bezier curve drawn at 40% opacity between a
+TRANSFER and its invoked child on another agent row. Arrowhead at the target.
+These edges are the visual signature of a delegation.
+
+## Navigating — pan, zoom, and selection
+
+### Mouse
+
+- **Click** a bar — selects it, opens the [drawer](drawer.md).
+- **Hover** a bar — pops a [quick-look popover](drawer.md#span-popover) with
+  summary, status, duration, latest thinking (if live), and quick actions.
+- **Right-click** — context menu (copy id, annotate, steer — see
+  [Control actions](control-actions.md#right-clicking-a-span)).
+- **Scroll wheel** — pan horizontally when the cursor is in the plot.
+- Click + drag inside the **minimap** to seek.
+
+### Keyboard
+
+Every shortcut is documented in [keyboard-shortcuts.md](keyboard-shortcuts.md).
+The Gantt-specific subset:
+
+| Key | Action |
+|---|---|
+| `←` / `→` | Pan 10% (wiring up in iter16 — see note below). |
+| `+` / `=` / `-` | Zoom in / out. |
+| `f` | Fit session to viewport (resets zoom to 1 hour window). |
+| `l` | Return to live cursor. |
+| `j` / `k` | Select next / previous span (sorted by start time across all agents). |
+| `[` / `]` | Focus previous / next agent row. |
+| `g` / `⇧g` | Jump to first / last agent. |
+| `Space` | Toggle live follow (pause all agents is on the transport bar). |
+| `Esc` | Close drawer / clear selection. |
+
+Note: the arrow-key pan handlers exist in `shortcuts.ts` but are intentionally
+no-ops pending the task-#11 renderer wiring. Use the minimap or the zoom
+buttons until that lands.
+
+## Minimap
+
+The minimap is fixed at 240×120 in the bottom-left of the plot and always
+visible. It shows:
+
+- One thin row per agent with a tinted rect for every span.
+- A semi-transparent blue rectangle marking the main viewport. The rect
+  tracks the real viewport as you pan or zoom.
+- +/- buttons for coarse zoom (same effect as the transport bar).
+
+Interaction:
+
+- **Click** anywhere on the minimap — seeks the main viewport so that the
+  click position becomes the left edge.
+- **Drag** — seeks continuously. The main Gantt repaints in real time.
+
+The minimap reads its time range from the union of all spans across every
+agent, so an agent that just joined will grow the minimap's horizontal
+extent and shift the viewport rectangle accordingly.
+
+## Live follow
+
+When `liveFollow` is on (the default after picking a session), the renderer
+keeps the right edge of the viewport pinned to "now" as new spans stream in.
+Any manual pan or minimap drag disables live follow and replaces the LIVE
+badge on the transport bar with `○ Viewport locked`. Press **L** or click
+the **↩ Follow live** button on the transport bar to re-attach.
+
+Pausing agents also unfollows live (since "now" isn't moving any more).
+Resuming agents re-attaches.
+
+## Focused and hidden agents
+
+You can focus a specific agent row with `[` / `]` or by clicking its name in
+the gutter. A focused row is highlighted but others remain visible.
+
+To **hide** an agent row entirely, use the gutter's hide toggle. Hidden
+agents are persisted in the UI store and the renderer filters them out of
+the plot (but not the minimap, so you can still see they exist). `showAll`
+on the UI store clears the hidden set.
+
+## Context window overlay (in this release)
+
+iter16 is adding a per-agent context-window overlay that renders the model's
+prompt window along the bottom of the agent row. When it lands this page
+will describe how to read it and how the overlay maps to the context
+telemetry being added in tasks #2 and #3. Treat this paragraph as a stub.
+
+## When the plot is empty
+
+If you pick a session and see nothing:
+
+- The session may have zero agents yet. Check the [Graph view](graph-view.md)
+  for a list — it also renders the `agent count` in its header.
+- The session may be live but extremely quiet; bars under a couple of pixels
+  wide are still drawn but invisible. Zoom in with `+`.
+- The agent may be connected but not reporting spans. See
+  [Troubleshooting](troubleshooting.md#gantt-is-empty).
+
+## Related pages
+
+- [Graph view](graph-view.md) — the same run as a sequence diagram.
+- [Drawer](drawer.md) — everything about the span you just clicked.
+- [Control actions](control-actions.md) — pause, steer, rewind, approve.
+- [Keyboard shortcuts](keyboard-shortcuts.md)

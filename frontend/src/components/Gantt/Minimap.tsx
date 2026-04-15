@@ -1,21 +1,22 @@
 // Minimap — a compact overview of the full session timeline rendered in a
-// fixed-size canvas in the bottom-right corner of the Gantt view.
+// fixed-size canvas in the bottom-left corner of the Gantt view.
 //
 // The minimap:
 //   - Draws one thin row per agent with colored rects for every span
 //   - Renders a semi-transparent viewport indicator rectangle
 //   - Supports click and drag to seek the main Gantt viewport
+//   - Provides +/- zoom buttons to widen/narrow the main viewport window
 
 import { useEffect, useRef, useCallback } from 'react';
 import type { OverlayContext } from '../../gantt/GanttCanvas';
 import { kindBaseColor } from '../../gantt/colors';
 import { viewportStart } from '../../gantt/viewport';
 
-const MM_W = 180;
-const MM_H = 90;
-const MM_PAD = 4;          // px padding inside minimap canvas
-const MM_AGENT_H = 6;      // px height per agent row in minimap
-const MM_AGENT_GAP = 1;    // px gap between agent rows
+const MM_W = 240;
+const MM_H = 120;
+const MM_PAD = 5;          // px padding inside minimap canvas
+const MM_AGENT_H = 7;      // px height per agent row in minimap
+const MM_AGENT_GAP = 2;    // px gap between agent rows
 
 // Total height of agent rows section
 function agentSectionHeight(agentCount: number): number {
@@ -37,7 +38,7 @@ export function Minimap({ ctx }: MinimapProps) {
   const draggingRef = useRef(false);
 
   // Compute the full session time range from all spans.
-  function getSessionRange(): { totalStartMs: number; totalEndMs: number } {
+  const getSessionRange = useCallback((): { totalStartMs: number; totalEndMs: number } => {
     const agentIds = store.spans.agentIds();
     let totalStartMs = Number.POSITIVE_INFINITY;
     let totalEndMs = 0;
@@ -56,7 +57,7 @@ export function Minimap({ ctx }: MinimapProps) {
     if (totalEndMs <= totalStartMs) totalEndMs = Math.max(store.nowMs, totalStartMs + 1);
 
     return { totalStartMs, totalEndMs };
-  }
+  }, [store]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -166,7 +167,7 @@ export function Minimap({ ctx }: MinimapProps) {
     c.strokeStyle = 'rgba(255,255,255,0.12)';
     c.lineWidth = 1;
     c.strokeRect(0.5, 0.5, w - 1, h - 1);
-  }, [renderer, store]);
+  }, [renderer, store, getSessionRange]);
 
   // Redraw whenever the tick changes (viewport moves, resize, span updates).
   useEffect(() => {
@@ -207,11 +208,11 @@ export function Minimap({ ctx }: MinimapProps) {
       const half = vp.windowMs / 2;
       renderer.setViewport({
         ...vp,
-        endMs: Math.max(vp.windowMs, targetMs + half),
+        endMs: targetMs + half,
         liveFollow: false,
       });
     },
-    [renderer, store],
+    [renderer, getSessionRange],
   );
 
   const handlePointerDown = useCallback(
@@ -238,32 +239,83 @@ export function Minimap({ ctx }: MinimapProps) {
     (e.currentTarget as HTMLCanvasElement).releasePointerCapture(e.pointerId);
   }, []);
 
+  const handleZoom = useCallback(
+    (factor: number, e: React.MouseEvent) => {
+      e.stopPropagation();
+      const vp = renderer.getViewport();
+      const midMs = vp.endMs - vp.windowMs / 2;
+      const newWindowMs = Math.max(5_000, Math.min(3_600_000, vp.windowMs * factor));
+      renderer.setViewport({
+        ...vp,
+        windowMs: newWindowMs,
+        endMs: midMs + newWindowMs / 2,
+        liveFollow: false,
+      });
+    },
+    [renderer],
+  );
+
   return (
-    <canvas
-      ref={canvasRef}
+    <div
       style={{
         position: 'absolute',
         bottom: 24,
         right: 16,
         zIndex: 20,
-        borderRadius: 6,
-        cursor: 'crosshair',
-        // Prevent the Gantt's wheel/click handlers from firing through.
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'stretch',
+        gap: 4,
         pointerEvents: 'auto',
       }}
-      width={MM_W}
-      height={MM_H}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
-      // Block wheel events from bubbling to the main Gantt canvas so the user
-      // can scroll within the minimap area without accidentally zooming.
+      // Block wheel/click from reaching the Gantt canvas underneath.
       onWheel={(e) => e.stopPropagation()}
-      // Block click propagation so the GanttCanvas onClick handler doesn't
-      // trigger span selection when clicking the minimap.
       onClick={(e) => e.stopPropagation()}
-      title="Minimap — click or drag to seek"
-    />
+    >
+      {/* Zoom controls */}
+      <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+        <button
+          title="Zoom in (narrow window)"
+          onClick={(e) => handleZoom(0.5, e)}
+          style={zoomBtnStyle}
+        >
+          +
+        </button>
+        <button
+          title="Zoom out (widen window)"
+          onClick={(e) => handleZoom(2, e)}
+          style={zoomBtnStyle}
+        >
+          −
+        </button>
+      </div>
+      <canvas
+        ref={canvasRef}
+        style={{ borderRadius: 6, cursor: 'crosshair', display: 'block' }}
+        width={MM_W}
+        height={MM_H}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        title="Minimap — click or drag to seek"
+      />
+    </div>
   );
 }
+
+const zoomBtnStyle: React.CSSProperties = {
+  width: 24,
+  height: 20,
+  padding: 0,
+  background: 'rgba(10,12,20,0.88)',
+  border: '1px solid rgba(255,255,255,0.12)',
+  borderRadius: 4,
+  color: 'rgba(255,255,255,0.75)',
+  fontSize: 14,
+  lineHeight: '18px',
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+};

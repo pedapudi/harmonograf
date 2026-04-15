@@ -61,7 +61,7 @@ class WatchSessionRequest(_message.Message):
     def __init__(self, session_id: _Optional[str] = ..., window_start: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., window_end: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class SessionUpdate(_message.Message):
-    __slots__ = ("session", "agent", "initial_span", "initial_annotation", "burst_complete", "new_span", "updated_span", "ended_span", "new_annotation", "agent_joined", "agent_left", "agent_status_changed", "session_ended", "payload_available", "task_report")
+    __slots__ = ("session", "agent", "initial_span", "initial_annotation", "burst_complete", "new_span", "updated_span", "ended_span", "new_annotation", "agent_joined", "agent_left", "agent_status_changed", "session_ended", "payload_available", "task_report", "task_plan", "updated_task_status", "context_window_sample")
     SESSION_FIELD_NUMBER: _ClassVar[int]
     AGENT_FIELD_NUMBER: _ClassVar[int]
     INITIAL_SPAN_FIELD_NUMBER: _ClassVar[int]
@@ -77,6 +77,9 @@ class SessionUpdate(_message.Message):
     SESSION_ENDED_FIELD_NUMBER: _ClassVar[int]
     PAYLOAD_AVAILABLE_FIELD_NUMBER: _ClassVar[int]
     TASK_REPORT_FIELD_NUMBER: _ClassVar[int]
+    TASK_PLAN_FIELD_NUMBER: _ClassVar[int]
+    UPDATED_TASK_STATUS_FIELD_NUMBER: _ClassVar[int]
+    CONTEXT_WINDOW_SAMPLE_FIELD_NUMBER: _ClassVar[int]
     session: _types_pb2.Session
     agent: _types_pb2.Agent
     initial_span: _types_pb2.Span
@@ -92,7 +95,22 @@ class SessionUpdate(_message.Message):
     session_ended: SessionEnded
     payload_available: PayloadAvailable
     task_report: TaskReport
-    def __init__(self, session: _Optional[_Union[_types_pb2.Session, _Mapping]] = ..., agent: _Optional[_Union[_types_pb2.Agent, _Mapping]] = ..., initial_span: _Optional[_Union[_types_pb2.Span, _Mapping]] = ..., initial_annotation: _Optional[_Union[_types_pb2.Annotation, _Mapping]] = ..., burst_complete: _Optional[_Union[InitialBurstComplete, _Mapping]] = ..., new_span: _Optional[_Union[NewSpan, _Mapping]] = ..., updated_span: _Optional[_Union[UpdatedSpan, _Mapping]] = ..., ended_span: _Optional[_Union[EndedSpan, _Mapping]] = ..., new_annotation: _Optional[_Union[NewAnnotation, _Mapping]] = ..., agent_joined: _Optional[_Union[AgentJoined, _Mapping]] = ..., agent_left: _Optional[_Union[AgentLeft, _Mapping]] = ..., agent_status_changed: _Optional[_Union[AgentStatusChanged, _Mapping]] = ..., session_ended: _Optional[_Union[SessionEnded, _Mapping]] = ..., payload_available: _Optional[_Union[PayloadAvailable, _Mapping]] = ..., task_report: _Optional[_Union[TaskReport, _Mapping]] = ...) -> None: ...
+    task_plan: _types_pb2.TaskPlan
+    updated_task_status: _types_pb2.UpdatedTaskStatus
+    context_window_sample: ContextWindowSample
+    def __init__(self, session: _Optional[_Union[_types_pb2.Session, _Mapping]] = ..., agent: _Optional[_Union[_types_pb2.Agent, _Mapping]] = ..., initial_span: _Optional[_Union[_types_pb2.Span, _Mapping]] = ..., initial_annotation: _Optional[_Union[_types_pb2.Annotation, _Mapping]] = ..., burst_complete: _Optional[_Union[InitialBurstComplete, _Mapping]] = ..., new_span: _Optional[_Union[NewSpan, _Mapping]] = ..., updated_span: _Optional[_Union[UpdatedSpan, _Mapping]] = ..., ended_span: _Optional[_Union[EndedSpan, _Mapping]] = ..., new_annotation: _Optional[_Union[NewAnnotation, _Mapping]] = ..., agent_joined: _Optional[_Union[AgentJoined, _Mapping]] = ..., agent_left: _Optional[_Union[AgentLeft, _Mapping]] = ..., agent_status_changed: _Optional[_Union[AgentStatusChanged, _Mapping]] = ..., session_ended: _Optional[_Union[SessionEnded, _Mapping]] = ..., payload_available: _Optional[_Union[PayloadAvailable, _Mapping]] = ..., task_report: _Optional[_Union[TaskReport, _Mapping]] = ..., task_plan: _Optional[_Union[_types_pb2.TaskPlan, _Mapping]] = ..., updated_task_status: _Optional[_Union[_types_pb2.UpdatedTaskStatus, _Mapping]] = ..., context_window_sample: _Optional[_Union[ContextWindowSample, _Mapping]] = ...) -> None: ...
+
+class ContextWindowSample(_message.Message):
+    __slots__ = ("agent_id", "recorded_at", "tokens", "limit_tokens")
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
+    RECORDED_AT_FIELD_NUMBER: _ClassVar[int]
+    TOKENS_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    agent_id: str
+    recorded_at: _timestamp_pb2.Timestamp
+    tokens: int
+    limit_tokens: int
+    def __init__(self, agent_id: _Optional[str] = ..., recorded_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., tokens: _Optional[int] = ..., limit_tokens: _Optional[int] = ...) -> None: ...
 
 class InitialBurstComplete(_message.Message):
     __slots__ = ("spans_sent", "agents_sent")

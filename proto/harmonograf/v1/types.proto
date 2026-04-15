@@ -9,7 +9,7 @@ package harmonograf.v1;
 
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/anthropics/harmonograf/gen/harmonograf/v1;harmonografv1";
+option go_package = "github.com/pedapudi/harmonograf/gen/harmonograf/v1;harmonografv1";
 
 // ---------------------------------------------------------------------------
 // Sessions and agents
@@ -207,6 +207,94 @@ message Span {
 
   repeated SpanLink links = 13;
   ErrorInfo error = 14;
+}
+
+// ---------------------------------------------------------------------------
+// Task plans
+// ---------------------------------------------------------------------------
+//
+// A task plan is a decomposition of an incoming request into a DAG of tasks,
+// each assigned to an agent. The planner lives in the client library as a
+// helper agent; it emits the plan to the server before normal execution
+// begins. The frontend renders the plan as chips/bars inside each agent's
+// column in the graph view. As execution proceeds, tasks are bound to real
+// spans (via bound_span_id) and their statuses update live — either by the
+// server deriving state from a span attribute named "hgraf.task_id", or by
+// the client emitting explicit UpdatedTaskStatus messages.
+
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_PENDING = 1;
+  TASK_STATUS_RUNNING = 2;
+  TASK_STATUS_COMPLETED = 3;
+  TASK_STATUS_FAILED = 4;
+  TASK_STATUS_CANCELLED = 5;
+}
+
+// Directed edge in the task dependency DAG. from_task_id must complete before
+// to_task_id can start.
+message TaskEdge {
+  string from_task_id = 1;
+  string to_task_id = 2;
+}
+
+message Task {
+  string id = 1;
+  string title = 2;
+  string description = 3;
+  // Agent id expected to execute this task. May be empty if the planner is
+  // deferring assignment.
+  string assignee_agent_id = 4;
+  TaskStatus status = 5;
+  // Planner's predicted schedule, session-relative milliseconds. Optional —
+  // the frontend falls back to t=0 stacking when these are zero.
+  int64 predicted_start_ms = 6;
+  int64 predicted_duration_ms = 7;
+  // Span id that is executing (or has executed) this task. Empty until a
+  // span stamped with this task's id begins running.
+  string bound_span_id = 8;
+}
+
+message TaskPlan {
+  string id = 1;
+  string session_id = 2;
+  // The invocation span that prompted the plan, if any.
+  string invocation_span_id = 3;
+  // Agent that produced the plan (usually the receiving agent, whose client
+  // library ran a PlannerHelper before normal execution).
+  string planner_agent_id = 4;
+  google.protobuf.Timestamp created_at = 5;
+  // One-line natural-language summary of the plan, shown in the graph view
+  // header when a plan is selected.
+  string summary = 6;
+  repeated Task tasks = 7;
+  repeated TaskEdge edges = 8;
+  // When the plan was revised in-flight by the observer in response to drift,
+  // this captures the human-readable reason. Empty on initial plans.
+  string revision_reason = 9;
+  // Structured drift kind for the revision that produced this plan (e.g.
+  // "tool_error", "new_work_discovered", "wrong_agent"). Empty on initial
+  // plans. Frontend uses this for drift icons / filters without having to
+  // regex the revision_reason.
+  string revision_kind = 10;
+  // Severity of the drift that triggered the revision: "info" | "warning"
+  // | "critical". Empty on initial plans.
+  string revision_severity = 11;
+  // Monotonic revision index within a plan lineage. 0 for initial plans,
+  // incrementing by one on each refine. Drives deterministic ordering of
+  // revisions in the UI timeline.
+  int64 revision_index = 12;
+}
+
+// Explicit task status delta. In most cases the server derives task status
+// from span lifecycle events (via the "hgraf.task_id" span attribute); this
+// message is an escape hatch for non-span-bound updates.
+message UpdatedTaskStatus {
+  string plan_id = 1;
+  string task_id = 2;
+  TaskStatus status = 3;
+  string bound_span_id = 4;
+  google.protobuf.Timestamp updated_at = 5;
 }
 
 // ---------------------------------------------------------------------------

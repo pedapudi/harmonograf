@@ -1,11 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useUiStore } from '../../state/uiStore';
+import { useEffect, useMemo, useReducer, useState } from 'react';
+import { useUiStore, type DrawerTaskSubtab } from '../../state/uiStore';
+import {
+  collectThinkingForTask,
+  extractThinkingText,
+  hasThinking as spanHasThinking,
+  formatThinkingInline,
+  type ThinkingEntry,
+} from '../../lib/thinking';
 import {
   getSessionStore,
   usePayload,
   usePostAnnotation,
   useSendControl,
-  sendStatusQuery,
+  useSessionWatch,
 } from '../../rpc/hooks';
 import type {
   Span,
@@ -14,10 +21,14 @@ import type {
   SpanLink,
   LinkRelation,
 } from '../../gantt/types';
+import type { PlanDiff, PlanRevision } from '../../gantt';
+import { parseRevisionReason } from '../../gantt/driftKinds';
 import { formatDuration } from '../../lib/format';
+import { OrchestrationTimeline } from '../OrchestrationTimeline/OrchestrationTimeline';
 
 type TabId =
   | 'summary'
+  | 'task'
   | 'payload'
   | 'timeline'
   | 'links'
@@ -26,6 +37,7 @@ type TabId =
 
 const TABS: { id: TabId; label: string; testId: string }[] = [
   { id: 'summary', label: 'Summary', testId: 'inspector-tab-overview' },
+  { id: 'task', label: 'Task', testId: 'inspector-tab-task' },
   { id: 'payload', label: 'Payload', testId: 'inspector-tab-payload' },
   { id: 'timeline', label: 'Timeline', testId: 'inspector-tab-timeline' },
   { id: 'links', label: 'Links', testId: 'inspector-tab-links' },
@@ -36,19 +48,63 @@ const TABS: { id: TabId; label: string; testId: string }[] = [
 export function Drawer() {
   const open = useUiStore((s) => s.drawerOpen);
   const selected = useUiStore((s) => s.selectedSpanId);
+  const selectedTaskId = useUiStore((s) => s.selectedTaskId);
+  const selectTask = useUiStore((s) => s.selectTask);
   const close = useUiStore((s) => s.closeDrawer);
   const sessionId = useUiStore((s) => s.currentSessionId);
 
-  // Look up the span from whichever SessionStore the rpc hooks currently hold
-  // for this session. Re-run when the selection changes so we capture newly
-  // arrived spans, but we accept that mid-drawer mutations (attribute updates
-  // after the drawer is open) require a close/reopen to surface — the design
-  // doc calls the drawer a modal side-sheet, not a live-updating pane.
-  const span = useMemo(() => {
-    if (!sessionId || !selected) return null;
-    const store = getSessionStore(sessionId);
-    return store?.spans.get(selected) ?? null;
-  }, [sessionId, selected]);
+  // Live-updating span subscription: re-renders whenever the span's attributes
+  // or status change (e.g. task_report, thinking_text arrive via stream events).
+  //
+  // We route through useSessionWatch rather than the bare getSessionStore()
+  // lookup so that (a) the Drawer participates in the refcounted watch and
+  // keeps the stream alive while open, and (b) we get a guaranteed non-null
+  // store handle even if the drawer is opened before GanttView mounted its
+  // own watch (deep-link, refresh, keyboard nav, etc.).
+  const watch = useSessionWatch(sessionId);
+  const store = watch.store;
+  // version ticks every time the span store fires a dirty notification, which
+  // re-runs the span lookup below. Computing the span during render (rather
+  // than mirroring it into useState via an effect) avoids cascading renders
+  // and handles the "selected span not yet in store" case: every store
+  // notification retries the lookup, so the drawer fills in as soon as the
+  // span arrives.
+  const [version, bumpVersion] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => {
+    if (!store) return;
+    return store.spans.subscribe(() => bumpVersion());
+  }, [store]);
+  const span = useMemo<Span | null>(() => {
+    if (!sessionId || !selected || !store) return null;
+    void version;
+    return store.spans.get(selected) ?? null;
+  }, [sessionId, selected, store, version]);
+
+  // Reverse reconciliation: when a span is selected (e.g. via popover → open
+  // drawer, keyboard nav, or deep link), walk the TaskRegistry and set
+  // selectedTaskId to whichever task binds to it. Runs again when tasks
+  // mutate so a late-arriving boundSpanId still gets picked up. When the
+  // selection clears, clear the task highlight too.
+  useEffect(() => {
+    if (!store) return;
+    const resolve = (): string | null => {
+      if (!selected) return null;
+      for (const plan of store.tasks.listPlans()) {
+        for (const t of plan.tasks) {
+          if (t.boundSpanId === selected) return t.id;
+        }
+      }
+      return null;
+    };
+    const next = resolve();
+    if (next !== selectedTaskId) selectTask(next);
+    return store.tasks.subscribe(() => {
+      const cur = useUiStore.getState();
+      const resolved = resolve();
+      if (cur.selectedTaskId !== resolved) selectTask(resolved);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store, selected]);
 
   return (
     <aside
@@ -69,6 +125,7 @@ export function Drawer() {
             ✕
           </button>
         </div>
+        <CurrentTaskSection sessionId={sessionId} selectedSpan={span} />
         {span ? (
           <DrawerTabs key={span.id} span={span} sessionId={sessionId} />
         ) : (
@@ -82,7 +139,20 @@ export function Drawer() {
 }
 
 function DrawerTabs({ span, sessionId }: { span: Span; sessionId: string | null }) {
-  const [tab, setTab] = useState<TabId>('summary');
+  // Honor deep-link tab request from the uiStore (set by the `t` shortcut).
+  // Read synchronously at mount time so the first paint lands on the right
+  // tab — TaskTab peeks at drawerRequestedTaskSubtab in the same render.
+  const requestedTab = useUiStore.getState().drawerRequestedTab;
+  const consumeRequest = useUiStore((s) => s.consumeDrawerRequestedTab);
+  const [tab, setTab] = useState<TabId>(requestedTab ?? 'summary');
+  useEffect(() => {
+    if (requestedTab) {
+      // Consume the request on a microtask so TaskTab's synchronous read of
+      // drawerRequestedTaskSubtab in the same mount tick still sees it.
+      queueMicrotask(() => consumeRequest());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
     <>
       <div className="hg-drawer__tabs" role="tablist">
@@ -100,7 +170,8 @@ function DrawerTabs({ span, sessionId }: { span: Span; sessionId: string | null 
         ))}
       </div>
       <div className="hg-drawer__body">
-        {tab === 'summary' && <SummaryTab span={span} sessionId={sessionId} />}
+        {tab === 'summary' && <SummaryTab span={span} />}
+        {tab === 'task' && <TaskTab span={span} sessionId={sessionId} />}
         {tab === 'payload' && <PayloadTab span={span} />}
         {tab === 'timeline' && <TimelineTab span={span} sessionId={sessionId} />}
         {tab === 'links' && <LinksTab span={span} />}
@@ -115,56 +186,666 @@ function DrawerTabs({ span, sessionId }: { span: Span; sessionId: string | null 
   );
 }
 
+// --- Current task section (live, outside tabs) -----------------------------
+
+function CurrentTaskSection({
+  sessionId,
+  selectedSpan,
+}: {
+  sessionId: string | null;
+  selectedSpan: Span | null;
+}) {
+  const watch = useSessionWatch(sessionId);
+  const store = watch.store;
+  const [, bump] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => {
+    if (!store) return;
+    return store.tasks.subscribe(() => bump());
+  }, [store]);
+
+  const current = store ? store.getCurrentTask() : null;
+  if (!current) return null;
+
+  const { task } = current;
+  // Highlight if the drawer is open on a span whose hgraf.task_id matches.
+  const selectedTaskId =
+    selectedSpan?.attributes?.['hgraf.task_id']?.kind === 'string'
+      ? selectedSpan.attributes['hgraf.task_id'].value
+      : undefined;
+  const highlighted = selectedTaskId && selectedTaskId === task.id;
+  const running = task.status === 'RUNNING';
+
+  return (
+    <div
+      className={`hg-drawer__current-task${highlighted ? ' hg-drawer__current-task--highlighted' : ''}`}
+      data-testid="drawer-current-task"
+      data-running={running ? 'true' : 'false'}
+    >
+      <div className="hg-drawer__current-task-header">
+        <span className="hg-drawer__current-task-label">Current task</span>
+        <span
+          className={`hg-strip__chip hg-strip__chip--${task.status?.toLowerCase() ?? 'pending'}`}
+        >
+          {task.status}
+        </span>
+      </div>
+      <div className="hg-drawer__current-task-title">{task.title || task.id}</div>
+      {task.description && (
+        <div className="hg-drawer__current-task-desc">{task.description}</div>
+      )}
+      {task.assigneeAgentId && (
+        <div className="hg-drawer__current-task-agent">
+          <code>{task.assigneeAgentId}</code>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Task tab ---------------------------------------------------------------
+
+function TaskTab({ span, sessionId }: { span: Span; sessionId: string | null }) {
+  // Subtab state: Overview is the original task-centric view (status, report,
+  // thinking snippet, plan revisions). Trajectory is a chronological feed of
+  // every thinking message captured on spans bound to the same task — the
+  // primary surface for reviewing an agent's reasoning trail. Task #4.
+  // Default subtab honors any pending deep-link request from the uiStore
+  // (set by the `t` shortcut). Reading the request synchronously during the
+  // mount render keeps the first paint on the correct subtab and sidesteps
+  // the react-hooks/set-state-in-effect lint rule.
+  const initialRequestedSubtab = useUiStore.getState().drawerRequestedTaskSubtab;
+  const [subtab, setSubtab] = useState<DrawerTaskSubtab>(
+    initialRequestedSubtab ?? 'overview',
+  );
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div
+        role="tablist"
+        aria-label="Task subtabs"
+        style={{
+          display: 'flex',
+          gap: 4,
+          padding: '6px 12px 0',
+          borderBottom: '1px solid var(--md-sys-color-outline-variant, #43474e)',
+        }}
+      >
+        <TaskSubtabButton
+          active={subtab === 'overview'}
+          onClick={() => setSubtab('overview')}
+          testId="inspector-task-subtab-overview"
+        >
+          Overview
+        </TaskSubtabButton>
+        <TaskSubtabButton
+          active={subtab === 'trajectory'}
+          onClick={() => setSubtab('trajectory')}
+          testId="inspector-task-subtab-trajectory"
+        >
+          Trajectory
+        </TaskSubtabButton>
+      </div>
+      {subtab === 'overview' && <TaskOverviewPanel span={span} sessionId={sessionId} />}
+      {subtab === 'trajectory' && <TaskTrajectoryPanel span={span} sessionId={sessionId} />}
+    </div>
+  );
+}
+
+function TaskSubtabButton({
+  active,
+  onClick,
+  testId,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  testId?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      data-testid={testId}
+      style={{
+        background: 'transparent',
+        color: active ? 'var(--md-sys-color-primary, #a8c8ff)' : 'inherit',
+        border: 'none',
+        borderBottom: active
+          ? '2px solid var(--md-sys-color-primary, #a8c8ff)'
+          : '2px solid transparent',
+        padding: '6px 10px',
+        fontSize: 12,
+        cursor: 'pointer',
+        fontWeight: active ? 600 : 500,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TaskOverviewPanel({ span, sessionId }: { span: Span; sessionId: string | null }) {
+  const taskReport = (span.attributes['task_report']?.kind === 'string' ? span.attributes['task_report'].value : undefined);
+  const llmThought = (span.attributes['llm.thought']?.kind === 'string' ? span.attributes['llm.thought'].value : undefined);
+  const thinkingText = (span.attributes['thinking_text']?.kind === 'string' ? span.attributes['thinking_text'].value : undefined);
+  const thinkingPreview = (span.attributes['thinking_preview']?.kind === 'string' ? span.attributes['thinking_preview'].value : undefined);
+  const hasThinking = span.attributes['has_thinking']?.kind === 'bool' && span.attributes['has_thinking'].value;
+  const isRunning = span.endMs == null;
+  const agentDesc = (span.attributes['agent_description']?.kind === 'string' ? span.attributes['agent_description'].value : undefined);
+
+  return (
+    <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Live status */}
+      {isRunning && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#a8c8ff' }}>
+          <span className="hg-transport__live-dot" style={{ display: 'inline-block' }} />
+          <span>Running</span>
+          {hasThinking && <span style={{ marginLeft: 4 }}>· 💭 Thinking</span>}
+        </div>
+      )}
+
+      {/* Current task report */}
+      {taskReport && (
+        <section>
+          <div style={{ fontSize: 10, opacity: 0.6, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Current Task</div>
+          <div style={{ fontSize: 12, lineHeight: 1.6, background: 'rgba(255,255,255,0.05)', borderRadius: 6, padding: '8px 10px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {taskReport}
+          </div>
+        </section>
+      )}
+
+      {/* Model thinking — prefers HarmonografAgent's llm.thought aggregate
+          when present, falls back to the plugin's streaming thinking_text /
+          thinking_preview capture. Both paths put Gemini 2.5 reasoning
+          tokens in front of the user. */}
+      {(llmThought || thinkingText || thinkingPreview) && (
+        <section data-testid="drawer-model-thinking">
+          <div style={{ fontSize: 10, opacity: 0.6, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Model thinking {isRunning && hasThinking ? '(live)' : ''}
+          </div>
+          <div
+            style={{
+              fontSize: 11,
+              lineHeight: 1.6,
+              background: 'rgba(168,200,255,0.05)',
+              borderRadius: 6,
+              padding: '8px 10px',
+              fontFamily: "ui-monospace, 'SF Mono', Consolas, 'Liberation Mono', monospace",
+              color: 'rgba(226,226,233,0.85)',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              maxHeight: 300,
+              overflow: 'auto',
+            }}
+          >
+            {llmThought || thinkingText || thinkingPreview}
+          </div>
+        </section>
+      )}
+
+      {/* Agent description */}
+      {agentDesc && (
+        <section>
+          <div style={{ fontSize: 10, opacity: 0.6, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Agent Role</div>
+          <div style={{ fontSize: 11, lineHeight: 1.5, opacity: 0.8 }}>{agentDesc}</div>
+        </section>
+      )}
+
+      {(!taskReport && !llmThought && !thinkingText && !thinkingPreview && !agentDesc) && (
+        <div style={{ fontSize: 12, opacity: 0.5, textAlign: 'center', padding: '24px 0' }}>
+          No task information available.
+        </div>
+      )}
+
+      <PlanRevisionsSection sessionId={sessionId} span={span} />
+
+      <section data-testid="drawer-orchestration-events">
+        <div style={{ fontSize: 10, opacity: 0.6, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Orchestration events
+        </div>
+        <OrchestrationTimeline sessionId={sessionId} limit={20} />
+      </section>
+    </div>
+  );
+}
+
+// Trajectory panel: chronological feed of every LLM thinking message on the
+// task bound to the selected span. Falls back to the single-span trail when
+// the span isn't task-bound (e.g. selecting a raw LLM_CALL in a delegated
+// agent that doesn't report task_id). Task #4.
+function TaskTrajectoryPanel({
+  span,
+  sessionId,
+}: {
+  span: Span;
+  sessionId: string | null;
+}) {
+  const store = getSessionStore(sessionId);
+  const [, bump] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => {
+    if (!store) return;
+    return store.spans.subscribe(() => bump());
+  }, [store]);
+
+  const taskIdAttr =
+    span.attributes?.['hgraf.task_id']?.kind === 'string'
+      ? span.attributes['hgraf.task_id'].value
+      : undefined;
+
+  const entries = useMemo<ThinkingEntry[]>(() => {
+    if (!store) return [];
+    // Walk only the spans that matter: when a task id is known, every span
+    // in the session is filtered inside collectThinkingForTask. Otherwise we
+    // fall back to the currently selected span alone.
+    const allSpans: Span[] = [];
+    for (const agent of store.agents.list) {
+      const arr = store.spans.queryAgent(
+        agent.id,
+        -Number.MAX_SAFE_INTEGER,
+        Number.MAX_SAFE_INTEGER,
+      );
+      allSpans.push(...arr);
+    }
+    if (taskIdAttr) return collectThinkingForTask(allSpans, taskIdAttr);
+    const text = extractThinkingText(span);
+    if (!text) return [];
+    return [
+      {
+        spanId: span.id,
+        agentId: span.agentId,
+        spanName: span.name,
+        spanKind: span.kind,
+        startMs: span.startMs,
+        endMs: span.endMs,
+        text,
+        isLive: span.endMs == null,
+      },
+    ];
+  }, [store, taskIdAttr, span]);
+
+  return (
+    <div
+      data-testid="drawer-task-trajectory"
+      style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}
+    >
+      <div style={{ fontSize: 10, opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        Thinking trajectory
+        {taskIdAttr && <span style={{ marginLeft: 6, opacity: 0.7 }}>· task {taskIdAttr}</span>}
+      </div>
+      {entries.length === 0 ? (
+        <div
+          data-testid="drawer-task-trajectory-empty"
+          style={{ fontSize: 12, opacity: 0.5, padding: '24px 0', textAlign: 'center' }}
+        >
+          No thinking captured for this task yet.
+        </div>
+      ) : (
+        <ol
+          style={{
+            listStyle: 'none',
+            padding: 0,
+            margin: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+          }}
+        >
+          {entries.map((e) => (
+            <li
+              key={e.spanId}
+              data-testid="drawer-task-trajectory-entry"
+              data-span-id={e.spanId}
+              style={{
+                fontSize: 11,
+                lineHeight: 1.5,
+                padding: '8px 10px',
+                borderLeft: `2px solid ${e.isLive ? '#a8c8ff' : 'rgba(168,200,255,0.3)'}`,
+                background: 'rgba(168,200,255,0.04)',
+                borderRadius: '0 6px 6px 0',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 10,
+                  opacity: 0.6,
+                  marginBottom: 4,
+                  display: 'flex',
+                  gap: 6,
+                  alignItems: 'center',
+                }}
+              >
+                <span>🧠</span>
+                <code style={{ fontSize: 10 }}>{e.spanName}</code>
+                <span>·</span>
+                <span>{e.agentId}</span>
+                {e.isLive && (
+                  <>
+                    <span>·</span>
+                    <span style={{ color: '#a8c8ff' }}>live</span>
+                  </>
+                )}
+              </div>
+              <div
+                style={{
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace",
+                  color: 'rgba(226,226,233,0.88)',
+                }}
+              >
+                {e.text}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+      <div style={{ fontSize: 10, opacity: 0.5 }}>
+        {entries.length} entr{entries.length === 1 ? 'y' : 'ies'} · newest
+        last · {formatThinkingInline(
+          entries[entries.length - 1]?.text ?? null,
+          60,
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Silence unused-variable warnings on helpers that the trajectory panel only
+// uses in some branches — tsc needs one reference to keep them optimized in.
+void spanHasThinking;
+
+function PlanRevisionsSection({
+  sessionId,
+  span,
+}: {
+  sessionId: string | null;
+  span: Span;
+}) {
+  const store = getSessionStore(sessionId);
+  const [, bump] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => {
+    if (!store) return;
+    return store.tasks.subscribe(() => bump());
+  }, [store]);
+
+  if (!store) return null;
+
+  // Prefer the plan bound to this span's task; fall back to the plan that
+  // owns whatever task is currently RUNNING so the tab stays informative when
+  // the selected span isn't itself a task-bound span.
+  const taskIdAttr =
+    span.attributes?.['hgraf.task_id']?.kind === 'string'
+      ? span.attributes['hgraf.task_id'].value
+      : undefined;
+  let planId: string | undefined;
+  if (taskIdAttr) {
+    planId = store.tasks.findPlanForTask(taskIdAttr)?.plan.id;
+  }
+  if (!planId) {
+    planId = store.getCurrentTask()?.plan.id;
+  }
+  if (!planId) return null;
+
+  const revisions = store.tasks.revisionsForPlan(planId);
+  if (revisions.length === 0) return null;
+
+  const ordered = [...revisions].reverse();
+
+  return (
+    <section data-testid="drawer-plan-revisions">
+      <div style={{ fontSize: 10, opacity: 0.6, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        Plan revisions
+      </div>
+      <div
+        style={{
+          maxHeight: 280,
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+        }}
+      >
+        {ordered.map((r, i) => (
+          <PlanRevisionEntry
+            key={`${r.revisedAtMs}-${i}`}
+            revision={r}
+            latest={i === 0}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PlanRevisionEntry({
+  revision,
+  latest,
+}: {
+  revision: PlanRevision;
+  latest: boolean;
+}) {
+  // Latest expands by default so the highlighted entry already shows its diff;
+  // older entries collapse to keep the history scannable.
+  const [open, setOpen] = useState(latest);
+  const diff = revision.diff;
+  const added = diff?.added.length ?? 0;
+  const removed = diff?.removed.length ?? 0;
+  const modified = diff?.modified.length ?? 0;
+  const hasDiff =
+    !!diff &&
+    (added > 0 || removed > 0 || modified > 0 || diff.edgesChanged);
+  const parsed = parseRevisionReason(revision.reason);
+
+  return (
+    <div
+      data-testid="drawer-plan-revision-entry"
+      data-latest={latest ? 'true' : 'false'}
+      data-open={open ? 'true' : 'false'}
+      data-drift-kind={parsed.kind ?? 'unknown'}
+      data-drift-category={parsed.meta.category}
+      style={{
+        fontSize: latest ? 12 : 11,
+        lineHeight: 1.5,
+        background: latest
+          ? 'rgba(168,200,255,0.08)'
+          : 'rgba(255,255,255,0.03)',
+        borderLeft: `2px solid ${parsed.meta.color}`,
+        borderRadius: 4,
+        padding: '6px 10px',
+        wordBreak: 'break-word',
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        data-testid="drawer-plan-revision-toggle"
+        style={{
+          all: 'unset',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          width: '100%',
+        }}
+      >
+        <span style={{ fontSize: 9, opacity: 0.6, minWidth: 8 }}>
+          {open ? '▾' : '▸'}
+        </span>
+        <span
+          data-testid="drawer-plan-revision-icon"
+          aria-hidden="true"
+          style={{
+            fontSize: 13,
+            color: parsed.meta.color,
+            minWidth: 14,
+            display: 'inline-flex',
+            justifyContent: 'center',
+          }}
+        >
+          {parsed.meta.icon}
+        </span>
+        <span
+          data-testid="drawer-plan-revision-kind-label"
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            color: parsed.meta.color,
+            textTransform: 'uppercase',
+            letterSpacing: '0.04em',
+          }}
+        >
+          {parsed.meta.label}
+        </span>
+        <span
+          data-testid="drawer-plan-revision-category-badge"
+          style={{
+            fontSize: 9,
+            opacity: 0.6,
+            padding: '1px 5px',
+            borderRadius: 8,
+            border: '1px solid currentColor',
+            textTransform: 'lowercase',
+            letterSpacing: '0.03em',
+          }}
+        >
+          {parsed.meta.category}
+        </span>
+        <span style={{ fontSize: 9, opacity: 0.55 }}>
+          {latest ? 'Latest · ' : ''}
+          {formatRevisionTime(revision.revisedAtMs)}
+        </span>
+        {hasDiff && (
+          <span
+            style={{
+              marginLeft: 'auto',
+              fontSize: 10,
+              fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace",
+              opacity: 0.8,
+            }}
+            data-testid="drawer-plan-revision-counts"
+          >
+            +{added} -{removed} ~{modified}
+            {diff!.edgesChanged ? ' ⇄' : ''}
+          </span>
+        )}
+      </button>
+      <div
+        style={{ marginTop: 2 }}
+        data-testid="drawer-plan-revision-detail"
+        title={revision.reason}
+      >
+        {parsed.detail || parsed.meta.label}
+      </div>
+      {open && diff && hasDiff && <PlanDiffDetail diff={diff} />}
+    </div>
+  );
+}
+
+function PlanDiffDetail({ diff }: { diff: PlanDiff }) {
+  return (
+    <div
+      data-testid="drawer-plan-revision-diff"
+      style={{
+        marginTop: 6,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+      }}
+    >
+      {diff.added.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          {diff.added.map((t) => (
+            <span
+              key={`add-${t.id}`}
+              data-testid="plan-diff-added"
+              style={{
+                fontSize: 10,
+                padding: '2px 6px',
+                borderRadius: 10,
+                background: 'rgba(120, 200, 140, 0.18)',
+                color: '#b7e8c1',
+                border: '1px solid rgba(120, 200, 140, 0.35)',
+              }}
+            >
+              + {t.title || t.id}
+            </span>
+          ))}
+        </div>
+      )}
+      {diff.removed.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          {diff.removed.map((t) => (
+            <span
+              key={`rem-${t.id}`}
+              data-testid="plan-diff-removed"
+              style={{
+                fontSize: 10,
+                padding: '2px 6px',
+                borderRadius: 10,
+                background: 'rgba(240, 120, 120, 0.15)',
+                color: '#f0a0a0',
+                border: '1px solid rgba(240, 120, 120, 0.3)',
+                textDecoration: 'line-through',
+              }}
+            >
+              − {t.title || t.id}
+            </span>
+          ))}
+        </div>
+      )}
+      {diff.modified.length > 0 && (
+        <ul
+          style={{
+            margin: 0,
+            paddingLeft: 14,
+            fontSize: 10,
+            opacity: 0.85,
+          }}
+        >
+          {diff.modified.map((m) => (
+            <li key={`mod-${m.id}`} data-testid="plan-diff-modified">
+              <span style={{ fontStyle: 'italic' }}>{m.title || m.id}</span>
+              {' — '}
+              <span style={{ opacity: 0.7 }}>{m.changes.join(', ')}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {diff.edgesChanged && (
+        <div
+          data-testid="plan-diff-edges"
+          style={{ fontSize: 10, opacity: 0.7 }}
+        >
+          Plan DAG restructured (edges changed)
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatRevisionTime(ms: number): string {
+  try {
+    return new Date(ms).toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  } catch {
+    return '';
+  }
+}
+
 // --- Summary tab ------------------------------------------------------------
 
-function SummaryTab({ span, sessionId }: { span: Span; sessionId: string | null }) {
+function SummaryTab({ span }: { span: Span }) {
   const durationMs =
     span.endMs !== null ? span.endMs - span.startMs : null;
   const entries = Object.entries(span.attributes);
-  const agent = sessionId ? getSessionStore(sessionId)?.agents.get(span.agentId) : undefined;
-  const [asking, setAsking] = useState(false);
-
-  const handleAsk = async () => {
-    if (!sessionId || asking) return;
-    setAsking(true);
-    await sendStatusQuery(sessionId, span.agentId).catch(() => {});
-    setAsking(false);
-  };
 
   return (
     <div className="hg-drawer__section">
-      {agent?.taskReport && (
-        <div className="hg-drawer__section hg-drawer__section--task">
-          <div className="hg-drawer__section-header">
-            <h4 className="hg-drawer__section-label">Current Task</h4>
-            <button
-              className="hg-drawer__ask-btn"
-              onClick={handleAsk}
-              disabled={asking}
-              title="Ask agent what it's working on"
-            >
-              {asking ? 'Asking…' : 'Ask ?'}
-            </button>
-          </div>
-          <p className="hg-drawer__task-report">{agent.taskReport}</p>
-        </div>
-      )}
-      {!agent?.taskReport && (
-        <div className="hg-drawer__section hg-drawer__section--task">
-          <div className="hg-drawer__section-header">
-            <h4 className="hg-drawer__section-label">Current Task</h4>
-            <button
-              className="hg-drawer__ask-btn"
-              onClick={handleAsk}
-              disabled={asking}
-              title="Ask agent what it's working on"
-            >
-              {asking ? 'Asking…' : 'Ask ?'}
-            </button>
-          </div>
-          <p className="hg-drawer__dim">No task report yet.</p>
-        </div>
-      )}
       <dl className="hg-drawer__meta">
         <dt>Status</dt>
         <dd>{span.status}</dd>

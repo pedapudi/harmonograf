@@ -23,6 +23,7 @@ export function makeAgent(name: string, joinMs: number): Agent {
     stuck: false,
     taskReport: '',
     taskReportAt: 0,
+    metadata: {},
   };
 }
 

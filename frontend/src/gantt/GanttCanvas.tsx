@@ -1,10 +1,20 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { GanttRenderer, type HoverState } from './renderer';
 import type { SessionStore } from './index';
+import type { ContextWindowSample } from './types';
+import { formatTokens } from './contextOverlay';
 import { useThemeStore } from '../theme/store';
 import { useUiStore } from '../state/uiStore';
 import { SpanContextMenu, type ContextMenuState } from '../components/Interaction/SpanContextMenu';
 import { usePopoverStore } from '../state/popoverStore';
+
+interface ContextHover {
+  agentId: string;
+  sample: ContextWindowSample;
+  ratio: number;
+  x: number;
+  y: number;
+}
 
 interface Props {
   store: SessionStore;
@@ -12,7 +22,7 @@ interface Props {
   height?: number;
   // Overlay layer mounted above the canvas (pins, drag selection, approval
   // editor). Receives the live renderer so children can project session-ms to
-  // pixels and re-render on viewport ticks. Task #5.
+  // pixels and re-render on viewport ticks.
   renderOverlay?: (ctx: OverlayContext) => React.ReactNode;
 }
 
@@ -36,6 +46,7 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
 
   const [hover, setHover] = useState<HoverState | null>(null);
+  const [ctxHover, setCtxHover] = useState<ContextHover | null>(null);
   const [liveBroken, setLiveBroken] = useState(false);
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const [overlayTick, setOverlayTick] = useState(0);
@@ -45,6 +56,10 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
   const setActiveRenderer = useUiStore((s) => s.setActiveRenderer);
   const showAllAgents = useUiStore((s) => s.showAllAgents);
   const hiddenAgentIds = useUiStore((s) => s.hiddenAgentIds);
+  const taskPlanMode = useUiStore((s) => s.taskPlanMode);
+  const taskPlanVisible = useUiStore((s) => s.taskPlanVisible);
+  const contextOverlayVisible = useUiStore((s) => s.contextOverlayVisible);
+  const selectedTaskId = useUiStore((s) => s.selectedTaskId);
   const themeBase = useThemeStore((s) => s.base);
   const colorBlind = useThemeStore((s) => s.colorBlind);
 
@@ -57,6 +72,24 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
           // the popover (and keyboard nav, notes, etc.).
           if (id) {
             openPopover(id, cx, cy);
+            // Reconcile task selection from the clicked span: if any plan
+            // task binds to this span id, reflect it as the selected task so
+            // the task panel + stages DAG highlight in lockstep.
+            const uiState = useUiStore.getState();
+            const plans = store.tasks.listPlans();
+            let matchTaskId: string | null = null;
+            for (const plan of plans) {
+              for (const t of plan.tasks) {
+                if (t.boundSpanId === id) {
+                  matchTaskId = t.id;
+                  break;
+                }
+              }
+              if (matchTaskId) break;
+            }
+            if (uiState.selectedTaskId !== matchTaskId) {
+              uiState.selectTask(matchTaskId);
+            }
           } else {
             closeUnpinnedPopovers();
           }
@@ -96,6 +129,42 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
   useEffect(() => {
     renderer.setHiddenAgents(hiddenAgentIds);
   }, [renderer, hiddenAgentIds]);
+
+  // Push task-plan overlay settings so the canvas hot path sees them without
+  // reaching into the zustand store each frame.
+  useEffect(() => {
+    renderer.setTaskPlanMode(taskPlanMode);
+  }, [renderer, taskPlanMode]);
+  useEffect(() => {
+    renderer.setTaskPlanVisible(taskPlanVisible);
+  }, [renderer, taskPlanVisible]);
+  useEffect(() => {
+    renderer.setContextOverlayVisible(contextOverlayVisible);
+  }, [renderer, contextOverlayVisible]);
+
+  // Resolve the selected task id → its bound span id and push it into the
+  // renderer so the overlay draws a halo around the matching bar. Also
+  // re-resolve when the tasks collection mutates (bindings arrive async when
+  // the planner emits ids before the underlying spans exist).
+  useEffect(() => {
+    const resolve = (): string | null => {
+      if (!selectedTaskId) return null;
+      const plans = store.tasks.listPlans();
+      for (const plan of plans) {
+        for (const t of plan.tasks) {
+          if (t.id === selectedTaskId) {
+            return t.boundSpanId || null;
+          }
+        }
+      }
+      return null;
+    };
+    renderer.setSelectedTaskSpanId(resolve());
+    const unsub = store.tasks.subscribe(() => {
+      renderer.setSelectedTaskSpanId(resolve());
+    });
+    return unsub;
+  }, [renderer, store, selectedTaskId]);
 
   // Mount + resize observer.
   useLayoutEffect(() => {
@@ -137,11 +206,32 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
   };
   const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
-    renderer.handlePointerMove(e.clientX - r.left, e.clientY - r.top);
+    const px = e.clientX - r.left;
+    const py = e.clientY - r.top;
+    renderer.handlePointerMove(px, py);
+    // Only resolve the context-window hover when the pointer is NOT over a
+    // span rect — spans own the foreground tooltip, the band is background.
+    if (contextOverlayVisible && !renderer.spanAt(px, py)) {
+      const cs = renderer.contextSampleAt(px, py);
+      if (cs) {
+        setCtxHover({
+          agentId: cs.agentId,
+          sample: cs.sample,
+          ratio: cs.ratio,
+          x: px,
+          y: py,
+        });
+      } else {
+        setCtxHover(null);
+      }
+    } else {
+      setCtxHover(null);
+    }
   };
   const onLeave = () => {
     renderer.handlePointerLeave();
     setHover(null);
+    setCtxHover(null);
   };
   const onContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -178,6 +268,34 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
       <canvas ref={bgRef} style={layer(0)} />
       <canvas ref={blocksRef} style={layer(1)} />
       <canvas ref={overlayRef} style={layer(2)} />
+      {!hover && ctxHover && (
+        <div
+          role="tooltip"
+          data-testid="context-window-tooltip"
+          style={{
+            position: 'absolute',
+            left: Math.min(ctxHover.x + 12, 9999),
+            top: Math.max(0, ctxHover.y - 52),
+            background: 'var(--md-sys-color-surface-container-highest, #31333c)',
+            color: 'var(--md-sys-color-on-surface, #e2e2e9)',
+            padding: '6px 10px',
+            borderRadius: 6,
+            pointerEvents: 'none',
+            fontSize: 12,
+            fontFamily: 'system-ui, sans-serif',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+            zIndex: 9,
+            maxWidth: 240,
+          }}
+        >
+          <div style={{ fontWeight: 600 }}>Context window</div>
+          <div style={{ opacity: 0.85 }}>
+            {formatTokens(ctxHover.sample.tokens)} / {formatTokens(ctxHover.sample.limitTokens)}
+            {' · '}
+            {Math.round(ctxHover.ratio * 100)}%
+          </div>
+        </div>
+      )}
       {hover && span && (
         <div
           role="tooltip"

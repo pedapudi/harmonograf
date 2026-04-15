@@ -103,6 +103,7 @@ class Transport:
         channel_factory: Optional[Callable[[str], Any]] = None,
         auth_token: str | None = None,
         progress_fn: Optional[Callable[[], tuple[int, str]]] = None,
+        context_window_fn: Optional[Callable[[], tuple[int, int]]] = None,
     ) -> None:
         self._events = events
         self._payloads = payloads
@@ -118,6 +119,7 @@ class Transport:
         self._config = config or TransportConfig()
         self._channel_factory = channel_factory
         self._progress_fn = progress_fn
+        self._context_window_fn = context_window_fn
 
         self._handlers: dict[str, ControlHandler] = {}
         self._handlers_lock = threading.Lock()
@@ -565,6 +567,10 @@ class Transport:
             return telemetry_pb2.TelemetryUp(span_update=payload)
         if env.kind is EnvelopeKind.SPAN_END:
             return telemetry_pb2.TelemetryUp(span_end=payload)
+        if env.kind is EnvelopeKind.TASK_PLAN:
+            return telemetry_pb2.TelemetryUp(task_plan=payload)
+        if env.kind is EnvelopeKind.TASK_STATUS_UPDATE:
+            return telemetry_pb2.TelemetryUp(task_status_update=payload)
         return None
 
     def _build_hello(self, telemetry_pb2: Any) -> Any:
@@ -595,6 +601,9 @@ class Transport:
         progress_counter, current_activity = (
             self._progress_fn() if self._progress_fn is not None else (0, "")
         )
+        ctx_tokens, ctx_limit = (
+            self._context_window_fn() if self._context_window_fn is not None else (0, 0)
+        )
         return telemetry_pb2.Heartbeat(
             buffered_events=stats.buffered_events,
             dropped_events=stats.dropped_total,
@@ -604,6 +613,8 @@ class Transport:
             cpu_self_pct=0.0,
             progress_counter=progress_counter,
             current_activity=current_activity,
+            context_window_tokens=ctx_tokens,
+            context_window_limit_tokens=ctx_limit,
         )
 
     # ------------------------------------------------------------------

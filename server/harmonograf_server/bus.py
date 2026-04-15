@@ -17,6 +17,8 @@ from harmonograf_server.storage import (
     AgentStatus,
     Annotation,
     Span,
+    Task,
+    TaskPlan,
 )
 
 
@@ -29,6 +31,9 @@ DELTA_ANNOTATION = "annotation"
 DELTA_HEARTBEAT = "heartbeat"
 DELTA_BACKPRESSURE = "backpressure"
 DELTA_TASK_REPORT = "task_report"
+DELTA_TASK_PLAN = "task_plan"
+DELTA_TASK_STATUS = "task_status"
+DELTA_CONTEXT_WINDOW_SAMPLE = "context_window_sample"
 
 
 @dataclass
@@ -162,6 +167,41 @@ class SessionBus:
     def publish_heartbeat(self, session_id: str, agent_id: str, stats: dict) -> None:
         self.publish(
             Delta(session_id, DELTA_HEARTBEAT, {"agent_id": agent_id, **stats})
+        )
+
+    def publish_task_plan(self, plan: TaskPlan) -> None:
+        self.publish(Delta(plan.session_id, DELTA_TASK_PLAN, plan))
+
+    def publish_task_status(
+        self, session_id: str, plan_id: str, task: Task
+    ) -> None:
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_TASK_STATUS,
+                {"plan_id": plan_id, "task": task},
+            )
+        )
+
+    def publish_context_window_sample(
+        self,
+        session_id: str,
+        agent_id: str,
+        tokens: int,
+        limit_tokens: int,
+        recorded_at: float,
+    ) -> None:
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_CONTEXT_WINDOW_SAMPLE,
+                {
+                    "agent_id": agent_id,
+                    "tokens": tokens,
+                    "limit_tokens": limit_tokens,
+                    "recorded_at": recorded_at,
+                },
+            )
         )
 
     def publish_task_report(

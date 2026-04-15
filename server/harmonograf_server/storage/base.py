@@ -76,6 +76,16 @@ class Framework(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
+class TaskStatus(str, Enum):
+    """Mirrors types_pb2.TaskStatus. Used by TaskPlan tasks."""
+
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
 # --- entities ---------------------------------------------------------------
 
 
@@ -168,6 +178,49 @@ class PayloadMeta:
 class PayloadRecord:
     meta: PayloadMeta
     bytes_: bytes
+
+
+@dataclass
+class TaskEdge:
+    from_task_id: str
+    to_task_id: str
+
+
+@dataclass
+class Task:
+    id: str
+    title: str = ""
+    description: str = ""
+    assignee_agent_id: str = ""
+    status: TaskStatus = TaskStatus.PENDING
+    predicted_start_ms: int = 0
+    predicted_duration_ms: int = 0
+    bound_span_id: Optional[str] = None
+
+
+@dataclass
+class TaskPlan:
+    id: str
+    session_id: str
+    created_at: float
+    invocation_span_id: str = ""
+    planner_agent_id: str = ""
+    summary: str = ""
+    tasks: list[Task] = field(default_factory=list)
+    edges: list[TaskEdge] = field(default_factory=list)
+    revision_reason: str = ""
+    revision_kind: str = ""
+    revision_severity: str = ""
+    revision_index: int = 0
+
+
+@dataclass
+class ContextWindowSample:
+    session_id: str
+    agent_id: str
+    recorded_at: float
+    tokens: int
+    limit_tokens: int
 
 
 @dataclass
@@ -325,6 +378,41 @@ class Store(ABC):
         implementation always reports ready.
         """
         return True
+
+    # task plans -----------------------------------------------------------
+    @abstractmethod
+    async def put_task_plan(self, plan: TaskPlan) -> TaskPlan: ...
+
+    @abstractmethod
+    async def get_task_plan(self, plan_id: str) -> Optional[TaskPlan]: ...
+
+    @abstractmethod
+    async def list_task_plans_for_session(
+        self, session_id: str
+    ) -> list[TaskPlan]: ...
+
+    @abstractmethod
+    async def update_task_status(
+        self,
+        plan_id: str,
+        task_id: str,
+        status: TaskStatus,
+        bound_span_id: Optional[str] = None,
+    ) -> Optional[Task]: ...
+
+    # context window samples ----------------------------------------------
+    @abstractmethod
+    async def append_context_window_sample(
+        self, sample: ContextWindowSample
+    ) -> None: ...
+
+    @abstractmethod
+    async def list_context_window_samples(
+        self,
+        session_id: str,
+        agent_id: Optional[str] = None,
+        limit_per_agent: int = 200,
+    ) -> list[ContextWindowSample]: ...
 
     # stats ----------------------------------------------------------------
     @abstractmethod

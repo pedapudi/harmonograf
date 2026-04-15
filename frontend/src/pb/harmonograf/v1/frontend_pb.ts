@@ -16,7 +16,7 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
-import type { Agent, AgentStatus, Annotation, AnnotationKind, AnnotationTarget, AttributeValue, ControlAckResult, ControlKind, ControlTarget, ErrorInfo, PayloadRef, Session, SessionStatus, Span, SpanStatus } from "./types_pb.js";
+import type { Agent, AgentStatus, Annotation, AnnotationKind, AnnotationTarget, AttributeValue, ControlAckResult, ControlKind, ControlTarget, ErrorInfo, PayloadRef, Session, SessionStatus, Span, SpanStatus, TaskPlan, UpdatedTaskStatus } from "./types_pb.js";
 import { file_harmonograf_v1_types } from "./types_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -24,7 +24,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file harmonograf/v1/frontend.proto.
  */
 export const file_harmonograf_v1_frontend: GenFile = /*@__PURE__*/
-  fileDesc("Ch1oYXJtb25vZ3JhZi92MS9mcm9udGVuZC5wcm90bxIOaGFybW9ub2dyYWYudjEimQIKDlNlc3Npb25TdW1tYXJ5EgoKAmlkGAEgASgJEg0KBXRpdGxlGAIgASgJEi4KCmNyZWF0ZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiwKCGVuZGVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBItCgZzdGF0dXMYBSABKA4yHS5oYXJtb25vZ3JhZi52MS5TZXNzaW9uU3RhdHVzEhMKC2FnZW50X2NvdW50GAYgASgFEhcKD2F0dGVudGlvbl9jb3VudBgHIAEoBRIxCg1sYXN0X2FjdGl2aXR5GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJ6ChNMaXN0U2Vzc2lvbnNSZXF1ZXN0EjQKDXN0YXR1c19maWx0ZXIYASABKA4yHS5oYXJtb25vZ3JhZi52MS5TZXNzaW9uU3RhdHVzEg4KBnNlYXJjaBgCIAEoCRINCgVsaW1pdBgDIAEoBRIOCgZvZmZzZXQYBCABKAUiXQoUTGlzdFNlc3Npb25zUmVzcG9uc2USMAoIc2Vzc2lvbnMYASADKAsyHi5oYXJtb25vZ3JhZi52MS5TZXNzaW9uU3VtbWFyeRITCgt0b3RhbF9jb3VudBgCIAEoBSKLAQoTV2F0Y2hTZXNzaW9uUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEjAKDHdpbmRvd19zdGFydBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKd2luZG93X2VuZBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAi/wUKDVNlc3Npb25VcGRhdGUSKgoHc2Vzc2lvbhgBIAEoCzIXLmhhcm1vbm9ncmFmLnYxLlNlc3Npb25IABImCgVhZ2VudBgCIAEoCzIVLmhhcm1vbm9ncmFmLnYxLkFnZW50SAASLAoMaW5pdGlhbF9zcGFuGAMgASgLMhQuaGFybW9ub2dyYWYudjEuU3BhbkgAEjgKEmluaXRpYWxfYW5ub3RhdGlvbhgEIAEoCzIaLmhhcm1vbm9ncmFmLnYxLkFubm90YXRpb25IABI+Cg5idXJzdF9jb21wbGV0ZRgFIAEoCzIkLmhhcm1vbm9ncmFmLnYxLkluaXRpYWxCdXJzdENvbXBsZXRlSAASKwoIbmV3X3NwYW4YBiABKAsyFy5oYXJtb25vZ3JhZi52MS5OZXdTcGFuSAASMwoMdXBkYXRlZF9zcGFuGAcgASgLMhsuaGFybW9ub2dyYWYudjEuVXBkYXRlZFNwYW5IABIvCgplbmRlZF9zcGFuGAggASgLMhkuaGFybW9ub2dyYWYudjEuRW5kZWRTcGFuSAASNwoObmV3X2Fubm90YXRpb24YCSABKAsyHS5oYXJtb25vZ3JhZi52MS5OZXdBbm5vdGF0aW9uSAASMwoMYWdlbnRfam9pbmVkGAogASgLMhsuaGFybW9ub2dyYWYudjEuQWdlbnRKb2luZWRIABIvCgphZ2VudF9sZWZ0GAsgASgLMhkuaGFybW9ub2dyYWYudjEuQWdlbnRMZWZ0SAASQgoUYWdlbnRfc3RhdHVzX2NoYW5nZWQYDCABKAsyIi5oYXJtb25vZ3JhZi52MS5BZ2VudFN0YXR1c0NoYW5nZWRIABI1Cg1zZXNzaW9uX2VuZGVkGA0gASgLMhwuaGFybW9ub2dyYWYudjEuU2Vzc2lvbkVuZGVkSAASPQoRcGF5bG9hZF9hdmFpbGFibGUYDiABKAsyIC5oYXJtb25vZ3JhZi52MS5QYXlsb2FkQXZhaWxhYmxlSABCBgoEa2luZCI/ChRJbml0aWFsQnVyc3RDb21wbGV0ZRISCgpzcGFuc19zZW50GAEgASgFEhMKC2FnZW50c19zZW50GAIgASgFIi0KB05ld1NwYW4SIgoEc3BhbhgBIAEoCzIULmhhcm1vbm9ncmFmLnYxLlNwYW4ikAIKC1VwZGF0ZWRTcGFuEg8KB3NwYW5faWQYASABKAkSKgoGc3RhdHVzGAIgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxI/CgphdHRyaWJ1dGVzGAMgAygLMisuaGFybW9ub2dyYWYudjEuVXBkYXRlZFNwYW4uQXR0cmlidXRlc0VudHJ5EjAKDHBheWxvYWRfcmVmcxgEIAMoCzIaLmhhcm1vbm9ncmFmLnYxLlBheWxvYWRSZWYaUQoPQXR0cmlidXRlc0VudHJ5EgsKA2tleRgBIAEoCRItCgV2YWx1ZRgCIAEoCzIeLmhhcm1vbm9ncmFmLnYxLkF0dHJpYnV0ZVZhbHVlOgI4ASLSAQoJRW5kZWRTcGFuEg8KB3NwYW5faWQYASABKAkSLAoIZW5kX3RpbWUYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEioKBnN0YXR1cxgDIAEoDjIaLmhhcm1vbm9ncmFmLnYxLlNwYW5TdGF0dXMSKAoFZXJyb3IYBCABKAsyGS5oYXJtb25vZ3JhZi52MS5FcnJvckluZm8SMAoMcGF5bG9hZF9yZWZzGAUgAygLMhouaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlZiI/Cg1OZXdBbm5vdGF0aW9uEi4KCmFubm90YXRpb24YASABKAsyGi5oYXJtb25vZ3JhZi52MS5Bbm5vdGF0aW9uIjMKC0FnZW50Sm9pbmVkEiQKBWFnZW50GAEgASgLMhUuaGFybW9ub2dyYWYudjEuQWdlbnQiMAoJQWdlbnRMZWZ0EhAKCGFnZW50X2lkGAEgASgJEhEKCXN0cmVhbV9pZBgCIAEoCSKEAQoSQWdlbnRTdGF0dXNDaGFuZ2VkEhAKCGFnZW50X2lkGAEgASgJEisKBnN0YXR1cxgCIAEoDjIbLmhhcm1vbm9ncmFmLnYxLkFnZW50U3RhdHVzEhcKD2J1ZmZlcmVkX2V2ZW50cxgDIAEoAxIWCg5kcm9wcGVkX2V2ZW50cxgEIAEoAyJxCgxTZXNzaW9uRW5kZWQSLAoIZW5kZWRfYXQYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjMKDGZpbmFsX3N0YXR1cxgCIAEoDjIdLmhhcm1vbm9ncmFmLnYxLlNlc3Npb25TdGF0dXMiIgoQUGF5bG9hZEF2YWlsYWJsZRIOCgZkaWdlc3QYASABKAkiOQoRR2V0UGF5bG9hZFJlcXVlc3QSDgoGZGlnZXN0GAEgASgJEhQKDHN1bW1hcnlfb25seRgCIAEoCCKBAQoMUGF5bG9hZENodW5rEg4KBmRpZ2VzdBgBIAEoCRISCgp0b3RhbF9zaXplGAIgASgDEgwKBG1pbWUYAyABKAkSDwoHc3VtbWFyeRgEIAEoCRINCgVjaHVuaxgFIAEoDBIMCgRsYXN0GAYgASgIEhEKCW5vdF9mb3VuZBgHIAEoCCKsAQoSR2V0U3BhblRyZWVSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSEQoJYWdlbnRfaWRzGAIgAygJEjAKDHdpbmRvd19zdGFydBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKd2luZG93X2VuZBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDQoFbGltaXQYBSABKAUiTQoTR2V0U3BhblRyZWVSZXNwb25zZRIjCgVzcGFucxgBIAMoCzIULmhhcm1vbm9ncmFmLnYxLlNwYW4SEQoJdHJ1bmNhdGVkGAIgASgIIsEBChVQb3N0QW5ub3RhdGlvblJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIwCgZ0YXJnZXQYAiABKAsyIC5oYXJtb25vZ3JhZi52MS5Bbm5vdGF0aW9uVGFyZ2V0EiwKBGtpbmQYAyABKA4yHi5oYXJtb25vZ3JhZi52MS5Bbm5vdGF0aW9uS2luZBIMCgRib2R5GAQgASgJEg4KBmF1dGhvchgFIAEoCRIWCg5hY2tfdGltZW91dF9tcxgGIAEoAyKVAQoWUG9zdEFubm90YXRpb25SZXNwb25zZRIuCgphbm5vdGF0aW9uGAEgASgLMhouaGFybW9ub2dyYWYudjEuQW5ub3RhdGlvbhIyCghkZWxpdmVyeRgCIAEoDjIgLmhhcm1vbm9ncmFmLnYxLkNvbnRyb2xBY2tSZXN1bHQSFwoPZGVsaXZlcnlfZGV0YWlsGAMgASgJIsUBChJTZW5kQ29udHJvbFJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRItCgZ0YXJnZXQYAiABKAsyHS5oYXJtb25vZ3JhZi52MS5Db250cm9sVGFyZ2V0EikKBGtpbmQYAyABKA4yGy5oYXJtb25vZ3JhZi52MS5Db250cm9sS2luZBIPCgdwYXlsb2FkGAQgASgMEhYKDmFja190aW1lb3V0X21zGAUgASgDEhgKEHJlcXVpcmVfYWxsX2Fja3MYBiABKAgihAEKE1NlbmRDb250cm9sUmVzcG9uc2USEgoKY29udHJvbF9pZBgBIAEoCRIwCgZyZXN1bHQYAiABKA4yIC5oYXJtb25vZ3JhZi52MS5Db250cm9sQWNrUmVzdWx0EicKBGFja3MYAyADKAsyGS5oYXJtb25vZ3JhZi52MS5TdHJlYW1BY2sijgEKCVN0cmVhbUFjaxIRCglzdHJlYW1faWQYASABKAkSMAoGcmVzdWx0GAIgASgOMiAuaGFybW9ub2dyYWYudjEuQ29udHJvbEFja1Jlc3VsdBIOCgZkZXRhaWwYAyABKAkSLAoIYWNrZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIjkKFERlbGV0ZVNlc3Npb25SZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSDQoFZm9yY2UYAiABKAgikAEKFURlbGV0ZVNlc3Npb25SZXNwb25zZRIPCgdkZWxldGVkGAEgASgIEhUKDXJlYXNvbl9pZl9ub3QYAiABKAkSFQoNc3BhbnNfcmVtb3ZlZBgDIAEoBRIbChNhbm5vdGF0aW9uc19yZW1vdmVkGAQgASgFEhsKE3BheWxvYWRfYnl0ZXNfZnJlZWQYBSABKAMiEQoPR2V0U3RhdHNSZXF1ZXN0Ip4CChBHZXRTdGF0c1Jlc3BvbnNlEhUKDXNlc3Npb25fY291bnQYASABKAUSGgoSbGl2ZV9zZXNzaW9uX2NvdW50GAIgASgFEhMKC2FnZW50X2NvdW50GAMgASgFEhIKCnNwYW5fY291bnQYBCABKAMSGAoQYW5ub3RhdGlvbl9jb3VudBgFIAEoAxIVCg1wYXlsb2FkX2NvdW50GAYgASgDEhUKDXBheWxvYWRfYnl0ZXMYByABKAMSEgoKZGlza19ieXRlcxgIIAEoAxIQCghkYXRhX2RpchgJIAEoCRIgChhhY3RpdmVfdGVsZW1ldHJ5X3N0cmVhbXMYCiABKAUSHgoWYWN0aXZlX2NvbnRyb2xfc3RyZWFtcxgLIAEoBUJEWkJnaXRodWIuY29tL2FudGhyb3BpY3MvaGFybW9ub2dyYWYvZ2VuL2hhcm1vbm9ncmFmL3YxO2hhcm1vbm9ncmFmdjFiBnByb3RvMw", [file_google_protobuf_timestamp, file_harmonograf_v1_types]);
+  fileDesc("Ch1oYXJtb25vZ3JhZi92MS9mcm9udGVuZC5wcm90bxIOaGFybW9ub2dyYWYudjEimQIKDlNlc3Npb25TdW1tYXJ5EgoKAmlkGAEgASgJEg0KBXRpdGxlGAIgASgJEi4KCmNyZWF0ZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiwKCGVuZGVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBItCgZzdGF0dXMYBSABKA4yHS5oYXJtb25vZ3JhZi52MS5TZXNzaW9uU3RhdHVzEhMKC2FnZW50X2NvdW50GAYgASgFEhcKD2F0dGVudGlvbl9jb3VudBgHIAEoBRIxCg1sYXN0X2FjdGl2aXR5GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJ6ChNMaXN0U2Vzc2lvbnNSZXF1ZXN0EjQKDXN0YXR1c19maWx0ZXIYASABKA4yHS5oYXJtb25vZ3JhZi52MS5TZXNzaW9uU3RhdHVzEg4KBnNlYXJjaBgCIAEoCRINCgVsaW1pdBgDIAEoBRIOCgZvZmZzZXQYBCABKAUiXQoUTGlzdFNlc3Npb25zUmVzcG9uc2USMAoIc2Vzc2lvbnMYASADKAsyHi5oYXJtb25vZ3JhZi52MS5TZXNzaW9uU3VtbWFyeRITCgt0b3RhbF9jb3VudBgCIAEoBSKLAQoTV2F0Y2hTZXNzaW9uUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEjAKDHdpbmRvd19zdGFydBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKd2luZG93X2VuZBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAi6QcKDVNlc3Npb25VcGRhdGUSKgoHc2Vzc2lvbhgBIAEoCzIXLmhhcm1vbm9ncmFmLnYxLlNlc3Npb25IABImCgVhZ2VudBgCIAEoCzIVLmhhcm1vbm9ncmFmLnYxLkFnZW50SAASLAoMaW5pdGlhbF9zcGFuGAMgASgLMhQuaGFybW9ub2dyYWYudjEuU3BhbkgAEjgKEmluaXRpYWxfYW5ub3RhdGlvbhgEIAEoCzIaLmhhcm1vbm9ncmFmLnYxLkFubm90YXRpb25IABI+Cg5idXJzdF9jb21wbGV0ZRgFIAEoCzIkLmhhcm1vbm9ncmFmLnYxLkluaXRpYWxCdXJzdENvbXBsZXRlSAASKwoIbmV3X3NwYW4YBiABKAsyFy5oYXJtb25vZ3JhZi52MS5OZXdTcGFuSAASMwoMdXBkYXRlZF9zcGFuGAcgASgLMhsuaGFybW9ub2dyYWYudjEuVXBkYXRlZFNwYW5IABIvCgplbmRlZF9zcGFuGAggASgLMhkuaGFybW9ub2dyYWYudjEuRW5kZWRTcGFuSAASNwoObmV3X2Fubm90YXRpb24YCSABKAsyHS5oYXJtb25vZ3JhZi52MS5OZXdBbm5vdGF0aW9uSAASMwoMYWdlbnRfam9pbmVkGAogASgLMhsuaGFybW9ub2dyYWYudjEuQWdlbnRKb2luZWRIABIvCgphZ2VudF9sZWZ0GAsgASgLMhkuaGFybW9ub2dyYWYudjEuQWdlbnRMZWZ0SAASQgoUYWdlbnRfc3RhdHVzX2NoYW5nZWQYDCABKAsyIi5oYXJtb25vZ3JhZi52MS5BZ2VudFN0YXR1c0NoYW5nZWRIABI1Cg1zZXNzaW9uX2VuZGVkGA0gASgLMhwuaGFybW9ub2dyYWYudjEuU2Vzc2lvbkVuZGVkSAASPQoRcGF5bG9hZF9hdmFpbGFibGUYDiABKAsyIC5oYXJtb25vZ3JhZi52MS5QYXlsb2FkQXZhaWxhYmxlSAASMQoLdGFza19yZXBvcnQYDyABKAsyGi5oYXJtb25vZ3JhZi52MS5UYXNrUmVwb3J0SAASLQoJdGFza19wbGFuGBAgASgLMhguaGFybW9ub2dyYWYudjEuVGFza1BsYW5IABJAChN1cGRhdGVkX3Rhc2tfc3RhdHVzGBEgASgLMiEuaGFybW9ub2dyYWYudjEuVXBkYXRlZFRhc2tTdGF0dXNIABJEChVjb250ZXh0X3dpbmRvd19zYW1wbGUYEiABKAsyIy5oYXJtb25vZ3JhZi52MS5Db250ZXh0V2luZG93U2FtcGxlSABCBgoEa2luZCJ+ChNDb250ZXh0V2luZG93U2FtcGxlEhAKCGFnZW50X2lkGAEgASgJEi8KC3JlY29yZGVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIOCgZ0b2tlbnMYAyABKAMSFAoMbGltaXRfdG9rZW5zGAQgASgDIj8KFEluaXRpYWxCdXJzdENvbXBsZXRlEhIKCnNwYW5zX3NlbnQYASABKAUSEwoLYWdlbnRzX3NlbnQYAiABKAUiLQoHTmV3U3BhbhIiCgRzcGFuGAEgASgLMhQuaGFybW9ub2dyYWYudjEuU3BhbiKQAgoLVXBkYXRlZFNwYW4SDwoHc3Bhbl9pZBgBIAEoCRIqCgZzdGF0dXMYAiABKA4yGi5oYXJtb25vZ3JhZi52MS5TcGFuU3RhdHVzEj8KCmF0dHJpYnV0ZXMYAyADKAsyKy5oYXJtb25vZ3JhZi52MS5VcGRhdGVkU3Bhbi5BdHRyaWJ1dGVzRW50cnkSMAoMcGF5bG9hZF9yZWZzGAQgAygLMhouaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlZhpRCg9BdHRyaWJ1dGVzRW50cnkSCwoDa2V5GAEgASgJEi0KBXZhbHVlGAIgASgLMh4uaGFybW9ub2dyYWYudjEuQXR0cmlidXRlVmFsdWU6AjgBItIBCglFbmRlZFNwYW4SDwoHc3Bhbl9pZBgBIAEoCRIsCghlbmRfdGltZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKgoGc3RhdHVzGAMgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIoCgVlcnJvchgEIAEoCzIZLmhhcm1vbm9ncmFmLnYxLkVycm9ySW5mbxIwCgxwYXlsb2FkX3JlZnMYBSADKAsyGi5oYXJtb25vZ3JhZi52MS5QYXlsb2FkUmVmIj8KDU5ld0Fubm90YXRpb24SLgoKYW5ub3RhdGlvbhgBIAEoCzIaLmhhcm1vbm9ncmFmLnYxLkFubm90YXRpb24iMwoLQWdlbnRKb2luZWQSJAoFYWdlbnQYASABKAsyFS5oYXJtb25vZ3JhZi52MS5BZ2VudCIwCglBZ2VudExlZnQSEAoIYWdlbnRfaWQYASABKAkSEQoJc3RyZWFtX2lkGAIgASgJIscBChJBZ2VudFN0YXR1c0NoYW5nZWQSEAoIYWdlbnRfaWQYASABKAkSKwoGc3RhdHVzGAIgASgOMhsuaGFybW9ub2dyYWYudjEuQWdlbnRTdGF0dXMSFwoPYnVmZmVyZWRfZXZlbnRzGAMgASgDEhYKDmRyb3BwZWRfZXZlbnRzGAQgASgDEhgKEGN1cnJlbnRfYWN0aXZpdHkYBSABKAkSDQoFc3R1Y2sYBiABKAgSGAoQcHJvZ3Jlc3NfY291bnRlchgHIAEoAyJxCgxTZXNzaW9uRW5kZWQSLAoIZW5kZWRfYXQYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjMKDGZpbmFsX3N0YXR1cxgCIAEoDjIdLmhhcm1vbm9ncmFmLnYxLlNlc3Npb25TdGF0dXMiIgoQUGF5bG9hZEF2YWlsYWJsZRIOCgZkaWdlc3QYASABKAkiewoKVGFza1JlcG9ydBIQCghhZ2VudF9pZBgBIAEoCRIOCgZyZXBvcnQYAiABKAkSGgoSaW52b2NhdGlvbl9zcGFuX2lkGAMgASgJEi8KC3JlY29yZGVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCI5ChFHZXRQYXlsb2FkUmVxdWVzdBIOCgZkaWdlc3QYASABKAkSFAoMc3VtbWFyeV9vbmx5GAIgASgIIoEBCgxQYXlsb2FkQ2h1bmsSDgoGZGlnZXN0GAEgASgJEhIKCnRvdGFsX3NpemUYAiABKAMSDAoEbWltZRgDIAEoCRIPCgdzdW1tYXJ5GAQgASgJEg0KBWNodW5rGAUgASgMEgwKBGxhc3QYBiABKAgSEQoJbm90X2ZvdW5kGAcgASgIIqwBChJHZXRTcGFuVHJlZVJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIRCglhZ2VudF9pZHMYAiADKAkSMAoMd2luZG93X3N0YXJ0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp3aW5kb3dfZW5kGAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBINCgVsaW1pdBgFIAEoBSJNChNHZXRTcGFuVHJlZVJlc3BvbnNlEiMKBXNwYW5zGAEgAygLMhQuaGFybW9ub2dyYWYudjEuU3BhbhIRCgl0cnVuY2F0ZWQYAiABKAgiwQEKFVBvc3RBbm5vdGF0aW9uUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEjAKBnRhcmdldBgCIAEoCzIgLmhhcm1vbm9ncmFmLnYxLkFubm90YXRpb25UYXJnZXQSLAoEa2luZBgDIAEoDjIeLmhhcm1vbm9ncmFmLnYxLkFubm90YXRpb25LaW5kEgwKBGJvZHkYBCABKAkSDgoGYXV0aG9yGAUgASgJEhYKDmFja190aW1lb3V0X21zGAYgASgDIpUBChZQb3N0QW5ub3RhdGlvblJlc3BvbnNlEi4KCmFubm90YXRpb24YASABKAsyGi5oYXJtb25vZ3JhZi52MS5Bbm5vdGF0aW9uEjIKCGRlbGl2ZXJ5GAIgASgOMiAuaGFybW9ub2dyYWYudjEuQ29udHJvbEFja1Jlc3VsdBIXCg9kZWxpdmVyeV9kZXRhaWwYAyABKAkixQEKElNlbmRDb250cm9sUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEi0KBnRhcmdldBgCIAEoCzIdLmhhcm1vbm9ncmFmLnYxLkNvbnRyb2xUYXJnZXQSKQoEa2luZBgDIAEoDjIbLmhhcm1vbm9ncmFmLnYxLkNvbnRyb2xLaW5kEg8KB3BheWxvYWQYBCABKAwSFgoOYWNrX3RpbWVvdXRfbXMYBSABKAMSGAoQcmVxdWlyZV9hbGxfYWNrcxgGIAEoCCKEAQoTU2VuZENvbnRyb2xSZXNwb25zZRISCgpjb250cm9sX2lkGAEgASgJEjAKBnJlc3VsdBgCIAEoDjIgLmhhcm1vbm9ncmFmLnYxLkNvbnRyb2xBY2tSZXN1bHQSJwoEYWNrcxgDIAMoCzIZLmhhcm1vbm9ncmFmLnYxLlN0cmVhbUFjayKOAQoJU3RyZWFtQWNrEhEKCXN0cmVhbV9pZBgBIAEoCRIwCgZyZXN1bHQYAiABKA4yIC5oYXJtb25vZ3JhZi52MS5Db250cm9sQWNrUmVzdWx0Eg4KBmRldGFpbBgDIAEoCRIsCghhY2tlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiOQoURGVsZXRlU2Vzc2lvblJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRINCgVmb3JjZRgCIAEoCCKQAQoVRGVsZXRlU2Vzc2lvblJlc3BvbnNlEg8KB2RlbGV0ZWQYASABKAgSFQoNcmVhc29uX2lmX25vdBgCIAEoCRIVCg1zcGFuc19yZW1vdmVkGAMgASgFEhsKE2Fubm90YXRpb25zX3JlbW92ZWQYBCABKAUSGwoTcGF5bG9hZF9ieXRlc19mcmVlZBgFIAEoAyIRCg9HZXRTdGF0c1JlcXVlc3QingIKEEdldFN0YXRzUmVzcG9uc2USFQoNc2Vzc2lvbl9jb3VudBgBIAEoBRIaChJsaXZlX3Nlc3Npb25fY291bnQYAiABKAUSEwoLYWdlbnRfY291bnQYAyABKAUSEgoKc3Bhbl9jb3VudBgEIAEoAxIYChBhbm5vdGF0aW9uX2NvdW50GAUgASgDEhUKDXBheWxvYWRfY291bnQYBiABKAMSFQoNcGF5bG9hZF9ieXRlcxgHIAEoAxISCgpkaXNrX2J5dGVzGAggASgDEhAKCGRhdGFfZGlyGAkgASgJEiAKGGFjdGl2ZV90ZWxlbWV0cnlfc3RyZWFtcxgKIAEoBRIeChZhY3RpdmVfY29udHJvbF9zdHJlYW1zGAsgASgFQkJaQGdpdGh1Yi5jb20vcGVkYXB1ZGkvaGFybW9ub2dyYWYvZ2VuL2hhcm1vbm9ncmFmL3YxO2hhcm1vbm9ncmFmdjFiBnByb3RvMw", [file_google_protobuf_timestamp, file_harmonograf_v1_types]);
 
 /**
  * Summary of a session for the picker. Cheap to build — does not load
@@ -280,6 +280,41 @@ export type SessionUpdate = Message<"harmonograf.v1.SessionUpdate"> & {
      */
     value: PayloadAvailable;
     case: "payloadAvailable";
+  } | {
+    /**
+     * Agent responded to a STATUS_QUERY or proactively emitted a task report.
+     *
+     * @generated from field: harmonograf.v1.TaskReport task_report = 15;
+     */
+    value: TaskReport;
+    case: "taskReport";
+  } | {
+    /**
+     * A full task plan (initial burst or newly emitted by a client).
+     *
+     * @generated from field: harmonograf.v1.TaskPlan task_plan = 16;
+     */
+    value: TaskPlan;
+    case: "taskPlan";
+  } | {
+    /**
+     * Delta: a single task's status changed (or it bound to a span).
+     *
+     * @generated from field: harmonograf.v1.UpdatedTaskStatus updated_task_status = 17;
+     */
+    value: UpdatedTaskStatus;
+    case: "updatedTaskStatus";
+  } | {
+    /**
+     * Single (timestamp, tokens, limit) sample for one agent's LLM
+     * context window. Delivered both during the initial burst (replaying
+     * the most recent samples from sqlite) and live as each heartbeat
+     * ingests.
+     *
+     * @generated from field: harmonograf.v1.ContextWindowSample context_window_sample = 18;
+     */
+    value: ContextWindowSample;
+    case: "contextWindowSample";
   } | { case: undefined; value?: undefined };
 };
 
@@ -289,6 +324,38 @@ export type SessionUpdate = Message<"harmonograf.v1.SessionUpdate"> & {
  */
 export const SessionUpdateSchema: GenMessage<SessionUpdate> = /*@__PURE__*/
   messageDesc(file_harmonograf_v1_frontend, 4);
+
+/**
+ * @generated from message harmonograf.v1.ContextWindowSample
+ */
+export type ContextWindowSample = Message<"harmonograf.v1.ContextWindowSample"> & {
+  /**
+   * @generated from field: string agent_id = 1;
+   */
+  agentId: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp recorded_at = 2;
+   */
+  recordedAt?: Timestamp;
+
+  /**
+   * @generated from field: int64 tokens = 3;
+   */
+  tokens: bigint;
+
+  /**
+   * @generated from field: int64 limit_tokens = 4;
+   */
+  limitTokens: bigint;
+};
+
+/**
+ * Describes the message harmonograf.v1.ContextWindowSample.
+ * Use `create(ContextWindowSampleSchema)` to create a new message.
+ */
+export const ContextWindowSampleSchema: GenMessage<ContextWindowSample> = /*@__PURE__*/
+  messageDesc(file_harmonograf_v1_frontend, 5);
 
 /**
  * @generated from message harmonograf.v1.InitialBurstComplete
@@ -310,7 +377,7 @@ export type InitialBurstComplete = Message<"harmonograf.v1.InitialBurstComplete"
  * Use `create(InitialBurstCompleteSchema)` to create a new message.
  */
 export const InitialBurstCompleteSchema: GenMessage<InitialBurstComplete> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 5);
+  messageDesc(file_harmonograf_v1_frontend, 6);
 
 /**
  * @generated from message harmonograf.v1.NewSpan
@@ -327,7 +394,7 @@ export type NewSpan = Message<"harmonograf.v1.NewSpan"> & {
  * Use `create(NewSpanSchema)` to create a new message.
  */
 export const NewSpanSchema: GenMessage<NewSpan> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 6);
+  messageDesc(file_harmonograf_v1_frontend, 7);
 
 /**
  * @generated from message harmonograf.v1.UpdatedSpan
@@ -359,7 +426,7 @@ export type UpdatedSpan = Message<"harmonograf.v1.UpdatedSpan"> & {
  * Use `create(UpdatedSpanSchema)` to create a new message.
  */
 export const UpdatedSpanSchema: GenMessage<UpdatedSpan> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 7);
+  messageDesc(file_harmonograf_v1_frontend, 8);
 
 /**
  * @generated from message harmonograf.v1.EndedSpan
@@ -400,7 +467,7 @@ export type EndedSpan = Message<"harmonograf.v1.EndedSpan"> & {
  * Use `create(EndedSpanSchema)` to create a new message.
  */
 export const EndedSpanSchema: GenMessage<EndedSpan> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 8);
+  messageDesc(file_harmonograf_v1_frontend, 9);
 
 /**
  * @generated from message harmonograf.v1.NewAnnotation
@@ -417,7 +484,7 @@ export type NewAnnotation = Message<"harmonograf.v1.NewAnnotation"> & {
  * Use `create(NewAnnotationSchema)` to create a new message.
  */
 export const NewAnnotationSchema: GenMessage<NewAnnotation> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 9);
+  messageDesc(file_harmonograf_v1_frontend, 10);
 
 /**
  * @generated from message harmonograf.v1.AgentJoined
@@ -434,7 +501,7 @@ export type AgentJoined = Message<"harmonograf.v1.AgentJoined"> & {
  * Use `create(AgentJoinedSchema)` to create a new message.
  */
 export const AgentJoinedSchema: GenMessage<AgentJoined> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 10);
+  messageDesc(file_harmonograf_v1_frontend, 11);
 
 /**
  * @generated from message harmonograf.v1.AgentLeft
@@ -456,7 +523,7 @@ export type AgentLeft = Message<"harmonograf.v1.AgentLeft"> & {
  * Use `create(AgentLeftSchema)` to create a new message.
  */
 export const AgentLeftSchema: GenMessage<AgentLeft> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 11);
+  messageDesc(file_harmonograf_v1_frontend, 12);
 
 /**
  * @generated from message harmonograf.v1.AgentStatusChanged
@@ -481,6 +548,30 @@ export type AgentStatusChanged = Message<"harmonograf.v1.AgentStatusChanged"> & 
    * @generated from field: int64 dropped_events = 4;
    */
   droppedEvents: bigint;
+
+  /**
+   * One-sentence description of what the agent is currently doing.
+   * Sourced from Heartbeat.current_activity and forwarded here so the
+   * frontend can display it without waiting for a span update.
+   *
+   * @generated from field: string current_activity = 5;
+   */
+  currentActivity: string;
+
+  /**
+   * Whether the agent appears stuck: has a RUNNING invocation but
+   * progress_counter has not changed for STUCK_THRESHOLD heartbeats.
+   *
+   * @generated from field: bool stuck = 6;
+   */
+  stuck: boolean;
+
+  /**
+   * The most recent progress_counter value seen from this agent.
+   *
+   * @generated from field: int64 progress_counter = 7;
+   */
+  progressCounter: bigint;
 };
 
 /**
@@ -488,7 +579,7 @@ export type AgentStatusChanged = Message<"harmonograf.v1.AgentStatusChanged"> & 
  * Use `create(AgentStatusChangedSchema)` to create a new message.
  */
 export const AgentStatusChangedSchema: GenMessage<AgentStatusChanged> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 12);
+  messageDesc(file_harmonograf_v1_frontend, 13);
 
 /**
  * @generated from message harmonograf.v1.SessionEnded
@@ -510,7 +601,7 @@ export type SessionEnded = Message<"harmonograf.v1.SessionEnded"> & {
  * Use `create(SessionEndedSchema)` to create a new message.
  */
 export const SessionEndedSchema: GenMessage<SessionEnded> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 13);
+  messageDesc(file_harmonograf_v1_frontend, 14);
 
 /**
  * @generated from message harmonograf.v1.PayloadAvailable
@@ -527,7 +618,49 @@ export type PayloadAvailable = Message<"harmonograf.v1.PayloadAvailable"> & {
  * Use `create(PayloadAvailableSchema)` to create a new message.
  */
 export const PayloadAvailableSchema: GenMessage<PayloadAvailable> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 14);
+  messageDesc(file_harmonograf_v1_frontend, 15);
+
+/**
+ * Broadcast whenever an agent responds to a STATUS_QUERY control event, or
+ * proactively emits a task-progress update. Delivered to all WatchSession
+ * subscribers so the Gantt modal and graph view stay in sync across viewers.
+ *
+ * @generated from message harmonograf.v1.TaskReport
+ */
+export type TaskReport = Message<"harmonograf.v1.TaskReport"> & {
+  /**
+   * @generated from field: string agent_id = 1;
+   */
+  agentId: string;
+
+  /**
+   * The agent's self-reported description of what it is working on.
+   *
+   * @generated from field: string report = 2;
+   */
+  report: string;
+
+  /**
+   * The active invocation span at the time of the report, if known.
+   *
+   * @generated from field: string invocation_span_id = 3;
+   */
+  invocationSpanId: string;
+
+  /**
+   * Server wall-clock time when the report was recorded.
+   *
+   * @generated from field: google.protobuf.Timestamp recorded_at = 4;
+   */
+  recordedAt?: Timestamp;
+};
+
+/**
+ * Describes the message harmonograf.v1.TaskReport.
+ * Use `create(TaskReportSchema)` to create a new message.
+ */
+export const TaskReportSchema: GenMessage<TaskReport> = /*@__PURE__*/
+  messageDesc(file_harmonograf_v1_frontend, 16);
 
 /**
  * GetPayload is server-streaming so that large payloads (multi-MiB LLM
@@ -556,7 +689,7 @@ export type GetPayloadRequest = Message<"harmonograf.v1.GetPayloadRequest"> & {
  * Use `create(GetPayloadRequestSchema)` to create a new message.
  */
 export const GetPayloadRequestSchema: GenMessage<GetPayloadRequest> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 15);
+  messageDesc(file_harmonograf_v1_frontend, 17);
 
 /**
  * @generated from message harmonograf.v1.PayloadChunk
@@ -611,7 +744,7 @@ export type PayloadChunk = Message<"harmonograf.v1.PayloadChunk"> & {
  * Use `create(PayloadChunkSchema)` to create a new message.
  */
 export const PayloadChunkSchema: GenMessage<PayloadChunk> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 16);
+  messageDesc(file_harmonograf_v1_frontend, 18);
 
 /**
  * @generated from message harmonograf.v1.GetSpanTreeRequest
@@ -655,7 +788,7 @@ export type GetSpanTreeRequest = Message<"harmonograf.v1.GetSpanTreeRequest"> & 
  * Use `create(GetSpanTreeRequestSchema)` to create a new message.
  */
 export const GetSpanTreeRequestSchema: GenMessage<GetSpanTreeRequest> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 17);
+  messageDesc(file_harmonograf_v1_frontend, 19);
 
 /**
  * @generated from message harmonograf.v1.GetSpanTreeResponse
@@ -677,7 +810,7 @@ export type GetSpanTreeResponse = Message<"harmonograf.v1.GetSpanTreeResponse"> 
  * Use `create(GetSpanTreeResponseSchema)` to create a new message.
  */
 export const GetSpanTreeResponseSchema: GenMessage<GetSpanTreeResponse> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 18);
+  messageDesc(file_harmonograf_v1_frontend, 20);
 
 /**
  * When kind == STEERING or HUMAN_RESPONSE, the server routes the body
@@ -727,7 +860,7 @@ export type PostAnnotationRequest = Message<"harmonograf.v1.PostAnnotationReques
  * Use `create(PostAnnotationRequestSchema)` to create a new message.
  */
 export const PostAnnotationRequestSchema: GenMessage<PostAnnotationRequest> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 19);
+  messageDesc(file_harmonograf_v1_frontend, 21);
 
 /**
  * @generated from message harmonograf.v1.PostAnnotationResponse
@@ -756,7 +889,7 @@ export type PostAnnotationResponse = Message<"harmonograf.v1.PostAnnotationRespo
  * Use `create(PostAnnotationResponseSchema)` to create a new message.
  */
 export const PostAnnotationResponseSchema: GenMessage<PostAnnotationResponse> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 20);
+  messageDesc(file_harmonograf_v1_frontend, 22);
 
 /**
  * Synchronous control issue. Server fans out to every active
@@ -807,7 +940,7 @@ export type SendControlRequest = Message<"harmonograf.v1.SendControlRequest"> & 
  * Use `create(SendControlRequestSchema)` to create a new message.
  */
 export const SendControlRequestSchema: GenMessage<SendControlRequest> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 21);
+  messageDesc(file_harmonograf_v1_frontend, 23);
 
 /**
  * @generated from message harmonograf.v1.SendControlResponse
@@ -837,7 +970,7 @@ export type SendControlResponse = Message<"harmonograf.v1.SendControlResponse"> 
  * Use `create(SendControlResponseSchema)` to create a new message.
  */
 export const SendControlResponseSchema: GenMessage<SendControlResponse> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 22);
+  messageDesc(file_harmonograf_v1_frontend, 24);
 
 /**
  * @generated from message harmonograf.v1.StreamAck
@@ -869,7 +1002,7 @@ export type StreamAck = Message<"harmonograf.v1.StreamAck"> & {
  * Use `create(StreamAckSchema)` to create a new message.
  */
 export const StreamAckSchema: GenMessage<StreamAck> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 23);
+  messageDesc(file_harmonograf_v1_frontend, 25);
 
 /**
  * @generated from message harmonograf.v1.DeleteSessionRequest
@@ -894,7 +1027,7 @@ export type DeleteSessionRequest = Message<"harmonograf.v1.DeleteSessionRequest"
  * Use `create(DeleteSessionRequestSchema)` to create a new message.
  */
 export const DeleteSessionRequestSchema: GenMessage<DeleteSessionRequest> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 24);
+  messageDesc(file_harmonograf_v1_frontend, 26);
 
 /**
  * @generated from message harmonograf.v1.DeleteSessionResponse
@@ -933,7 +1066,7 @@ export type DeleteSessionResponse = Message<"harmonograf.v1.DeleteSessionRespons
  * Use `create(DeleteSessionResponseSchema)` to create a new message.
  */
 export const DeleteSessionResponseSchema: GenMessage<DeleteSessionResponse> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 25);
+  messageDesc(file_harmonograf_v1_frontend, 27);
 
 /**
  * Retention stats. Harmonograf v0 does not evict automatically
@@ -950,7 +1083,7 @@ export type GetStatsRequest = Message<"harmonograf.v1.GetStatsRequest"> & {
  * Use `create(GetStatsRequestSchema)` to create a new message.
  */
 export const GetStatsRequestSchema: GenMessage<GetStatsRequest> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 26);
+  messageDesc(file_harmonograf_v1_frontend, 28);
 
 /**
  * @generated from message harmonograf.v1.GetStatsResponse
@@ -1019,5 +1152,5 @@ export type GetStatsResponse = Message<"harmonograf.v1.GetStatsResponse"> & {
  * Use `create(GetStatsResponseSchema)` to create a new message.
  */
 export const GetStatsResponseSchema: GenMessage<GetStatsResponse> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_frontend, 27);
+  messageDesc(file_harmonograf_v1_frontend, 29);
 

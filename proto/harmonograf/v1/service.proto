@@ -23,7 +23,7 @@ import "harmonograf/v1/control.proto";
 import "harmonograf/v1/frontend.proto";
 import "harmonograf/v1/types.proto";
 
-option go_package = "github.com/anthropics/harmonograf/gen/harmonograf/v1;harmonografv1";
+option go_package = "github.com/pedapudi/harmonograf/gen/harmonograf/v1;harmonografv1";
 
 service Harmonograf {
   // --- Agent → server: high-volume telemetry ---------------------------

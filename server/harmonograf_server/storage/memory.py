@@ -25,6 +25,10 @@ from harmonograf_server.storage.base import (
     SpanStatus,
     Stats,
     Store,
+    Task,
+    TaskPlan,
+    TaskStatus,
+    ContextWindowSample,
 )
 
 
@@ -39,6 +43,9 @@ class InMemoryStore(Store):
         self._annotations: dict[str, Annotation] = {}
         self._payloads: dict[str, PayloadRecord] = {}
         self._payload_refcount: dict[str, int] = {}
+        self._task_plans: dict[str, TaskPlan] = {}
+        # session_id -> agent_id -> list[ContextWindowSample] (append-only).
+        self._ctx_samples: dict[str, dict[str, list[ContextWindowSample]]] = {}
 
     async def start(self) -> None:
         return None
@@ -118,6 +125,12 @@ class InMemoryStore(Store):
             ]
             for aid in ann_ids:
                 del self._annotations[aid]
+            plan_ids = [
+                pid for pid, p in self._task_plans.items() if p.session_id == session_id
+            ]
+            for pid in plan_ids:
+                del self._task_plans[pid]
+            self._ctx_samples.pop(session_id, None)
             return True
 
     # agents --------------------------------------------------------------
@@ -366,7 +379,77 @@ class InMemoryStore(Store):
         else:
             self._payload_refcount[digest] = n
 
+    # task plans ----------------------------------------------------------
+    async def put_task_plan(self, plan: TaskPlan) -> TaskPlan:
+        async with self._lock:
+            self._task_plans[plan.id] = copy.deepcopy(plan)
+            return copy.deepcopy(plan)
+
+    async def get_task_plan(self, plan_id: str) -> Optional[TaskPlan]:
+        async with self._lock:
+            p = self._task_plans.get(plan_id)
+            return copy.deepcopy(p) if p else None
+
+    async def list_task_plans_for_session(
+        self, session_id: str
+    ) -> list[TaskPlan]:
+        async with self._lock:
+            out = [
+                copy.deepcopy(p)
+                for p in self._task_plans.values()
+                if p.session_id == session_id
+            ]
+            out.sort(key=lambda p: p.created_at)
+            return out
+
+    async def update_task_status(
+        self,
+        plan_id: str,
+        task_id: str,
+        status: TaskStatus,
+        bound_span_id: Optional[str] = None,
+    ) -> Optional[Task]:
+        async with self._lock:
+            plan = self._task_plans.get(plan_id)
+            if plan is None:
+                return None
+            for t in plan.tasks:
+                if t.id == task_id:
+                    t.status = status
+                    if bound_span_id is not None:
+                        t.bound_span_id = bound_span_id
+                    return copy.deepcopy(t)
+            return None
+
     # stats ---------------------------------------------------------------
+    async def append_context_window_sample(
+        self, sample: ContextWindowSample
+    ) -> None:
+        async with self._lock:
+            per_agent = self._ctx_samples.setdefault(sample.session_id, {})
+            per_agent.setdefault(sample.agent_id, []).append(
+                copy.deepcopy(sample)
+            )
+
+    async def list_context_window_samples(
+        self,
+        session_id: str,
+        agent_id: Optional[str] = None,
+        limit_per_agent: int = 200,
+    ) -> list[ContextWindowSample]:
+        async with self._lock:
+            per_agent = self._ctx_samples.get(session_id, {})
+            out: list[ContextWindowSample] = []
+            limit = max(1, int(limit_per_agent))
+            if agent_id is not None:
+                lst = per_agent.get(agent_id, [])
+                out.extend(copy.deepcopy(s) for s in lst[-limit:])
+            else:
+                for aid, lst in per_agent.items():
+                    out.extend(copy.deepcopy(s) for s in lst[-limit:])
+            out.sort(key=lambda s: (s.agent_id, s.recorded_at))
+            return out
+
     async def stats(self) -> Stats:
         async with self._lock:
             payload_bytes = sum(rec.meta.size for rec in self._payloads.values())

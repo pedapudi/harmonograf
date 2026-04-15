@@ -105,7 +105,7 @@ class PayloadUpload(_message.Message):
     def __init__(self, digest: _Optional[str] = ..., total_size: _Optional[int] = ..., mime: _Optional[str] = ..., chunk: _Optional[bytes] = ..., last: bool = ..., evicted: bool = ...) -> None: ...
 
 class Heartbeat(_message.Message):
-    __slots__ = ("buffered_events", "dropped_events", "dropped_spans_critical", "buffered_payload_bytes", "payloads_evicted", "cpu_self_pct", "client_time", "progress_counter", "current_activity")
+    __slots__ = ("buffered_events", "dropped_events", "dropped_spans_critical", "buffered_payload_bytes", "payloads_evicted", "cpu_self_pct", "client_time", "progress_counter", "current_activity", "context_window_tokens", "context_window_limit_tokens")
     BUFFERED_EVENTS_FIELD_NUMBER: _ClassVar[int]
     DROPPED_EVENTS_FIELD_NUMBER: _ClassVar[int]
     DROPPED_SPANS_CRITICAL_FIELD_NUMBER: _ClassVar[int]
@@ -115,6 +115,8 @@ class Heartbeat(_message.Message):
     CLIENT_TIME_FIELD_NUMBER: _ClassVar[int]
     PROGRESS_COUNTER_FIELD_NUMBER: _ClassVar[int]
     CURRENT_ACTIVITY_FIELD_NUMBER: _ClassVar[int]
+    CONTEXT_WINDOW_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    CONTEXT_WINDOW_LIMIT_TOKENS_FIELD_NUMBER: _ClassVar[int]
     buffered_events: int
     dropped_events: int
     dropped_spans_critical: int
@@ -124,7 +126,9 @@ class Heartbeat(_message.Message):
     client_time: _timestamp_pb2.Timestamp
     progress_counter: int
     current_activity: str
-    def __init__(self, buffered_events: _Optional[int] = ..., dropped_events: _Optional[int] = ..., dropped_spans_critical: _Optional[int] = ..., buffered_payload_bytes: _Optional[int] = ..., payloads_evicted: _Optional[int] = ..., cpu_self_pct: _Optional[float] = ..., client_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., progress_counter: _Optional[int] = ..., current_activity: _Optional[str] = ...) -> None: ...
+    context_window_tokens: int
+    context_window_limit_tokens: int
+    def __init__(self, buffered_events: _Optional[int] = ..., dropped_events: _Optional[int] = ..., dropped_spans_critical: _Optional[int] = ..., buffered_payload_bytes: _Optional[int] = ..., payloads_evicted: _Optional[int] = ..., cpu_self_pct: _Optional[float] = ..., client_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., progress_counter: _Optional[int] = ..., current_activity: _Optional[str] = ..., context_window_tokens: _Optional[int] = ..., context_window_limit_tokens: _Optional[int] = ...) -> None: ...
 
 class Goodbye(_message.Message):
     __slots__ = ("reason",)
@@ -133,7 +137,7 @@ class Goodbye(_message.Message):
     def __init__(self, reason: _Optional[str] = ...) -> None: ...
 
 class TelemetryUp(_message.Message):
-    __slots__ = ("hello", "span_start", "span_update", "span_end", "payload", "heartbeat", "control_ack", "goodbye")
+    __slots__ = ("hello", "span_start", "span_update", "span_end", "payload", "heartbeat", "control_ack", "goodbye", "task_plan", "task_status_update")
     HELLO_FIELD_NUMBER: _ClassVar[int]
     SPAN_START_FIELD_NUMBER: _ClassVar[int]
     SPAN_UPDATE_FIELD_NUMBER: _ClassVar[int]
@@ -142,6 +146,8 @@ class TelemetryUp(_message.Message):
     HEARTBEAT_FIELD_NUMBER: _ClassVar[int]
     CONTROL_ACK_FIELD_NUMBER: _ClassVar[int]
     GOODBYE_FIELD_NUMBER: _ClassVar[int]
+    TASK_PLAN_FIELD_NUMBER: _ClassVar[int]
+    TASK_STATUS_UPDATE_FIELD_NUMBER: _ClassVar[int]
     hello: Hello
     span_start: SpanStart
     span_update: SpanUpdate
@@ -150,7 +156,9 @@ class TelemetryUp(_message.Message):
     heartbeat: Heartbeat
     control_ack: _types_pb2.ControlAck
     goodbye: Goodbye
-    def __init__(self, hello: _Optional[_Union[Hello, _Mapping]] = ..., span_start: _Optional[_Union[SpanStart, _Mapping]] = ..., span_update: _Optional[_Union[SpanUpdate, _Mapping]] = ..., span_end: _Optional[_Union[SpanEnd, _Mapping]] = ..., payload: _Optional[_Union[PayloadUpload, _Mapping]] = ..., heartbeat: _Optional[_Union[Heartbeat, _Mapping]] = ..., control_ack: _Optional[_Union[_types_pb2.ControlAck, _Mapping]] = ..., goodbye: _Optional[_Union[Goodbye, _Mapping]] = ...) -> None: ...
+    task_plan: _types_pb2.TaskPlan
+    task_status_update: _types_pb2.UpdatedTaskStatus
+    def __init__(self, hello: _Optional[_Union[Hello, _Mapping]] = ..., span_start: _Optional[_Union[SpanStart, _Mapping]] = ..., span_update: _Optional[_Union[SpanUpdate, _Mapping]] = ..., span_end: _Optional[_Union[SpanEnd, _Mapping]] = ..., payload: _Optional[_Union[PayloadUpload, _Mapping]] = ..., heartbeat: _Optional[_Union[Heartbeat, _Mapping]] = ..., control_ack: _Optional[_Union[_types_pb2.ControlAck, _Mapping]] = ..., goodbye: _Optional[_Union[Goodbye, _Mapping]] = ..., task_plan: _Optional[_Union[_types_pb2.TaskPlan, _Mapping]] = ..., task_status_update: _Optional[_Union[_types_pb2.UpdatedTaskStatus, _Mapping]] = ...) -> None: ...
 
 class Welcome(_message.Message):
     __slots__ = ("accepted", "assigned_session_id", "assigned_stream_id", "server_time", "flags", "rejection_reason")

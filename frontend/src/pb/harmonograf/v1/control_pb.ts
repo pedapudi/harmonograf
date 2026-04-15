@@ -21,7 +21,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file harmonograf/v1/control.proto.
  */
 export const file_harmonograf_v1_control: GenFile = /*@__PURE__*/
-  fileDesc("ChxoYXJtb25vZ3JhZi92MS9jb250cm9sLnByb3RvEg5oYXJtb25vZ3JhZi52MSJSChdTdWJzY3JpYmVDb250cm9sUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEhEKCXN0cmVhbV9pZBgDIAEoCUJEWkJnaXRodWIuY29tL2FudGhyb3BpY3MvaGFybW9ub2dyYWYvZ2VuL2hhcm1vbm9ncmFmL3YxO2hhcm1vbm9ncmFmdjFiBnByb3RvMw");
+  fileDesc("ChxoYXJtb25vZ3JhZi92MS9jb250cm9sLnByb3RvEg5oYXJtb25vZ3JhZi52MSJSChdTdWJzY3JpYmVDb250cm9sUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEhEKCXN0cmVhbV9pZBgDIAEoCUJCWkBnaXRodWIuY29tL3BlZGFwdWRpL2hhcm1vbm9ncmFmL2dlbi9oYXJtb25vZ3JhZi92MTtoYXJtb25vZ3JhZnYxYgZwcm90bzM");
 
 /**
  * Subscribes to control events for one telemetry stream. The session_id,

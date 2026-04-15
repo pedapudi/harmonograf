@@ -11,6 +11,7 @@ import { AttentionSnackbar } from '../Interaction/AttentionSnackbar';
 import { GanttDomProxy } from '../Interaction/GanttDomProxy';
 import { SpanPopover } from '../Interaction/SpanPopover';
 import { Minimap } from './Minimap';
+import { ContextWindowBadgeStrip } from './ContextWindowBadgeStrip';
 
 // When the server is reachable, the Gantt reads from the WatchSession-backed
 // SessionStore owned by the rpc hooks module. When the server isn't reachable
@@ -87,6 +88,7 @@ export function GanttPlaceholder() {
             <PinStrip ctx={ctx} sessionId={sessionId} />
             <ApprovalEditor ctx={ctx} sessionId={sessionId} />
             <SpanPopover ctx={ctx} sessionId={sessionId} />
+            <ContextWindowBadgeStrip ctx={ctx} />
             <Minimap ctx={ctx} />
           </>
         )}

@@ -86,6 +86,59 @@ export type Capability =
   | 'HUMAN_IN_LOOP'
   | 'INTERCEPT_TRANSFER';
 
+// ── Task plan types (mirror harmonograf.v1.TaskStatus / Task / TaskPlan) ─────
+// Kept as plain TS types so the renderer never imports proto runtime objects.
+
+export type TaskStatus =
+  | 'UNSPECIFIED'
+  | 'PENDING'
+  | 'RUNNING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED';
+
+export interface Task {
+  id: string;
+  title: string;
+  description: string;
+  assigneeAgentId: string;
+  status: TaskStatus;
+  // Session-relative ms (0 if the planner didn't provide timing).
+  predictedStartMs: number;
+  predictedDurationMs: number;
+  boundSpanId: string;
+}
+
+export interface TaskEdge {
+  fromTaskId: string;
+  toTaskId: string;
+}
+
+export interface TaskPlan {
+  id: string;
+  invocationSpanId: string;
+  plannerAgentId: string;
+  createdAtMs: number; // session-relative
+  summary: string;
+  tasks: Task[];
+  edges: TaskEdge[];
+  revisionReason: string;
+  revisionKind?: string;
+  revisionSeverity?: string;
+  revisionIndex?: number;
+}
+
+// Per-agent context-window telemetry sample (task #3). Converted from the
+// wire `ContextWindowSample` at the rpc/convert seam: recordedAt becomes
+// session-relative ms, int64 bigints narrow to number. The renderer consumes
+// this shape directly and never touches proto runtime objects.
+export interface ContextWindowSample {
+  // Session-relative ms (matches Span.startMs).
+  tMs: number;
+  tokens: number;
+  limitTokens: number;
+}
+
 export type AgentFramework = 'ADK' | 'CUSTOM' | 'UNKNOWN';
 export type AgentConnection = 'CONNECTED' | 'DISCONNECTED' | 'CRASHED';
 
@@ -100,4 +153,25 @@ export interface Agent {
   stuck: boolean;
   taskReport: string;        // latest self-reported task description
   taskReportAt: number;      // ms timestamp when report was recorded
+  // Free-form key/value metadata copied from the Hello frame. Currently used
+  // for `harmonograf.execution_mode` ("sequential" | "parallel" | "delegated")
+  // so the chrome can surface which orchestration mode the agent is running.
+  metadata: Record<string, string>;
+}
+
+// Canonical orchestration modes advertised via
+// `agent.metadata['harmonograf.execution_mode']`. Anything else is treated as
+// unknown by the UI.
+export type ExecutionMode = 'sequential' | 'parallel' | 'delegated';
+
+export const EXECUTION_MODE_KEY = 'harmonograf.execution_mode';
+
+export function readExecutionMode(
+  agent: Pick<Agent, 'metadata'> | null | undefined,
+): ExecutionMode | null {
+  const raw = agent?.metadata?.[EXECUTION_MODE_KEY];
+  if (raw === 'sequential' || raw === 'parallel' || raw === 'delegated') {
+    return raw;
+  }
+  return null;
 }

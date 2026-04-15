@@ -29,7 +29,10 @@ from harmonograf_server.bus import (
     DELTA_SPAN_END,
     DELTA_SPAN_START,
     DELTA_SPAN_UPDATE,
+    DELTA_TASK_PLAN,
     DELTA_TASK_REPORT,
+    DELTA_TASK_STATUS,
+    DELTA_CONTEXT_WINDOW_SAMPLE,
     Delta,
     SessionBus,
 )
@@ -41,6 +44,9 @@ from harmonograf_server.convert import (
     py_to_attr_value,
     storage_agent_to_pb,
     storage_span_to_pb,
+    storage_task_plan_to_pb,
+    storage_task_to_pb,
+    task_status_to_pb,
     ts_to_float,
 )
 from harmonograf_server.ingest import IngestPipeline
@@ -245,6 +251,35 @@ class FrontendServicerMixin:
                 yield frontend_pb2.SessionUpdate(
                     initial_annotation=_storage_annotation_to_pb(ann)
                 )
+
+            # 4b. Task plans — burst any plans the session already has so
+            # the graph view can render the DAG on reconnect.
+            plans = await self._store.list_task_plans_for_session(session_id)
+            for plan in plans:
+                yield frontend_pb2.SessionUpdate(
+                    task_plan=storage_task_plan_to_pb(plan)
+                )
+
+            # 4c. Context window samples — replay the most recent per-agent
+            # series so the Gantt context-window lane renders immediately
+            # on reconnect instead of waiting for the next heartbeat tick.
+            try:
+                ctx_samples = await self._store.list_context_window_samples(
+                    session_id, limit_per_agent=200
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("list_context_window_samples failed: %s", exc)
+                ctx_samples = []
+            for cs in ctx_samples:
+                pb_sample = frontend_pb2.ContextWindowSample(
+                    agent_id=cs.agent_id,
+                    tokens=cs.tokens,
+                    limit_tokens=cs.limit_tokens,
+                )
+                ra = float_to_ts(cs.recorded_at)
+                if ra is not None:
+                    pb_sample.recorded_at.CopyFrom(ra)
+                yield frontend_pb2.SessionUpdate(context_window_sample=pb_sample)
 
             # 5. Burst complete marker
             yield frontend_pb2.SessionUpdate(
@@ -668,6 +703,33 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
         ts.nanos = int((recorded_at_f - int(recorded_at_f)) * 1e9)
         tr.recorded_at.CopyFrom(ts)
         return frontend_pb2.SessionUpdate(task_report=tr)
+    if delta.kind == DELTA_TASK_PLAN:
+        plan = delta.payload
+        return frontend_pb2.SessionUpdate(task_plan=storage_task_plan_to_pb(plan))
+    if delta.kind == DELTA_TASK_STATUS:
+        p = delta.payload
+        task = p["task"]
+        uts = types_pb2.UpdatedTaskStatus(
+            plan_id=p["plan_id"],
+            task_id=task.id,
+            status=task_status_to_pb(task.status),
+            bound_span_id=task.bound_span_id or "",
+        )
+        uts.updated_at.GetCurrentTime()
+        return frontend_pb2.SessionUpdate(updated_task_status=uts)
+    if delta.kind == DELTA_CONTEXT_WINDOW_SAMPLE:
+        p = delta.payload
+        pb_sample = frontend_pb2.ContextWindowSample(
+            agent_id=p["agent_id"],
+            tokens=int(p["tokens"]),
+            limit_tokens=int(p["limit_tokens"]),
+        )
+        recorded_at_f = p.get("recorded_at", time.time())
+        ts = Timestamp()
+        ts.seconds = int(recorded_at_f)
+        ts.nanos = int((recorded_at_f - int(recorded_at_f)) * 1e9)
+        pb_sample.recorded_at.CopyFrom(ts)
+        return frontend_pb2.SessionUpdate(context_window_sample=pb_sample)
     if delta.kind == DELTA_BACKPRESSURE:
         return None
     return None

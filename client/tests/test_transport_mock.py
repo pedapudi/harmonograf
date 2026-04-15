@@ -266,6 +266,31 @@ class TestTransportHandshake:
 
 
 class TestHeartbeat:
+    def test_heartbeat_carries_context_window_fields(self, isolated_identity):
+        # Direct unit coverage for the transport's heartbeat builder: the
+        # context_window_tokens / limit fields must flow from a Client's
+        # set_context_window() through _build_heartbeat without needing a
+        # live server. This is the client-side half of task #2 plumbing.
+        from harmonograf_client.pb import telemetry_pb2
+
+        client = Client(
+            name="ctxwin-agent",
+            server_addr="127.0.0.1:1",  # unused; transport never starts
+            autostart=False,
+        )
+        try:
+            client.set_context_window(tokens=12345, limit_tokens=128000)
+            hb = client._transport._build_heartbeat(telemetry_pb2)
+            assert hb.context_window_tokens == 12345
+            assert hb.context_window_limit_tokens == 128000
+            # Subsequent call overwrites the previous sample.
+            client.set_context_window(tokens=42, limit_tokens=200000)
+            hb2 = client._transport._build_heartbeat(telemetry_pb2)
+            assert hb2.context_window_tokens == 42
+            assert hb2.context_window_limit_tokens == 200000
+        finally:
+            client.shutdown(flush_timeout=0.1)
+
     def test_heartbeat_emitted(self, server, isolated_identity):
         from harmonograf_client.transport import TransportConfig, Transport
         from harmonograf_client.buffer import EventRingBuffer, PayloadBuffer

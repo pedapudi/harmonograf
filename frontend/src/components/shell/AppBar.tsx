@@ -23,6 +23,7 @@ export function AppBar() {
   const openPicker = useUiStore((s) => s.openSessionPicker);
   const toggleRail = useUiStore((s) => s.toggleNavRail);
   const setNavSection = useUiStore((s) => s.setNavSection);
+  const toggleLegend = useUiStore((s) => s.toggleLegend);
   const sessionId = useUiStore((s) => s.currentSessionId);
   const rpcSessions = useSessionsStore((s) => s.sessions);
   const rpcError = useSessionsStore((s) => s.error);
@@ -83,6 +84,14 @@ export function AppBar() {
         title="Theme"
       >
         ◐
+      </button>
+      <button
+        className="hg-appbar__icon-btn"
+        onClick={toggleLegend}
+        aria-label="Show Gantt legend"
+        title="Show legend (icons & colors)"
+      >
+        ?
       </button>
       <button
         className="hg-appbar__icon-btn"

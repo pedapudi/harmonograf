@@ -116,6 +116,7 @@ export function convertAgent(a: PbAgent): UiAgent {
     stuck: false,
     taskReport: '',
     taskReportAt: 0,
+    metadata: { ...a.metadata },
   };
 }
 

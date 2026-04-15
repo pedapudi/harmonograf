@@ -23,6 +23,7 @@ from harmonograf_server.storage import (
     SpanKind,
     SpanLink,
     SpanStatus,
+    ContextWindowSample,
     make_store,
 )
 
@@ -274,6 +275,45 @@ async def test_stats_accuracy(store):
     assert stats.span_count == 2
     assert stats.payload_count == 1
     assert stats.payload_bytes == 4096
+
+
+async def test_context_window_sample_roundtrip(store):
+    # Server-side plumbing for task #2: append per-agent samples, list
+    # them back in (agent_id, recorded_at) order, and confirm the
+    # per-agent cap is enforced independently.
+    sess = _make_session()
+    await store.create_session(sess)
+    await store.register_agent(_make_agent(sess.id, agent_id="agent-a"))
+    await store.register_agent(_make_agent(sess.id, agent_id="agent-b"))
+
+    base = 1_700_000_100.0
+    samples = [
+        ContextWindowSample(sess.id, "agent-a", base + 0, 1000, 128000),
+        ContextWindowSample(sess.id, "agent-a", base + 5, 1500, 128000),
+        ContextWindowSample(sess.id, "agent-b", base + 2, 800, 200000),
+        ContextWindowSample(sess.id, "agent-b", base + 4, 1200, 200000),
+    ]
+    for s in samples:
+        await store.append_context_window_sample(s)
+
+    all_samples = await store.list_context_window_samples(sess.id)
+    # Sorted by (agent_id, recorded_at).
+    assert [(s.agent_id, s.tokens) for s in all_samples] == [
+        ("agent-a", 1000),
+        ("agent-a", 1500),
+        ("agent-b", 800),
+        ("agent-b", 1200),
+    ]
+    assert all(s.limit_tokens in (128000, 200000) for s in all_samples)
+
+    only_a = await store.list_context_window_samples(sess.id, agent_id="agent-a")
+    assert [s.tokens for s in only_a] == [1000, 1500]
+
+    capped = await store.list_context_window_samples(
+        sess.id, agent_id="agent-a", limit_per_agent=1
+    )
+    assert len(capped) == 1
+    assert capped[0].tokens == 1500  # most recent
 
 
 async def test_delete_session_cascades(store):

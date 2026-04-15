@@ -5,7 +5,7 @@ import type { ThemeBase } from '../../../theme/themes';
 import { apiBaseUrl } from '../../../rpc/transport';
 
 const HARMONOGRAF_VERSION = '0.0.0';
-const REPO_URL = 'https://github.com/anthropics/harmonograf';
+const REPO_URL = 'https://github.com/pedapudi/harmonograf';
 
 const THEMES: { id: ThemeBase; label: string }[] = [
   { id: 'dark', label: 'Dark' },

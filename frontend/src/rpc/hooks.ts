@@ -22,6 +22,59 @@ import {
 import { useAnnotationStore } from '../state/annotationStore';
 import { packLanes } from '../gantt/layout';
 import type { ListSessionsResponse } from '../pb/harmonograf/v1/frontend_pb.js';
+import type {
+  TaskPlan as PbTaskPlan,
+  Task as PbTask,
+} from '../pb/harmonograf/v1/types_pb.js';
+import type { TaskPlan, Task, TaskStatus } from '../gantt/types';
+
+const TASK_STATUS_STRINGS: TaskStatus[] = [
+  'UNSPECIFIED',
+  'PENDING',
+  'RUNNING',
+  'COMPLETED',
+  'FAILED',
+  'CANCELLED',
+];
+
+function taskStatusFromInt(n: number): TaskStatus {
+  return TASK_STATUS_STRINGS[n] ?? 'UNSPECIFIED';
+}
+
+function tsToMsAbs(t: { seconds: bigint; nanos: number } | undefined): number {
+  if (!t) return 0;
+  return Number(t.seconds) * 1000 + Math.floor(t.nanos / 1_000_000);
+}
+
+function convertTask(t: PbTask): Task {
+  return {
+    id: t.id,
+    title: t.title,
+    description: t.description,
+    assigneeAgentId: t.assigneeAgentId,
+    status: taskStatusFromInt(t.status as unknown as number),
+    predictedStartMs: Number(t.predictedStartMs),
+    predictedDurationMs: Number(t.predictedDurationMs),
+    boundSpanId: t.boundSpanId,
+  };
+}
+
+function convertTaskPlan(p: PbTaskPlan, sessionStartMs: number): TaskPlan {
+  const createdAbs = tsToMsAbs(p.createdAt);
+  return {
+    id: p.id,
+    invocationSpanId: p.invocationSpanId,
+    plannerAgentId: p.plannerAgentId,
+    createdAtMs: createdAbs ? createdAbs - sessionStartMs : 0,
+    summary: p.summary,
+    tasks: p.tasks.map(convertTask),
+    edges: p.edges.map((e) => ({ fromTaskId: e.fromTaskId, toTaskId: e.toTaskId })),
+    revisionReason: p.revisionReason || '',
+    revisionKind: p.revisionKind || '',
+    revisionSeverity: p.revisionSeverity || '',
+    revisionIndex: Number(p.revisionIndex ?? 0n),
+  };
+}
 
 // --- Sessions list (polled) -------------------------------------------------
 
@@ -100,6 +153,21 @@ function getOrCreateStore(sessionId: string): SessionStore {
 export function getSessionStore(sessionId: string | null): SessionStore | undefined {
   if (!sessionId) return undefined;
   return storeCache.get(sessionId);
+}
+
+// Reactive hook that re-renders whenever the agent registry changes for the
+// given session. Returns the live Agent object for agentId, or null if not
+// found. Use this instead of getSessionStore().agents.get() when the component
+// needs to stay current with heartbeat/status updates.
+export function useAgentLive(sessionId: string | null, agentId: string | null) {
+  const store = getSessionStore(sessionId);
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!store) return;
+    return store.agents.subscribe(() => setTick((t) => t + 1));
+  }, [store]);
+  if (!agentId) return null;
+  return store?.agents.get(agentId) ?? null;
 }
 
 export function useSessionWatch(sessionId: string | null): WatchSessionState {
@@ -250,6 +318,23 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
                   existing.payloadRefs = kind.value.payloadRefs.map(convertPayloadRef);
                 }
                 store.spans.update(existing);
+                // If an INVOCATION span just ended and the agent has no other
+                // running INVOCATION spans, clear any stale taskReport so the
+                // Graph view doesn't keep showing "Thinking: …" after the agent
+                // finishes all work.
+                if (existing.kind === 'INVOCATION') {
+                  const agentSpans = store.spans.queryAgent(
+                    existing.agentId,
+                    -Number.MAX_SAFE_INTEGER,
+                    Number.MAX_SAFE_INTEGER,
+                  );
+                  const hasRunningInvocation = agentSpans.some(
+                    (s) => s.kind === 'INVOCATION' && s.endMs === null,
+                  );
+                  if (!hasRunningInvocation) {
+                    store.agents.clearTaskReport(existing.agentId);
+                  }
+                }
               }
               break;
             }
@@ -295,23 +380,55 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
               );
               store.agents.setActivityAndStuck(
                 kind.value.agentId,
-                (kind.value as any).currentActivity ?? '',
-                (kind.value as any).stuck ?? false,
+                kind.value.currentActivity,
+                kind.value.stuck,
               );
               break;
             }
-            default: {
-              // Handle task_report delta (not yet in generated proto types).
-              if ((kind as any).case === 'taskReport') {
-                const tr = (kind as any).value;
-                const recordedMs = tr.recordedAt
-                  ? Number(tr.recordedAt.seconds ?? 0) * 1000 +
-                    Math.floor((tr.recordedAt.nanos ?? 0) / 1_000_000)
-                  : Date.now();
-                store.agents.setTaskReport(tr.agentId ?? '', tr.report ?? '', recordedMs);
-              }
+            case 'taskPlan': {
+              const sessionStart = origin?.startMs ?? 0;
+              store.tasks.upsertPlan(convertTaskPlan(kind.value, sessionStart));
               break;
             }
+            case 'updatedTaskStatus': {
+              const u = kind.value;
+              store.tasks.updateTaskStatus(
+                u.planId,
+                u.taskId,
+                taskStatusFromInt(u.status as unknown as number),
+                u.boundSpanId,
+              );
+              break;
+            }
+            case 'taskReport': {
+              const tr = kind.value;
+              const recordedMs = tr.recordedAt
+                ? Number(tr.recordedAt.seconds) * 1000 +
+                  Math.floor(tr.recordedAt.nanos / 1_000_000)
+                : Date.now();
+              store.agents.setTaskReport(tr.agentId, tr.report, recordedMs);
+              break;
+            }
+            case 'contextWindowSample': {
+              // Task #2 wire → task #3 visualization seam. Convert the wall
+              // clock Timestamp to session-relative ms (matching Span.startMs)
+              // and narrow the int64 bigints to number — realistic token
+              // counts are many orders of magnitude below 2^53.
+              const cws = kind.value;
+              if (!cws.recordedAt) break;
+              const wallMs =
+                Number(cws.recordedAt.seconds) * 1000 +
+                Math.floor(cws.recordedAt.nanos / 1_000_000);
+              const sessionStart = store.wallClockStartMs || 0;
+              const tMs = sessionStart > 0 ? wallMs - sessionStart : wallMs;
+              store.contextSeries.append(cws.agentId, {
+                tMs,
+                tokens: Number(cws.tokens),
+                limitTokens: Number(cws.limitTokens),
+              });
+              break;
+            }
+            default:
               break;
           }
         }
@@ -444,22 +561,18 @@ export function useSendControl(): (args: SendControlArgs) => Promise<void> {
   }, []);
 }
 
-// STATUS_QUERY control kind (value 10 — not yet in the ControlKind enum).
-const CONTROL_KIND_STATUS_QUERY = 10 as unknown as ControlKind;
-
 export async function sendStatusQuery(sessionId: string, agentId: string): Promise<string> {
   try {
     const client = getHarmonografClient();
     const resp = await client.sendControl({
       sessionId,
       target: { agentId, spanId: '' },
-      kind: CONTROL_KIND_STATUS_QUERY,
+      kind: ControlKind.STATUS_QUERY,
       payload: new Uint8Array(0),
       ackTimeoutMs: 8000n,
     });
-    // Return the detail from the first ack, or the top-level detail if present.
-    const firstAck = (resp as any).acks?.[0];
-    return firstAck?.detail ?? (resp as any).detail ?? '';
+    // Return detail from the first ack.
+    return resp.acks[0]?.detail ?? '';
   } catch {
     return '';
   }
