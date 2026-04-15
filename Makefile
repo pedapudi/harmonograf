@@ -69,13 +69,12 @@ proto-ts:
 # ---------------------------------------------------------------------------
 
 install: server-install client-install frontend-install
-	@git submodule update --init --recursive
 
 server-install:
-	@cd $(ROOT)/server && uv sync
+	@cd $(ROOT) && uv sync
 
 client-install:
-	@cd $(ROOT)/client && uv sync
+	@cd $(ROOT) && uv sync
 
 frontend-install:
 	@cd $(ROOT)/frontend && pnpm install --frozen-lockfile
@@ -190,10 +189,10 @@ demo: .demo-agents-stage
 test: server-test client-test frontend-test
 
 server-test:
-	@cd $(ROOT)/server && uv run --with pytest --with pytest-asyncio python -m pytest -q
+	@cd $(ROOT) && uv run --extra e2e --with pytest --with pytest-asyncio python -m pytest -q server/tests/
 
 client-test:
-	@cd $(ROOT)/client && uv run --with pytest --with pytest-asyncio python -m pytest -q
+	@cd $(ROOT) && uv run --extra e2e --with pytest --with pytest-asyncio python -m pytest -q client/tests/
 
 frontend-test:
 	@cd $(ROOT)/frontend && pnpm build && pnpm lint
