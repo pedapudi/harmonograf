@@ -21,7 +21,7 @@ You need the following on your `PATH`:
 | [`uv`](https://github.com/astral-sh/uv) | recent | The server and client live in `uv`-managed projects. `pip` is not a supported substitute. |
 | Node | 20 | Required by the Vite frontend. |
 | `pnpm` | recent | The frontend uses `pnpm` with a frozen lockfile. |
-| `git` | any | The ADK third-party submodule is pulled by `make install`. |
+| `git` | any | Needed to clone this repo and Google's `adk-python` into `third_party/` (local editable install, never committed). |
 
 Plus one of:
 
@@ -47,13 +47,21 @@ From here on, every command assumes you are at the repository root.
 make install
 ```
 
-This does four things:
+This does three things:
 
 1. `uv sync` under `server/` — installs the server's Python deps.
 2. `uv sync` under `client/` — installs the client library's Python deps.
 3. `pnpm install --frozen-lockfile` under `frontend/` — installs frontend deps.
-4. `git submodule update --init --recursive` — pulls `third_party/adk-python`,
-   which the end-to-end test and some of the ADK integration tests need.
+
+You also need a local checkout of Google's `adk-python` at `third_party/adk-python/`
+because the root `pyproject.toml` installs it as an editable path dependency. This
+repo does not vendor or track ADK — clone it yourself before running `make install`:
+
+```bash
+git clone https://github.com/google/adk-python.git third_party/adk-python
+```
+
+`third_party/` is git-ignored so your local ADK checkout never lands in commits.
 
 Expected wall-clock time: 30–90 seconds on a warm machine. If `uv` has never
 hydrated its cache it can take longer on the first run.
@@ -246,14 +254,13 @@ cd server && uv run python -m harmonograf_server --store memory
 
 In-memory loses everything on restart but is fine for one-off testing.
 
-**`make install` fails pulling the ADK submodule.**
-Your `git` probably can't reach GitHub. The submodule is optional for running
-the demo itself — only the end-to-end test under `tests/e2e/` needs it. You can
-skip the submodule and proceed with the rest of `make install` by running the
-individual install targets:
+**`uv sync` fails with a missing `third_party/adk-python` path.**
+You haven't cloned Google's `adk-python` into `third_party/` yet. This repo
+does not vendor or track ADK — you must clone it yourself:
 
 ```bash
-make server-install client-install frontend-install
+git clone https://github.com/google/adk-python.git third_party/adk-python
+make install
 ```
 
 ---

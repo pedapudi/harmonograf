@@ -8,15 +8,18 @@ For deeper architectural context see [docs/design/03-server.md](design/03-server
 
 - Python 3.11+ with [`uv`](https://github.com/astral-sh/uv) on `PATH`
 - Node 20+ with `pnpm`
-- `git` (the presentation_agent demo pulls the ADK submodule)
+- `git` (for cloning the adk-python dependency into `third_party/`)
 
 ## 2. Install
 
+The root `pyproject.toml` installs Google's `adk-python` as an editable path dependency, so you need a local checkout of it before running `make install`:
+
 ```bash
+git clone https://github.com/google/adk-python.git third_party/adk-python
 make install
 ```
 
-This runs `uv sync` for `server/` and `client/`, `pnpm install --frozen-lockfile` for `frontend/`, and `git submodule update --init --recursive` to pull `third_party/adk-python`.
+`make install` runs `uv sync` for `server/` and `client/` and `pnpm install --frozen-lockfile` for `frontend/`. `third_party/` is git-ignored in this repo — ADK is a read-only vendored dependency that never ships with harmonograf.
 
 ## 3. Run the server
 

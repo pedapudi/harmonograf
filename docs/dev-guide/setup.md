@@ -14,7 +14,8 @@ or macOS box.
 | [buf](https://buf.build/docs/installation) | 1.30+ | TypeScript proto codegen (`make proto-ts`) | `brew install bufbuild/buf/buf` |
 | `protoc` | 25+ | Indirectly used by `grpc_tools` for Python stubs | Usually pulled in via `grpcio-tools`; no manual install needed |
 | SQLite | 3.37+ (ships WAL, `JSON1`) | Default storage backend | OS package |
-| git + submodules | — | `third_party/adk-python` is a submodule | `git submodule update --init --recursive` after clone |
+| git | — | Repo cloning | OS package |
+| Google adk-python | matching upstream | Editable path dependency referenced by root `pyproject.toml` | Clone into `third_party/adk-python/` yourself — this repo does not vendor or track ADK |
 
 You do **not** need Docker, Make 4, Bazel, or anything else. The whole thing is
 a Python monorepo plus a Vite app.
@@ -22,15 +23,18 @@ a Python monorepo plus a Vite app.
 ## Clone
 
 ```bash
-git clone <repo-url> harmonograf
+git clone git@github.com:pedapudi/harmonograf.git
 cd harmonograf
-git submodule update --init --recursive
+git clone https://github.com/google/adk-python.git third_party/adk-python
 ```
 
-The `third_party/adk-python` submodule is pulled in as an editable dependency
-by the uv workspace — see the root `pyproject.toml` for the `[tool.uv.sources]`
-entry. If you forget to pull it, `uv sync` will fail with a clear error, but
-it's easier to just remember up front.
+harmonograf installs `google-adk` as an editable path dependency rooted at
+`third_party/adk-python/` (see the `[tool.uv.sources]` entry in the root
+`pyproject.toml`). This repo does **not** track or vendor ADK — the `third_party/`
+directory is git-ignored. You are responsible for maintaining a local checkout
+there. Treat it as a read-only third-party dependency: do not commit changes
+into the ADK checkout as part of harmonograf work. If you forget to clone it,
+`uv sync` will fail with a clear error about a missing path dependency.
 
 ## Install
 
@@ -184,9 +188,8 @@ harmonograf/
 │   ├── milestones.md          #   Roadmap
 │   ├── operator-quickstart.md #   End-user (not contributor) setup
 │   └── reporting-tools.md     #   Reporting tool reference
-├── third_party/adk-python/    # Submodule: ADK source (editable)
+├── third_party/adk-python/    # Local-only editable ADK checkout (gitignored)
 ├── data/                      # Runtime sqlite dbs (gitignored)
-├── .claude/                   # Claude Code settings, hooks, team configs
 ├── Makefile                   # All dev tasks
 ├── pyproject.toml             # Root uv workspace aggregator
 └── uv.lock                    # Workspace-wide lockfile
