@@ -42,3 +42,6 @@ waffle.tar.gz
 # installs — never committed). Re-create by cloning the upstream repo into
 # third_party/adk-python/. See docs/dev-guide/setup.md.
 third_party/
+
+# Claude Code runtime scratch (agent team state, scheduled task locks, etc.)
+.claude/
