@@ -210,7 +210,7 @@ Symptoms: a plan was refined but the UI still shows the old plan.
 3. CORS? Open DevTools; if you see CORS errors for requests to the server,
    check `_cors.py` allow list.
 4. Does the agent see `HARMONOGRAF_SERVER`? Default is `127.0.0.1:7531`;
-   if it's not set in `presentation_agent/` env, spans won't flow.
+   if it's not set in `tests/reference_agents/presentation_agent/` env, spans won't flow.
 
 ### 7. "A proto change broke old clients"
 

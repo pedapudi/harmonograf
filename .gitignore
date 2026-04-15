@@ -25,7 +25,7 @@ Thumbs.db
 
 # Harmonograf runtime data
 data/
-presentation_agent/output/
+tests/reference_agents/presentation_agent/output/
 .demo-agents/
 *.sqlite
 *.sqlite-journal

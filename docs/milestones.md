@@ -16,7 +16,7 @@ UI and watches the timeline populate in harmonograf's UI in real time.
   echo (task #8) so the browser smoke passes green end-to-end.
 - **A3** — session picker lists real sessions from `ListSessions` and
   auto-selects the newest on load.
-- **A4** — integrate `attach_adk` **inside** `presentation_agent/agent.py`
+- **A4** — integrate `attach_adk` **inside** `tests/reference_agents/presentation_agent/agent.py`
   where `root_agent` is constructed, so every invocation driven through
   adk's own runner automatically reports to harmonograf. Remove or
   repurpose `run_harmonograf.py`. Update Makefile `demo-presentation`

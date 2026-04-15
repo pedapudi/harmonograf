@@ -66,7 +66,7 @@ You should see:
 - Open the **Harmonograf UI** at `http://127.0.0.1:5173` in a second tab. You should see a new session appear in the session list within ~1s of the first span.
 - Click the session to open the Gantt. Spans stream in live.
 
-The presentation agent itself is defined in `presentation_agent/agent.py`. It is instrumented through `HarmonografAgent` which auto-registers reporting tools into every `LlmAgent` in its sub-tree (`client/harmonograf_client/agent.py:335-355` — `_auto_register_reporting_tools`).
+The presentation agent itself is defined in `tests/reference_agents/presentation_agent/agent.py`. It is instrumented through `HarmonografAgent` which auto-registers reporting tools into every `LlmAgent` in its sub-tree (`client/harmonograf_client/agent.py:335-355` — `_auto_register_reporting_tools`).
 
 ### 3. Tail logs
 
@@ -108,7 +108,7 @@ sqlite3 data/harmonograf.sqlite "SELECT id, title, status, started_at FROM sessi
 
 - **`OPENAI_API_KEY=dummy` is the default fallback.** The Makefile uses `$${OPENAI_API_KEY:-dummy}`. If your first call fails with `401 Unauthorized` you forgot to export a real key.
 - **Port collisions.** `pnpm dev --strictPort` will refuse to start if 5173 is taken; the trap in `make demo` will then kill the server and adk web too because `bash -eu` exits. Either free the port or set `FRONTEND_PORT=5174`.
-- **`.demo-agents/` is regenerated every run.** Do not edit files under `.demo-agents/` — your changes are wiped. Edit `presentation_agent/agent.py` instead; the passthrough loads it by absolute file path (see `Makefile:.demo-agents-stage`).
+- **`.demo-agents/` is regenerated every run.** Do not edit files under `.demo-agents/` — your changes are wiped. Edit `tests/reference_agents/presentation_agent/agent.py` instead; the passthrough loads it by absolute file path (see `Makefile:.demo-agents-stage`).
 - **Symlinks under `.demo-agents/` will break ADK.** ADK's `_resolve_agent_dir` calls `Path.resolve()` and refuses paths that escape the agents root. The passthrough pattern in the Makefile is load-bearing — do not "simplify" it to a symlink.
 - **Frontend cache.** If the UI shows stale state after a schema or renderer change, hard-reload (Ctrl-Shift-R). Vite HMR will **not** pick up changes to generated files under `frontend/src/pb/` — restart `pnpm dev`.
 - **SQLite file retained across runs.** `data/harmonograf.sqlite` accumulates sessions forever until you delete it. Clear with `rm data/harmonograf.sqlite` before a clean-slate run.

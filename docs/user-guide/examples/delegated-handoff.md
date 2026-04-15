@@ -16,7 +16,7 @@ rather than an orchestrator.
     Mode chip `OBS`. Wraps the inner `presentation_agent`-style team.
   - `researcher`, `web_developer`, `reviewer`, `debugger` — sub-agents
     composed as `AgentTool` instances on the coordinator. See
-    `presentation_agent/agent.py`.
+    `tests/reference_agents/presentation_agent/agent.py`.
 - The coordinator's LLM picks which specialist to call as a tool each
   turn. Harmonograf does not route — the `OBS` mode exists precisely
   because the inner agent is in charge.
@@ -172,7 +172,7 @@ revision_index    = 1
 
 ## Related
 
-- `presentation_agent/agent.py` — a real `AgentTool`-composed team.
+- `tests/reference_agents/presentation_agent/agent.py` — a real `AgentTool`-composed team.
 - [tasks-and-plans.md → orchestration modes](../tasks-and-plans.md#orchestration-modes)
 - [glossary.md → delegated](../glossary.md#delegated), [AgentTool](../glossary.md#agenttool), [transfer](../glossary.md#transfer)
 - [graph-view.md](../graph-view.md)

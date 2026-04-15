@@ -772,12 +772,13 @@ class TestPresentationAppExport:
         import sys
         from pathlib import Path
 
-        # presentation_agent lives at repo root and has no pyproject.toml
-        # of its own, so ensure the repo root is on sys.path when this
-        # test runs under `uv run pytest` from any working directory.
-        repo_root = Path(__file__).resolve().parents[2]
-        if str(repo_root) not in sys.path:
-            sys.path.insert(0, str(repo_root))
+        # presentation_agent lives under tests/reference_agents/ and has
+        # no pyproject.toml of its own, so ensure that directory is on
+        # sys.path when this test runs under `uv run pytest` from any
+        # working directory.
+        ref_root = Path(__file__).resolve().parents[1] / "reference_agents"
+        if str(ref_root) not in sys.path:
+            sys.path.insert(0, str(ref_root))
 
         import presentation_agent.agent as agent_mod
 

@@ -91,7 +91,7 @@ frontend-dev:
 
 # Run the presentation_agent sample under the canonical `adk web` CLI
 # with a harmonograf server at $(HARMONOGRAF_SERVER). Instrumentation
-# lives inside presentation_agent/agent.py (the exported `app` attaches
+# lives inside tests/reference_agents/presentation_agent/agent.py (the exported `app` attaches
 # a harmonograf plugin), so simply running the agent under adk web is
 # enough to emit spans.
 #
@@ -101,8 +101,9 @@ frontend-dev:
 # _resolve_agent_dir which calls Path.resolve() and refuses any
 # resolved path that escapes the agents_root sandbox. The passthrough
 # loads the real presentation_agent.agent module by absolute file path
-# (not by package import) to avoid colliding with the .demo-agents
-# entry that ADK puts on sys.path[0].
+# from tests/reference_agents/presentation_agent/agent.py (not by package
+# import) to avoid colliding with the .demo-agents entry that ADK puts
+# on sys.path[0].
 #
 # Override HARMONOGRAF_SERVER / ADK_WEB_PORT as needed:
 #   make demo-presentation ADK_WEB_PORT=8080 HARMONOGRAF_SERVER=127.0.0.1:7531
@@ -121,18 +122,18 @@ FRONTEND_PORT ?= 5173
 		'"""Passthrough so adk web can run presentation_agent under .demo-agents/.' \
 		'' \
 		'ADK puts .demo-agents/ on sys.path[0], which would otherwise shadow' \
-		'the real presentation_agent package at the repo root. We load the' \
-		'real module by absolute file path under a private name so ADK still' \
-		'resolves agent_dir inside .demo-agents (its safety check rejects' \
-		'symlinks that escape the sandbox) while the actual code lives in' \
-		'the canonical presentation_agent/ package.' \
+		'the real presentation_agent package under tests/reference_agents/.' \
+		'We load the real module by absolute file path under a private name' \
+		'so ADK still resolves agent_dir inside .demo-agents (its safety' \
+		'check rejects symlinks that escape the sandbox) while the actual' \
+		'code lives in tests/reference_agents/presentation_agent/.' \
 		'"""' \
 		'from __future__ import annotations' \
 		'' \
 		'import importlib.util' \
 		'from pathlib import Path' \
 		'' \
-		'_real = Path(__file__).resolve().parents[2] / "presentation_agent" / "agent.py"' \
+		'_real = Path(__file__).resolve().parents[2] / "tests" / "reference_agents" / "presentation_agent" / "agent.py"' \
 		'_spec = importlib.util.spec_from_file_location("_real_presentation_agent", _real)' \
 		'_mod = importlib.util.module_from_spec(_spec)' \
 		'assert _spec.loader is not None' \

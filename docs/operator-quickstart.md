@@ -110,7 +110,7 @@ export OPENAI_API_BASE="http://localhost:8080/v1"
 make demo
 ```
 
-`presentation_agent/agent.py` detects provider-style strings (anything with a `/` before any `:`) and wraps them in `google.adk.models.lite_llm.LiteLlm`. Plain `gemini-*` names keep the native path and don't pull LiteLLM in. The `demo` / `demo-presentation` Makefile targets install LiteLLM via `uv run --extra demo …` — no extra steps required.
+`tests/reference_agents/presentation_agent/agent.py` detects provider-style strings (anything with a `/` before any `:`) and wraps them in `google.adk.models.lite_llm.LiteLlm`. Plain `gemini-*` names keep the native path and don't pull LiteLLM in. The `demo` / `demo-presentation` Makefile targets install LiteLLM via `uv run --extra demo …` — no extra steps required.
 
 ## 6. Health probes
 
@@ -146,7 +146,7 @@ client = Client(
 )
 ```
 
-For the presentation_agent demo, set the token on the command line (the sample currently does not thread a token through — use an unauthenticated dev server, or run the demo script directly and add `token=...` to the `Client(...)` call in `presentation_agent/run_harmonograf.py`).
+For the presentation_agent demo, set the token on the command line (the sample currently does not thread a token through — use an unauthenticated dev server, or run the demo script directly and add `token=...` to the `Client(...)` call in `tests/reference_agents/presentation_agent/run_harmonograf.py`).
 
 `/healthz` and `/readyz` remain open regardless of `--auth-token`.
 

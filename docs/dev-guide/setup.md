@@ -83,7 +83,7 @@ This runs three processes in parallel (see `Makefile:154-184`):
 1. **`make server-run`** — the gRPC server on `HARMONOGRAF_SERVER=127.0.0.1:7531`
    plus the gRPC-Web bridge on `FRONTEND_PORT=5174`, with sqlite at `./data/`.
 2. **`make frontend-dev`** — Vite dev server on `:5173`.
-3. **`make demo-presentation`** — `adk web` hosting `presentation_agent/`, which
+3. **`make demo-presentation`** — `adk web` hosting `tests/reference_agents/presentation_agent/`, which
    is already instrumented with the harmonograf client library, on
    `ADK_WEB_PORT=8080`.
 
@@ -176,8 +176,9 @@ harmonograf/
 │   │   ├── state/uiStore.ts   #   Zustand UI state
 │   │   └── pb/                #   Generated protobuf-es stubs
 │   └── package.json
-├── presentation_agent/        # Example ADK agent, used by `make demo`
 ├── tests/
+│   ├── reference_agents/      #   Reference ADK agents used by demos + e2e
+│   │   └── presentation_agent/#   Example ADK agent, used by `make demo`
 │   ├── e2e/                   #   Full-stack scenarios (real ADK + real server)
 │   └── integration/           #   Playwright harness for frontend-server interop
 ├── docs/
