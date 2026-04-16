@@ -5,6 +5,8 @@ This is the same session you see on the [Gantt](gantt-view.md), re-rendered
 as a **sequence diagram**: one vertical column per agent, time flowing down,
 cross-agent interactions drawn as horizontal arrows between columns.
 
+![Agent topology graph with transfer arrows and task chips](../images/06-graph-view.png)
+
 Use the Graph when you want to reason about **who talked to whom** instead of
 **what happened when**. The Gantt is density-optimized; the Graph is
 flow-optimized.

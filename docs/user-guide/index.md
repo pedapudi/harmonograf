@@ -76,8 +76,8 @@ flowchart TD
 
 - **Code paths** are relative to the repo root. For example,
   `frontend/src/lib/shortcuts.ts` is the source of truth for the keyboard map.
-- **Screenshots** are marked `TODO` and live under `_screenshots/`. Descriptive
-  alt-text accompanies every one so you can follow along without images.
+- **Screenshots** live under `docs/images/`. Filenames follow the pattern
+  `NN-description.png` and are referenced inline throughout the guide.
 - **In this release** means a feature that recently shipped (the sequence-
   diagram minimap/zoom, deeper thinking surfacing, context-window overlay)
   and may still be rough at the edges.

@@ -37,12 +37,17 @@ Harmonograf keeps the story first-class:
 
 ### Screenshots
 
-> **TODO:** drop in canonical screenshots here.
->
-> - `docs/images/readme-gantt.png` — headline Gantt view of a running presentation_agent session.
-> - `docs/images/readme-diff.png` — replan banner with plan diff drawer open.
-> - `docs/images/readme-graph.png` — agent topology graph view.
-> - `docs/images/readme-inspector.png` — span inspector drawer with tool call arguments.
+**Gantt timeline** — five agents running a multi-task research workflow. The task plan strip at the bottom shows stages with per-task status chips.
+
+![Gantt timeline overview](docs/images/01-gantt-overview.png)
+
+**Agent topology graph** — the same session viewed as an agent graph with transfer arrows, task chips, and a minimap in the corner.
+
+![Agent topology graph view](docs/images/06-graph-view.png)
+
+**Session picker** — browse all sessions with agent counts, attention badges, and time-ago labels.
+
+![Session picker overlay](docs/images/11-session-picker.png)
 
 ---
 

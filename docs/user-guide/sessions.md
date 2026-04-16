@@ -9,6 +9,8 @@ Everything else in the UI is scoped to the currently-selected session.
 Selecting a different session reloads the Gantt, Graph, drawer, transport
 bar, and task panel.
 
+![Session picker showing multiple sessions with agent counts and status](../images/11-session-picker.png)
+
 ## Opening the picker
 
 Three ways, all equivalent:

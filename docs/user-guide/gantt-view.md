@@ -5,6 +5,8 @@ highest-density surface in harmonograf: one row per agent along the
 vertical axis, time on the horizontal axis, and a colored bar ("span") for
 every unit of work the agent reported.
 
+![Gantt timeline with five agents and a task plan strip](../images/01-gantt-overview.png)
+
 If in doubt about a glyph or color, open the **legend** from the `?` button
 on the app bar — it is the authoritative visual reference and mirrors every
 renderer symbol.
