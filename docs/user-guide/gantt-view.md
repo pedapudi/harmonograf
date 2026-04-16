@@ -37,7 +37,7 @@ flowchart TB
 
 ## Layout recap
 
-![TODO: screenshot of the Gantt view with labels: agent gutter, time axis, spans, minimap, transport bar, task panel](_screenshots/gantt-view.png)
+![Gantt view with agent gutter, spans, minimap, transport bar, and task plan](../images/16-gantt-full-session.png)
 
 | Region | Purpose |
 |---|---|

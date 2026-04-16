@@ -49,6 +49,14 @@ Harmonograf keeps the story first-class:
 
 ![Session picker overlay](docs/images/11-session-picker.png)
 
+**LLM call popover with thinking** — click any span to see a floating popover. LLM calls surface the model's chain-of-thought in an expandable thinking section.
+
+![LLM call popover with thinking](docs/images/17-llm-call-popover-thinking.png)
+
+**Inspector drawer** — the drawer shows span details across Summary, Task, Payload, Timeline, and Links tabs. Here the Payload tab reveals the tool-use schema sent to the model.
+
+![Inspector drawer — payload tab](docs/images/20-llm-call-drawer-payload.png)
+
 ---
 
 ## Architecture

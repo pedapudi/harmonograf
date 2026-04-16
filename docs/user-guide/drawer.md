@@ -5,7 +5,7 @@ from the right of the shell when you click a span on the [Gantt](gantt-view.md)
 or an activation box on the [Graph](graph-view.md), and holds seven tabs of
 detail plus a live "current task" header.
 
-![TODO: screenshot of the drawer open on a running LLM span with the Task tab active](_screenshots/drawer-task-tab.png)
+![Inspector drawer — Summary tab for an LLM call](../images/18-llm-call-drawer-summary.png)
 
 ## Opening, closing, and what it binds to
 

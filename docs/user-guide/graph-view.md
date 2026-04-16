@@ -11,7 +11,7 @@ Use the Graph when you want to reason about **who talked to whom** instead of
 **what happened when**. The Gantt is density-optimized; the Graph is
 flow-optimized.
 
-![TODO: screenshot of the Graph view with labeled agent headers, activation boxes, and three transfer arrows](_screenshots/graph-view.png)
+![Graph view showing agent topology with transfer arrows and tool call drawer](../images/23-graph-view.png)
 
 ## Example topology
 

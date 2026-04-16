@@ -16,7 +16,7 @@ reference: pick the page that matches what you're looking at on screen.
 Harmonograf uses a single-window layout. Every page of this guide refers to
 one of the regions below. Mentally tag them as you read.
 
-![TODO: annotated screenshot of the shell showing the regions below](_screenshots/shell-regions.png)
+![Gantt timeline with task plan strip](../images/16-gantt-full-session.png)
 
 | Region | Where | What it is |
 |---|---|---|

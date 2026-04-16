@@ -20,7 +20,7 @@ Three ways, all equivalent:
 - Click the session title in the app bar (the button with the ▾ marker next
   to the Harmonograf wordmark).
 
-![TODO: screenshot of the session picker open, showing Live / Recent / Archive sections with a few rows](_screenshots/session-picker.png)
+![Session picker with session list and search](../images/26-session-picker.png)
 
 The picker is a modal with a search field at the top and three sections:
 **Live**, **Recent (last 24h)**, and **Archive**. It focuses the search field

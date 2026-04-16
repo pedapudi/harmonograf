@@ -80,7 +80,7 @@ Four surfaces emit control messages today:
 
 ### 1. Transport bar (session-wide)
 
-![TODO: screenshot of the transport bar showing the LIVE badge, pause button, and zoom controls](_screenshots/transport-bar.png)
+![Transport bar with LIVE badge, pause button, and zoom controls](../images/14-transport-bar.png)
 
 The transport bar at the bottom of the [Gantt view](gantt-view.md) has
 session-wide transport buttons:
