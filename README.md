@@ -174,9 +174,9 @@ Contributions are welcome. Before starting non-trivial work, read
 with local-dev workflows, test matrix, and release process is landing as
 [docs/dev-guide/](docs/dev-guide/).
 
-Ground rules: don't invent features, prefer editing existing files over creating new
-ones, and if you change the proto run `make proto` and commit the regenerated stubs
-alongside the source change.
+Ground rules: don't invent features when existing features can be extended, prefer 
+editing existing files over creating new ones, and if you change the proto run
+`make proto` and commit the regenerated stubs alongside the source change.
 
 ---
 
