@@ -13,6 +13,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Iterable, Optional, Union
 
+# Orchestration types moved to goldfive in the Phase A migration (issue #2).
+# Harmonograf re-exports the goldfive dataclasses here so storage signatures
+# stay stable for callers, while the underlying truth lives in goldfive.
+from goldfive.types import Task as Task  # noqa: F401
+from goldfive.types import TaskEdge as TaskEdge  # noqa: F401
+from goldfive.types import TaskStatus as TaskStatus  # noqa: F401
+
 
 class SessionStatus(str, Enum):
     LIVE = "LIVE"
@@ -74,16 +81,6 @@ class Framework(str, Enum):
     ADK = "ADK"
     CUSTOM = "CUSTOM"
     UNKNOWN = "UNKNOWN"
-
-
-class TaskStatus(str, Enum):
-    """Mirrors types_pb2.TaskStatus. Used by TaskPlan tasks."""
-
-    PENDING = "PENDING"
-    RUNNING = "RUNNING"
-    COMPLETED = "COMPLETED"
-    FAILED = "FAILED"
-    CANCELLED = "CANCELLED"
 
 
 # --- entities ---------------------------------------------------------------
@@ -180,24 +177,11 @@ class PayloadRecord:
     bytes_: bytes
 
 
-@dataclass
-class TaskEdge:
-    from_task_id: str
-    to_task_id: str
-
-
-@dataclass
-class Task:
-    id: str
-    title: str = ""
-    description: str = ""
-    assignee_agent_id: str = ""
-    status: TaskStatus = TaskStatus.PENDING
-    predicted_start_ms: int = 0
-    predicted_duration_ms: int = 0
-    bound_span_id: Optional[str] = None
-
-
+# TaskPlan composes goldfive tasks/edges with harmonograf's session-scoped
+# bookkeeping (session_id, invocation_span_id, planner_agent_id, created_at).
+# Goldfive's own Plan has run_id / goal_ids instead; we keep both concerns
+# separate so goldfive can evolve without touching harmonograf's storage
+# schema. See docs/goldfive-migration-plan.md §1.3.
 @dataclass
 class TaskPlan:
     id: str

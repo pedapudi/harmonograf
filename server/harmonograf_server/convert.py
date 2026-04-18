@@ -9,8 +9,9 @@ from typing import Any, Optional
 
 from google.protobuf.timestamp_pb2 import Timestamp
 
-from harmonograf_server.pb import types_pb2
+from harmonograf_server.pb import types_pb2  # imports goldfive.pb via pb/__init__.py
 from harmonograf_server.pb import telemetry_pb2
+from goldfive.v1 import types_pb2 as goldfive_types_pb2  # noqa: E402
 from harmonograf_server.storage import (
     Agent,
     AgentStatus,
@@ -24,9 +25,6 @@ from harmonograf_server.storage import (
     SpanKind,
     SpanLink,
     SpanStatus,
-    Task,
-    TaskEdge,
-    TaskPlan,
     TaskStatus,
 )
 
@@ -143,21 +141,20 @@ _AGENT_STATUS_TO_PB = {
     AgentStatus.CRASHED: types_pb2.AGENT_STATUS_CRASHED,
 }
 
+# TaskStatus lives in goldfive after the Phase A migration (issue #2). The
+# enum is a StrEnum whose values match goldfive.v1.TaskStatus name suffixes,
+# so we derive the mapping programmatically rather than listing each pair.
 _PB_TO_TASK_STATUS = {
-    types_pb2.TASK_STATUS_UNSPECIFIED: TaskStatus.PENDING,
-    types_pb2.TASK_STATUS_PENDING: TaskStatus.PENDING,
-    types_pb2.TASK_STATUS_RUNNING: TaskStatus.RUNNING,
-    types_pb2.TASK_STATUS_COMPLETED: TaskStatus.COMPLETED,
-    types_pb2.TASK_STATUS_FAILED: TaskStatus.FAILED,
-    types_pb2.TASK_STATUS_CANCELLED: TaskStatus.CANCELLED,
+    goldfive_types_pb2.TASK_STATUS_UNSPECIFIED: TaskStatus.PENDING,
+    goldfive_types_pb2.TASK_STATUS_PENDING: TaskStatus.PENDING,
+    goldfive_types_pb2.TASK_STATUS_RUNNING: TaskStatus.RUNNING,
+    goldfive_types_pb2.TASK_STATUS_COMPLETED: TaskStatus.COMPLETED,
+    goldfive_types_pb2.TASK_STATUS_FAILED: TaskStatus.FAILED,
+    goldfive_types_pb2.TASK_STATUS_CANCELLED: TaskStatus.CANCELLED,
+    goldfive_types_pb2.TASK_STATUS_BLOCKED: TaskStatus.BLOCKED,
 }
-_TASK_STATUS_TO_PB = {
-    TaskStatus.PENDING: types_pb2.TASK_STATUS_PENDING,
-    TaskStatus.RUNNING: types_pb2.TASK_STATUS_RUNNING,
-    TaskStatus.COMPLETED: types_pb2.TASK_STATUS_COMPLETED,
-    TaskStatus.FAILED: types_pb2.TASK_STATUS_FAILED,
-    TaskStatus.CANCELLED: types_pb2.TASK_STATUS_CANCELLED,
-}
+_TASK_STATUS_TO_PB = {v: k for k, v in _PB_TO_TASK_STATUS.items() if v is not TaskStatus.PENDING}
+_TASK_STATUS_TO_PB[TaskStatus.PENDING] = goldfive_types_pb2.TASK_STATUS_PENDING
 
 
 def task_status_from_pb(pb_status: int) -> TaskStatus:
@@ -165,7 +162,7 @@ def task_status_from_pb(pb_status: int) -> TaskStatus:
 
 
 def task_status_to_pb(status: TaskStatus) -> int:
-    return _TASK_STATUS_TO_PB.get(status, types_pb2.TASK_STATUS_PENDING)
+    return _TASK_STATUS_TO_PB.get(status, goldfive_types_pb2.TASK_STATUS_PENDING)
 
 
 # --- attribute values -------------------------------------------------------
@@ -348,90 +345,11 @@ def span_status_from_pb(pb_status: int) -> SpanStatus:
 
 
 # --- task plans -------------------------------------------------------------
-
-
-def pb_task_to_storage(pb: types_pb2.Task) -> Task:
-    return Task(
-        id=pb.id,
-        title=pb.title or "",
-        description=pb.description or "",
-        assignee_agent_id=pb.assignee_agent_id or "",
-        status=task_status_from_pb(pb.status),
-        predicted_start_ms=int(pb.predicted_start_ms),
-        predicted_duration_ms=int(pb.predicted_duration_ms),
-        bound_span_id=pb.bound_span_id or None,
-    )
-
-
-def storage_task_to_pb(task: Task) -> types_pb2.Task:
-    return types_pb2.Task(
-        id=task.id,
-        title=task.title or "",
-        description=task.description or "",
-        assignee_agent_id=task.assignee_agent_id or "",
-        status=task_status_to_pb(task.status),
-        predicted_start_ms=task.predicted_start_ms,
-        predicted_duration_ms=task.predicted_duration_ms,
-        bound_span_id=task.bound_span_id or "",
-    )
-
-
-def pb_task_plan_to_storage(
-    pb: types_pb2.TaskPlan, *, session_id: Optional[str] = None
-) -> TaskPlan:
-    created_at = ts_to_float(pb.created_at) if pb.HasField("created_at") else 0.0
-    return TaskPlan(
-        id=pb.id,
-        session_id=session_id or pb.session_id,
-        invocation_span_id=pb.invocation_span_id or "",
-        planner_agent_id=pb.planner_agent_id or "",
-        created_at=created_at,
-        summary=pb.summary or "",
-        tasks=[pb_task_to_storage(t) for t in pb.tasks],
-        edges=[
-            TaskEdge(from_task_id=e.from_task_id, to_task_id=e.to_task_id)
-            for e in pb.edges
-        ],
-        revision_reason=pb.revision_reason or "",
-        revision_kind=pb.revision_kind or "",
-        revision_severity=pb.revision_severity or "",
-        revision_index=int(pb.revision_index) if pb.revision_index else 0,
-    )
-
-
-def storage_task_plan_to_pb(plan: TaskPlan) -> types_pb2.TaskPlan:
-    pb = types_pb2.TaskPlan(
-        id=plan.id,
-        session_id=plan.session_id,
-        invocation_span_id=plan.invocation_span_id or "",
-        planner_agent_id=plan.planner_agent_id or "",
-        summary=plan.summary or "",
-        revision_reason=plan.revision_reason or "",
-        revision_kind=plan.revision_kind or "",
-        revision_severity=plan.revision_severity or "",
-        revision_index=int(plan.revision_index or 0),
-    )
-    created = float_to_ts(plan.created_at)
-    if created is not None:
-        pb.created_at.CopyFrom(created)
-    for t in plan.tasks:
-        pb.tasks.append(storage_task_to_pb(t))
-    for e in plan.edges:
-        pb.edges.add(from_task_id=e.from_task_id, to_task_id=e.to_task_id)
-    return pb
-
-
-def pb_task_status_from_pb(
-    pb: types_pb2.UpdatedTaskStatus,
-) -> tuple[str, str, TaskStatus, Optional[str]]:
-    """Extract (plan_id, task_id, status, bound_span_id) from an
-    UpdatedTaskStatus proto message."""
-    return (
-        pb.plan_id,
-        pb.task_id,
-        task_status_from_pb(pb.status),
-        pb.bound_span_id or None,
-    )
+#
+# Task/TaskPlan/UpdatedTaskStatus pb conversions were removed in Phase A of
+# the goldfive migration (issue #2). Plan + task state now rides inside
+# TelemetryUp.goldfive_event (goldfive.v1.Event); the ingest-side
+# dispatcher and its storage wiring land in Phase B.
 
 
 def storage_agent_to_pb(agent: Agent) -> types_pb2.Agent:
