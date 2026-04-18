@@ -567,10 +567,8 @@ class Transport:
             return telemetry_pb2.TelemetryUp(span_update=payload)
         if env.kind is EnvelopeKind.SPAN_END:
             return telemetry_pb2.TelemetryUp(span_end=payload)
-        if env.kind is EnvelopeKind.TASK_PLAN:
-            return telemetry_pb2.TelemetryUp(task_plan=payload)
-        if env.kind is EnvelopeKind.TASK_STATUS_UPDATE:
-            return telemetry_pb2.TelemetryUp(task_status_update=payload)
+        if env.kind is EnvelopeKind.GOLDFIVE_EVENT:
+            return telemetry_pb2.TelemetryUp(goldfive_event=payload)
         return None
 
     def _build_hello(self, telemetry_pb2: Any) -> Any:
