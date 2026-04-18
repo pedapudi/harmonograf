@@ -24,9 +24,10 @@ _sym_db = _symbol_database.Default()
 
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 from harmonograf.v1 import types_pb2 as harmonograf_dot_v1_dot_types__pb2
+from goldfive.v1 import events_pb2 as goldfive_dot_v1_dot_events__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1eharmonograf/v1/telemetry.proto\x12\x0eharmonograf.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aharmonograf/v1/types.proto\"\xcb\x02\n\x05Hello\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\t\x12\x12\n\nsession_id\x18\x02 \x01(\t\x12\x0c\n\x04name\x18\x03 \x01(\t\x12,\n\tframework\x18\x04 \x01(\x0e\x32\x19.harmonograf.v1.Framework\x12\x19\n\x11\x66ramework_version\x18\x05 \x01(\t\x12\x30\n\x0c\x63\x61pabilities\x18\x06 \x03(\x0e\x32\x1a.harmonograf.v1.Capability\x12\x35\n\x08metadata\x18\x07 \x03(\x0b\x32#.harmonograf.v1.Hello.MetadataEntry\x12\x14\n\x0cresume_token\x18\x08 \x01(\t\x12\x15\n\rsession_title\x18\t \x01(\t\x1a/\n\rMetadataEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"/\n\tSpanStart\x12\"\n\x04span\x18\x01 \x01(\x0b\x32\x14.harmonograf.v1.Span\"\x8e\x02\n\nSpanUpdate\x12\x0f\n\x07span_id\x18\x01 \x01(\t\x12>\n\nattributes\x18\x02 \x03(\x0b\x32*.harmonograf.v1.SpanUpdate.AttributesEntry\x12*\n\x06status\x18\x03 \x01(\x0e\x32\x1a.harmonograf.v1.SpanStatus\x12\x30\n\x0cpayload_refs\x18\x04 \x03(\x0b\x32\x1a.harmonograf.v1.PayloadRef\x1aQ\n\x0f\x41ttributesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12-\n\x05value\x18\x02 \x01(\x0b\x32\x1e.harmonograf.v1.AttributeValue:\x02\x38\x01\"\xe0\x02\n\x07SpanEnd\x12\x0f\n\x07span_id\x18\x01 \x01(\t\x12,\n\x08\x65nd_time\x18\x02 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12*\n\x06status\x18\x03 \x01(\x0e\x32\x1a.harmonograf.v1.SpanStatus\x12(\n\x05\x65rror\x18\x04 \x01(\x0b\x32\x19.harmonograf.v1.ErrorInfo\x12;\n\nattributes\x18\x05 \x03(\x0b\x32\'.harmonograf.v1.SpanEnd.AttributesEntry\x12\x30\n\x0cpayload_refs\x18\x06 \x03(\x0b\x32\x1a.harmonograf.v1.PayloadRef\x1aQ\n\x0f\x41ttributesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12-\n\x05value\x18\x02 \x01(\x0b\x32\x1e.harmonograf.v1.AttributeValue:\x02\x38\x01\"o\n\rPayloadUpload\x12\x0e\n\x06\x64igest\x18\x01 \x01(\t\x12\x12\n\ntotal_size\x18\x02 \x01(\x03\x12\x0c\n\x04mime\x18\x03 \x01(\t\x12\r\n\x05\x63hunk\x18\x04 \x01(\x0c\x12\x0c\n\x04last\x18\x05 \x01(\x08\x12\x0f\n\x07\x65victed\x18\x06 \x01(\x08\"\xd5\x02\n\tHeartbeat\x12\x17\n\x0f\x62uffered_events\x18\x01 \x01(\x03\x12\x16\n\x0e\x64ropped_events\x18\x02 \x01(\x03\x12\x1e\n\x16\x64ropped_spans_critical\x18\x03 \x01(\x03\x12\x1e\n\x16\x62uffered_payload_bytes\x18\x04 \x01(\x03\x12\x18\n\x10payloads_evicted\x18\x05 \x01(\x03\x12\x14\n\x0c\x63pu_self_pct\x18\x06 \x01(\x01\x12/\n\x0b\x63lient_time\x18\x07 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x18\n\x10progress_counter\x18\x08 \x01(\x03\x12\x18\n\x10\x63urrent_activity\x18\t \x01(\t\x12\x1d\n\x15\x63ontext_window_tokens\x18\n \x01(\x03\x12#\n\x1b\x63ontext_window_limit_tokens\x18\x0b \x01(\x03\"\x19\n\x07Goodbye\x12\x0e\n\x06reason\x18\x01 \x01(\t\"\xfe\x03\n\x0bTelemetryUp\x12&\n\x05hello\x18\x01 \x01(\x0b\x32\x15.harmonograf.v1.HelloH\x00\x12/\n\nspan_start\x18\x02 \x01(\x0b\x32\x19.harmonograf.v1.SpanStartH\x00\x12\x31\n\x0bspan_update\x18\x03 \x01(\x0b\x32\x1a.harmonograf.v1.SpanUpdateH\x00\x12+\n\x08span_end\x18\x04 \x01(\x0b\x32\x17.harmonograf.v1.SpanEndH\x00\x12\x30\n\x07payload\x18\x05 \x01(\x0b\x32\x1d.harmonograf.v1.PayloadUploadH\x00\x12.\n\theartbeat\x18\x06 \x01(\x0b\x32\x19.harmonograf.v1.HeartbeatH\x00\x12\x31\n\x0b\x63ontrol_ack\x18\x07 \x01(\x0b\x32\x1a.harmonograf.v1.ControlAckH\x00\x12*\n\x07goodbye\x18\x08 \x01(\x0b\x32\x17.harmonograf.v1.GoodbyeH\x00\x12-\n\ttask_plan\x18\t \x01(\x0b\x32\x18.harmonograf.v1.TaskPlanH\x00\x12?\n\x12task_status_update\x18\n \x01(\x0b\x32!.harmonograf.v1.UpdatedTaskStatusH\x00\x42\x05\n\x03msg\"\x80\x02\n\x07Welcome\x12\x10\n\x08\x61\x63\x63\x65pted\x18\x01 \x01(\x08\x12\x1b\n\x13\x61ssigned_session_id\x18\x02 \x01(\t\x12\x1a\n\x12\x61ssigned_stream_id\x18\x03 \x01(\t\x12/\n\x0bserver_time\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x31\n\x05\x66lags\x18\x05 \x03(\x0b\x32\".harmonograf.v1.Welcome.FlagsEntry\x12\x18\n\x10rejection_reason\x18\x06 \x01(\t\x1a,\n\nFlagsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\" \n\x0ePayloadRequest\x12\x0e\n\x06\x64igest\x18\x01 \x01(\t\"\x87\x01\n\x0b\x46lowControl\x12\x32\n\x06\x61\x63tion\x18\x01 \x01(\x0e\x32\".harmonograf.v1.FlowControl.Action\"D\n\x06\x41\x63tion\x12\x16\n\x12\x41\x43TION_UNSPECIFIED\x10\x00\x12\x0f\n\x0b\x41\x43TION_SLOW\x10\x01\x12\x11\n\rACTION_RESUME\x10\x02\"\x1f\n\rServerGoodbye\x12\x0e\n\x06reason\x18\x01 \x01(\t\"\xeb\x01\n\rTelemetryDown\x12*\n\x07welcome\x18\x01 \x01(\x0b\x32\x17.harmonograf.v1.WelcomeH\x00\x12\x39\n\x0fpayload_request\x18\x02 \x01(\x0b\x32\x1e.harmonograf.v1.PayloadRequestH\x00\x12\x33\n\x0c\x66low_control\x18\x03 \x01(\x0b\x32\x1b.harmonograf.v1.FlowControlH\x00\x12\x37\n\x0eserver_goodbye\x18\x04 \x01(\x0b\x32\x1d.harmonograf.v1.ServerGoodbyeH\x00\x42\x05\n\x03msgBBZ@github.com/pedapudi/harmonograf/gen/harmonograf/v1;harmonografv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1eharmonograf/v1/telemetry.proto\x12\x0eharmonograf.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aharmonograf/v1/types.proto\x1a\x18goldfive/v1/events.proto\"\xcb\x02\n\x05Hello\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\t\x12\x12\n\nsession_id\x18\x02 \x01(\t\x12\x0c\n\x04name\x18\x03 \x01(\t\x12,\n\tframework\x18\x04 \x01(\x0e\x32\x19.harmonograf.v1.Framework\x12\x19\n\x11\x66ramework_version\x18\x05 \x01(\t\x12\x30\n\x0c\x63\x61pabilities\x18\x06 \x03(\x0e\x32\x1a.harmonograf.v1.Capability\x12\x35\n\x08metadata\x18\x07 \x03(\x0b\x32#.harmonograf.v1.Hello.MetadataEntry\x12\x14\n\x0cresume_token\x18\x08 \x01(\t\x12\x15\n\rsession_title\x18\t \x01(\t\x1a/\n\rMetadataEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"/\n\tSpanStart\x12\"\n\x04span\x18\x01 \x01(\x0b\x32\x14.harmonograf.v1.Span\"\x8e\x02\n\nSpanUpdate\x12\x0f\n\x07span_id\x18\x01 \x01(\t\x12>\n\nattributes\x18\x02 \x03(\x0b\x32*.harmonograf.v1.SpanUpdate.AttributesEntry\x12*\n\x06status\x18\x03 \x01(\x0e\x32\x1a.harmonograf.v1.SpanStatus\x12\x30\n\x0cpayload_refs\x18\x04 \x03(\x0b\x32\x1a.harmonograf.v1.PayloadRef\x1aQ\n\x0f\x41ttributesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12-\n\x05value\x18\x02 \x01(\x0b\x32\x1e.harmonograf.v1.AttributeValue:\x02\x38\x01\"\xe0\x02\n\x07SpanEnd\x12\x0f\n\x07span_id\x18\x01 \x01(\t\x12,\n\x08\x65nd_time\x18\x02 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12*\n\x06status\x18\x03 \x01(\x0e\x32\x1a.harmonograf.v1.SpanStatus\x12(\n\x05\x65rror\x18\x04 \x01(\x0b\x32\x19.harmonograf.v1.ErrorInfo\x12;\n\nattributes\x18\x05 \x03(\x0b\x32\'.harmonograf.v1.SpanEnd.AttributesEntry\x12\x30\n\x0cpayload_refs\x18\x06 \x03(\x0b\x32\x1a.harmonograf.v1.PayloadRef\x1aQ\n\x0f\x41ttributesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12-\n\x05value\x18\x02 \x01(\x0b\x32\x1e.harmonograf.v1.AttributeValue:\x02\x38\x01\"o\n\rPayloadUpload\x12\x0e\n\x06\x64igest\x18\x01 \x01(\t\x12\x12\n\ntotal_size\x18\x02 \x01(\x03\x12\x0c\n\x04mime\x18\x03 \x01(\t\x12\r\n\x05\x63hunk\x18\x04 \x01(\x0c\x12\x0c\n\x04last\x18\x05 \x01(\x08\x12\x0f\n\x07\x65victed\x18\x06 \x01(\x08\"\xd5\x02\n\tHeartbeat\x12\x17\n\x0f\x62uffered_events\x18\x01 \x01(\x03\x12\x16\n\x0e\x64ropped_events\x18\x02 \x01(\x03\x12\x1e\n\x16\x64ropped_spans_critical\x18\x03 \x01(\x03\x12\x1e\n\x16\x62uffered_payload_bytes\x18\x04 \x01(\x03\x12\x18\n\x10payloads_evicted\x18\x05 \x01(\x03\x12\x14\n\x0c\x63pu_self_pct\x18\x06 \x01(\x01\x12/\n\x0b\x63lient_time\x18\x07 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x18\n\x10progress_counter\x18\x08 \x01(\x03\x12\x18\n\x10\x63urrent_activity\x18\t \x01(\t\x12\x1d\n\x15\x63ontext_window_tokens\x18\n \x01(\x03\x12#\n\x1b\x63ontext_window_limit_tokens\x18\x0b \x01(\x03\"\x19\n\x07Goodbye\x12\x0e\n\x06reason\x18\x01 \x01(\t\"\xc8\x03\n\x0bTelemetryUp\x12&\n\x05hello\x18\x01 \x01(\x0b\x32\x15.harmonograf.v1.HelloH\x00\x12/\n\nspan_start\x18\x02 \x01(\x0b\x32\x19.harmonograf.v1.SpanStartH\x00\x12\x31\n\x0bspan_update\x18\x03 \x01(\x0b\x32\x1a.harmonograf.v1.SpanUpdateH\x00\x12+\n\x08span_end\x18\x04 \x01(\x0b\x32\x17.harmonograf.v1.SpanEndH\x00\x12\x30\n\x07payload\x18\x05 \x01(\x0b\x32\x1d.harmonograf.v1.PayloadUploadH\x00\x12.\n\theartbeat\x18\x06 \x01(\x0b\x32\x19.harmonograf.v1.HeartbeatH\x00\x12\x31\n\x0b\x63ontrol_ack\x18\x07 \x01(\x0b\x32\x1a.harmonograf.v1.ControlAckH\x00\x12*\n\x07goodbye\x18\x08 \x01(\x0b\x32\x17.harmonograf.v1.GoodbyeH\x00\x12,\n\x0egoldfive_event\x18\x0b \x01(\x0b\x32\x12.goldfive.v1.EventH\x00\x42\x05\n\x03msgJ\x04\x08\t\x10\nJ\x04\x08\n\x10\x0b\"\x80\x02\n\x07Welcome\x12\x10\n\x08\x61\x63\x63\x65pted\x18\x01 \x01(\x08\x12\x1b\n\x13\x61ssigned_session_id\x18\x02 \x01(\t\x12\x1a\n\x12\x61ssigned_stream_id\x18\x03 \x01(\t\x12/\n\x0bserver_time\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x31\n\x05\x66lags\x18\x05 \x03(\x0b\x32\".harmonograf.v1.Welcome.FlagsEntry\x12\x18\n\x10rejection_reason\x18\x06 \x01(\t\x1a,\n\nFlagsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\" \n\x0ePayloadRequest\x12\x0e\n\x06\x64igest\x18\x01 \x01(\t\"\x87\x01\n\x0b\x46lowControl\x12\x32\n\x06\x61\x63tion\x18\x01 \x01(\x0e\x32\".harmonograf.v1.FlowControl.Action\"D\n\x06\x41\x63tion\x12\x16\n\x12\x41\x43TION_UNSPECIFIED\x10\x00\x12\x0f\n\x0b\x41\x43TION_SLOW\x10\x01\x12\x11\n\rACTION_RESUME\x10\x02\"\x1f\n\rServerGoodbye\x12\x0e\n\x06reason\x18\x01 \x01(\t\"\xeb\x01\n\rTelemetryDown\x12*\n\x07welcome\x18\x01 \x01(\x0b\x32\x17.harmonograf.v1.WelcomeH\x00\x12\x39\n\x0fpayload_request\x18\x02 \x01(\x0b\x32\x1e.harmonograf.v1.PayloadRequestH\x00\x12\x33\n\x0c\x66low_control\x18\x03 \x01(\x0b\x32\x1b.harmonograf.v1.FlowControlH\x00\x12\x37\n\x0eserver_goodbye\x18\x04 \x01(\x0b\x32\x1d.harmonograf.v1.ServerGoodbyeH\x00\x42\x05\n\x03msgBBZ@github.com/pedapudi/harmonograf/gen/harmonograf/v1;harmonografv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -42,40 +43,40 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_SPANEND_ATTRIBUTESENTRY']._serialized_options = b'8\001'
   _globals['_WELCOME_FLAGSENTRY']._loaded_options = None
   _globals['_WELCOME_FLAGSENTRY']._serialized_options = b'8\001'
-  _globals['_HELLO']._serialized_start=112
-  _globals['_HELLO']._serialized_end=443
-  _globals['_HELLO_METADATAENTRY']._serialized_start=396
-  _globals['_HELLO_METADATAENTRY']._serialized_end=443
-  _globals['_SPANSTART']._serialized_start=445
-  _globals['_SPANSTART']._serialized_end=492
-  _globals['_SPANUPDATE']._serialized_start=495
-  _globals['_SPANUPDATE']._serialized_end=765
-  _globals['_SPANUPDATE_ATTRIBUTESENTRY']._serialized_start=684
-  _globals['_SPANUPDATE_ATTRIBUTESENTRY']._serialized_end=765
-  _globals['_SPANEND']._serialized_start=768
-  _globals['_SPANEND']._serialized_end=1120
-  _globals['_SPANEND_ATTRIBUTESENTRY']._serialized_start=684
-  _globals['_SPANEND_ATTRIBUTESENTRY']._serialized_end=765
-  _globals['_PAYLOADUPLOAD']._serialized_start=1122
-  _globals['_PAYLOADUPLOAD']._serialized_end=1233
-  _globals['_HEARTBEAT']._serialized_start=1236
-  _globals['_HEARTBEAT']._serialized_end=1577
-  _globals['_GOODBYE']._serialized_start=1579
-  _globals['_GOODBYE']._serialized_end=1604
-  _globals['_TELEMETRYUP']._serialized_start=1607
-  _globals['_TELEMETRYUP']._serialized_end=2117
-  _globals['_WELCOME']._serialized_start=2120
-  _globals['_WELCOME']._serialized_end=2376
-  _globals['_WELCOME_FLAGSENTRY']._serialized_start=2332
-  _globals['_WELCOME_FLAGSENTRY']._serialized_end=2376
-  _globals['_PAYLOADREQUEST']._serialized_start=2378
-  _globals['_PAYLOADREQUEST']._serialized_end=2410
-  _globals['_FLOWCONTROL']._serialized_start=2413
-  _globals['_FLOWCONTROL']._serialized_end=2548
-  _globals['_FLOWCONTROL_ACTION']._serialized_start=2480
-  _globals['_FLOWCONTROL_ACTION']._serialized_end=2548
-  _globals['_SERVERGOODBYE']._serialized_start=2550
-  _globals['_SERVERGOODBYE']._serialized_end=2581
-  _globals['_TELEMETRYDOWN']._serialized_start=2584
-  _globals['_TELEMETRYDOWN']._serialized_end=2819
+  _globals['_HELLO']._serialized_start=138
+  _globals['_HELLO']._serialized_end=469
+  _globals['_HELLO_METADATAENTRY']._serialized_start=422
+  _globals['_HELLO_METADATAENTRY']._serialized_end=469
+  _globals['_SPANSTART']._serialized_start=471
+  _globals['_SPANSTART']._serialized_end=518
+  _globals['_SPANUPDATE']._serialized_start=521
+  _globals['_SPANUPDATE']._serialized_end=791
+  _globals['_SPANUPDATE_ATTRIBUTESENTRY']._serialized_start=710
+  _globals['_SPANUPDATE_ATTRIBUTESENTRY']._serialized_end=791
+  _globals['_SPANEND']._serialized_start=794
+  _globals['_SPANEND']._serialized_end=1146
+  _globals['_SPANEND_ATTRIBUTESENTRY']._serialized_start=710
+  _globals['_SPANEND_ATTRIBUTESENTRY']._serialized_end=791
+  _globals['_PAYLOADUPLOAD']._serialized_start=1148
+  _globals['_PAYLOADUPLOAD']._serialized_end=1259
+  _globals['_HEARTBEAT']._serialized_start=1262
+  _globals['_HEARTBEAT']._serialized_end=1603
+  _globals['_GOODBYE']._serialized_start=1605
+  _globals['_GOODBYE']._serialized_end=1630
+  _globals['_TELEMETRYUP']._serialized_start=1633
+  _globals['_TELEMETRYUP']._serialized_end=2089
+  _globals['_WELCOME']._serialized_start=2092
+  _globals['_WELCOME']._serialized_end=2348
+  _globals['_WELCOME_FLAGSENTRY']._serialized_start=2304
+  _globals['_WELCOME_FLAGSENTRY']._serialized_end=2348
+  _globals['_PAYLOADREQUEST']._serialized_start=2350
+  _globals['_PAYLOADREQUEST']._serialized_end=2382
+  _globals['_FLOWCONTROL']._serialized_start=2385
+  _globals['_FLOWCONTROL']._serialized_end=2520
+  _globals['_FLOWCONTROL_ACTION']._serialized_start=2452
+  _globals['_FLOWCONTROL_ACTION']._serialized_end=2520
+  _globals['_SERVERGOODBYE']._serialized_start=2522
+  _globals['_SERVERGOODBYE']._serialized_end=2553
+  _globals['_TELEMETRYDOWN']._serialized_start=2556
+  _globals['_TELEMETRYDOWN']._serialized_end=2791
 # @@protoc_insertion_point(module_scope)

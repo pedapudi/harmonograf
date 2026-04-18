@@ -401,49 +401,6 @@ class TestMultiTaskPerTurnSweep:
         assert kw["status"] == "COMPLETED"
 
 
-class TestSubmitPlanPreservesStatus:
-    def test_submit_plan_preserves_terminal_task_status_on_wire(self):
-        """``Client.submit_plan`` previously hardcoded
-        ``TASK_STATUS_PENDING`` on the wire — a refine that re-submits
-        a plan whose tasks were already COMPLETED would clobber server
-        state. Augment 2B fix: read Task.status and map it to the pb
-        enum.
-        """
-        from harmonograf_client.client import Client
-        from harmonograf_client.planner import Plan, Task
-
-        class _StubTransport:
-            def __init__(self, **kwargs) -> None:
-                self.events = kwargs["events"]
-                self.assigned_session_id = ""
-                self.notified = 0
-            def start(self) -> None: pass
-            def shutdown(self, timeout: float = 0) -> None: pass
-            def notify(self) -> None:
-                self.notified += 1
-            def register_control_handler(self, *a, **kw) -> None: pass
-            def enqueue_payload(self, *a, **kw) -> bool: return True
-
-        client = Client(
-            name="test", autostart=False,
-            _transport_factory=_StubTransport,
-        )
-        plan = Plan(
-            tasks=[
-                Task(id="t1", title="a", status="COMPLETED"),
-                Task(id="t2", title="b", status="RUNNING"),
-                Task(id="t3", title="c", status="PENDING"),
-            ],
-            edges=[],
-        )
-        client.submit_plan(plan)
-
-        # Inspect the envelope that was pushed onto the ring buffer.
-        envs = client._events.pop_batch(10)
-        assert envs, "expected an envelope to be pushed"
-        from harmonograf_client.pb import types_pb2
-        tp = envs[0].payload
-        by_id = {t.id: t for t in tp.tasks}
-        assert by_id["t1"].status == types_pb2.TASK_STATUS_COMPLETED
-        assert by_id["t2"].status == types_pb2.TASK_STATUS_RUNNING
-        assert by_id["t3"].status == types_pb2.TASK_STATUS_PENDING
+# TestSubmitPlanPreservesStatus removed in Phase A of the goldfive
+# migration (issue #2). Client.submit_plan is gone; plan emission
+# migrates to emit_goldfive_event in Phase B, with its own coverage.

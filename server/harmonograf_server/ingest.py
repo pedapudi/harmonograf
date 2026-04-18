@@ -30,8 +30,6 @@ from harmonograf_server.convert import (
     attr_map_to_dict,
     hello_to_agent,
     pb_span_to_storage,
-    pb_task_plan_to_storage,
-    pb_task_status_from_pb,
     span_status_from_pb,
     ts_to_float,
 )
@@ -256,10 +254,8 @@ class IngestPipeline:
             await self._handle_heartbeat(ctx, msg.heartbeat)
         elif kind == "control_ack":
             self._control_sink.record_ack(msg.control_ack, stream_id=ctx.stream_id)
-        elif kind == "task_plan":
-            await self._handle_task_plan(ctx, msg.task_plan)
-        elif kind == "task_status_update":
-            await self._handle_task_status_update(ctx, msg.task_status_update)
+        elif kind == "goldfive_event":
+            await self._handle_goldfive_event(ctx, msg.goldfive_event)
         elif kind == "goodbye":
             await self._handle_goodbye(ctx, msg.goodbye)
         elif kind == "hello":
@@ -625,68 +621,24 @@ class IngestPipeline:
             },
         )
 
-    async def _handle_task_plan(
-        self, ctx: StreamContext, pb_plan: types_pb2.TaskPlan
-    ) -> None:
-        if not pb_plan.id:
-            raise ValueError("TaskPlan.id is required")
-        session_id = pb_plan.session_id or ctx.session_id
-        plan = pb_task_plan_to_storage(pb_plan, session_id=session_id)
-        # If planner didn't stamp a created_at, use server time.
-        if not plan.created_at:
-            plan.created_at = self._now()
+    async def _handle_goldfive_event(self, ctx: StreamContext, event: Any) -> None:
+        """Placeholder dispatch for goldfive.v1.Event envelopes.
 
-        # Auto-register routes for planner and assignees so the frontend
-        # can render rows for them even before any telemetry arrives.
-        if plan.planner_agent_id:
-            await self._ensure_route(
-                ctx, session_id, plan.planner_agent_id, name=plan.planner_agent_id
-            )
-        for task in plan.tasks:
-            if task.assignee_agent_id:
-                await self._ensure_route(
-                    ctx,
-                    session_id,
-                    task.assignee_agent_id,
-                    name=task.assignee_agent_id,
-                )
-
-        stored = await self._store.put_task_plan(plan)
-
-        # Populate the task->plan index for this session.
-        idx = self._task_index.setdefault(session_id, {})
-        for task in stored.tasks:
-            idx[task.id] = stored.id
-
-        self._bus.publish_task_plan(stored)
-        logger.info(
-            "task plan received session_id=%s plan_id=%s tasks=%d",
-            session_id,
-            stored.id,
-            len(stored.tasks),
+        Phase A of the goldfive migration (issue #2) wires the wire-level
+        variant through to here. The actual per-kind handlers — plan
+        ingestion, task status updates, drift markers, run lifecycle —
+        land in Phase B. For now we log at debug so tests can assert the
+        pipeline accepted the envelope without crashing.
+        """
+        kind = event.WhichOneof("payload") if event is not None else None
+        logger.debug(
+            "goldfive event received session_id=%s run_id=%s sequence=%s kind=%s "
+            "(Phase B will wire this up)",
+            ctx.session_id,
+            getattr(event, "run_id", ""),
+            getattr(event, "sequence", 0),
+            kind,
         )
-
-    async def _handle_task_status_update(
-        self, ctx: StreamContext, pb: types_pb2.UpdatedTaskStatus
-    ) -> None:
-        plan_id, task_id, status, bound_span_id = pb_task_status_from_pb(pb)
-        if not plan_id or not task_id:
-            logger.debug("ignoring UpdatedTaskStatus with missing ids")
-            return
-        updated = await self._store.update_task_status(
-            plan_id, task_id, status, bound_span_id=bound_span_id
-        )
-        if updated is None:
-            logger.warning(
-                "task_status_update for unknown task plan_id=%s task_id=%s",
-                plan_id,
-                task_id,
-            )
-            return
-        # Look up the session id of this plan to route the delta.
-        plan = await self._store.get_task_plan(plan_id)
-        session_id = plan.session_id if plan else ctx.session_id
-        self._bus.publish_task_status(session_id, plan_id, updated)
 
     async def _bind_task_to_span(
         self,

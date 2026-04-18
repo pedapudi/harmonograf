@@ -2,6 +2,7 @@ import datetime
 
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
 from harmonograf.v1 import types_pb2 as _types_pb2
+from goldfive.v1 import events_pb2 as _events_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
@@ -137,7 +138,7 @@ class Goodbye(_message.Message):
     def __init__(self, reason: _Optional[str] = ...) -> None: ...
 
 class TelemetryUp(_message.Message):
-    __slots__ = ("hello", "span_start", "span_update", "span_end", "payload", "heartbeat", "control_ack", "goodbye", "task_plan", "task_status_update")
+    __slots__ = ("hello", "span_start", "span_update", "span_end", "payload", "heartbeat", "control_ack", "goodbye", "goldfive_event")
     HELLO_FIELD_NUMBER: _ClassVar[int]
     SPAN_START_FIELD_NUMBER: _ClassVar[int]
     SPAN_UPDATE_FIELD_NUMBER: _ClassVar[int]
@@ -146,8 +147,7 @@ class TelemetryUp(_message.Message):
     HEARTBEAT_FIELD_NUMBER: _ClassVar[int]
     CONTROL_ACK_FIELD_NUMBER: _ClassVar[int]
     GOODBYE_FIELD_NUMBER: _ClassVar[int]
-    TASK_PLAN_FIELD_NUMBER: _ClassVar[int]
-    TASK_STATUS_UPDATE_FIELD_NUMBER: _ClassVar[int]
+    GOLDFIVE_EVENT_FIELD_NUMBER: _ClassVar[int]
     hello: Hello
     span_start: SpanStart
     span_update: SpanUpdate
@@ -156,9 +156,8 @@ class TelemetryUp(_message.Message):
     heartbeat: Heartbeat
     control_ack: _types_pb2.ControlAck
     goodbye: Goodbye
-    task_plan: _types_pb2.TaskPlan
-    task_status_update: _types_pb2.UpdatedTaskStatus
-    def __init__(self, hello: _Optional[_Union[Hello, _Mapping]] = ..., span_start: _Optional[_Union[SpanStart, _Mapping]] = ..., span_update: _Optional[_Union[SpanUpdate, _Mapping]] = ..., span_end: _Optional[_Union[SpanEnd, _Mapping]] = ..., payload: _Optional[_Union[PayloadUpload, _Mapping]] = ..., heartbeat: _Optional[_Union[Heartbeat, _Mapping]] = ..., control_ack: _Optional[_Union[_types_pb2.ControlAck, _Mapping]] = ..., goodbye: _Optional[_Union[Goodbye, _Mapping]] = ..., task_plan: _Optional[_Union[_types_pb2.TaskPlan, _Mapping]] = ..., task_status_update: _Optional[_Union[_types_pb2.UpdatedTaskStatus, _Mapping]] = ...) -> None: ...
+    goldfive_event: _events_pb2.Event
+    def __init__(self, hello: _Optional[_Union[Hello, _Mapping]] = ..., span_start: _Optional[_Union[SpanStart, _Mapping]] = ..., span_update: _Optional[_Union[SpanUpdate, _Mapping]] = ..., span_end: _Optional[_Union[SpanEnd, _Mapping]] = ..., payload: _Optional[_Union[PayloadUpload, _Mapping]] = ..., heartbeat: _Optional[_Union[Heartbeat, _Mapping]] = ..., control_ack: _Optional[_Union[_types_pb2.ControlAck, _Mapping]] = ..., goodbye: _Optional[_Union[Goodbye, _Mapping]] = ..., goldfive_event: _Optional[_Union[_events_pb2.Event, _Mapping]] = ...) -> None: ...
 
 class Welcome(_message.Message):
     __slots__ = ("accepted", "assigned_session_id", "assigned_stream_id", "server_time", "flags", "rejection_reason")

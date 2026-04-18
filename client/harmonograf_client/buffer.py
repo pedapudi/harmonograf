@@ -47,8 +47,9 @@ class EnvelopeKind(enum.Enum):
     SPAN_UPDATE = "span_update"
     SPAN_END = "span_end"
     PAYLOAD_CHUNK = "payload_chunk"
-    TASK_PLAN = "task_plan"
-    TASK_STATUS_UPDATE = "task_status_update"
+    # Goldfive orchestration event; payload is a goldfive.v1.Event proto
+    # (issue #2 migration).
+    GOLDFIVE_EVENT = "goldfive_event"
 
 
 @dataclasses.dataclass

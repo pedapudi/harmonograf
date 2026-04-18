@@ -2,6 +2,12 @@ ROOT := $(shell pwd)
 PROTO_DIR := $(ROOT)/proto
 PROTO_FILES := $(wildcard $(PROTO_DIR)/harmonograf/v1/*.proto)
 
+# Goldfive proto tree. Resolved via the installed goldfive package so the
+# path follows the editable dep without hardcoding a clone location; the
+# generated stubs in goldfive/pb/ are shared by the harmonograf pbs at
+# runtime via goldfive's namespace-package trick (goldfive/pb/__init__.py).
+GOLDFIVE_PROTO_DIR := $(shell uv run --no-project python -c "import goldfive, pathlib; print(pathlib.Path(goldfive.__file__).resolve().parent.parent / 'proto')" 2>/dev/null)
+
 SERVER_PB := $(ROOT)/server/harmonograf_server/pb
 CLIENT_PB := $(ROOT)/client/harmonograf_client/pb
 FRONTEND_PB := $(ROOT)/frontend/src/pb
@@ -35,15 +41,21 @@ proto: proto-python proto-ts
 # and IDEs see the generated symbols. An __init__.py is created in the
 # output package so it imports cleanly.
 proto-python:
+	@if [ -z "$(GOLDFIVE_PROTO_DIR)" ]; then \
+		echo "ERROR: could not resolve goldfive proto directory. Run 'uv sync' first."; \
+		exit 1; \
+	fi
 	@mkdir -p $(SERVER_PB)/harmonograf/v1 $(CLIENT_PB)/harmonograf/v1
 	@uv run --with grpcio-tools --with grpcio --with mypy-protobuf python -m grpc_tools.protoc \
 		--proto_path=$(PROTO_DIR) \
+		--proto_path=$(GOLDFIVE_PROTO_DIR) \
 		--python_out=$(SERVER_PB) \
 		--grpc_python_out=$(SERVER_PB) \
 		--pyi_out=$(SERVER_PB) \
 		$(PROTO_FILES)
 	@uv run --with grpcio-tools --with grpcio --with mypy-protobuf python -m grpc_tools.protoc \
 		--proto_path=$(PROTO_DIR) \
+		--proto_path=$(GOLDFIVE_PROTO_DIR) \
 		--python_out=$(CLIENT_PB) \
 		--grpc_python_out=$(CLIENT_PB) \
 		--pyi_out=$(CLIENT_PB) \

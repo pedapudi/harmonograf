@@ -25,7 +25,6 @@ from google.protobuf import timestamp_pb2
 from .buffer import EnvelopeKind, EventRingBuffer, PayloadBuffer, SpanEnvelope
 from .enums import Capability, SpanKind, SpanStatus
 from .identity import AgentIdentity, load_or_create
-from .planner import Plan
 from .transport import ControlAckSpec, Transport, TransportConfig
 
 
@@ -313,93 +312,20 @@ class Client:
     def on_control(self, kind: str, callback: ControlCallback) -> None:
         self._transport.register_control_handler(kind.upper(), callback)
 
-    def submit_plan(
-        self,
-        plan: Plan,
-        *,
-        plan_id: Optional[str] = None,
-        invocation_span_id: str = "",
-        session_id: Optional[str] = None,
-    ) -> str:
-        """Emit a :class:`TaskPlan` envelope and return the plan id.
+    def emit_goldfive_event(self, event_pb: Any) -> None:
+        """Ship a ``goldfive.v1.Event`` to the server.
 
-        The plan is pushed onto the same event ring buffer that spans
-        use, so it shares flow control and will be serialized onto the
-        ``StreamTelemetry`` upstream alongside span messages. It's a
-        non-blocking call — agent code does not wait on the wire.
-
-        Spans that execute a planned task should carry
-        ``hgraf.task_id`` in their ``emit_span_start`` ``attributes``
-        mapping; the server binds the task to the span and auto-updates
-        its status from span lifecycle events, so callers do not need
-        to emit :meth:`submit_task_status_update` in the common path.
+        Goldfive owns orchestration post-migration (issue #2); plans and
+        task-status deltas that used to travel as dedicated
+        ``TaskPlan`` / ``UpdatedTaskStatus`` envelopes now ride inside a
+        ``TelemetryUp.goldfive_event`` variant. The envelope is pushed
+        onto the same buffer that spans use, so it shares backpressure
+        and reconnect semantics — this call never blocks.
         """
-        pid = plan_id or _uuid7_hex()
-        tp = self._types_pb2.TaskPlan(
-            id=pid,
-            session_id=session_id or self._session_id,
-            invocation_span_id=invocation_span_id or "",
-            planner_agent_id=self._agent_id,
-            created_at=_now_ts(),
-            summary=plan.summary or "",
-            revision_reason=getattr(plan, "revision_reason", "") or "",
-            revision_kind=getattr(plan, "revision_kind", "") or "",
-            revision_severity=getattr(plan, "revision_severity", "") or "",
-            revision_index=int(getattr(plan, "revision_index", 0) or 0),
-        )
-        for t in plan.tasks:
-            tp.tasks.add(
-                id=t.id,
-                title=t.title,
-                description=t.description,
-                assignee_agent_id=t.assignee_agent_id,
-                status=self._resolve_task_status(getattr(t, "status", "")),
-                predicted_start_ms=t.predicted_start_ms,
-                predicted_duration_ms=t.predicted_duration_ms,
-            )
-        for e in plan.edges:
-            tp.edges.add(from_task_id=e.from_task_id, to_task_id=e.to_task_id)
         env = SpanEnvelope(
-            kind=EnvelopeKind.TASK_PLAN,
-            span_id="",  # plans have no span id
-            payload=tp,
-        )
-        self._events.push(env)
-        self._transport.notify()
-        return pid
-
-    def submit_task_status_update(
-        self,
-        plan_id: str,
-        task_id: str,
-        status: str,
-        *,
-        bound_span_id: str = "",
-    ) -> None:
-        """Emit an explicit :class:`UpdatedTaskStatus` envelope.
-
-        Escape hatch for callers that want to change a task's status
-        independent of a span lifecycle (e.g. marking a task CANCELLED
-        after a human steering instruction). The common path is to
-        stamp spans with ``hgraf.task_id`` and let the server update
-        status automatically — use this only when that isn't feasible.
-        """
-        types_pb2 = self._types_pb2
-        status_name = status.upper() if isinstance(status, str) else "PENDING"
-        status_enum = getattr(
-            types_pb2, f"TASK_STATUS_{status_name}", types_pb2.TASK_STATUS_PENDING
-        )
-        upd = types_pb2.UpdatedTaskStatus(
-            plan_id=plan_id,
-            task_id=task_id,
-            status=status_enum,
-            bound_span_id=bound_span_id or "",
-            updated_at=_now_ts(),
-        )
-        env = SpanEnvelope(
-            kind=EnvelopeKind.TASK_STATUS_UPDATE,
-            span_id=bound_span_id or "",
-            payload=upd,
+            kind=EnvelopeKind.GOLDFIVE_EVENT,
+            span_id="",
+            payload=event_pb,
         )
         self._events.push(env)
         self._transport.notify()
@@ -431,13 +357,6 @@ class Client:
         if enum_val is None:
             return types_pb2.SPAN_KIND_CUSTOM, name
         return enum_val, ""
-
-    def _resolve_task_status(self, status: Any) -> int:
-        types_pb2 = self._types_pb2
-        if not status:
-            return types_pb2.TASK_STATUS_PENDING
-        name = str(status).upper()
-        return getattr(types_pb2, f"TASK_STATUS_{name}", types_pb2.TASK_STATUS_PENDING)
 
     def _resolve_status(self, status: str | SpanStatus) -> int:
         types_pb2 = self._types_pb2

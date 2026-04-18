@@ -44,8 +44,6 @@ from harmonograf_server.convert import (
     py_to_attr_value,
     storage_agent_to_pb,
     storage_span_to_pb,
-    storage_task_plan_to_pb,
-    storage_task_to_pb,
     task_status_to_pb,
     ts_to_float,
 )
@@ -252,13 +250,9 @@ class FrontendServicerMixin:
                     initial_annotation=_storage_annotation_to_pb(ann)
                 )
 
-            # 4b. Task plans — burst any plans the session already has so
-            # the graph view can render the DAG on reconnect.
-            plans = await self._store.list_task_plans_for_session(session_id)
-            for plan in plans:
-                yield frontend_pb2.SessionUpdate(
-                    task_plan=storage_task_plan_to_pb(plan)
-                )
+            # 4b. Task plan burst suppressed during Phase A of the goldfive
+            # migration (issue #2). SessionUpdate.task_plan is reserved until
+            # Phase B adds goldfive_event-based plan deltas.
 
             # 4c. Context window samples — replay the most recent per-agent
             # series so the Gantt context-window lane renders immediately
@@ -703,20 +697,13 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
         ts.nanos = int((recorded_at_f - int(recorded_at_f)) * 1e9)
         tr.recorded_at.CopyFrom(ts)
         return frontend_pb2.SessionUpdate(task_report=tr)
-    if delta.kind == DELTA_TASK_PLAN:
-        plan = delta.payload
-        return frontend_pb2.SessionUpdate(task_plan=storage_task_plan_to_pb(plan))
-    if delta.kind == DELTA_TASK_STATUS:
-        p = delta.payload
-        task = p["task"]
-        uts = types_pb2.UpdatedTaskStatus(
-            plan_id=p["plan_id"],
-            task_id=task.id,
-            status=task_status_to_pb(task.status),
-            bound_span_id=task.bound_span_id or "",
-        )
-        uts.updated_at.GetCurrentTime()
-        return frontend_pb2.SessionUpdate(updated_task_status=uts)
+    if delta.kind == DELTA_TASK_PLAN or delta.kind == DELTA_TASK_STATUS:
+        # Phase A of the goldfive migration (issue #2) reserves the
+        # SessionUpdate.task_plan / updated_task_status fields. Plan and
+        # task deltas are paused until Phase B rewires them through
+        # goldfive_event. Drop the delta rather than raise — the bus may
+        # still fan them out from storage bootstrap paths.
+        return None
     if delta.kind == DELTA_CONTEXT_WINDOW_SAMPLE:
         p = delta.payload
         pb_sample = frontend_pb2.ContextWindowSample(

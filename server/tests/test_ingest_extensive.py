@@ -23,9 +23,7 @@ from harmonograf_server.bus import (
     DELTA_SPAN_END,
     DELTA_SPAN_START,
     DELTA_SPAN_UPDATE,
-    DELTA_TASK_PLAN,
     DELTA_TASK_REPORT,
-    DELTA_TASK_STATUS,
     SessionBus,
 )
 from harmonograf_server.ingest import IngestPipeline
@@ -373,96 +371,11 @@ async def test_live_streams_and_active_stream_count(pipeline):
     assert pipeline.active_stream_count() == 0
 
 
-async def test_task_plan_persists_and_publishes(pipeline, store):
-    ctx, _ = await pipeline.handle_hello(_hello(session_id="sess_tp"))
-    sub = await pipeline.bus.subscribe("sess_tp")
-    plan = types_pb2.TaskPlan(
-        id="plan-1",
-        session_id="sess_tp",
-        planner_agent_id="planner",
-        summary="do things",
-    )
-    plan.tasks.add(id="t1", title="first", assignee_agent_id="worker")
-    plan.tasks.add(id="t2", title="second", assignee_agent_id="worker")
-    plan.edges.add(from_task_id="t1", to_task_id="t2")
-    await pipeline.handle_message(ctx, telemetry_pb2.TelemetryUp(task_plan=plan))
-    stored = await store.get_task_plan("plan-1")
-    assert stored is not None
-    assert len(stored.tasks) == 2
-    # Bus saw task_plan delta.
-    kinds = set()
-    while not sub.queue.empty():
-        kinds.add(sub.queue.get_nowait().kind)
-    assert DELTA_TASK_PLAN in kinds
-
-
-async def test_task_plan_missing_id_raises(pipeline):
-    ctx, _ = await pipeline.handle_hello(_hello(session_id="sess_tpe"))
-    plan = types_pb2.TaskPlan(session_id="sess_tpe")
-    with pytest.raises(ValueError):
-        await pipeline.handle_message(ctx, telemetry_pb2.TelemetryUp(task_plan=plan))
-
-
-async def test_task_binding_via_hgraf_task_id_on_leaf_span(pipeline, store):
-    ctx, _ = await pipeline.handle_hello(_hello(session_id="sess_bind"))
-    plan = types_pb2.TaskPlan(id="plan-b", session_id="sess_bind")
-    plan.tasks.add(id="t1", title="work")
-    await pipeline.handle_message(ctx, telemetry_pb2.TelemetryUp(task_plan=plan))
-
-    # Leaf span with hgraf.task_id → task flips to RUNNING.
-    span_msg = _span_msg("sp-t1", attrs={"hgraf.task_id": "t1"})
-    await pipeline.handle_message(ctx, span_msg)
-    stored = await store.get_task_plan("plan-b")
-    t1 = next(t for t in stored.tasks if t.id == "t1")
-    assert t1.status == TaskStatus.RUNNING
-    assert t1.bound_span_id == "sp-t1"
-
-    # Span end (COMPLETED) does NOT flip task status. Task lifecycle is
-    # a semantic event that only the walker knows how to emit — a
-    # single leaf span ending is one of N calls for the task, not
-    # "task done". See iter13 task #6.
-    await pipeline.handle_message(ctx, _span_end("sp-t1"))
-    stored = await store.get_task_plan("plan-b")
-    t1 = next(t for t in stored.tasks if t.id == "t1")
-    assert t1.status == TaskStatus.RUNNING
-
-
-async def test_task_binding_ignored_on_wrapper_span(pipeline, store):
-    ctx, _ = await pipeline.handle_hello(_hello(session_id="sess_wrap"))
-    plan = types_pb2.TaskPlan(id="plan-w", session_id="sess_wrap")
-    plan.tasks.add(id="t1", title="work")
-    await pipeline.handle_message(ctx, telemetry_pb2.TelemetryUp(task_plan=plan))
-
-    # INVOCATION (wrapper) with hgraf.task_id — must not flip task state.
-    span_msg = _span_msg(
-        "inv",
-        kind=types_pb2.SPAN_KIND_INVOCATION,
-        attrs={"hgraf.task_id": "t1"},
-    )
-    await pipeline.handle_message(ctx, span_msg)
-    stored = await store.get_task_plan("plan-w")
-    t1 = next(t for t in stored.tasks if t.id == "t1")
-    assert t1.status == TaskStatus.PENDING
-    assert t1.bound_span_id is None
-
-
-async def test_task_status_update_message_routes_via_bus(pipeline, store):
-    ctx, _ = await pipeline.handle_hello(_hello(session_id="sess_tsu"))
-    plan = types_pb2.TaskPlan(id="plan-s", session_id="sess_tsu")
-    plan.tasks.add(id="t1", title="work")
-    await pipeline.handle_message(ctx, telemetry_pb2.TelemetryUp(task_plan=plan))
-
-    sub = await pipeline.bus.subscribe("sess_tsu")
-    uts = types_pb2.UpdatedTaskStatus(
-        plan_id="plan-s", task_id="t1", status=types_pb2.TASK_STATUS_RUNNING
-    )
-    await pipeline.handle_message(ctx, telemetry_pb2.TelemetryUp(task_status_update=uts))
-    kinds = []
-    while not sub.queue.empty():
-        kinds.append(sub.queue.get_nowait().kind)
-    assert DELTA_TASK_STATUS in kinds
-    updated = await store.get_task_plan("plan-s")
-    assert updated.tasks[0].status == TaskStatus.RUNNING
+# task_plan / task_status_update wire-level ingestion tests removed in Phase A
+# of the goldfive migration (issue #2). The TelemetryUp.task_plan /
+# task_status_update variants are reserved; plan and task state now travel in
+# TelemetryUp.goldfive_event. Phase B rewires the ingest pipeline around that
+# new path and restores these assertions.
 
 
 async def test_task_report_attr_on_span_publishes_task_report(pipeline):
