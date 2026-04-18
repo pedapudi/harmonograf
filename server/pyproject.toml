@@ -16,6 +16,7 @@ dependencies = [
     "rich>=13.7",
     "sonora>=0.2.2",
     "hypercorn>=0.17",
+    "goldfive",
 ]
 
 [project.optional-dependencies]

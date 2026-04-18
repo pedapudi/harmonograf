@@ -72,15 +72,6 @@ class LinkRelation(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     LINK_RELATION_FOLLOWS: _ClassVar[LinkRelation]
     LINK_RELATION_REPLACES: _ClassVar[LinkRelation]
 
-class TaskStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = ()
-    TASK_STATUS_UNSPECIFIED: _ClassVar[TaskStatus]
-    TASK_STATUS_PENDING: _ClassVar[TaskStatus]
-    TASK_STATUS_RUNNING: _ClassVar[TaskStatus]
-    TASK_STATUS_COMPLETED: _ClassVar[TaskStatus]
-    TASK_STATUS_FAILED: _ClassVar[TaskStatus]
-    TASK_STATUS_CANCELLED: _ClassVar[TaskStatus]
-
 class AnnotationKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     ANNOTATION_KIND_UNSPECIFIED: _ClassVar[AnnotationKind]
@@ -149,12 +140,6 @@ LINK_RELATION_WAITING_ON: LinkRelation
 LINK_RELATION_TRIGGERED_BY: LinkRelation
 LINK_RELATION_FOLLOWS: LinkRelation
 LINK_RELATION_REPLACES: LinkRelation
-TASK_STATUS_UNSPECIFIED: TaskStatus
-TASK_STATUS_PENDING: TaskStatus
-TASK_STATUS_RUNNING: TaskStatus
-TASK_STATUS_COMPLETED: TaskStatus
-TASK_STATUS_FAILED: TaskStatus
-TASK_STATUS_CANCELLED: TaskStatus
 ANNOTATION_KIND_UNSPECIFIED: AnnotationKind
 ANNOTATION_KIND_COMMENT: AnnotationKind
 ANNOTATION_KIND_STEERING: AnnotationKind
@@ -327,76 +312,6 @@ class Span(_message.Message):
     links: _containers.RepeatedCompositeFieldContainer[SpanLink]
     error: ErrorInfo
     def __init__(self, id: _Optional[str] = ..., session_id: _Optional[str] = ..., agent_id: _Optional[str] = ..., parent_span_id: _Optional[str] = ..., kind: _Optional[_Union[SpanKind, str]] = ..., kind_string: _Optional[str] = ..., status: _Optional[_Union[SpanStatus, str]] = ..., name: _Optional[str] = ..., start_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., end_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., attributes: _Optional[_Mapping[str, AttributeValue]] = ..., payload_refs: _Optional[_Iterable[_Union[PayloadRef, _Mapping]]] = ..., links: _Optional[_Iterable[_Union[SpanLink, _Mapping]]] = ..., error: _Optional[_Union[ErrorInfo, _Mapping]] = ...) -> None: ...
-
-class TaskEdge(_message.Message):
-    __slots__ = ("from_task_id", "to_task_id")
-    FROM_TASK_ID_FIELD_NUMBER: _ClassVar[int]
-    TO_TASK_ID_FIELD_NUMBER: _ClassVar[int]
-    from_task_id: str
-    to_task_id: str
-    def __init__(self, from_task_id: _Optional[str] = ..., to_task_id: _Optional[str] = ...) -> None: ...
-
-class Task(_message.Message):
-    __slots__ = ("id", "title", "description", "assignee_agent_id", "status", "predicted_start_ms", "predicted_duration_ms", "bound_span_id")
-    ID_FIELD_NUMBER: _ClassVar[int]
-    TITLE_FIELD_NUMBER: _ClassVar[int]
-    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
-    ASSIGNEE_AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    PREDICTED_START_MS_FIELD_NUMBER: _ClassVar[int]
-    PREDICTED_DURATION_MS_FIELD_NUMBER: _ClassVar[int]
-    BOUND_SPAN_ID_FIELD_NUMBER: _ClassVar[int]
-    id: str
-    title: str
-    description: str
-    assignee_agent_id: str
-    status: TaskStatus
-    predicted_start_ms: int
-    predicted_duration_ms: int
-    bound_span_id: str
-    def __init__(self, id: _Optional[str] = ..., title: _Optional[str] = ..., description: _Optional[str] = ..., assignee_agent_id: _Optional[str] = ..., status: _Optional[_Union[TaskStatus, str]] = ..., predicted_start_ms: _Optional[int] = ..., predicted_duration_ms: _Optional[int] = ..., bound_span_id: _Optional[str] = ...) -> None: ...
-
-class TaskPlan(_message.Message):
-    __slots__ = ("id", "session_id", "invocation_span_id", "planner_agent_id", "created_at", "summary", "tasks", "edges", "revision_reason", "revision_kind", "revision_severity", "revision_index")
-    ID_FIELD_NUMBER: _ClassVar[int]
-    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
-    INVOCATION_SPAN_ID_FIELD_NUMBER: _ClassVar[int]
-    PLANNER_AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
-    SUMMARY_FIELD_NUMBER: _ClassVar[int]
-    TASKS_FIELD_NUMBER: _ClassVar[int]
-    EDGES_FIELD_NUMBER: _ClassVar[int]
-    REVISION_REASON_FIELD_NUMBER: _ClassVar[int]
-    REVISION_KIND_FIELD_NUMBER: _ClassVar[int]
-    REVISION_SEVERITY_FIELD_NUMBER: _ClassVar[int]
-    REVISION_INDEX_FIELD_NUMBER: _ClassVar[int]
-    id: str
-    session_id: str
-    invocation_span_id: str
-    planner_agent_id: str
-    created_at: _timestamp_pb2.Timestamp
-    summary: str
-    tasks: _containers.RepeatedCompositeFieldContainer[Task]
-    edges: _containers.RepeatedCompositeFieldContainer[TaskEdge]
-    revision_reason: str
-    revision_kind: str
-    revision_severity: str
-    revision_index: int
-    def __init__(self, id: _Optional[str] = ..., session_id: _Optional[str] = ..., invocation_span_id: _Optional[str] = ..., planner_agent_id: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., summary: _Optional[str] = ..., tasks: _Optional[_Iterable[_Union[Task, _Mapping]]] = ..., edges: _Optional[_Iterable[_Union[TaskEdge, _Mapping]]] = ..., revision_reason: _Optional[str] = ..., revision_kind: _Optional[str] = ..., revision_severity: _Optional[str] = ..., revision_index: _Optional[int] = ...) -> None: ...
-
-class UpdatedTaskStatus(_message.Message):
-    __slots__ = ("plan_id", "task_id", "status", "bound_span_id", "updated_at")
-    PLAN_ID_FIELD_NUMBER: _ClassVar[int]
-    TASK_ID_FIELD_NUMBER: _ClassVar[int]
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    BOUND_SPAN_ID_FIELD_NUMBER: _ClassVar[int]
-    UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
-    plan_id: str
-    task_id: str
-    status: TaskStatus
-    bound_span_id: str
-    updated_at: _timestamp_pb2.Timestamp
-    def __init__(self, plan_id: _Optional[str] = ..., task_id: _Optional[str] = ..., status: _Optional[_Union[TaskStatus, str]] = ..., bound_span_id: _Optional[str] = ..., updated_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class AnnotationTarget(_message.Message):
     __slots__ = ("span_id", "agent_time")

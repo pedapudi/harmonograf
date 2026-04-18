@@ -16,6 +16,7 @@ package harmonograf.v1;
 
 import "google/protobuf/timestamp.proto";
 import "harmonograf/v1/types.proto";
+import "goldfive/v1/events.proto";
 
 option go_package = "github.com/pedapudi/harmonograf/gen/harmonograf/v1;harmonografv1";
 
@@ -131,6 +132,10 @@ message Goodbye {
 
 // TelemetryUp is the upstream oneof that StreamTelemetry takes.
 message TelemetryUp {
+  // Reserved: were TaskPlan task_plan = 9 / UpdatedTaskStatus
+  // task_status_update = 10 before the goldfive migration (issue #2).
+  // Plan + task state now ride inside goldfive_event.
+  reserved 9, 10;
   oneof msg {
     Hello hello = 1;
     SpanStart span_start = 2;
@@ -142,13 +147,13 @@ message TelemetryUp {
     // telemetry to preserve happens-before. See types.proto ControlAck.
     ControlAck control_ack = 7;
     Goodbye goodbye = 8;
-    // Task plan emitted by the client's PlannerHelper before normal
-    // execution begins. See types.proto TaskPlan.
-    TaskPlan task_plan = 9;
-    // Explicit task status delta. Usually statuses are derived server-side
-    // from spans that carry an hgraf.task_id attribute; this is an escape
-    // hatch for cases where no span exists.
-    UpdatedTaskStatus task_status_update = 10;
+    // Goldfive orchestration event. Carries the full goldfive Event
+    // envelope (RunStarted, GoalDerived, PlanSubmitted, PlanRevised,
+    // TaskStarted/Progress/Completed/Failed/Blocked/Cancelled,
+    // DriftDetected, RunCompleted, RunAborted). Server ingest dispatches
+    // on the event's payload oneof; frontend WatchSession fans it out
+    // as typed deltas.
+    goldfive.v1.Event goldfive_event = 11;
   }
 }
 

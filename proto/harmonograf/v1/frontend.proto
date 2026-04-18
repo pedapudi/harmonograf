@@ -68,6 +68,11 @@ message WatchSessionRequest {
 }
 
 message SessionUpdate {
+  // Reserved: were TaskPlan task_plan = 16 / UpdatedTaskStatus
+  // updated_task_status = 17 before the goldfive migration (issue #2).
+  // Plan + task deltas will return in Phase B, carried inside a
+  // goldfive.v1.Event variant.
+  reserved 16, 17;
   oneof kind {
     // Initial burst messages. Multiple of each may be sent before the
     // first delta. A client knows the burst is done when it sees the
@@ -94,10 +99,6 @@ message SessionUpdate {
     PayloadAvailable payload_available = 14;
     // Agent responded to a STATUS_QUERY or proactively emitted a task report.
     TaskReport task_report = 15;
-    // A full task plan (initial burst or newly emitted by a client).
-    TaskPlan task_plan = 16;
-    // Delta: a single task's status changed (or it bound to a span).
-    UpdatedTaskStatus updated_task_status = 17;
     // Single (timestamp, tokens, limit) sample for one agent's LLM
     // context window. Delivered both during the initial burst (replaying
     // the most recent samples from sqlite) and live as each heartbeat
