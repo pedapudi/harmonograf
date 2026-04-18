@@ -24,6 +24,7 @@ from .planner import (
     make_default_adk_call_llm,
 )
 from .runner import HarmonografRunner, make_harmonograf_runner
+from .sink import HarmonografSink
 from .transport import ControlAckSpec
 
 __all__ = [
@@ -33,6 +34,7 @@ __all__ = [
     "ControlAckSpec",
     "HarmonografAgent",
     "HarmonografRunner",
+    "HarmonografSink",
     "LLMPlanner",
     "PassthroughPlanner",
     "Plan",
