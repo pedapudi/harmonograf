@@ -71,21 +71,21 @@ class TestEnvelopeToUp:
         up = t._envelope_to_up(env, telemetry_pb2)
         assert up.WhichOneof("msg") == "span_end"
 
-    def test_task_plan_maps_to_task_plan_oneof(self):
-        t = _make_transport()
-        tp = types_pb2.TaskPlan(id="plan-1")
-        env = SpanEnvelope(kind=EnvelopeKind.TASK_PLAN, span_id="", payload=tp)
-        up = t._envelope_to_up(env, telemetry_pb2)
-        assert up.WhichOneof("msg") == "task_plan"
-        assert up.task_plan.id == "plan-1"
+    def test_goldfive_event_maps_to_goldfive_event_oneof(self):
+        """Phase A of the goldfive migration (issue #2) replaced the
+        TaskPlan / UpdatedTaskStatus variants with a single
+        ``goldfive_event`` envelope that carries a goldfive.v1.Event.
+        """
+        from goldfive.v1 import events_pb2
 
-    def test_task_status_update_maps_correctly(self):
         t = _make_transport()
-        upd = types_pb2.UpdatedTaskStatus(plan_id="p", task_id="t")
-        env = SpanEnvelope(kind=EnvelopeKind.TASK_STATUS_UPDATE, span_id="", payload=upd)
+        ev = events_pb2.Event(run_id="run-1", sequence=0)
+        ev.run_started.goal_summary = "demo"
+        env = SpanEnvelope(kind=EnvelopeKind.GOLDFIVE_EVENT, span_id="", payload=ev)
         up = t._envelope_to_up(env, telemetry_pb2)
-        assert up.WhichOneof("msg") == "task_status_update"
-        assert up.task_status_update.plan_id == "p"
+        assert up.WhichOneof("msg") == "goldfive_event"
+        assert up.goldfive_event.run_id == "run-1"
+        assert up.goldfive_event.WhichOneof("payload") == "run_started"
 
     def test_payload_chunk_returns_none(self):
         t = _make_transport()

@@ -1,36 +1,23 @@
 """Tests for the TaskPlan feature.
 
-Covers:
-  - Round-trip a TaskPlan through storage (sqlite + memory via parametrize).
-  - Ingest receives a TaskPlan -> bus publishes a task_plan delta, and
-    _delta_to_session_update produces a SessionUpdate with the plan.
-  - Ingest receives a SpanStart carrying `hgraf.task_id` -> the matching
-    task transitions to RUNNING and bound_span_id is set. SpanEnd with
-    COMPLETED transitions it to COMPLETED.
+Most assertions here test wire-level ingestion of TaskPlan /
+UpdatedTaskStatus envelopes, which Phase A of the goldfive migration
+(issue #2) removed from ``TelemetryUp``. Plan + task state now rides
+inside ``TelemetryUp.goldfive_event``; Phase B rewires ingest around
+that dispatch and restores these tests against the new path.
+
+The module is skipped in its entirety for Phase A — re-enable once
+Phase B lands the goldfive-event ingest.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
-import pytest_asyncio
-from google.protobuf.timestamp_pb2 import Timestamp
 
-from harmonograf_server.bus import (
-    DELTA_TASK_PLAN,
-    DELTA_TASK_STATUS,
-    SessionBus,
-)
-from harmonograf_server.ingest import IngestPipeline, StreamContext
-from harmonograf_server.pb import telemetry_pb2, types_pb2
-from harmonograf_server.rpc.frontend import _delta_to_session_update
-from harmonograf_server.storage import (
-    Task,
-    TaskEdge,
-    TaskPlan,
-    TaskStatus,
-    make_store,
+pytest.skip(
+    "TaskPlan wire path removed in Phase A of goldfive migration (issue #2); "
+    "re-enable after Phase B rewires ingest around TelemetryUp.goldfive_event.",
+    allow_module_level=True,
 )
 
 

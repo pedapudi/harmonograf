@@ -218,46 +218,10 @@ class TestEmitSpanEnd:
         assert env.payload.payload_refs[0].mime == "text/plain"
 
 
-class TestSubmitPlan:
-    def test_plan_envelope_pushed(self, client):
-        plan = Plan(
-            tasks=[Task(id="t1", title="A"), Task(id="t2", title="B")],
-            edges=[TaskEdge(from_task_id="t1", to_task_id="t2")],
-            summary="go",
-        )
-        pid = client.submit_plan(plan)
-        env = _drain(client)[0]
-        assert env.kind is EnvelopeKind.TASK_PLAN
-        assert env.payload.id == pid
-        assert env.payload.summary == "go"
-        assert [t.id for t in env.payload.tasks] == ["t1", "t2"]
-        assert len(env.payload.edges) == 1
-
-    def test_plan_id_generated(self, client):
-        plan = Plan(tasks=[Task(id="t1", title="A")], edges=[])
-        pid = client.submit_plan(plan)
-        assert isinstance(pid, str) and len(pid) > 8
-
-    def test_plan_id_preserved_when_provided(self, client):
-        plan = Plan(tasks=[Task(id="t1", title="A")], edges=[])
-        pid = client.submit_plan(plan, plan_id="manual-123")
-        assert pid == "manual-123"
-        assert _drain(client)[0].payload.id == "manual-123"
-
-
-class TestSubmitTaskStatus:
-    def test_envelope_pushed(self, client):
-        client.submit_task_status_update("plan-1", "t1", "RUNNING", bound_span_id="s-9")
-        env = _drain(client)[0]
-        assert env.kind is EnvelopeKind.TASK_STATUS_UPDATE
-        assert env.payload.plan_id == "plan-1"
-        assert env.payload.task_id == "t1"
-        assert env.payload.bound_span_id == "s-9"
-
-    def test_unknown_status_falls_back_to_pending(self, client):
-        client.submit_task_status_update("p", "t", "HALLUCINATION")
-        # Should still push without error (resolver defaults to PENDING).
-        assert len(_drain(client)) == 1
+# TestSubmitPlan / TestSubmitTaskStatus removed in Phase A of the goldfive
+# migration (issue #2). Client.submit_plan / submit_task_status_update are
+# gone; plan + task state now rides inside emit_goldfive_event, covered by
+# Phase B's new client/tests/test_sink.py.
 
 
 class TestProgressAndActivity:

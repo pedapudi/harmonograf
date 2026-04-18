@@ -237,99 +237,10 @@ async def test_watch_session_translates_annotation_delta(harness, stub):
     assert got.annotation.body == "hey"
 
 
-async def test_watch_session_translates_task_plan_delta(harness, stub):
-    store = harness["store"]
-    bus = harness["bus"]
-    await _seed_minimal(store, "sess_tp", n_spans=0, created_at=time.time() - 1)
-
-    call = stub.WatchSession(frontend_pb2.WatchSessionRequest(session_id="sess_tp"))
-    got_plan = None
-
-    async def run():
-        nonlocal got_plan
-        burst_done = False
-        async for upd in call:
-            w = upd.WhichOneof("kind")
-            if w == "burst_complete":
-                burst_done = True
-                plan = TaskPlan(
-                    id="plan-live",
-                    session_id="sess_tp",
-                    created_at=time.time(),
-                    planner_agent_id="a",
-                    tasks=[Task(id="t1", title="first")],
-                )
-                await store.put_task_plan(plan)
-                bus.publish_task_plan(plan)
-            elif w == "task_plan" and burst_done:
-                got_plan = upd.task_plan
-                break
-
-    await asyncio.wait_for(run(), timeout=3.0)
-    call.cancel()
-    assert got_plan is not None
-    assert got_plan.id == "plan-live"
-
-
-async def test_watch_session_translates_task_status_delta(harness, stub):
-    store = harness["store"]
-    bus = harness["bus"]
-    await _seed_minimal(store, "sess_ts", created_at=time.time() - 1)
-    plan = TaskPlan(
-        id="plan-ts", session_id="sess_ts", created_at=time.time(),
-        tasks=[Task(id="t1", title="x")],
-    )
-    await store.put_task_plan(plan)
-
-    call = stub.WatchSession(frontend_pb2.WatchSessionRequest(session_id="sess_ts"))
-    got = None
-
-    async def run():
-        nonlocal got
-        burst_done = False
-        async for upd in call:
-            w = upd.WhichOneof("kind")
-            if w == "burst_complete":
-                burst_done = True
-                t = Task(id="t1", title="x", status=TaskStatus.RUNNING, bound_span_id="sp1")
-                bus.publish_task_status("sess_ts", "plan-ts", t)
-            elif w == "updated_task_status" and burst_done:
-                got = upd.updated_task_status
-                break
-
-    await asyncio.wait_for(run(), timeout=3.0)
-    call.cancel()
-    assert got is not None
-    assert got.plan_id == "plan-ts"
-    assert got.task_id == "t1"
-    assert got.bound_span_id == "sp1"
-
-
-async def test_watch_session_task_plan_burst_on_reconnect(harness, stub):
-    """Existing plans are replayed during the initial burst."""
-    store = harness["store"]
-    await _seed_minimal(store, "sess_rp", created_at=time.time() - 1)
-    plan = TaskPlan(
-        id="plan-rp", session_id="sess_rp", created_at=time.time(),
-        tasks=[Task(id="t1", title="x")],
-    )
-    await store.put_task_plan(plan)
-
-    call = stub.WatchSession(frontend_pb2.WatchSessionRequest(session_id="sess_rp"))
-    saw_plan = False
-
-    async def run():
-        nonlocal saw_plan
-        async for upd in call:
-            w = upd.WhichOneof("kind")
-            if w == "task_plan":
-                saw_plan = True
-            if w == "burst_complete":
-                break
-
-    await asyncio.wait_for(run(), timeout=3.0)
-    call.cancel()
-    assert saw_plan
+# task_plan / updated_task_status WatchSession delta translation tests were
+# removed in Phase A of the goldfive migration (issue #2). SessionUpdate
+# reserves those field numbers until Phase B routes goldfive_event-based
+# plan deltas through WatchSession.
 
 
 # ---- GetSpanTree ----------------------------------------------------------
