@@ -27,10 +27,14 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Optional, Protocol
 
 from harmonograf_server.bus import SessionBus
 from harmonograf_server.convert import (
+    _drift_kind_pb_to_string,
+    _drift_severity_pb_to_string,
     attr_map_to_dict,
+    goldfive_pb_plan_to_storage,
     hello_to_agent,
     pb_span_to_storage,
     span_status_from_pb,
+    task_status_from_pb,
     ts_to_float,
 )
 from harmonograf_server.pb import telemetry_pb2, types_pb2
@@ -43,6 +47,7 @@ from harmonograf_server.storage import (
     SpanKind,
     SpanStatus,
     Store,
+    TaskPlan,
     TaskStatus,
 )
 
@@ -622,22 +627,278 @@ class IngestPipeline:
         )
 
     async def _handle_goldfive_event(self, ctx: StreamContext, event: Any) -> None:
-        """Placeholder dispatch for goldfive.v1.Event envelopes.
+        """Dispatch a ``goldfive.v1.Event`` to the per-kind handler.
 
-        Phase A of the goldfive migration (issue #2) wires the wire-level
-        variant through to here. The actual per-kind handlers — plan
-        ingestion, task status updates, drift markers, run lifecycle —
-        land in Phase B. For now we log at debug so tests can assert the
-        pipeline accepted the envelope without crashing.
+        Goldfive owns orchestration after the Phase A proto migration
+        (issue #2); plans, task state transitions, drift markers, and
+        run lifecycle signals all arrive here wrapped in a single
+        ``TelemetryUp.goldfive_event`` envelope. Each payload variant
+        drives a storage mutation and/or bus fan-out so the frontend
+        Gantt stays live. Unknown payload variants are logged and
+        ignored so adding a new event kind in goldfive is
+        forward-compatible with an older harmonograf server.
         """
-        kind = event.WhichOneof("payload") if event is not None else None
+        if event is None:
+            return
+        kind = event.WhichOneof("payload")
+        run_id = event.run_id
+        sequence = event.sequence
         logger.debug(
-            "goldfive event received session_id=%s run_id=%s sequence=%s kind=%s "
-            "(Phase B will wire this up)",
+            "goldfive event session_id=%s run_id=%s sequence=%s kind=%s",
             ctx.session_id,
-            getattr(event, "run_id", ""),
-            getattr(event, "sequence", 0),
+            run_id,
+            sequence,
             kind,
+        )
+        if kind == "run_started":
+            await self._on_run_started(ctx, event.run_started, run_id)
+        elif kind == "goal_derived":
+            await self._on_goal_derived(ctx, event.goal_derived, run_id)
+        elif kind == "plan_submitted":
+            await self._on_plan_submitted(ctx, event.plan_submitted, run_id)
+        elif kind == "plan_revised":
+            await self._on_plan_revised(ctx, event.plan_revised, run_id)
+        elif kind == "task_started":
+            await self._on_task_started(ctx, event.task_started, run_id)
+        elif kind == "task_progress":
+            self._on_task_progress(ctx, event.task_progress, run_id)
+        elif kind == "task_completed":
+            await self._on_task_completed(ctx, event.task_completed, run_id)
+        elif kind == "task_failed":
+            await self._on_task_failed(ctx, event.task_failed, run_id)
+        elif kind == "task_blocked":
+            await self._on_task_blocked(ctx, event.task_blocked, run_id)
+        elif kind == "task_cancelled":
+            await self._on_task_cancelled(ctx, event.task_cancelled, run_id)
+        elif kind == "drift_detected":
+            self._on_drift_detected(ctx, event.drift_detected, run_id)
+        elif kind == "run_completed":
+            self._on_run_completed(ctx, event.run_completed, run_id)
+        elif kind == "run_aborted":
+            self._on_run_aborted(ctx, event.run_aborted, run_id)
+        else:
+            logger.debug(
+                "ignoring unknown goldfive event payload kind=%s on session_id=%s",
+                kind,
+                ctx.session_id,
+            )
+
+    # ---- goldfive event handlers -------------------------------------
+
+    async def _on_run_started(
+        self, ctx: StreamContext, payload: Any, run_id: str
+    ) -> None:
+        started_at: Optional[float] = None
+        if payload.HasField("started_at"):
+            started_at = ts_to_float(payload.started_at)
+        self._bus.publish_run_started(
+            ctx.session_id,
+            run_id,
+            goal_summary=payload.goal_summary or "",
+            started_at=started_at,
+        )
+
+    async def _on_goal_derived(
+        self, ctx: StreamContext, payload: Any, run_id: str
+    ) -> None:
+        goals = [
+            {
+                "id": g.id,
+                "summary": g.summary,
+                "metadata": dict(g.metadata),
+                "has_success_predicate": bool(
+                    g.HasField("has_success_predicate") and g.has_success_predicate
+                ),
+            }
+            for g in payload.goals
+        ]
+        self._bus.publish_goal_derived(ctx.session_id, run_id, goals)
+
+    async def _on_plan_submitted(
+        self, ctx: StreamContext, payload: Any, run_id: str
+    ) -> None:
+        await self._upsert_plan(ctx, payload.plan, run_id=run_id)
+
+    async def _on_plan_revised(
+        self, ctx: StreamContext, payload: Any, run_id: str
+    ) -> None:
+        # The revision metadata lives both on ``payload.plan`` (inline in
+        # goldfive's ``Plan``) and as flattened top-level fields on the
+        # PlanRevised event. Prefer the event-level fields when the plan
+        # itself is missing them — goldfive emits the flattened copy to
+        # save sinks from unpacking the plan.
+        stored = await self._upsert_plan(ctx, payload.plan, run_id=run_id)
+        if stored is None:
+            return
+        overwrites: dict[str, Any] = {}
+        if not stored.revision_kind:
+            kind_str = _drift_kind_pb_to_string(payload.drift_kind)
+            if kind_str:
+                overwrites["revision_kind"] = kind_str
+        if not stored.revision_severity:
+            sev_str = _drift_severity_pb_to_string(payload.severity)
+            if sev_str:
+                overwrites["revision_severity"] = sev_str
+        if not stored.revision_reason and payload.reason:
+            overwrites["revision_reason"] = payload.reason
+        if payload.revision_index and not stored.revision_index:
+            overwrites["revision_index"] = int(payload.revision_index)
+        if overwrites:
+            for k, v in overwrites.items():
+                setattr(stored, k, v)
+            await self._store.put_task_plan(stored)
+            self._bus.publish_task_plan(stored)
+
+    async def _upsert_plan(
+        self, ctx: StreamContext, pb_plan: Any, *, run_id: str
+    ) -> Optional[TaskPlan]:
+        """Translate a ``goldfive.v1.Plan`` and persist + fan out the result.
+
+        Returns the stored ``TaskPlan`` so callers (PlanRevised) can
+        enrich it with the flattened revision metadata if needed.
+        """
+        if not pb_plan.id:
+            logger.warning(
+                "goldfive plan missing id on session_id=%s run_id=%s; dropping",
+                ctx.session_id,
+                run_id,
+            )
+            return None
+        created_at = ts_to_float(pb_plan.created_at) if pb_plan.HasField("created_at") else self._now()
+        stored = goldfive_pb_plan_to_storage(
+            pb_plan,
+            session_id=ctx.session_id,
+            created_at=created_at,
+            planner_agent_id=ctx.agent_id,
+        )
+        stored = await self._store.put_task_plan(stored)
+        # Refresh the task index for span-to-task binding lookups on the
+        # hot path. A re-emitted plan with the same id replaces previous
+        # index entries so stale task ids are pruned.
+        idx = self._task_index.setdefault(ctx.session_id, {})
+        # Drop prior mappings that pointed at this plan id.
+        for task_id in [tid for tid, pid in idx.items() if pid == stored.id]:
+            idx.pop(task_id, None)
+        for task in stored.tasks:
+            idx[task.id] = stored.id
+        self._bus.publish_task_plan(stored)
+        return stored
+
+    async def _on_task_started(
+        self, ctx: StreamContext, payload: Any, run_id: str
+    ) -> None:
+        await self._apply_goldfive_task_status(
+            ctx, payload.task_id, TaskStatus.RUNNING, run_id=run_id
+        )
+
+    def _on_task_progress(
+        self, ctx: StreamContext, payload: Any, run_id: str
+    ) -> None:
+        # Progress is a high-frequency, non-terminal signal — fan out on
+        # the bus so the frontend can render a progress bar, but do not
+        # persist. Matches the design note in §5.2 of the migration plan.
+        self._bus.publish_task_progress(
+            ctx.session_id,
+            run_id,
+            task_id=payload.task_id,
+            fraction=float(payload.fraction),
+            detail=payload.detail,
+        )
+
+    async def _on_task_completed(
+        self, ctx: StreamContext, payload: Any, run_id: str
+    ) -> None:
+        await self._apply_goldfive_task_status(
+            ctx, payload.task_id, TaskStatus.COMPLETED, run_id=run_id
+        )
+
+    async def _on_task_failed(
+        self, ctx: StreamContext, payload: Any, run_id: str
+    ) -> None:
+        await self._apply_goldfive_task_status(
+            ctx, payload.task_id, TaskStatus.FAILED, run_id=run_id
+        )
+
+    async def _on_task_blocked(
+        self, ctx: StreamContext, payload: Any, run_id: str
+    ) -> None:
+        await self._apply_goldfive_task_status(
+            ctx, payload.task_id, TaskStatus.BLOCKED, run_id=run_id
+        )
+
+    async def _on_task_cancelled(
+        self, ctx: StreamContext, payload: Any, run_id: str
+    ) -> None:
+        await self._apply_goldfive_task_status(
+            ctx, payload.task_id, TaskStatus.CANCELLED, run_id=run_id
+        )
+
+    async def _apply_goldfive_task_status(
+        self,
+        ctx: StreamContext,
+        task_id: str,
+        status: TaskStatus,
+        *,
+        run_id: str,
+    ) -> None:
+        if not task_id:
+            logger.debug(
+                "goldfive task status event missing task_id on session_id=%s run_id=%s",
+                ctx.session_id,
+                run_id,
+            )
+            return
+        plan_id = self._task_index.get(ctx.session_id, {}).get(task_id)
+        if plan_id is None:
+            # Fall back to a storage scan: handles pipeline restarts
+            # where the in-memory index has not been populated yet.
+            plans = await self._store.list_task_plans_for_session(ctx.session_id)
+            for p in plans:
+                for t in p.tasks:
+                    if t.id == task_id:
+                        plan_id = p.id
+                        self._task_index.setdefault(ctx.session_id, {})[
+                            task_id
+                        ] = plan_id
+                        break
+                if plan_id is not None:
+                    break
+        if plan_id is None:
+            logger.debug(
+                "goldfive task_id=%s has no matching plan in session_id=%s",
+                task_id,
+                ctx.session_id,
+            )
+            return
+        updated = await self._store.update_task_status(plan_id, task_id, status)
+        if updated is not None:
+            self._bus.publish_task_status(ctx.session_id, plan_id, updated)
+
+    def _on_drift_detected(
+        self, ctx: StreamContext, payload: Any, run_id: str
+    ) -> None:
+        self._bus.publish_drift(
+            ctx.session_id,
+            run_id,
+            kind=_drift_kind_pb_to_string(payload.kind),
+            severity=_drift_severity_pb_to_string(payload.severity),
+            detail=payload.detail,
+            current_task_id=payload.current_task_id,
+            current_agent_id=payload.current_agent_id,
+        )
+
+    def _on_run_completed(
+        self, ctx: StreamContext, payload: Any, run_id: str
+    ) -> None:
+        self._bus.publish_run_completed(
+            ctx.session_id, run_id, outcome_summary=payload.outcome_summary
+        )
+
+    def _on_run_aborted(
+        self, ctx: StreamContext, payload: Any, run_id: str
+    ) -> None:
+        self._bus.publish_run_aborted(
+            ctx.session_id, run_id, reason=payload.reason
         )
 
     async def _bind_task_to_span(

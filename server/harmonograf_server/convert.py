@@ -25,6 +25,9 @@ from harmonograf_server.storage import (
     SpanKind,
     SpanLink,
     SpanStatus,
+    Task,
+    TaskEdge,
+    TaskPlan,
     TaskStatus,
 )
 
@@ -346,10 +349,103 @@ def span_status_from_pb(pb_status: int) -> SpanStatus:
 
 # --- task plans -------------------------------------------------------------
 #
-# Task/TaskPlan/UpdatedTaskStatus pb conversions were removed in Phase A of
-# the goldfive migration (issue #2). Plan + task state now rides inside
-# TelemetryUp.goldfive_event (goldfive.v1.Event); the ingest-side
-# dispatcher and its storage wiring land in Phase B.
+# Plan + task state rides inside ``TelemetryUp.goldfive_event`` (a
+# ``goldfive.v1.Event``) after the Phase A migration (issue #2). The helpers
+# below translate between goldfive's ``Plan`` / ``Task`` pb messages and
+# harmonograf's storage-layer ``TaskPlan`` / ``Task`` dataclasses; the latter
+# re-export goldfive's Python dataclasses so field round-trips are mechanical.
+
+
+def goldfive_pb_task_to_storage(pb: Any) -> Task:
+    return Task(
+        id=pb.id,
+        title=pb.title,
+        description=pb.description,
+        assignee_agent_id=pb.assignee_agent_id,
+        status=task_status_from_pb(pb.status),
+        predicted_start_ms=pb.predicted_start_ms,
+        predicted_duration_ms=pb.predicted_duration_ms,
+        bound_span_id=pb.bound_span_id or "",
+    )
+
+
+def goldfive_pb_plan_to_storage(
+    pb: Any,
+    *,
+    session_id: str,
+    created_at: float,
+    invocation_span_id: str = "",
+    planner_agent_id: str = "",
+) -> TaskPlan:
+    """Translate a ``goldfive.v1.Plan`` into harmonograf's ``TaskPlan``.
+
+    Harmonograf persists a plan in its storage layer with a few
+    session-scoped fields goldfive's message does not carry
+    (``session_id``, ``invocation_span_id``, ``planner_agent_id``). Those
+    are passed in by the caller — typically the ingest pipeline, which
+    knows them from the stream context that delivered the event.
+
+    ``revision_kind`` and ``revision_severity`` are stored as enum-value
+    strings to match the existing harmonograf schema (``"tool_error"``,
+    ``"warning"``, etc.); the lookup falls back to empty string when
+    goldfive's enum is unspecified.
+    """
+
+    tasks = [goldfive_pb_task_to_storage(t) for t in pb.tasks]
+    edges = [
+        TaskEdge(from_task_id=e.from_task_id, to_task_id=e.to_task_id)
+        for e in pb.edges
+    ]
+    return TaskPlan(
+        id=pb.id,
+        session_id=session_id,
+        created_at=created_at,
+        invocation_span_id=invocation_span_id,
+        planner_agent_id=planner_agent_id,
+        summary=pb.summary,
+        tasks=tasks,
+        edges=edges,
+        revision_reason=pb.revision_reason,
+        revision_kind=_drift_kind_pb_to_string(pb.revision_kind),
+        revision_severity=_drift_severity_pb_to_string(pb.revision_severity),
+        revision_index=int(pb.revision_index),
+    )
+
+
+def _drift_kind_pb_to_string(value: int) -> str:
+    """Convert a ``goldfive.v1.DriftKind`` enum int to its lowercase value.
+
+    Returns the empty string when the enum is ``DRIFT_KIND_UNSPECIFIED`` so
+    storage does not record a meaningless revision kind on initial plans.
+    """
+
+    try:
+        name = goldfive_types_pb2.DriftKind.Name(value)
+    except (ValueError, AttributeError):
+        return ""
+    if name == "DRIFT_KIND_UNSPECIFIED":
+        return ""
+    if name.startswith("DRIFT_KIND_"):
+        return name[len("DRIFT_KIND_"):].lower()
+    return name.lower()
+
+
+def _drift_severity_pb_to_string(value: int) -> str:
+    """Convert a ``goldfive.v1.DriftSeverity`` enum int to its lowercase value.
+
+    Returns the empty string on UNSPECIFIED so initial plans keep a clean
+    severity column.
+    """
+
+    try:
+        name = goldfive_types_pb2.DriftSeverity.Name(value)
+    except (ValueError, AttributeError):
+        return ""
+    if name == "DRIFT_SEVERITY_UNSPECIFIED":
+        return ""
+    if name.startswith("DRIFT_SEVERITY_"):
+        return name[len("DRIFT_SEVERITY_"):].lower()
+    return name.lower()
 
 
 def storage_agent_to_pb(agent: Agent) -> types_pb2.Agent:

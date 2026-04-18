@@ -34,6 +34,13 @@ DELTA_TASK_REPORT = "task_report"
 DELTA_TASK_PLAN = "task_plan"
 DELTA_TASK_STATUS = "task_status"
 DELTA_CONTEXT_WINDOW_SAMPLE = "context_window_sample"
+# Goldfive-originated run / drift / task-progress signals (issue #2, Phase B).
+DELTA_RUN_STARTED = "run_started"
+DELTA_RUN_COMPLETED = "run_completed"
+DELTA_RUN_ABORTED = "run_aborted"
+DELTA_GOAL_DERIVED = "goal_derived"
+DELTA_DRIFT = "drift"
+DELTA_TASK_PROGRESS = "task_progress"
 
 
 @dataclass
@@ -222,6 +229,111 @@ class SessionBus:
                     "report": report,
                     "invocation_span_id": invocation_span_id,
                     "recorded_at": recorded_at or time.time(),
+                },
+            )
+        )
+
+    # Goldfive-originated deltas (issue #2, Phase B). Payloads are plain dicts
+    # so WatchSession can route them to frontend-facing proto shapes in Phase
+    # C/D without coupling the bus to goldfive's pb types.
+
+    def publish_run_started(
+        self,
+        session_id: str,
+        run_id: str,
+        *,
+        goal_summary: str = "",
+        started_at: Optional[float] = None,
+    ) -> None:
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_RUN_STARTED,
+                {
+                    "run_id": run_id,
+                    "goal_summary": goal_summary,
+                    "started_at": started_at,
+                },
+            )
+        )
+
+    def publish_run_completed(
+        self, session_id: str, run_id: str, *, outcome_summary: str = ""
+    ) -> None:
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_RUN_COMPLETED,
+                {"run_id": run_id, "outcome_summary": outcome_summary},
+            )
+        )
+
+    def publish_run_aborted(
+        self, session_id: str, run_id: str, *, reason: str = ""
+    ) -> None:
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_RUN_ABORTED,
+                {"run_id": run_id, "reason": reason},
+            )
+        )
+
+    def publish_goal_derived(
+        self, session_id: str, run_id: str, goals: list[dict]
+    ) -> None:
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_GOAL_DERIVED,
+                {"run_id": run_id, "goals": goals},
+            )
+        )
+
+    def publish_drift(
+        self,
+        session_id: str,
+        run_id: str,
+        *,
+        kind: str,
+        severity: str,
+        detail: str = "",
+        current_task_id: str = "",
+        current_agent_id: str = "",
+    ) -> None:
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_DRIFT,
+                {
+                    "run_id": run_id,
+                    "kind": kind,
+                    "severity": severity,
+                    "detail": detail,
+                    "current_task_id": current_task_id,
+                    "current_agent_id": current_agent_id,
+                },
+            )
+        )
+
+    def publish_task_progress(
+        self,
+        session_id: str,
+        run_id: str,
+        *,
+        task_id: str,
+        fraction: float,
+        detail: str = "",
+    ) -> None:
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_TASK_PROGRESS,
+                {
+                    "run_id": run_id,
+                    "task_id": task_id,
+                    "fraction": fraction,
+                    "detail": detail,
                 },
             )
         )
