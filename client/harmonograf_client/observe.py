@@ -40,10 +40,17 @@ def observe(
 ) -> "goldfive.Runner":
     """Attach a :class:`HarmonografSink` to ``runner`` and return it.
 
-    This helper is observability-only. It mutates ``runner.sinks`` by
-    appending a single :class:`HarmonografSink`; it never touches the
-    planner, steerer, executor, goal deriver, or any other orchestration
-    component.
+    This helper is observability-only: it registers a
+    :class:`HarmonografSink` via ``runner.add_sink(...)`` and wires a
+    :class:`ControlBridge` so pause / resume / cancel / steer / rewind
+    issued from the harmonograf UI reach the live runner. It never
+    touches the planner, steerer, executor, goal deriver, or any other
+    orchestration component.
+
+    ``observe()`` must be called from within a running asyncio event
+    loop — the bridge needs a loop to consume events on, and the
+    bridge's teardown is registered as a :meth:`Runner.add_close_hook`
+    so ``runner.close()`` tears the wire down cleanly.
 
     Parameters
     ----------
@@ -77,7 +84,10 @@ def observe(
     -----
     Calling ``observe`` twice on the same runner appends two sinks.
     That's deliberate — the caller is responsible for deciding whether
-    deduping makes sense in their context.
+    deduping makes sense in their context. Attaching a second bridge to
+    the same runner will raise from goldfive's ``control`` setter since
+    a channel is already attached — callers who want multiple observers
+    should share a single ``Client``+bridge pair instead.
     """
     if client is None:
         resolved_addr = server_addr or os.environ.get("HARMONOGRAF_SERVER")
@@ -89,30 +99,30 @@ def observe(
             client_kwargs["server_addr"] = resolved_addr
         client = Client(**client_kwargs)
 
-    runner.sinks.append(HarmonografSink(client))
+    sink = HarmonografSink(client)
+    runner.add_sink(sink)
 
-    # Attach a goldfive ControlChannel bridge so pause/resume/cancel/
-    # steer/rewind issued from the harmonograf UI reach the live runner.
-    # The bridge needs a running asyncio loop to consume events on; when
-    # ``observe()`` is called outside async context (e.g. from a sync
-    # script), we skip it — the sink half of ``observe`` still works.
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
+    # Attach a goldfive ControlChannel if the runner doesn't already
+    # have one. The setter is idempotent on same-identity channels and
+    # raises if a different channel is already attached.
+    if runner.control is None:
+        from goldfive.control import ControlChannel
 
-    if loop is not None:
-        from ._control_bridge import ControlBridge
+        runner.control = ControlChannel()
 
-        bridge = ControlBridge(client, runner, loop)
-        bridge.start()
-        # Stash for test + introspection access. Underscore prefix so
-        # it's clear this is private plumbing, not part of the Runner's
-        # public contract.
-        runner._harmonograf_control_bridge = bridge  # type: ignore[attr-defined]
-    else:
-        log.debug(
-            "observe(): no running event loop — control bridge not started"
-        )
+    # Spin up the bridge and register its teardown as a close hook so
+    # ``runner.close()`` shuts the wire down cleanly. No monkey-patching,
+    # no hasattr walks — this relies on goldfive's Runner extension API.
+    from ._control_bridge import ControlBridge
+
+    loop = asyncio.get_running_loop()
+    bridge = ControlBridge(client, runner, loop)
+    bridge.start()
+    runner.add_close_hook(bridge.stop)
+
+    # Stash for test + introspection access. Underscore prefix so it's
+    # clear this is private plumbing, not part of the Runner's public
+    # contract.
+    runner._harmonograf_control_bridge = bridge  # type: ignore[attr-defined]
 
     return runner
