@@ -256,6 +256,91 @@ async def test_watch_session_unknown_returns_not_found(harness, stub):
     assert exc.value.code() == grpc.StatusCode.NOT_FOUND
 
 
+@pytest.mark.asyncio
+async def test_watch_session_replays_persisted_plan_as_goldfive_events(
+    harness, stub
+):
+    """Initial burst must include a plan_submitted + task_* events for the
+    persisted plan. Regression for issue #12: Phase B wired ingest but not
+    the WatchSession delivery path, so the UI always saw an empty Tasks
+    panel on reconnect."""
+
+    from harmonograf_server.storage import Task, TaskPlan, TaskStatus
+
+    store = harness["store"]
+    bus = harness["bus"]
+    now = time.time()
+    await _seed_session(store, session_id="sess_gf", n_spans=0, start=now - 10)
+
+    plan = TaskPlan(
+        id="plan-1",
+        session_id="sess_gf",
+        created_at=now - 8,
+        planner_agent_id="agent-1",
+        summary="Three echo tasks.",
+        tasks=[
+            Task(id="t1", title="first", status=TaskStatus.COMPLETED),
+            Task(id="t2", title="second", status=TaskStatus.COMPLETED),
+            Task(id="t3", title="third", status=TaskStatus.RUNNING),
+            Task(id="t4", title="fourth", status=TaskStatus.PENDING),
+        ],
+    )
+    await store.put_task_plan(plan)
+
+    req = frontend_pb2.WatchSessionRequest(session_id="sess_gf")
+    call = stub.WatchSession(req)
+
+    plan_events: list = []
+    task_events: list[tuple[str, str]] = []  # (kind, task_id)
+    burst_seen = False
+    live_run_completed = None
+
+    async def consumer():
+        nonlocal burst_seen, live_run_completed
+        async for upd in call:
+            which = upd.WhichOneof("kind")
+            if which == "goldfive_event":
+                kind = upd.goldfive_event.WhichOneof("payload")
+                if kind == "plan_submitted":
+                    plan_events.append(upd.goldfive_event.plan_submitted.plan)
+                elif kind == "task_started":
+                    task_events.append(("task_started", upd.goldfive_event.task_started.task_id))
+                elif kind == "task_completed":
+                    task_events.append(
+                        ("task_completed", upd.goldfive_event.task_completed.task_id)
+                    )
+                elif kind == "run_completed":
+                    live_run_completed = upd.goldfive_event.run_completed.outcome_summary
+                    break
+            elif which == "burst_complete":
+                burst_seen = True
+                # Publish a live goldfive delta after the burst so we can
+                # assert the subscribe-path conversion as well.
+                bus.publish_run_completed(
+                    "sess_gf", "run-1", outcome_summary="done"
+                )
+
+    await asyncio.wait_for(consumer(), timeout=5.0)
+    call.cancel()
+
+    assert burst_seen, "burst_complete never arrived"
+    assert len(plan_events) == 1, f"expected one plan_submitted, got {len(plan_events)}"
+    replayed_plan = plan_events[0]
+    assert replayed_plan.id == "plan-1"
+    assert [t.id for t in replayed_plan.tasks] == ["t1", "t2", "t3", "t4"]
+    # Two completed tasks + one running — each completed task emits
+    # task_started + task_completed; the running task emits task_started.
+    assert ("task_completed", "t1") in task_events
+    assert ("task_completed", "t2") in task_events
+    assert task_events.count(("task_started", "t1")) == 1
+    assert task_events.count(("task_started", "t2")) == 1
+    assert ("task_started", "t3") in task_events
+    # PENDING task t4 must not have emitted any events.
+    assert all(tid != "t4" for _, tid in task_events)
+    # Live path: the run_completed delta landed on the stream.
+    assert live_run_completed == "done"
+
+
 # ---- GetPayload -----------------------------------------------------------
 
 
