@@ -311,6 +311,23 @@ class Client:
     def on_control(self, kind: str, callback: ControlCallback) -> None:
         self._transport.register_control_handler(kind.upper(), callback)
 
+    def set_control_forward(self, fn: Optional[Callable[[Any], None]]) -> None:
+        """Install a raw ``ControlEvent`` forwarder. ``None`` uninstalls.
+
+        While a forwarder is active, events bypass the per-kind callbacks
+        registered via :meth:`on_control` — ack responsibility moves to
+        the forwarder, which must call :meth:`send_control_ack` for every
+        event. This is the hook the goldfive bridge in
+        ``harmonograf_client._control_bridge`` uses.
+        """
+        self._transport.set_control_forward(fn)
+
+    def send_control_ack(
+        self, control_id: str, result: str, detail: str = ""
+    ) -> None:
+        """Send a ``ControlAck`` upstream. Thread-safe and non-blocking."""
+        self._transport.send_control_ack(control_id, result, detail)
+
     def emit_goldfive_event(self, event_pb: Any) -> None:
         """Ship a ``goldfive.v1.Event`` to the server.
 

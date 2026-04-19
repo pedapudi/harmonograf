@@ -66,6 +66,9 @@ class FakeTransport:
         self.handlers: dict[str, Callable[[Any], Any]] = {}
         self.assigned_session_id: str = session_id
         self.payload_accept = True
+        self.control_forward: Optional[Callable[[Any], None]] = None
+        # (control_id, result, detail) tuples pushed via send_control_ack.
+        self.sent_acks: list[tuple[str, str, str]] = []
 
     # --- public surface Client depends on -----------------------------
 
@@ -84,6 +87,22 @@ class FakeTransport:
 
     def register_control_handler(self, kind: str, cb: Callable[[Any], Any]) -> None:
         self.handlers[kind] = cb
+
+    def set_control_forward(self, fn: Optional[Callable[[Any], None]]) -> None:
+        self.control_forward = fn
+
+    def send_control_ack(
+        self, control_id: str, result: str, detail: str = ""
+    ) -> None:
+        self.sent_acks.append((control_id, result, detail))
+
+    # Bridge tests simulate a ControlEvent arriving on the control stream
+    # by calling this directly. Matches the real transport's call path —
+    # set_control_forward's callable receives a ControlEvent proto.
+    def deliver_control_event(self, event: Any) -> None:
+        fwd = self.control_forward
+        if fwd is not None:
+            fwd(event)
 
 
 def make_factory(store: list[FakeTransport]) -> Callable[..., FakeTransport]:
