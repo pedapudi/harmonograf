@@ -16,7 +16,7 @@ ADK app for per-span observability::
     from goldfive.adapters.adk import ADKAdapter
     from harmonograf_client import Client, HarmonografSink
 
-    client = Client(name="research", server_addr="127.0.0.1:50431")
+    client = Client(name="research", server_addr="127.0.0.1:7531")
     runner = Runner(
         agent=ADKAdapter(root_agent),
         planner=LLMPlanner(call_llm=...),

@@ -28,7 +28,7 @@ class HarmonografSink:
         from goldfive import Runner
         from harmonograf_client import Client, HarmonografSink
 
-        client = Client(name="research", server_addr="localhost:50431")
+        client = Client(name="research", server_addr="127.0.0.1:7531")
         sink = HarmonografSink(client)
         runner = Runner(..., sinks=[sink])
         await runner.run(user_request)

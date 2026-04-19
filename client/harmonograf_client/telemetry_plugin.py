@@ -12,7 +12,7 @@ plugin to the ADK ``App`` that ``adk web`` / ``adk run`` builds::
     from google.adk.apps.app import App
     from harmonograf_client import Client, HarmonografTelemetryPlugin
 
-    client = Client(name="research", server_addr="127.0.0.1:50431")
+    client = Client(name="research", server_addr="127.0.0.1:7531")
     app = App(root_agent=..., plugins=[HarmonografTelemetryPlugin(client)])
 
 The plugin is safe to install alongside ``goldfive.adapters.adk`` 's
