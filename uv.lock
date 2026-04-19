@@ -691,7 +691,7 @@ wheels = [
 [[package]]
 name = "goldfive"
 version = "0.1.0"
-source = { editable = "../goldfive" }
+source = { editable = "third_party/goldfive" }
 
 [package.metadata]
 requires-dist = [
@@ -1592,25 +1592,31 @@ name = "harmonograf"
 version = "0.0.0"
 source = { editable = "." }
 dependencies = [
-    { name = "goldfive" },
     { name = "harmonograf-client" },
     { name = "harmonograf-server" },
 ]
 
 [package.optional-dependencies]
 demo = [
+    { name = "goldfive" },
     { name = "google-adk" },
     { name = "litellm" },
 ]
 e2e = [
+    { name = "goldfive" },
     { name = "google-adk" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
+orchestration = [
+    { name = "goldfive" },
+]
 
 [package.metadata]
 requires-dist = [
-    { name = "goldfive", editable = "../goldfive" },
+    { name = "goldfive", marker = "extra == 'demo'", editable = "third_party/goldfive" },
+    { name = "goldfive", marker = "extra == 'e2e'", editable = "third_party/goldfive" },
+    { name = "goldfive", marker = "extra == 'orchestration'", editable = "third_party/goldfive" },
     { name = "google-adk", marker = "extra == 'demo'", editable = "third_party/adk-python" },
     { name = "google-adk", marker = "extra == 'e2e'", editable = "third_party/adk-python" },
     { name = "harmonograf-client", editable = "client" },
@@ -1619,7 +1625,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'e2e'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'e2e'", specifier = ">=0.23" },
 ]
-provides-extras = ["e2e", "demo"]
+provides-extras = ["orchestration", "e2e", "demo"]
 
 [[package]]
 name = "harmonograf-client"
@@ -1640,7 +1646,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "goldfive", editable = "../goldfive" },
+    { name = "goldfive", editable = "third_party/goldfive" },
     { name = "grpcio", specifier = ">=1.60" },
     { name = "protobuf", specifier = ">=4.25" },
     { name = "pydantic", specifier = ">=2.0" },
@@ -1674,7 +1680,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20" },
-    { name = "goldfive", editable = "../goldfive" },
+    { name = "goldfive", editable = "third_party/goldfive" },
     { name = "grpcio", specifier = ">=1.62" },
     { name = "grpcio-tools", specifier = ">=1.62" },
     { name = "hypercorn", specifier = ">=0.17" },

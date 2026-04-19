@@ -1,12 +1,23 @@
 # Harmonograf
 
-**The observability console for agent workflows orchestrated by [goldfive](https://github.com/pedapudi/goldfive).**
+**The observability console for multi-agent workflows.**
 
-Harmonograf stores the event timeline produced by a goldfive run, renders it as a
-Gantt-chart-style view in a browser, and lets humans intervene with control
-events on the same connection it observes them on. Goldfive owns the plan, task
-state machine, drift taxonomy, and reporting tools; harmonograf owns the
-session, the span timeline, the UI, storage, and the control router.
+Harmonograf renders agent activity as a Gantt-style timeline, lets humans
+intervene with control events on the same connection it observes them on, and
+works two ways:
+
+- **Standalone** — emit spans from any agent, from any framework, via the
+  `harmonograf_client.Client`. No orchestration. The Gantt, inspector, and
+  control surfaces light up; the Tasks panel stays empty. See
+  [`docs/standalone-observability.md`](docs/standalone-observability.md).
+- **With [goldfive](https://github.com/pedapudi/goldfive)** — opt in to the
+  orchestration extra (`uv sync --extra orchestration`) and harmonograf also
+  shows plans, tasks, and drift. Goldfive owns the plan / task state machine /
+  drift taxonomy / reporting tools; harmonograf is the screen you watch it on.
+  See [`docs/goldfive-integration.md`](docs/goldfive-integration.md).
+
+Both modes target the same server, the same wire format, and the same UI —
+the difference is purely which panels populate.
 
 ---
 
@@ -64,15 +75,34 @@ Integration is a single-line install: construct a `goldfive.Runner`, attach a
 
 ## Get running in 10 minutes
 
-The fastest path from clone to a live-rendering Gantt is the goldfive
+### Standalone (no goldfive)
+
+The shortest path: boot the server + frontend, and emit synthetic spans
+from a plain Python script. Nothing else.
+
+```bash
+git clone https://github.com/pedapudi/harmonograf
+cd harmonograf
+git submodule update --init --recursive
+git clone --depth 1 https://github.com/google/adk-python.git third_party/adk-python
+uv sync
+make demo-standalone    # server + frontend + spans_only.py
+```
+
+The frontend renders a session with a Gantt; Tasks panel stays empty.
+Full walkthrough: [`docs/standalone-observability.md`](docs/standalone-observability.md).
+
+### With goldfive orchestration
+
+The fastest path to see plans + tasks + drift is the goldfive
 observability quickstart. It installs goldfive + harmonograf, boots this
 stack via `make demo`, runs a CallableAdapter agent in a second shell,
 and shows the events flowing into the UI — no LLM credentials required.
 
 1. `make install` in this repo (see the full [quickstart](docs/quickstart.md) for prereqs).
-2. `make demo` to bring up the server + frontend + ADK web.
-3. Install `goldfive` in a second shell and run
-   `examples/harmonograf_observed/agent.py`.
+2. `uv sync --extra orchestration` to opt in to the goldfive API.
+3. `make demo` to bring up the server + frontend + ADK web.
+4. In a second shell run `examples/harmonograf_observed/agent.py` from the goldfive repo.
 
 Full walkthrough (lives in the goldfive repo): **[observability-with-harmonograf.md](https://github.com/pedapudi/goldfive/blob/main/docs/guides/observability-with-harmonograf.md)**.
 

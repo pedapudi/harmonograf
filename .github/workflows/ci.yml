@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.0.0
@@ -32,9 +34,6 @@ jobs:
 
       - name: Vendor google/adk-python
         run: git clone --depth 1 https://github.com/google/adk-python.git third_party/adk-python
-
-      - name: Vendor goldfive (editable sibling)
-        run: git clone --depth 1 https://github.com/pedapudi/goldfive.git "$GITHUB_WORKSPACE/../goldfive"
 
       - name: Install server deps
         run: make server-install
@@ -51,6 +50,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.0.0
@@ -68,9 +69,6 @@ jobs:
       - name: Vendor google/adk-python
         run: git clone --depth 1 https://github.com/google/adk-python.git third_party/adk-python
 
-      - name: Vendor goldfive (editable sibling)
-        run: git clone --depth 1 https://github.com/pedapudi/goldfive.git "$GITHUB_WORKSPACE/../goldfive"
-
       - name: Install client deps
         run: make client-install
 
@@ -86,6 +84,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Install pnpm
         uses: pnpm/action-setup@v5
@@ -110,9 +110,6 @@ jobs:
       - name: Vendor google/adk-python
         run: git clone --depth 1 https://github.com/google/adk-python.git third_party/adk-python
 
-      - name: Vendor goldfive (editable sibling)
-        run: git clone --depth 1 https://github.com/pedapudi/goldfive.git "$GITHUB_WORKSPACE/../goldfive"
-
       - name: Install harmonograf (resolves goldfive path for proto-ts)
         run: uv sync --frozen || uv sync
 
@@ -124,3 +121,67 @@ jobs:
 
       - name: Run frontend tests
         run: make frontend-test
+
+  standalone-test:
+    name: standalone-test
+    # Proves harmonograf is usable without the goldfive orchestration
+    # extra: installs without `--extra orchestration`, boots a server,
+    # and emits spans via examples/standalone_observability/spans_only.py.
+    # Zero goldfive imports in the example's source (verified by grep).
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            server/uv.lock
+            client/uv.lock
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Vendor google/adk-python
+        run: git clone --depth 1 https://github.com/google/adk-python.git third_party/adk-python
+
+      - name: Install harmonograf without orchestration extra
+        run: uv sync
+
+      - name: Verify spans_only.py has zero goldfive references
+        run: |
+          # Issue #29 acceptance criterion: `grep -i goldfive` on
+          # spans_only.py must return zero hits.
+          if grep -i goldfive examples/standalone_observability/spans_only.py; then
+            echo "FAIL: spans_only.py references goldfive." >&2
+            exit 1
+          fi
+          echo "OK: spans_only.py has no goldfive references."
+
+      - name: Generate Python proto stubs
+        run: make proto-python
+
+      - name: Run standalone emitter against a live server
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          ( cd server && uv run python -m harmonograf_server \
+              --store sqlite --data-dir "$GITHUB_WORKSPACE/data" \
+              --port 7531 ) &
+          SERVER_PID=$!
+          trap "kill $SERVER_PID 2>/dev/null || true" EXIT
+          # Wait for the gRPC port to accept connections.
+          for i in $(seq 1 30); do
+            if python -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1',7531)); s.close()" 2>/dev/null; then
+              echo "server ready"; break
+            fi
+            sleep 1
+          done
+          HARMONOGRAF_SERVER=127.0.0.1:7531 \
+            uv run python examples/standalone_observability/spans_only.py

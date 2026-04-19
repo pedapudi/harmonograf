@@ -16,6 +16,7 @@ or macOS box.
 | SQLite | 3.37+ (ships WAL, `JSON1`) | Default storage backend | OS package |
 | git | — | Repo cloning | OS package |
 | Google adk-python | matching upstream | Editable path dependency referenced by root `pyproject.toml` | Clone into `third_party/adk-python/` yourself — this repo does not vendor or track ADK |
+| goldfive | sibling checkout via submodule | Editable path dependency at `third_party/goldfive/`; required at install time for proto stubs | Populated by `git submodule update --init --recursive` after clone |
 
 You do **not** need Docker, Make 4, Bazel, or anything else. The whole thing is
 a Python monorepo plus a Vite app.
@@ -25,16 +26,41 @@ a Python monorepo plus a Vite app.
 ```bash
 git clone git@github.com:pedapudi/harmonograf.git
 cd harmonograf
+git submodule update --init --recursive       # pulls goldfive into third_party/goldfive
 git clone https://github.com/google/adk-python.git third_party/adk-python
 ```
 
-harmonograf installs `google-adk` as an editable path dependency rooted at
-`third_party/adk-python/` (see the `[tool.uv.sources]` entry in the root
-`pyproject.toml`). This repo does **not** track or vendor ADK — the `third_party/`
-directory is git-ignored. You are responsible for maintaining a local checkout
-there. Treat it as a read-only third-party dependency: do not commit changes
-into the ADK checkout as part of harmonograf work. If you forget to clone it,
-`uv sync` will fail with a clear error about a missing path dependency.
+harmonograf pulls two third-party packages in as editable path
+dependencies:
+
+- **`google-adk`** at `third_party/adk-python/`. Not tracked or vendored —
+  the `third_party/adk-python/` directory is git-ignored; you are
+  responsible for maintaining a local checkout. Treat it as a read-only
+  third-party dependency.
+- **`goldfive`** at `third_party/goldfive/`. Tracked as a git submodule so
+  the commit sha is pinned in `.gitmodules`. Run `git submodule update
+  --init --recursive` after cloning; CI uses `submodules: recursive` on
+  `actions/checkout`.
+
+If either path is missing, `uv sync` will fail with a clear error about a
+missing path dependency.
+
+### Optional: goldfive orchestration extra
+
+By default, `uv sync` installs harmonograf for *observability*: you can
+emit spans, render the Gantt, and send control events without touching
+goldfive's orchestration API. To opt in to the `wrap()`/Runner/planner
+surface (plans + tasks + drift in the UI), install the `orchestration`
+extra:
+
+```bash
+uv sync --extra orchestration
+```
+
+See [`docs/standalone-observability.md`](../standalone-observability.md)
+for the standalone guide and
+[`docs/goldfive-integration.md`](../goldfive-integration.md) for the
+orchestration path.
 
 ## Install
 
