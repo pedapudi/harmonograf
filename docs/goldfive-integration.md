@@ -57,7 +57,7 @@ from harmonograf_client import Client, HarmonografSink
 
 root = Agent(name="researcher", model="openai/gpt-4o-mini")
 
-client = Client(name="researcher", server_addr="127.0.0.1:50431")
+client = Client(name="researcher", server_addr="127.0.0.1:7531")
 sink = HarmonografSink(client)
 
 runner = Runner(
