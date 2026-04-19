@@ -14,8 +14,10 @@ from typing import AsyncIterator
 
 import grpc
 
+from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
+
 from harmonograf_server.control_router import ControlRouter
-from harmonograf_server.pb import control_pb2, types_pb2
+from harmonograf_server.pb import control_pb2
 
 
 logger = logging.getLogger(__name__)
@@ -31,7 +33,7 @@ class ControlServicerMixin:
         self,
         request: control_pb2.SubscribeControlRequest,
         context: grpc.aio.ServicerContext,
-    ) -> AsyncIterator[types_pb2.ControlEvent]:
+    ) -> AsyncIterator[gf_control_pb2.ControlEvent]:
         if not request.agent_id:
             await context.abort(
                 grpc.StatusCode.INVALID_ARGUMENT, "agent_id is required"

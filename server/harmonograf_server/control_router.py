@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Awaitable, Callable, Optional
 
-from harmonograf_server.pb import types_pb2
+from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
 
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ class DeliveryResult(str, Enum):
 @dataclass
 class AckRecord:
     stream_id: str
-    result: types_pb2.ControlAckResult
+    result: gf_control_pb2.ControlAckResult
     detail: str
     acked_at: float
 
@@ -64,7 +64,7 @@ class ControlSubscription:
         self.session_id = session_id
         self.agent_id = agent_id
         self.stream_id = stream_id
-        self.queue: asyncio.Queue[types_pb2.ControlEvent] = asyncio.Queue(maxsize=256)
+        self.queue: asyncio.Queue[gf_control_pb2.ControlEvent] = asyncio.Queue(maxsize=256)
         self._closed = False
 
     def close(self) -> None:
@@ -187,14 +187,28 @@ class ControlRouter:
         *,
         session_id: str,
         agent_id: str,
-        kind: types_pb2.ControlKind,
-        payload: bytes = b"",
-        span_id: Optional[str] = None,
+        event: gf_control_pb2.ControlEvent,
         timeout_s: float = 5.0,
         require_all_acks: bool = False,
-        control_id: Optional[str] = None,
     ) -> DeliveryOutcome:
-        control_id = control_id or f"ctl_{uuid.uuid4().hex[:16]}"
+        """Fan ``event`` out to every live SubscribeControl stream for ``agent_id``.
+
+        ``event`` is a fully-formed ``goldfive.v1.ControlEvent``. Callers
+        typically set ``event.id`` and ``event.target.agent_id`` themselves;
+        if ``event.id`` is empty we allocate one and if ``event.issued_at``
+        is unset we stamp it server-side so the wire is never ambiguous.
+        """
+        if not event.id:
+            event.id = f"ctl_{uuid.uuid4().hex[:16]}"
+        if not event.HasField("issued_at"):
+            from google.protobuf.timestamp_pb2 import Timestamp
+
+            ts = Timestamp()
+            ts.GetCurrentTime()
+            event.issued_at.CopyFrom(ts)
+        if not event.target.agent_id:
+            event.target.agent_id = agent_id
+        control_id = event.id
 
         async with self._lock:
             bucket = dict(self._subs.get(agent_id, {}))
@@ -211,18 +225,6 @@ class ControlRouter:
         if not live_ids:
             return DeliveryOutcome(control_id=control_id, result=DeliveryResult.UNAVAILABLE)
 
-        event = types_pb2.ControlEvent(
-            id=control_id,
-            target=types_pb2.ControlTarget(agent_id=agent_id, span_id=span_id or ""),
-            kind=kind,
-            payload=payload,
-        )
-        from google.protobuf.timestamp_pb2 import Timestamp
-
-        ts = Timestamp()
-        ts.GetCurrentTime()
-        event.issued_at.CopyFrom(ts)
-
         loop = asyncio.get_event_loop()
         pending = _PendingDelivery(
             control_id=control_id,
@@ -230,7 +232,7 @@ class ControlRouter:
             require_all=require_all_acks,
             session_id=session_id,
             agent_id=agent_id,
-            kind=int(kind),
+            kind=int(event.kind),
             future=loop.create_future(),
         )
         async with self._lock:
@@ -250,7 +252,7 @@ class ControlRouter:
                     pending,
                     AckRecord(
                         stream_id=sid,
-                        result=types_pb2.CONTROL_ACK_RESULT_FAILURE,
+                        result=gf_control_pb2.CONTROL_ACK_RESULT_FAILURE,
                         detail="control queue full",
                         acked_at=time.time(),
                     ),
@@ -269,7 +271,7 @@ class ControlRouter:
             )
 
     def record_ack(
-        self, ack: types_pb2.ControlAck, *, stream_id: Optional[str] = None
+        self, ack: gf_control_pb2.ControlAck, *, stream_id: Optional[str] = None
     ) -> None:
         """Called from the telemetry ingest pipeline when a ControlAck arrives
         on a TelemetryUp. stream_id is optional: if the ingest layer knows
@@ -301,8 +303,8 @@ class ControlRouter:
 
         # Fire STATUS_QUERY callbacks when the ack is a success response.
         if (
-            pending.kind == types_pb2.CONTROL_KIND_STATUS_QUERY
-            and record.result == types_pb2.CONTROL_ACK_RESULT_SUCCESS
+            pending.kind == gf_control_pb2.CONTROL_KIND_STATUS_QUERY
+            and record.result == gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
             and self._status_query_callbacks
         ):
             loop = asyncio.get_event_loop()
@@ -323,7 +325,7 @@ class ControlRouter:
         if pending.future.done():
             return
         any_success = any(
-            a.result == types_pb2.CONTROL_ACK_RESULT_SUCCESS for a in pending.acks
+            a.result == gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS for a in pending.acks
         )
         all_done = not pending.expected_stream_ids
         if pending.require_all:
@@ -331,7 +333,7 @@ class ControlRouter:
                 return
             result = (
                 DeliveryResult.SUCCESS if any_success and all(
-                    a.result == types_pb2.CONTROL_ACK_RESULT_SUCCESS for a in pending.acks
+                    a.result == gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS for a in pending.acks
                 ) else DeliveryResult.FAILED
             )
         else:

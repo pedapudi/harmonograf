@@ -58,6 +58,7 @@ from harmonograf_server.convert import (
 )
 from goldfive.v1 import events_pb2 as goldfive_events_pb2
 from goldfive.v1 import types_pb2 as goldfive_types_pb2
+from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
 from harmonograf_server.ingest import IngestPipeline
 from harmonograf_server.pb import frontend_pb2, types_pb2
 from harmonograf_server.storage import (
@@ -446,11 +447,11 @@ class FrontendServicerMixin:
 
         resp = frontend_pb2.PostAnnotationResponse(
             annotation=_storage_annotation_to_pb(ann),
-            delivery=types_pb2.CONTROL_ACK_RESULT_UNSPECIFIED,
+            delivery=gf_control_pb2.CONTROL_ACK_RESULT_UNSPECIFIED,
         )
 
         if kind == AnnotationKind.COMMENT:
-            resp.delivery = types_pb2.CONTROL_ACK_RESULT_SUCCESS
+            resp.delivery = gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
             return resp
 
         # STEERING / HUMAN_RESPONSE route through ControlRouter.
@@ -460,26 +461,28 @@ class FrontendServicerMixin:
             if sp is not None:
                 target_agent = sp.agent_id
         if not target_agent:
-            resp.delivery = types_pb2.CONTROL_ACK_RESULT_FAILURE
+            resp.delivery = gf_control_pb2.CONTROL_ACK_RESULT_FAILURE
             resp.delivery_detail = "no target agent"
             return resp
 
-        control_kind = (
-            types_pb2.CONTROL_KIND_STEER
-            if kind == AnnotationKind.STEERING
-            else types_pb2.CONTROL_KIND_INJECT_MESSAGE
+        event = gf_control_pb2.ControlEvent(
+            target=gf_control_pb2.ControlTarget(agent_id=target_agent),
         )
+        if kind == AnnotationKind.STEERING:
+            event.kind = gf_control_pb2.CONTROL_KIND_STEER
+            event.steer.note = request.body
+        else:
+            event.kind = gf_control_pb2.CONTROL_KIND_INJECT_MESSAGE
+            event.inject_message.text = request.body
         timeout = (request.ack_timeout_ms / 1000.0) if request.ack_timeout_ms else DEFAULT_SEND_CONTROL_TIMEOUT_S
         outcome = await self._router.deliver(
             session_id=request.session_id,
             agent_id=target_agent,
-            kind=control_kind,
-            payload=request.body.encode("utf-8"),
-            span_id=target.span_id or None,
+            event=event,
             timeout_s=timeout,
         )
         if outcome.result == DeliveryResult.SUCCESS:
-            resp.delivery = types_pb2.CONTROL_ACK_RESULT_SUCCESS
+            resp.delivery = gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
             delivered_ts = time.time()
             await self._store.put_annotation(
                 Annotation(
@@ -494,13 +497,13 @@ class FrontendServicerMixin:
                 )
             )
         elif outcome.result == DeliveryResult.UNAVAILABLE:
-            resp.delivery = types_pb2.CONTROL_ACK_RESULT_FAILURE
+            resp.delivery = gf_control_pb2.CONTROL_ACK_RESULT_FAILURE
             resp.delivery_detail = "agent offline"
         elif outcome.result == DeliveryResult.DEADLINE_EXCEEDED:
-            resp.delivery = types_pb2.CONTROL_ACK_RESULT_FAILURE
+            resp.delivery = gf_control_pb2.CONTROL_ACK_RESULT_FAILURE
             resp.delivery_detail = "ack timeout"
         else:
-            resp.delivery = types_pb2.CONTROL_ACK_RESULT_FAILURE
+            resp.delivery = gf_control_pb2.CONTROL_ACK_RESULT_FAILURE
             resp.delivery_detail = "delivery failed"
         return resp
 
@@ -511,30 +514,33 @@ class FrontendServicerMixin:
         request: frontend_pb2.SendControlRequest,
         context: grpc.aio.ServicerContext,
     ) -> frontend_pb2.SendControlResponse:
-        if not request.session_id or not request.target.agent_id:
+        if not request.session_id or not request.event.target.agent_id:
             await context.abort(
-                grpc.StatusCode.INVALID_ARGUMENT, "session_id and target.agent_id required"
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "session_id and event.target.agent_id required",
             )
             return frontend_pb2.SendControlResponse()
 
         timeout = (request.ack_timeout_ms / 1000.0) if request.ack_timeout_ms else DEFAULT_SEND_CONTROL_TIMEOUT_S
+        # Copy so the router can stamp ``id``/``issued_at`` without mutating
+        # the caller's request message.
+        event = gf_control_pb2.ControlEvent()
+        event.CopyFrom(request.event)
         outcome = await self._router.deliver(
             session_id=request.session_id,
-            agent_id=request.target.agent_id,
-            kind=request.kind,
-            payload=request.payload,
-            span_id=request.target.span_id or None,
+            agent_id=request.event.target.agent_id,
+            event=event,
             timeout_s=timeout,
             require_all_acks=request.require_all_acks,
         )
 
         resp = frontend_pb2.SendControlResponse(control_id=outcome.control_id)
         if outcome.result == DeliveryResult.SUCCESS:
-            resp.result = types_pb2.CONTROL_ACK_RESULT_SUCCESS
+            resp.result = gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
         elif outcome.result == DeliveryResult.UNAVAILABLE:
-            resp.result = types_pb2.CONTROL_ACK_RESULT_UNSUPPORTED
+            resp.result = gf_control_pb2.CONTROL_ACK_RESULT_UNSUPPORTED
         else:
-            resp.result = types_pb2.CONTROL_ACK_RESULT_FAILURE
+            resp.result = gf_control_pb2.CONTROL_ACK_RESULT_FAILURE
         for ack in outcome.acks:
             sa = resp.acks.add(
                 stream_id=ack.stream_id,
