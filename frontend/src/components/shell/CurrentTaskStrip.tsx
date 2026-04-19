@@ -11,6 +11,7 @@ const STATUS_CLASS: Record<TaskStatus, string> = {
   COMPLETED: 'hg-strip__chip--completed',
   FAILED: 'hg-strip__chip--failed',
   CANCELLED: 'hg-strip__chip--cancelled',
+  BLOCKED: 'hg-strip__chip--pending',
 };
 
 const MODE_LABEL: Record<ExecutionMode, string> = {

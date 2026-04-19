@@ -1,0 +1,22 @@
+version: v2
+# Workspace root — declares proto/ and frontend/vendor-proto/ as sibling
+# modules so telemetry.proto / frontend.proto can resolve their
+# `import "goldfive/v1/events.proto"` statements without the per-run
+# codegen needing to know where the goldfive package lives. The
+# vendor-proto module is a symlink populated by `make proto-ts`
+# (gitignored), so the checkout tracks the installed goldfive without
+# committing a hardcoded path.
+modules:
+  - path: proto
+  - path: frontend/vendor-proto
+lint:
+  use:
+    - STANDARD
+  except:
+    # Our package is harmonograf.v1 and files live under harmonograf/v1/; the
+    # PACKAGE_DIRECTORY_MATCH rule is satisfied. Most of these are opt-outs we
+    # do not need yet.
+    - FIELD_NOT_REQUIRED
+breaking:
+  use:
+    - FILE

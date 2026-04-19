@@ -82,6 +82,29 @@ describe('TaskRegistry', () => {
     expect(() => reg.updateTaskStatus('p1', 'missing', 'RUNNING', '')).not.toThrow();
   });
 
+  it('updateTaskStatusByTaskId finds the task across plans and no-ops on unknown ids', () => {
+    reg.upsertPlan(makePlan('p1', { invocationSpanId: 'inv-p1' }));
+    reg.upsertPlan(
+      makePlan('p2', {
+        invocationSpanId: 'inv-p2',
+        tasks: [makeTask('tX'), makeTask('tY')],
+      }),
+    );
+    const fn = vi.fn();
+    reg.subscribe(fn);
+
+    reg.updateTaskStatusByTaskId('tX', 'RUNNING', 'span-xy');
+    const tX = reg.getPlan('p2')!.tasks.find((t) => t.id === 'tX')!;
+    expect(tX.status).toBe('RUNNING');
+    expect(tX.boundSpanId).toBe('span-xy');
+    expect(fn).toHaveBeenCalledTimes(1);
+
+    expect(() =>
+      reg.updateTaskStatusByTaskId('nonexistent', 'BLOCKED'),
+    ).not.toThrow();
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
   it('listPlans returns plans sorted by createdAtMs', () => {
     reg.upsertPlan(makePlan('p2', { createdAtMs: 200, invocationSpanId: 'inv-p2' }));
     reg.upsertPlan(makePlan('p1', { createdAtMs: 100, invocationSpanId: 'inv-p1' }));

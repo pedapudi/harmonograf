@@ -64,17 +64,29 @@ proto-python:
 	@touch $(CLIENT_PB)/harmonograf/__init__.py $(CLIENT_PB)/harmonograf/v1/__init__.py
 	@echo "Python proto stubs regenerated."
 
-# TypeScript: deferred. The frontend engineer picks the toolchain
-# (@bufbuild/protoc-gen-es + @connectrpc/protoc-gen-connect-es is the
-# current recommendation) as part of task #12. This target stays as a
-# placeholder so `make proto` does not silently no-op.
+# TypeScript: buf v2 + @bufbuild/protoc-gen-es. Resolves the goldfive
+# proto tree the same way proto-python does (via the installed goldfive
+# package) so telemetry.proto / frontend.proto can `import "goldfive/v1/
+# events.proto"`. The goldfive tree is exposed to buf as a symlinked
+# vendor dir under frontend/; the symlink is gitignored and refreshed
+# every run, so the checkout tracks the editable dep without committing
+# a hardcoded path.
+FRONTEND_VENDOR_PROTO := $(ROOT)/frontend/vendor-proto
+
 proto-ts:
-	@if [ -f $(ROOT)/frontend/buf.gen.yaml ]; then \
-		cd $(ROOT)/frontend && pnpm exec buf generate; \
-		echo "TypeScript proto stubs regenerated under frontend/src/pb/."; \
-	else \
+	@if [ ! -f $(ROOT)/frontend/buf.gen.yaml ]; then \
 		echo "proto-ts: frontend/buf.gen.yaml not present yet — skipping."; \
+		exit 0; \
 	fi
+	@if [ -z "$(GOLDFIVE_PROTO_DIR)" ]; then \
+		echo "ERROR: could not resolve goldfive proto directory. Run 'uv sync' first."; \
+		exit 1; \
+	fi
+	@rm -rf $(FRONTEND_VENDOR_PROTO)
+	@mkdir -p $(FRONTEND_VENDOR_PROTO)
+	@ln -sfn $(GOLDFIVE_PROTO_DIR)/goldfive $(FRONTEND_VENDOR_PROTO)/goldfive
+	@cd $(ROOT)/frontend && pnpm exec buf generate
+	@echo "TypeScript proto stubs regenerated under frontend/src/pb/."
 
 # ---------------------------------------------------------------------------
 # Installs

@@ -19,6 +19,7 @@ const STATUS_DOT: Record<Task['status'], string> = {
   COMPLETED: '#4caf50',
   FAILED: '#e06070',
   CANCELLED: '#8d9199',
+  BLOCKED: '#f59e0b',
 };
 
 const COLUMN_WIDTH = 140;

@@ -14,6 +14,8 @@ node_modules/
 dist/
 .vite/
 *.tsbuildinfo
+# Symlinked into the installed goldfive proto tree by `make proto-ts`.
+frontend/vendor-proto/
 
 # OS / editor
 .DS_Store

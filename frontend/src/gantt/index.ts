@@ -271,6 +271,25 @@ export class TaskRegistry {
     this.emit();
   }
 
+  // Goldfive task_* events carry only the task_id (task ids are unique
+  // across plans in a run). Search every plan; silently no-op if the
+  // task hasn't been introduced yet (a plan_submitted event may arrive
+  // out of order with a task_started on a reconnect).
+  updateTaskStatusByTaskId(
+    taskId: string,
+    status: TaskStatus,
+    boundSpanId?: string,
+  ): void {
+    for (const plan of this.plans) {
+      const task = plan.tasks.find((t) => t.id === taskId);
+      if (!task) continue;
+      task.status = status;
+      if (boundSpanId) task.boundSpanId = boundSpanId;
+      this.emit();
+      return;
+    }
+  }
+
   // Flattened helper: every task (across all plans) assigned to an agent.
   // Used by the renderer to build the per-column pre-strip.
   tasksForAgent(agentId: string): Task[] {
