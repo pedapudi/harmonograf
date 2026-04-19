@@ -1,32 +1,40 @@
-"""ADK multi-agent sample: coordinator → research → web developer.
+"""ADK multi-agent presentation demo, driven by goldfive.
 
-The ``root_agent`` below is a plain ADK ``LlmAgent`` hierarchy. The
-module also exports ``app``: an :class:`google.adk.apps.app.App` that
-wraps ``root_agent`` and attaches a harmonograf plugin so that canonical
-ADK entry points (``adk web``, ``adk run``, ``adk api_server``) emit
-telemetry automatically — no separate runner script required.
+Post-migration (issue #4) this module no longer owns any orchestration.
+The ADK tree (coordinator → research / web_developer / reviewer /
+debugger) is plain ADK. Orchestration — planning, task dispatch, drift
+detection, steering — lives in goldfive. Harmonograf observes the run
+via :class:`harmonograf_client.HarmonografSink` (plan + task events)
+and :class:`harmonograf_client.HarmonografTelemetryPlugin` (per-span
+LLM_CALL / TOOL_CALL observability).
 
-``app`` is materialised lazily via PEP 562 module-level ``__getattr__``
-so that importing this module without a running harmonograf server is
-still cheap, and tests can override ``HARMONOGRAF_SERVER`` before the
-first access.
+The module exports:
+
+* ``root_agent`` — the ADK coordinator agent.
+* ``app`` — a lazily-built :class:`google.adk.apps.app.App` that
+  installs :class:`HarmonografTelemetryPlugin` so ``adk web`` /
+  ``adk run`` emit spans automatically. ``app`` is created on first
+  access (PEP 562 module-level ``__getattr__``) so callers that only
+  want ``root_agent`` don't pay transport setup cost.
+* ``build_goldfive_runner`` — convenience wrapper that assembles a
+  :class:`goldfive.Runner` around the coordinator with an
+  :class:`ADKAdapter`, :class:`HarmonografSink`, optional mock planner
+  / goal deriver, and a logging sink. Mirrors the ``--mock`` pattern
+  from ``goldfive/examples/adk_presentation/agent.py`` so the demo
+  runs without credentials when needed.
 """
 
 from __future__ import annotations
 
 import atexit
+import json
 import logging
 import os
-from typing import Any, Optional
+from collections.abc import AsyncGenerator
+from typing import Any, Callable, Optional
 
 from google.adk.agents import Agent
 from google.adk.tools import AgentTool, FunctionTool
-
-try:
-    from harmonograf_client.tools import augment_instruction as _hg_augment
-except Exception:  # noqa: BLE001 — keep module importable without the client
-    def _hg_augment(existing: str) -> str:  # type: ignore[misc]
-        return existing
 
 log = logging.getLogger(__name__)
 
@@ -39,33 +47,26 @@ log = logging.getLogger(__name__)
 def write_webpage(
     topic: str, html_content: str, css_content: str, js_content: str
 ) -> str:
-    """Writes an interactive webpage (HTML, CSS, JS) under ``output/``."""
+    """Write an interactive webpage (HTML, CSS, JS) under ``output/``."""
     try:
         topic_filename = topic.lower().replace(" ", "_").replace("/", "_")
         output_dir = os.path.join(os.path.dirname(__file__), "output", topic_filename)
         os.makedirs(output_dir, exist_ok=True)
 
-        html_path = os.path.join(output_dir, "index.html")
-        css_path = os.path.join(output_dir, "styles.css")
-        js_path = os.path.join(output_dir, "script.js")
-
-        with open(html_path, "w") as f:
+        with open(os.path.join(output_dir, "index.html"), "w") as f:
             f.write(html_content)
-        with open(css_path, "w") as f:
+        with open(os.path.join(output_dir, "styles.css"), "w") as f:
             f.write(css_content)
-        with open(js_path, "w") as f:
+        with open(os.path.join(output_dir, "script.js"), "w") as f:
             f.write(js_content)
 
         return f"Successfully created presentation on '{topic}' at {output_dir}"
-    except Exception as e:  # noqa: BLE001 — tool result must be serialisable
+    except OSError as e:
         return f"Error writing file: {e}"
 
 
 def read_presentation_files(topic: str) -> dict[str, str]:
-    """Reads the generated presentation files for ``topic`` and returns a
-    dict mapping filename → file contents. Used by ``reviewer_agent`` to
-    critique ``web_developer_agent``'s output.
-    """
+    """Read the generated presentation files and return name → contents."""
     topic_filename = topic.lower().replace(" ", "_").replace("/", "_")
     output_dir = os.path.join(os.path.dirname(__file__), "output", topic_filename)
     files: dict[str, str] = {}
@@ -80,10 +81,9 @@ def read_presentation_files(topic: str) -> dict[str, str]:
 
 
 def patch_file(path: str, new_content: str) -> str:
-    """Overwrites ``path`` with ``new_content`` in place. Used by
-    ``debugger_agent`` to fix issues that ``reviewer_agent`` flagged or
-    that caused ``write_webpage`` to fail. Relative paths are resolved
-    against the ``output/`` directory so the debugger can't accidentally
+    """Overwrite ``path`` with ``new_content`` in place.
+
+    Relative paths resolve against ``output/`` so the debugger cannot
     scribble outside the sandbox.
     """
     try:
@@ -93,7 +93,7 @@ def patch_file(path: str, new_content: str) -> str:
         with open(path, "w") as f:
             f.write(new_content)
         return f"Successfully patched {path}"
-    except Exception as e:  # noqa: BLE001 — tool result must be serialisable
+    except OSError as e:
         return f"Error patching file: {e}"
 
 
@@ -102,12 +102,6 @@ read_presentation_files_tool = FunctionTool(read_presentation_files)
 patch_file_tool = FunctionTool(patch_file)
 
 
-# Users can specify the model via environment variable.
-# For OpenAI-compatible endpoints, provide a LiteLLM-compliant string
-# (e.g. ``openai/my-model``) and set ``OPENAI_API_BASE``. ADK's LLMRegistry
-# recognises provider-style strings and dispatches them through LiteLlm
-# automatically — no wrapping needed here, as long as litellm is installed
-# (the ``demo`` optional-deps group pulls it in).
 MODEL_NAME = os.environ.get("USER_MODEL_NAME", "gemini-2.5-flash")
 
 
@@ -116,152 +110,132 @@ MODEL_NAME = os.environ.get("USER_MODEL_NAME", "gemini-2.5-flash")
 # ---------------------------------------------------------------------------
 
 
-research_agent = Agent(
-    name="research_agent",
-    model=MODEL_NAME,
-    instruction=_hg_augment(
-        "You are a researcher. Your goal is to gather information about the "
-        "topic the user provides.\nThink step-by-step and provide a "
-        "comprehensive synthesis of high-quality bullet points and facts "
-        "that can be used to generate a presentation slideshow."
-    ),
-    description=(
-        "An agent capable of deeply reasoning and synthesizing a given topic "
-        "for presentation notes."
-    ),
-    tools=[],
-)
-
-web_developer_agent = Agent(
-    name="web_developer_agent",
-    model=MODEL_NAME,
-    instruction=_hg_augment(
-        "You are an expert Frontend Web Developer. Your goal is to take "
-        "research on a topic and generate a stunning, interactive, "
-        "single-page presentation slideshow.\nGenerate beautiful semantic "
-        "HTML structure, elegant CSS with modern design trends, animations, "
-        "and transitions, and JavaScript for slideshow navigation "
-        "(next/prev slides).\nThe HTML MUST include "
-        '`<link rel="stylesheet" href="styles.css">` and '
-        '`<script src="script.js"></script>` so the files are connected '
-        "properly.\nRemember to output the absolute final HTML, CSS, and JS "
-        "using the `write_webpage` tool! Do not just print the code out, "
-        "you must invoke the tool once everything is ready."
-    ),
-    description=(
-        "An expert frontend developer agent that generates interactive HTML, "
-        "CSS, and JS slideshow presentations and saves them to disk."
-    ),
-    tools=[write_webpage_tool],
-)
-
-reviewer_agent = Agent(
-    name="reviewer_agent",
-    model=MODEL_NAME,
-    instruction=_hg_augment(
-        "You are a senior frontend code reviewer. You will be given the "
-        "topic of a presentation that ``web_developer_agent`` just "
-        "generated. Call the ``read_presentation_files`` tool with the "
-        "topic to fetch the generated HTML, CSS, and JS, then produce a "
-        "structured critique as a list of issues. Each issue must include "
-        "a short description and a severity of 'critical', 'major', or "
-        "'minor'. If there are no issues, return an empty list and say so "
-        "explicitly so the coordinator knows to skip debugging."
-    ),
-    description=(
-        "A reviewer agent that reads the generated presentation files and "
-        "produces a structured critique of issues and their severity."
-    ),
-    tools=[read_presentation_files_tool],
-)
-
-debugger_agent = Agent(
-    name="debugger_agent",
-    model=MODEL_NAME,
-    instruction=_hg_augment(
-        "You are a debugging agent. You are invoked when "
-        "``write_webpage`` failed or when ``reviewer_agent`` flagged "
-        "critical issues in the generated presentation. Read the issues "
-        "and their file paths, then call the ``patch_file`` tool with the "
-        "full corrected content of each file that needs to change. "
-        "Report which files you patched when you are done."
-    ),
-    description=(
-        "A debugger agent that patches generated presentation files in "
-        "place to resolve critical issues flagged by the reviewer or by "
-        "a failing write_webpage call."
-    ),
-    tools=[patch_file_tool],
-)
-
-_inner_root_agent = Agent(
-    name="coordinator_agent",
-    model=MODEL_NAME,
-    instruction=(
-        "You are the Coordinator Agent. Your task is to work with the user "
-        "to pick a topic for an interactive slideshow presentation.\n"
-        "First, get a topic from the user.\nSecond, transfer control to the "
-        "'research_agent' to gather comprehensive context and facts about "
-        "the topic. Make sure to provide it with the topic!\nThird, after "
-        "researching, transfer control to the 'web_developer_agent' and "
-        "provide it with all the researched materials. Instruct it to "
-        "generate and save the presentation codebase.\nFourth, transfer "
-        "control to the 'reviewer_agent' with the topic so it can read "
-        "the generated files and produce a structured critique.\nFifth, "
-        "if ``write_webpage`` failed or the reviewer reported any "
-        "critical issues, transfer control to the 'debugger_agent' with "
-        "the reviewer's critique and have it patch the affected files. "
-        "Skip this step when the reviewer reports no critical issues.\n"
-        "Finally, report back to the user when the task is complete.\n"
-        "Flow: research → web_developer → reviewer → "
-        "(if critical issues) debugger → report."
-    ),
-    description=(
-        "The main coordinator agent that drives the overall process of "
-        "creating an interactive slideshow generation."
-    ),
-    tools=[
-        AgentTool(research_agent),
-        AgentTool(web_developer_agent),
-        AgentTool(reviewer_agent),
-        AgentTool(debugger_agent),
-    ],
-)
-
-
-# HarmonografAgent wraps the coordinator so ADK's entry points
-# (``adk web`` / ``adk run`` / ``adk api_server``) pick up plan-driven
-# orchestration transparently. ``harmonograf_client`` is late-bound in
-# ``_build_app()`` — the module-level root_agent holds ``None`` until
-# the App is constructed, at which point we mutate the attribute in
-# place. This keeps module import cheap for callers that only need the
-# inner agents.
-try:
-    from harmonograf_client import HarmonografAgent as _HarmonografAgent
-except Exception:  # noqa: BLE001 — keep module importable without the client
-    _HarmonografAgent = None  # type: ignore[assignment,misc]
-
-if _HarmonografAgent is not None:
-    root_agent = _HarmonografAgent(
-        name="harmonograf",
-        description="Harmonograf orchestrator wrapping coordinator_agent",
-        inner_agent=_inner_root_agent,
-        harmonograf_client=None,
-        planner=None,
+def _build_agent_tree(model: Any) -> Agent:
+    research_agent = Agent(
+        name="research_agent",
+        model=model,
+        instruction=(
+            "You are a researcher. Your goal is to gather information about "
+            "the topic the user provides.\nThink step-by-step and provide a "
+            "comprehensive synthesis of high-quality bullet points and facts "
+            "that can be used to generate a presentation slideshow."
+        ),
+        description=(
+            "An agent capable of deeply reasoning and synthesizing a given "
+            "topic for presentation notes."
+        ),
+        tools=[],
     )
-else:
-    root_agent = _inner_root_agent  # type: ignore[assignment]
+
+    web_developer_agent = Agent(
+        name="web_developer_agent",
+        model=model,
+        instruction=(
+            "You are an expert Frontend Web Developer. Your goal is to take "
+            "research on a topic and generate a stunning, interactive, "
+            "single-page presentation slideshow.\nGenerate beautiful semantic "
+            "HTML structure, elegant CSS with modern design trends, "
+            "animations, and transitions, and JavaScript for slideshow "
+            "navigation (next/prev slides).\nThe HTML MUST include "
+            '`<link rel="stylesheet" href="styles.css">` and '
+            '`<script src="script.js"></script>` so the files are connected '
+            "properly.\nRemember to output the absolute final HTML, CSS, and "
+            "JS using the `write_webpage` tool! Do not just print the code "
+            "out, you must invoke the tool once everything is ready."
+        ),
+        description=(
+            "An expert frontend developer agent that generates interactive "
+            "HTML, CSS, and JS slideshow presentations and saves them to disk."
+        ),
+        tools=[write_webpage_tool],
+    )
+
+    reviewer_agent = Agent(
+        name="reviewer_agent",
+        model=model,
+        instruction=(
+            "You are a senior frontend code reviewer. You will be given the "
+            "topic of a presentation that ``web_developer_agent`` just "
+            "generated. Call the ``read_presentation_files`` tool with the "
+            "topic to fetch the generated HTML, CSS, and JS, then produce a "
+            "structured critique as a list of issues. Each issue must "
+            "include a short description and a severity of 'critical', "
+            "'major', or 'minor'. If there are no issues, return an empty "
+            "list and say so explicitly so the coordinator knows to skip "
+            "debugging."
+        ),
+        description=(
+            "A reviewer agent that reads the generated presentation files "
+            "and produces a structured critique of issues and their severity."
+        ),
+        tools=[read_presentation_files_tool],
+    )
+
+    debugger_agent = Agent(
+        name="debugger_agent",
+        model=model,
+        instruction=(
+            "You are a debugging agent. You are invoked when "
+            "``write_webpage`` failed or when ``reviewer_agent`` flagged "
+            "critical issues in the generated presentation. Read the issues "
+            "and their file paths, then call the ``patch_file`` tool with "
+            "the full corrected content of each file that needs to change. "
+            "Report which files you patched when you are done."
+        ),
+        description=(
+            "A debugger agent that patches generated presentation files in "
+            "place to resolve critical issues flagged by the reviewer or by "
+            "a failing write_webpage call."
+        ),
+        tools=[patch_file_tool],
+    )
+
+    return Agent(
+        name="coordinator_agent",
+        model=model,
+        instruction=(
+            "You are the Coordinator Agent. Your task is to work with the "
+            "user to pick a topic for an interactive slideshow "
+            "presentation.\nFirst, get a topic from the user.\nSecond, "
+            "transfer control to the 'research_agent' to gather "
+            "comprehensive context and facts about the topic. Make sure to "
+            "provide it with the topic!\nThird, after researching, transfer "
+            "control to the 'web_developer_agent' and provide it with all "
+            "the researched materials. Instruct it to generate and save the "
+            "presentation codebase.\nFourth, transfer control to the "
+            "'reviewer_agent' with the topic so it can read the generated "
+            "files and produce a structured critique.\nFifth, if "
+            "``write_webpage`` failed or the reviewer reported any critical "
+            "issues, transfer control to the 'debugger_agent' with the "
+            "reviewer's critique and have it patch the affected files. Skip "
+            "this step when the reviewer reports no critical issues.\n"
+            "Finally, report back to the user when the task is complete.\n"
+            "Flow: research → web_developer → reviewer → (if critical "
+            "issues) debugger → report."
+        ),
+        description=(
+            "The main coordinator agent that drives the overall process of "
+            "creating an interactive slideshow generation."
+        ),
+        tools=[
+            AgentTool(research_agent),
+            AgentTool(web_developer_agent),
+            AgentTool(reviewer_agent),
+            AgentTool(debugger_agent),
+        ],
+    )
+
+
+root_agent = _build_agent_tree(MODEL_NAME)
 
 
 # ---------------------------------------------------------------------------
-# Harmonograf instrumentation — lazy App export
+# Harmonograf instrumentation — lazy ``app`` export
 # ---------------------------------------------------------------------------
 
 
 _DEFAULT_SERVER = "127.0.0.1:7531"
 
-# Cached singleton so that multiple ``module.app`` accesses during agent
-# loading don't construct a second Client (and a second transport thread).
 _APP: Optional[Any] = None
 _CLIENT: Optional[Any] = None
 _ATEXIT_REGISTERED: bool = False
@@ -278,49 +252,55 @@ def _shutdown_client() -> None:
     _CLIENT = None
 
 
-def _build_app() -> Any:
-    """Construct the ADK ``App`` wrapping ``root_agent`` plus the
-    harmonograf plugin. Safe to call with or without a running server.
-    """
+def _get_or_create_client() -> Optional[Any]:
     global _CLIENT, _ATEXIT_REGISTERED
+    if _CLIENT is not None:
+        return _CLIENT
+    try:
+        from harmonograf_client import Client
+    except Exception as e:  # noqa: BLE001 — keep module importable
+        log.warning("harmonograf_client unavailable (%s); running without telemetry", e)
+        return None
+    server_addr = os.environ.get("HARMONOGRAF_SERVER", _DEFAULT_SERVER)
+    _CLIENT = Client(
+        name="presentation",
+        server_addr=server_addr,
+        framework="ADK",
+        capabilities=["HUMAN_IN_LOOP", "STEERING"],
+    )
+    if not _ATEXIT_REGISTERED:
+        atexit.register(_shutdown_client)
+        _ATEXIT_REGISTERED = True
+    log.info(
+        "harmonograf: presentation_agent client → %s (agent_id=%s)",
+        server_addr,
+        _CLIENT.agent_id,
+    )
+    return _CLIENT
+
+
+def _build_app() -> Any:
+    """Construct the ADK ``App`` wrapping ``root_agent``.
+
+    Installs :class:`HarmonografTelemetryPlugin` when harmonograf_client
+    is importable so ``adk web`` / ``adk run`` emit per-span telemetry.
+    Safe to construct even when no server is reachable — the Client
+    buffers locally and retries in the background.
+    """
     from google.adk.apps.app import App
 
-    server_addr = os.environ.get("HARMONOGRAF_SERVER", _DEFAULT_SERVER)
     plugins: list[Any] = []
-
-    try:
-        from harmonograf_client import Client, make_adk_plugin
-    except Exception as e:  # noqa: BLE001 — keep module importable
-        log.warning(
-            "harmonograf_client unavailable (%s); running without instrumentation",
-            e,
-        )
-    else:
-        _CLIENT = Client(
-            name="presentation",
-            server_addr=server_addr,
-            framework="ADK",
-            capabilities=["HUMAN_IN_LOOP", "STEERING"],
-        )
-        if not _ATEXIT_REGISTERED:
-            atexit.register(_shutdown_client)
-            _ATEXIT_REGISTERED = True
-        # make_adk_plugin auto-wires a default LLMPlanner backed by ADK's
-        # own LLM registry when planner= is left unset, so the
-        # HUMAN_IN_LOOP / STEERING capabilities advertised above are
-        # actually driven by plan generation and mid-run refinement.
-        plugins.append(make_adk_plugin(_CLIENT))
-        # Late-bind the harmonograf client onto the wrapper agent so its
-        # orchestration loop can reach the plugin's shared state.
-        if _HarmonografAgent is not None and isinstance(
-            root_agent, _HarmonografAgent
-        ):
-            object.__setattr__(root_agent, "harmonograf_client", _CLIENT)
-        log.info(
-            "harmonograf: instrumented presentation_agent → %s (agent_id=%s)",
-            server_addr,
-            _CLIENT.agent_id,
-        )
+    client = _get_or_create_client()
+    if client is not None:
+        try:
+            from harmonograf_client import HarmonografTelemetryPlugin
+        except Exception as e:  # noqa: BLE001
+            log.warning(
+                "HarmonografTelemetryPlugin unavailable (%s); running without spans",
+                e,
+            )
+        else:
+            plugins.append(HarmonografTelemetryPlugin(client))
 
     return App(
         name="presentation_agent",
@@ -330,10 +310,7 @@ def _build_app() -> Any:
 
 
 def __getattr__(name: str) -> Any:
-    """PEP 562 module-level lazy attribute — builds ``app`` on first
-    access so importers that only need ``root_agent`` don't pay the cost
-    of starting a telemetry transport.
-    """
+    """PEP 562 lazy attribute — build ``app`` on first access."""
     global _APP
     if name == "app":
         if _APP is None:
@@ -342,48 +319,199 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def make_harmonograf_runner(**kwargs: Any) -> Any:
-    """Build a :class:`HarmonografRunner` wrapping ``root_agent`` with
-    plan enforcement enabled. Callers that bypass ``adk run`` / ``adk web``
-    (e.g. a custom entrypoint or an integration test) can use this to
-    actually drive the agent through the planner-generated DAG rather
-    than relying on the softer plugin-only injection path.
+# ---------------------------------------------------------------------------
+# goldfive Runner wiring — mirrors ``goldfive/examples/adk_presentation``
+# ---------------------------------------------------------------------------
 
-    Returns ``None`` when ``harmonograf_client`` is unavailable so the
-    demo module stays importable in minimal environments.
+
+def _mock_planner_call_llm(topic: str) -> Callable[[str, str, str], Any]:
+    """Return an async ``call_llm`` that produces a canned plan JSON.
+
+    Matches ``goldfive.LLMPlanner``'s ``(system_prompt, user_prompt,
+    model) -> str`` signature. Emits one task per specialist subagent
+    so the executor walks ``TaskStarted`` / ``TaskCompleted`` for each.
     """
-    global _CLIENT, _ATEXIT_REGISTERED
+
+    plan_json = {
+        "summary": f"Build a slideshow presentation on '{topic}'.",
+        "tasks": [
+            {
+                "id": "research",
+                "title": "Gather research bullet points on the topic",
+                "description": "Summarise key facts about the topic.",
+                "assignee_agent_id": "research_agent",
+            },
+            {
+                "id": "build",
+                "title": "Generate HTML/CSS/JS slideshow",
+                "description": "Produce the presentation files and save them.",
+                "assignee_agent_id": "web_developer_agent",
+            },
+            {
+                "id": "review",
+                "title": "Review the generated presentation",
+                "description": "Critique the generated slideshow for issues.",
+                "assignee_agent_id": "reviewer_agent",
+            },
+            {
+                "id": "debug",
+                "title": "Patch any critical issues the reviewer flagged",
+                "description": "Apply fixes to the presentation files.",
+                "assignee_agent_id": "debugger_agent",
+            },
+        ],
+        "edges": [
+            {"from_task_id": "research", "to_task_id": "build"},
+            {"from_task_id": "build", "to_task_id": "review"},
+            {"from_task_id": "review", "to_task_id": "debug"},
+        ],
+    }
+
+    async def _call(system: str, prompt: str, model: str) -> str:
+        return json.dumps(plan_json)
+
+    return _call
+
+
+def _mock_goal_call_llm(topic: str) -> Callable[[str, str, str], Any]:
+    """Return an async ``call_llm`` that produces a single canned goal."""
+
+    goals_json = {
+        "goals": [
+            {
+                "id": "g1",
+                "summary": f"Produce an interactive slideshow on '{topic}'.",
+            }
+        ]
+    }
+
+    async def _call(system: str, prompt: str, model: str) -> str:
+        return json.dumps(goals_json)
+
+    return _call
+
+
+def _make_mock_adk_model() -> Any:
+    """Return a BaseLlm that short-circuits every ADK model call.
+
+    Borrowed from goldfive's adk_presentation example. Each subagent
+    produces a deterministic reply so the executor's auto-complete
+    marks each task COMPLETED on a clean adapter return.
+    """
+    from google.adk.models.base_llm import BaseLlm
+    from google.adk.models.llm_request import LlmRequest
+    from google.adk.models.llm_response import LlmResponse
+    from google.genai import types as genai_types
+
+    class _MockLlm(BaseLlm):
+        @classmethod
+        def supported_models(cls) -> list[str]:
+            return [r"mock/.*"]
+
+        async def generate_content_async(
+            self, llm_request: LlmRequest, stream: bool = False
+        ) -> AsyncGenerator[LlmResponse, None]:
+            text = (
+                f"[mock:{self.model}] acknowledged task and deferred real "
+                "work to a production run."
+            )
+            yield LlmResponse(
+                content=genai_types.Content(
+                    role="model",
+                    parts=[genai_types.Part(text=text)],
+                ),
+                partial=False,
+                turn_complete=True,
+            )
+
+    return _MockLlm(model="mock/presentation-agent")
+
+
+def build_goldfive_runner(
+    *,
+    topic: str = "the history of the espresso machine",
+    mock: bool = True,
+    client: Optional[Any] = None,
+    extra_sinks: Optional[list[Any]] = None,
+) -> tuple[Any, Any, Optional[Any], Optional[Any]]:
+    """Assemble a :class:`goldfive.Runner` driving the coordinator tree.
+
+    Returns ``(runner, memory_sink, client, harmonograf_sink)``. The
+    harmonograf ``client`` + ``sink`` are ``None`` when
+    ``HARMONOGRAF_SERVER`` is unset and no explicit ``client`` is
+    passed; otherwise a :class:`HarmonografSink` is attached.
+
+    When ``mock=True`` every network call — ADK model, planner, goal
+    deriver — is short-circuited with canned output so the run
+    completes offline. This is the integration-oracle path used by
+    ``tests/e2e/test_presentation_agent.py``.
+    """
+    import goldfive
+    from goldfive import (
+        InMemorySink,
+        LLMGoalDeriver,
+        LLMPlanner,
+        Runner,
+        SequentialExecutor,
+    )
+    from goldfive.adapters.adk import ADKAdapter
+
+    if mock:
+        tree = _build_agent_tree(_make_mock_adk_model())
+        planner_call_llm = _mock_planner_call_llm(topic)
+        goal_call_llm = _mock_goal_call_llm(topic)
+        planner_model = "mock/planner"
+        goal_model = "mock/goal-deriver"
+    else:
+        tree = _build_agent_tree(MODEL_NAME)
+        raise SystemExit(
+            "non-mock mode not wired here; use goldfive/examples/adk_presentation "
+            "for a real OpenAI-backed run"
+        )
+
+    adapter = ADKAdapter(tree)
+
+    sinks: list[Any] = []
+    memory_sink = InMemorySink()
+    sinks.append(memory_sink)
+
+    explicit_client = client
+    if explicit_client is None:
+        explicit_client = _get_or_create_client()
+
+    harmonograf_sink = None
+    if explicit_client is not None:
+        try:
+            from harmonograf_client import HarmonografSink
+
+            harmonograf_sink = HarmonografSink(explicit_client)
+            sinks.append(harmonograf_sink)
+        except Exception as e:  # noqa: BLE001
+            log.warning("HarmonografSink unavailable (%s)", e)
 
     try:
-        from harmonograf_client import Client
-        from harmonograf_client.runner import HarmonografRunner
-    except Exception as e:  # noqa: BLE001
-        log.warning(
-            "harmonograf_client unavailable (%s); make_harmonograf_runner returning None",
-            e,
-        )
-        return None
+        logging_sink = goldfive.sinks.LoggingSink()
+    except Exception:  # noqa: BLE001 — proto extra may be absent
+        logging_sink = None
+    if logging_sink is not None:
+        sinks.append(logging_sink)
 
-    server_addr = os.environ.get("HARMONOGRAF_SERVER", _DEFAULT_SERVER)
-    if _CLIENT is None:
-        _CLIENT = Client(
-            name="presentation",
-            server_addr=server_addr,
-            framework="ADK",
-            capabilities=["HUMAN_IN_LOOP", "STEERING"],
-        )
-        if not _ATEXIT_REGISTERED:
-            atexit.register(_shutdown_client)
-            _ATEXIT_REGISTERED = True
+    if extra_sinks:
+        sinks.extend(extra_sinks)
 
-    return HarmonografRunner(agent=root_agent, client=_CLIENT, **kwargs)
+    runner = Runner(
+        agent=adapter,
+        planner=LLMPlanner(call_llm=planner_call_llm, model=planner_model),
+        executor=SequentialExecutor(max_plan_reinvocations=8),
+        goal_deriver=LLMGoalDeriver(call_llm=goal_call_llm, model=goal_model),
+        sinks=sinks,
+        max_plan_reinvocations=8,
+    )
+    return runner, memory_sink, explicit_client, harmonograf_sink
 
 
 def _reset_for_testing() -> None:
-    """Drop the cached ``App`` and ``Client`` so tests can rebuild under
-    a fresh ``HARMONOGRAF_SERVER`` environment. Not part of the public
-    API — called only from tests/e2e/test_presentation_agent.py.
-    """
+    """Drop the cached ``app`` and ``Client``. Test-only hook."""
     global _APP, _CLIENT
     if _CLIENT is not None:
         try:
