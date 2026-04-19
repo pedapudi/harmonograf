@@ -1,31 +1,29 @@
-"""Bridge harmonograf ``ControlEvent``\\s into a goldfive ``ControlChannel``.
+"""Bridge harmonograf ``SubscribeControl`` events into a goldfive ``ControlChannel``.
 
 The harmonograf server delivers control events over a dedicated
 ``SubscribeControl`` gRPC stream; goldfive's :class:`goldfive.control.ControlChannel`
 is the in-process primitive a :class:`goldfive.Runner` consumes live
 steering messages from. :class:`ControlBridge` is the wire between them.
 
-Responsibilities:
+Since the harmonograf + goldfive control schemas were consolidated in
+harmonograf #37 the wire event *is* a ``goldfive.v1.ControlEvent`` —
+there is no harmonograf-owned enum to translate against, and no bytes
+payload to decode. The bridge's responsibilities are now purely
+transport:
 
-1. Intercept every raw ``ControlEvent`` from the client (via
-   :meth:`Client.set_control_forward`) and translate it to a goldfive
-   :class:`ControlMessage`, preserving ``control_id`` as the message
-   ``id`` for ack correlation.
-2. Forward the ``ControlMessage`` into ``runner.control`` on the user's
-   event loop (the transport delivers events on its own loop, so a
-   thread-safe hop is required).
-3. Mirror goldfive acks back out as harmonograf ``ControlAck`` frames
-   via :meth:`Client.send_control_ack`.
-4. Tear down cleanly when :meth:`Runner.close` is called (via the
-   close hook :func:`observe` registers) — forward hook uninstalled,
-   both forwarding tasks cancelled, and the goldfive channel closed so
-   any in-flight ``runner.control.acks()`` consumer exits its iterator.
-
-Phase-1 kind coverage mirrors goldfive issue #71: PAUSE, RESUME, CANCEL,
-STEER, REWIND_TO, APPROVE, REJECT translate one-to-one. INJECT_MESSAGE,
-STATUS_QUERY, INTERCEPT_TRANSFER are out of scope and ack UNSUPPORTED
-directly back to the server. Any kind goldfive does not know also acks
-UNSUPPORTED.
+1. Intercept every raw ``goldfive.v1.ControlEvent`` from the client (via
+   :meth:`Client.set_control_forward`), convert it to a goldfive
+   :class:`ControlMessage` with :func:`goldfive.conv.from_pb_control_event`,
+   and hand it off to the runner's ``control`` channel. The proto's
+   ``id`` becomes the message ``id`` so acks correlate end-to-end.
+2. Mirror goldfive :class:`ControlAck` objects back out as harmonograf
+   ``ControlAck`` frames via :meth:`Client.send_control_ack`. The ack
+   wire type is also goldfive's now, but the bridge still hops across
+   transport+loop boundaries so callers on either side can stay naive.
+3. Tear down cleanly when :meth:`Runner.close` is called (via the close
+   hook :func:`observe` registers) — forward hook uninstalled, both
+   forwarding tasks cancelled, and the goldfive channel closed so any
+   in-flight ``runner.control.acks()`` consumer exits its iterator.
 
 The bridge does NOT attach a control channel to the runner — that is
 :func:`observe`'s responsibility, done before :meth:`start` is called.
@@ -44,22 +42,6 @@ if TYPE_CHECKING:
     from .client import Client
 
 log = logging.getLogger("harmonograf_client._control_bridge")
-
-
-# harmonograf ControlKind name → goldfive ControlKind name.
-# Any harmonograf kind not in this table is acked UNSUPPORTED. Membership
-# here is a necessary but not sufficient condition — the goldfive enum
-# may still reject the value (e.g. if goldfive drops a kind in a later
-# release), in which case we also ack UNSUPPORTED.
-_KIND_MAP: dict[str, str] = {
-    "PAUSE": "PAUSE",
-    "RESUME": "RESUME",
-    "CANCEL": "CANCEL",
-    "STEER": "STEER",
-    "REWIND_TO": "REWIND_TO",
-    "APPROVE": "APPROVE",
-    "REJECT": "REJECT",
-}
 
 
 class ControlBridge:
@@ -121,9 +103,7 @@ class ControlBridge:
     # ------------------------------------------------------------------
 
     async def _events_loop(self) -> None:
-        from goldfive.control import ControlKind, ControlMessage
-
-        from .pb import types_pb2
+        from goldfive.conv import from_pb_control_event
 
         while True:
             try:
@@ -131,40 +111,30 @@ class ControlBridge:
             except asyncio.CancelledError:
                 return
 
-            h_kind_name = _h_kind_name(event.kind, types_pb2)
-            g_kind_name = _KIND_MAP.get(h_kind_name)
-            if g_kind_name is None:
-                self._client.send_control_ack(
-                    event.id,
-                    "unsupported",
-                    f"harmonograf ControlKind {h_kind_name} "
-                    "is not supported by this bridge",
-                )
-                continue
-
             try:
-                g_kind = ControlKind(g_kind_name)
-            except ValueError:
+                msg = from_pb_control_event(event)
+            except Exception as exc:  # noqa: BLE001
+                # Malformed / unknown kind — ack UNSUPPORTED so the server
+                # resolves the pending deliver instead of timing out.
+                log.warning("failed to decode control event: %s", exc)
                 self._client.send_control_ack(
-                    event.id,
+                    getattr(event, "id", ""),
                     "unsupported",
-                    f"goldfive has no ControlKind.{g_kind_name}",
+                    f"failed to decode control event: {exc!r}",
                 )
                 continue
 
-            payload = _decode_payload(h_kind_name, event.payload)
-            msg = ControlMessage(kind=g_kind, id=event.id, payload=payload)
             chan = self._runner.control
             if chan is None:
                 self._client.send_control_ack(
-                    event.id, "failure", "runner has no control channel"
+                    msg.id, "failure", "runner has no control channel"
                 )
                 continue
             try:
                 await chan.send(msg)
             except Exception as exc:  # noqa: BLE001
                 log.warning("failed to forward control to runner: %s", exc)
-                self._client.send_control_ack(event.id, "failure", repr(exc))
+                self._client.send_control_ack(msg.id, "failure", repr(exc))
 
     async def _acks_loop(self) -> None:
         chan = self._runner.control
@@ -217,15 +187,6 @@ class ControlBridge:
 # ----------------------------------------------------------------------
 
 
-def _h_kind_name(kind_value: int, types_pb2: Any) -> str:
-    """Return the short harmonograf ``ControlKind`` name (e.g. ``PAUSE``)."""
-    try:
-        raw = types_pb2.ControlKind.Name(kind_value)
-    except Exception:
-        return "UNSPECIFIED"
-    return raw.removeprefix("CONTROL_KIND_")
-
-
 def _ack_result_name(result: Any) -> str:
     """Map a goldfive ``AckResult`` to the lowercase harmonograf wire name."""
     # AckResult is a StrEnum; its value is the uppercase name.
@@ -233,21 +194,3 @@ def _ack_result_name(result: Any) -> str:
         return str(result.value).lower()
     except AttributeError:
         return str(result).split(".")[-1].lower()
-
-
-def _decode_payload(h_kind_name: str, payload: bytes) -> dict[str, Any]:
-    """Decode a harmonograf control payload into goldfive's dict shape.
-
-    Harmonograf delivers payloads as ``bytes`` (see ``ControlEvent.payload``
-    in ``proto/harmonograf/v1/types.proto``); goldfive's
-    :class:`ControlMessage` expects a ``dict``. The shape per kind is
-    defined in goldfive issue #71.
-    """
-    if not payload:
-        return {}
-    text = payload.decode("utf-8", errors="replace")
-    if h_kind_name == "STEER":
-        return {"note": text}
-    if h_kind_name == "REWIND_TO":
-        return {"task_id": text}
-    return {"data": text}
