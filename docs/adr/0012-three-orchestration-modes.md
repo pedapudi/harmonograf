@@ -1,3 +1,10 @@
+> **DEPRECATED (goldfive migration).** Orchestration modes now live in
+> [goldfive](https://github.com/pedapudi/goldfive) (`goldfive.executors`,
+> `goldfive.runner`). Harmonograf consumes the resulting events but does not
+> define the modes. See
+> [../goldfive-integration.md](../goldfive-integration.md) and
+> [../goldfive-migration-plan.md](../goldfive-migration-plan.md).
+
 # ADR 0012 — Three orchestration modes (sequential, parallel, delegated)
 
 ## Status

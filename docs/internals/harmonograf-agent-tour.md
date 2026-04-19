@@ -1,3 +1,10 @@
+> **DEPRECATED (goldfive migration).** `HarmonografAgent` has been deleted.
+> The three execution modes (sequential, parallel, delegated) now live in
+> [goldfive](https://github.com/pedapudi/goldfive) (`goldfive.Runner` +
+> `goldfive.executors`). Turn-boundary invariant checks are likewise goldfive's
+> concern. See [../goldfive-integration.md](../goldfive-integration.md) and
+> [../goldfive-migration-plan.md](../goldfive-migration-plan.md).
+
 # An annotated tour of `HarmonografAgent`
 
 `client/harmonograf_client/agent.py` (~1900 lines) is the thin orchestration

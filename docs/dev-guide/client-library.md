@@ -1,3 +1,11 @@
+> **DEPRECATED (goldfive migration).** This page describes the pre-goldfive
+> client library, which carried orchestration and state-machine logic. Those
+> pieces have moved to [goldfive](https://github.com/pedapudi/goldfive); the
+> surviving harmonograf client is `Client` (span transport) + `HarmonografSink`
+> (goldfive event adapter). See
+> [../goldfive-integration.md](../goldfive-integration.md) and
+> [../goldfive-migration-plan.md](../goldfive-migration-plan.md).
+
 # Client library internals
 
 The client library (`client/harmonograf_client/`) is the biggest and

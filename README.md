@@ -1,39 +1,42 @@
 # Harmonograf
 
-**A console for observing, understanding, and coordinating multi-agent systems.**
+**The observability console for agent workflows orchestrated by [goldfive](https://github.com/pedapudi/goldfive).**
 
-Harmonograf gives you a Gantt-chart-style view of what a fleet of agents is doing in
-real time — who is running, which task they are on, what tool they just called, where
-the plan has drifted, and which runs are stuck. It is not a passive log viewer: the
-server terminates bidirectional connections from every participating client, so the
-UI can steer agents back through the same channel it observes them on.
-
-The first-class integration target is [Google's Agent Development Kit
-(ADK)](https://github.com/google/adk-python). Harmonograf ships with an ADK plugin
-that wires up telemetry, reporting tools, and bidirectional control with one line of
-code and no changes to your agent graph.
+Harmonograf stores the event timeline produced by a goldfive run, renders it as a
+Gantt-chart-style view in a browser, and lets humans intervene with control
+events on the same connection it observes them on. Goldfive owns the plan, task
+state machine, drift taxonomy, and reporting tools; harmonograf owns the
+session, the span timeline, the UI, storage, and the control router.
 
 ---
 
 ## What is Harmonograf?
 
-Multi-agent systems break every assumption that single-agent observability tools are
-built on. A chat completion is no longer an "operation" — it is one beat inside a
-rollout that may span five sub-agents, parallel branches, mid-flight replans, and
-tool calls whose outputs feed tasks nobody planned ten seconds earlier. Span trees
-flatten that structure into nested boxes and then ask you to reconstruct the story.
+Multi-agent systems break every assumption that single-agent observability tools
+are built on. A chat completion is no longer an "operation" — it is one beat
+inside a rollout that may span five sub-agents, parallel branches, mid-flight
+replans, and tool calls whose outputs feed tasks nobody planned ten seconds
+earlier. Span trees flatten that structure into nested boxes and then ask you to
+reconstruct the story.
 
-Harmonograf keeps the story first-class:
+Goldfive provides the orchestration primitives that make the story first-class —
+plans are data, task state is explicit, drift is a first-class event, and
+reporting tools are the contract between agent and framework. Harmonograf is the
+screen you watch that story on:
 
-- **Plans are data.** Every run starts with a plan, every task has an explicit
-  lifecycle, and the state machine is monotonic and driven by the agent itself, not
-  inferred from when a span closed.
-- **Drift is a first-class event.** Tool errors, refusals, new work discovered,
-  plan divergence, and ~20 other drift kinds fire a deferential "refine" call that
-  produces a revised plan, live in the UI, with a visual diff against the old one.
-- **The UI talks back.** The same connection that streams telemetry up also streams
-  control down — pause, resume, send a note, steer, cancel. The frontend is a
-  coordination surface, not a read-only dashboard.
+- **One canonical timeline.** The server terminates goldfive event streams from
+  every participating agent and fans them out to any number of frontend
+  subscribers. One server, many agents, many viewers.
+- **Plan-aware UI.** The Gantt, the inspector, and the plan-diff drawer all
+  render goldfive's plan / task / drift semantics directly. When goldfive fires
+  a `PlanRevised` event, the frontend shows the diff with the old plan side by
+  side.
+- **Bidirectional by default.** The same connection that streams telemetry up
+  also streams control down — pause, resume, steer, cancel, annotate — so the
+  UI is a coordination surface, not a read-only dashboard.
+
+Integration is a single-line install: construct a `goldfive.Runner`, attach a
+`HarmonografSink`, and the run's events start materialising in the UI.
 
 ### Screenshots
 
@@ -61,15 +64,17 @@ Harmonograf keeps the story first-class:
 
 ## Architecture
 
-Harmonograf is three components that share one data model. Telemetry flows up from agents through the server to the browser; control messages flow back down on the same connections.
+Harmonograf is three components that share one data model. Telemetry (spans +
+goldfive events) flows up from agents through the server to the browser;
+control messages flow back down on the same connections.
 
 ```mermaid
 flowchart TD
     UI[Frontend<br/>Gantt + Graph + Diff]
     Server[harmonograf-server<br/>fan-in · store · control]
-    A[agent A<br/>ADK + client]
-    B[agent B<br/>ADK + client]
-    C[agent C<br/>ADK + client]
+    A[agent A<br/>goldfive.Runner<br/>+ HarmonografSink]
+    B[agent B<br/>goldfive.Runner<br/>+ HarmonografSink]
+    C[agent C<br/>goldfive.Runner<br/>+ HarmonografSink]
     UI <-- "gRPC-Web :7532" --> Server
     Server <-- "gRPC :7531" --> A
     Server <-- "gRPC :7531" --> B
@@ -80,24 +85,16 @@ flowchart TD
 |---|---|---|---|
 | **Frontend** | `frontend/` | TypeScript / React / Vite | Gantt timeline, agent topology graph, plan-diff drawer, inspector, transport bar. Talks gRPC-Web to the server. |
 | **Server** | `server/` | Python / asyncio / grpcio | Terminates connections from every client, owns the canonical timeline, stores it (SQLite or in-memory), and fans out live updates to any number of frontend subscribers. Also the control bridge. |
-| **Client library** | `client/` | Python | Embedded inside each agent. Ships with an ADK plugin (`attach_adk`), reporting tools, a DAG walker for parallel mode, session-state protocol, and a buffered transport that survives server restarts. |
+| **Client library** | `client/` | Python | Embedded inside each agent. Provides `Client` (span transport, payload upload, control handlers) and `HarmonografSink` — a `goldfive.EventSink` that forwards goldfive plan / task / drift events into the harmonograf telemetry stream. |
 
-The data model (`Session`, `Agent`, `Task`, `Plan`, `Span`, `Payload`, `ControlMessage`)
-is defined once in `proto/harmonograf/v1/*.proto` and regenerated into all three
-components via `make proto`.
+Orchestration semantics — plans, tasks, drift kinds, reporting tools, refine
+pipeline, session-state protocol — live in [goldfive](https://github.com/pedapudi/goldfive).
+Harmonograf consumes them, it does not define them.
 
-### Orchestration modes
-
-`HarmonografAgent` can run an ADK agent graph in one of three modes, selected by
-`orchestrator_mode` and `parallel_mode`:
-
-| Mode | Flags | How the plan executes |
-|---|---|---|
-| **Sequential** (default) | `orchestrator_mode=True, parallel_mode=False` | The plan is fed as one user turn and the coordinator LLM executes it; per-task lifecycle is reported via the reporting tools. |
-| **Parallel** | `orchestrator_mode=True, parallel_mode=True` | A rigid-DAG batch walker drives sub-agents directly, respecting plan edges as dependencies and using a forced `task_id` ContextVar so parallel branches never race. |
-| **Delegated** | `orchestrator_mode=False` | A single delegation with an event observer scanning for drift afterward; the inner agent is in charge of its own task sequencing. |
-
-Full protocol reference: [docs/protocol/](docs/protocol/).
+The data model shared between client, server, and frontend is defined in
+`proto/harmonograf/v1/*.proto`. Goldfive's `Event` envelope is imported from
+`goldfive/v1/events.proto` and rides through harmonograf's `TelemetryUp` as a
+first-class variant. Regenerate stubs with `make proto`.
 
 ---
 
@@ -132,9 +129,10 @@ make demo
 
 `make demo` starts three processes in one foreground shell: `harmonograf-server`
 on `127.0.0.1:7531` (gRPC) + `:7532` (gRPC-Web), the Vite frontend on
-`http://127.0.0.1:5173`, and `adk web` hosting `presentation_agent` on
-`http://127.0.0.1:8080`. Drive a presentation from the ADK tab; watch the timeline
-materialise live in the harmonograf tab. Ctrl-C tears all three down.
+`http://127.0.0.1:5173`, and `adk web` hosting the goldfive-orchestrated
+reference agent on `http://127.0.0.1:8080`. Drive a rollout from the ADK tab;
+watch the timeline materialise live in the harmonograf tab. Ctrl-C tears all
+three down.
 
 ---
 
@@ -144,21 +142,28 @@ materialise live in the harmonograf tab. Ctrl-C tears all three down.
 |---|---|
 | [docs/overview.md](docs/overview.md) | Longer-form writeup: motivation, design principles, current features, non-goals, roadmap. Start here after this README. |
 | [docs/quickstart.md](docs/quickstart.md) | Step-by-step from clone to running demo, with troubleshooting and local-LLM wiring. |
+| [docs/goldfive-integration.md](docs/goldfive-integration.md) | How harmonograf consumes goldfive: `HarmonografSink`, the `goldfive_event` envelope, the split of responsibilities. |
+| [docs/goldfive-migration-plan.md](docs/goldfive-migration-plan.md) | The design record for the harmonograf → goldfive migration; what moved, what stayed, what was deleted. |
 | [docs/operator-quickstart.md](docs/operator-quickstart.md) | Flags, retention, health probes, bearer-token auth — the ops-facing reference. |
-| [docs/reporting-tools.md](docs/reporting-tools.md) | The reporting-tool protocol agents use to communicate task state. |
 | [docs/user-guide/](docs/user-guide/) | Navigating the UI: Gantt, graph, inspector, diff drawer, transport bar, keyboard shortcuts. |
 | [docs/dev-guide/](docs/dev-guide/) | Building from source, adding a storage backend, wiring a new framework adapter, writing tests. |
-| [docs/protocol/](docs/protocol/) | Wire protocol, proto reference, session-state schema, drift taxonomy, plan-diff semantics. |
+| [docs/protocol/](docs/protocol/) | Wire protocol, proto reference, span lifecycle, control stream. |
 | [docs/design/](docs/design/) | Per-component design notes — data model, client library, server, frontend, human-interaction model, information flow. |
 | [docs/milestones.md](docs/milestones.md) | Incremental delivery plan. |
+
+Orchestration references (reporting tools, drift taxonomy, task state machine,
+session-state protocol) now live in the [goldfive](https://github.com/pedapudi/goldfive)
+docs. Pages under `docs/` that described those topics in the standalone era
+carry a DEPRECATED banner pointing to goldfive.
 
 ---
 
 ## Status
 
 Harmonograf is pre-1.0 and under active development. The demo flow (`make demo`
-against `presentation_agent`) is the canonical smoke test — if it runs green, the
-core pipeline is healthy.
+against the reference goldfive agent) is the canonical smoke test — if it runs
+green, the ingest → storage → bus → frontend pipeline is healthy for both spans
+and goldfive events.
 
 Deliberate non-goals for v0 are listed in
 [docs/overview.md](docs/overview.md#non-goals); notable ones include TLS,
@@ -169,14 +174,16 @@ clustering, and multi-tenant auth.
 ## Contributing
 
 Contributions are welcome. Before starting non-trivial work, read
-[AGENTS.md](AGENTS.md) for the project vision and the plan-execution protocol, and
-[docs/design/](docs/design/) for the component the change touches. A developer guide
-with local-dev workflows, test matrix, and release process is landing as
-[docs/dev-guide/](docs/dev-guide/).
+[AGENTS.md](AGENTS.md) for the project vision and the component split between
+harmonograf and goldfive, and [docs/design/](docs/design/) for the component the
+change touches. A developer guide with local-dev workflows, test matrix, and
+release process is landing as [docs/dev-guide/](docs/dev-guide/).
 
-Ground rules: don't invent features when existing features can be extended, prefer 
-editing existing files over creating new ones, and if you change the proto run
-`make proto` and commit the regenerated stubs alongside the source change.
+Ground rules: don't invent features when existing features can be extended,
+prefer editing existing files over creating new ones, keep orchestration changes
+in goldfive and observability changes in harmonograf, and if you change the
+proto run `make proto` and commit the regenerated stubs alongside the source
+change.
 
 ---
 

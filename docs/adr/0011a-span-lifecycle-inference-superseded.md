@@ -1,3 +1,8 @@
+> **DEPRECATED (goldfive migration).** Task-state concerns have moved to
+> [goldfive](https://github.com/pedapudi/goldfive); this historical record is
+> kept for context only. See
+> [../goldfive-integration.md](../goldfive-integration.md).
+
 # ADR 0011a — Span-lifecycle inference for task state (Superseded)
 
 ## Status

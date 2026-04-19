@@ -1,3 +1,11 @@
+> **DEPRECATED (goldfive migration).** Reporting tools now live in
+> [goldfive](https://github.com/pedapudi/goldfive) and are injected through
+> `goldfive.reporting` + the ADK adapter there. Harmonograf no longer owns the
+> reporting-tool surface or the `before_tool_callback` interception described
+> below. See [goldfive-integration.md](goldfive-integration.md) for the current
+> split of responsibilities and [goldfive-migration-plan.md](goldfive-migration-plan.md)
+> for the design record.
+
 # Reporting tools reference
 
 Harmonograf injects a small set of **reporting tools** into every sub-agent wrapped by `HarmonografAgent`. These tools are how an agent explicitly communicates task state to the orchestrator instead of making harmonograf guess from span lifecycle or prose output.
