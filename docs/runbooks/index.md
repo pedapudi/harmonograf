@@ -1,5 +1,13 @@
 # Runbooks
 
+> **Post-goldfive-migration scope.** Orchestration (plan submission, plan
+> revisions, drift classification, orchestration modes, state-machine
+> invariants) moved to [goldfive](https://github.com/pedapudi/goldfive).
+> Runbooks that debugged those codepaths have been removed; the ones that
+> remain here cover transport, storage, frontend rendering, and the symptoms
+> an operator sees from harmonograf's side. For orchestration debugging,
+> start from goldfive's own docs.
+
 Operator-facing diagnostic playbooks. These differ from
 [`user-guide/troubleshooting.md`](../user-guide/troubleshooting.md) (which
 is for someone looking at the UI and wondering why a button didn't do what
@@ -42,11 +50,8 @@ severity band).
 |---|---|---|
 | 04 | [task-stuck-in-pending](task-stuck-in-pending.md) | Plan rendered but tasks never enter RUNNING. |
 | 05 | [task-stuck-in-running](task-stuck-in-running.md) | Task pinwheels forever; stuck amber border on agent row. |
-| 06 | [plan-never-gets-submitted](plan-never-gets-submitted.md) | First user turn and no plan appears. |
-| 07 | [plan-revisions-not-appearing](plan-revisions-not-appearing.md) | You expected a refine; nothing landed. |
 | 08 | [drift-not-firing](drift-not-firing.md) | Tool errored, agent refused, banner silent. |
 | 10 | [span-tree-looks-wrong](span-tree-looks-wrong.md) | Orphans, impossible parents, cross-agent link chaos. |
-| 17 | [orchestration-mode-mismatch](orchestration-mode-mismatch.md) | Agent plan walking behaves nothing like docs describe. |
 
 ### Medium — degraded quality
 
@@ -54,7 +59,6 @@ severity band).
 |---|---|---|
 | 09 | [payloads-missing](payloads-missing.md) | Drawer shows "not preserved" or spinner hangs. |
 | 11 | [frontend-shows-stale-data](frontend-shows-stale-data.md) | UI and sqlite disagree. |
-| 13 | [invariant-violations](invariant-violations.md) | `InvariantViolation(...)` warnings in client log. |
 | 14 | [high-latency-callbacks](high-latency-callbacks.md) | Agent tail latency grew; ADK callbacks slow. |
 | 15 | [context-window-exceeded](context-window-exceeded.md) | Model refuses / truncates; `context_window_tokens` near limit. |
 | 19 | [thinking-not-visible](thinking-not-visible.md) | Thinking text exists but UI does not render it. |

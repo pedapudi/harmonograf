@@ -1,10 +1,18 @@
-I have comprehensive context. Now let me produce the detailed migration plan. This is a read-only task so I'll output the plan directly as my response.
+# Harmonograf → Goldfive Migration Plan
+
+> **STATUS: COMPLETED (Phase D landed 2026-04-18).**
+> All four phases merged on `main`:
+> - Phase A — proto migration + goldfive dependency ([#6](https://github.com/pedapudi/harmonograf/pull/6), closes [#2](https://github.com/pedapudi/harmonograf/issues/2))
+> - Phase B — `HarmonografSink` + goldfive event ingest ([#7](https://github.com/pedapudi/harmonograf/pull/7), closes [#3](https://github.com/pedapudi/harmonograf/issues/3))
+> - Phase C — delete legacy client orchestration, rewire demos on goldfive ([#9](https://github.com/pedapudi/harmonograf/pull/9), closes [#4](https://github.com/pedapudi/harmonograf/issues/4))
+> - Phase D — e2e validation + cleanup + integration guide (this PR, closes [#5](https://github.com/pedapudi/harmonograf/issues/5) and meta [#1](https://github.com/pedapudi/harmonograf/issues/1))
+>
+> The current integration surface is documented in
+> [goldfive-integration.md](goldfive-integration.md). The rest of this file is
+> preserved as the design record.
 
 ---
 
-# Harmonograf → Goldfive Migration Plan
-
-*Target save location (user to save):* `~/git/harmonograf/docs/goldfive-migration-plan.md`
 *Author:* Architect pass (2026-04-18)
 *Scope:* Refactor harmonograf to delegate orchestration to goldfive; retain observability (server, storage, frontend, spans, sessions, agents, annotations, control routing) as harmonograf's unique value.
 
