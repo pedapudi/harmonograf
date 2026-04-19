@@ -37,6 +37,7 @@ from __future__ import annotations
 
 from .client import Client
 from .enums import Capability, SpanKind, SpanStatus
+from .observe import observe
 from .sink import HarmonografSink
 from .telemetry_plugin import HarmonografTelemetryPlugin
 from .transport import ControlAckSpec
@@ -49,6 +50,7 @@ __all__ = [
     "HarmonografTelemetryPlugin",
     "SpanKind",
     "SpanStatus",
+    "observe",
 ]
 
 __version__ = "0.0.0"

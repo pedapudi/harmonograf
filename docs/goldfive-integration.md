@@ -44,36 +44,105 @@ the server's ingest dispatches on `event.payload` (a protobuf `oneof` over
 
 ## Minimal worked example
 
+The target form is two lines of setup — one for orchestration, one for
+observability:
+
+```python
+import goldfive
+import harmonograf_client
+
+runner = harmonograf_client.observe(goldfive.wrap(root_agent))
+outcome = await runner.run("make a presentation about waffles")
+```
+
+**First `goldfive.wrap` for orchestration, then `harmonograf_client.observe`
+for observability.** The layering is crystal-clear and each call owns exactly
+one concern:
+
+- `goldfive.wrap(agent)` — the *only* planning/steering injection. Picks a
+  default `LLMPlanner`, `SequentialExecutor`, adapter, and goal deriver, and
+  returns a ready-to-run `goldfive.Runner`.
+- `harmonograf_client.observe(runner)` — the *only* observability wiring.
+  Constructs a `Client`, appends a `HarmonografSink` to `runner.sinks`, and
+  returns the same runner for chaining. Nothing about the runner's planning,
+  steering, goal derivation, or execution is touched.
+
+Neither call is implicit — if you want both you write both, and you can skip
+either one when you don't.
+
+### End-to-end
+
 ```python
 from __future__ import annotations
 
 import asyncio
 
 import goldfive
-from goldfive import LLMPlanner, Runner, SequentialExecutor
-from goldfive.adapters.adk import ADKAdapter
+import harmonograf_client
 from google.adk.agents import Agent
-from harmonograf_client import Client, HarmonografSink
+
 
 async def main() -> None:
     root = Agent(name="researcher", model="openai/gpt-4o-mini")
 
-    client = Client(name="researcher")  # defaults to 127.0.0.1:7531
-
-    runner = Runner(
-        agent=ADKAdapter(root),
-        planner=LLMPlanner(call_llm=my_llm_call, model="openai/gpt-4o-mini"),
-        executor=SequentialExecutor(),
-        sinks=[HarmonografSink(client), goldfive.sinks.LoggingSink()],
-    )
+    runner = harmonograf_client.observe(goldfive.wrap(root))
 
     outcome = await runner.run("Summarise recent observability research.")
     print("ok" if outcome.success else outcome.reason)
-    await runner.close()           # flushes every sink, including ours
-    client.shutdown(flush_timeout=5.0)
+    await runner.close()  # flushes every sink, including harmonograf's
 
 
 asyncio.run(main())
+```
+
+### Reusing a Client or tagging the run
+
+`observe` accepts the same identity knobs as `Client`:
+
+```python
+# Reuse a pre-built Client (e.g. shared across many runners)
+client = harmonograf_client.Client(
+    name="prod-agent", framework="ADK", server_addr="remote:7531"
+)
+runner = harmonograf_client.observe(goldfive.wrap(root_agent), client=client)
+
+# Or let observe construct the Client, passing just the tags
+runner = harmonograf_client.observe(
+    goldfive.wrap(root_agent), name="presentation", framework="ADK"
+)
+```
+
+When `server_addr` is omitted, `observe` reads `$HARMONOGRAF_SERVER` and
+otherwise falls back to `Client`'s default (`127.0.0.1:7531`).
+
+### Composing with other sinks
+
+Because `observe` *appends* to `runner.sinks` it composes cleanly with any
+sinks `goldfive.wrap` already configured:
+
+```python
+from goldfive.sinks import JSONLPersistenceSink
+
+runner = goldfive.wrap(root_agent, sinks=[JSONLPersistenceSink("runs/log.jsonl")])
+runner = harmonograf_client.observe(runner)  # HarmonografSink appended alongside
+```
+
+### Fully manual wiring (pre-`wrap`)
+
+If you need to override a goldfive internal that `wrap` doesn't expose, build
+the `Runner` yourself and skip `wrap` — `observe` still works the same:
+
+```python
+from goldfive import LLMPlanner, Runner, SequentialExecutor
+from goldfive.adapters.adk import ADKAdapter
+import harmonograf_client
+
+runner = Runner(
+    agent=ADKAdapter(root),
+    planner=LLMPlanner(call_llm=my_llm_call, model="openai/gpt-4o-mini"),
+    executor=SequentialExecutor(),
+)
+runner = harmonograf_client.observe(runner, name="researcher")
 ```
 
 While `main()` runs, the frontend (started by `make demo`, served at
