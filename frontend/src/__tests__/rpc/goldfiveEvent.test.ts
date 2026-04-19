@@ -90,13 +90,18 @@ describe('applyGoldfiveEvent', () => {
       0,
     );
 
-    const dispatch = (caseName: string, schema: typeof TaskStartedSchema, taskId: string) => {
+    // The schema type varies per case; use a permissive signature so each
+    // dispatch can pass its own *Schema without TS complaining that a
+    // TaskCompleted schema isn't assignable to TaskStarted's schema slot.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dispatch = (caseName: string, schema: any, taskId: string) => {
       applyGoldfiveEvent(
         create(EventSchema, {
           eventId: `ev-${caseName}`,
           runId: 'run-1',
           sequence: 1n,
-          payload: { case: caseName as 'taskStarted', value: create(schema, { taskId }) },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          payload: { case: caseName as any, value: create(schema, { taskId }) },
         }),
         store,
         0,
