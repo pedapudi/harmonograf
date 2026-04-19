@@ -54,6 +54,8 @@ _KIND_MAP: dict[str, str] = {
     "CANCEL": "CANCEL",
     "STEER": "STEER",
     "REWIND_TO": "REWIND_TO",
+    "APPROVE": "APPROVE",
+    "REJECT": "REJECT",
 }
 
 
