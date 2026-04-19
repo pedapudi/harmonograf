@@ -448,6 +448,73 @@ def _drift_severity_pb_to_string(value: int) -> str:
     return name.lower()
 
 
+def _drift_kind_string_to_pb(value: str) -> int:
+    if not value:
+        return goldfive_types_pb2.DRIFT_KIND_UNSPECIFIED
+    name = f"DRIFT_KIND_{value.upper()}"
+    try:
+        return goldfive_types_pb2.DriftKind.Value(name)
+    except (ValueError, AttributeError):
+        return goldfive_types_pb2.DRIFT_KIND_UNSPECIFIED
+
+
+def _drift_severity_string_to_pb(value: str) -> int:
+    if not value:
+        return goldfive_types_pb2.DRIFT_SEVERITY_UNSPECIFIED
+    name = f"DRIFT_SEVERITY_{value.upper()}"
+    try:
+        return goldfive_types_pb2.DriftSeverity.Value(name)
+    except (ValueError, AttributeError):
+        return goldfive_types_pb2.DRIFT_SEVERITY_UNSPECIFIED
+
+
+def storage_task_to_goldfive_pb(task: Task) -> Any:
+    """Translate a storage ``Task`` back into ``goldfive.v1.Task``."""
+
+    pb = goldfive_types_pb2.Task(
+        id=task.id,
+        title=task.title,
+        description=task.description,
+        assignee_agent_id=task.assignee_agent_id,
+        status=task_status_to_pb(task.status),
+        predicted_start_ms=int(task.predicted_start_ms),
+        predicted_duration_ms=int(task.predicted_duration_ms),
+    )
+    if task.bound_span_id:
+        pb.bound_span_id = task.bound_span_id
+    return pb
+
+
+def storage_plan_to_goldfive_pb(plan: TaskPlan) -> Any:
+    """Translate a storage ``TaskPlan`` back into ``goldfive.v1.Plan``.
+
+    Inverse of :func:`goldfive_pb_plan_to_storage`; used by WatchSession's
+    initial-burst replay to synthesise ``Event(plan_submitted=...)`` frames
+    from the persisted plan without needing to hold the original wire bytes.
+    """
+
+    pb = goldfive_types_pb2.Plan(
+        id=plan.id,
+        summary=plan.summary,
+        revision_reason=plan.revision_reason,
+        revision_kind=_drift_kind_string_to_pb(plan.revision_kind),
+        revision_severity=_drift_severity_string_to_pb(plan.revision_severity),
+        revision_index=int(plan.revision_index),
+    )
+    for task in plan.tasks:
+        pb.tasks.append(storage_task_to_goldfive_pb(task))
+    for edge in plan.edges:
+        pb.edges.append(
+            goldfive_types_pb2.TaskEdge(
+                from_task_id=edge.from_task_id, to_task_id=edge.to_task_id
+            )
+        )
+    created = float_to_ts(plan.created_at)
+    if created is not None:
+        pb.created_at.CopyFrom(created)
+    return pb
+
+
 def storage_agent_to_pb(agent: Agent) -> types_pb2.Agent:
     pb = types_pb2.Agent(
         id=agent.id,

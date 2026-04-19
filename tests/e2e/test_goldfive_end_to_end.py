@@ -195,6 +195,61 @@ class TestGoldfiveRoundTrip:
             task_statuses = {t.id: str(t.status) for t in stored.tasks}
             assert set(task_statuses) == {"t1", "t2", "t3"}
 
+            # Issue #12: WatchSession must expose the persisted plan + task
+            # state to late-joining clients via goldfive_event frames. A
+            # fresh subscriber should see plan_submitted and at least some
+            # task lifecycle events for the three tasks before the initial
+            # burst finishes.
+            import grpc
+            from harmonograf_server.pb import (
+                frontend_pb2,
+                service_pb2_grpc,
+            )
+
+            session_id = stored.session_id
+            async with grpc.aio.insecure_channel(harmonograf_server["addr"]) as ch:
+                stub = service_pb2_grpc.HarmonografStub(ch)
+                watch = stub.WatchSession(
+                    frontend_pb2.WatchSessionRequest(session_id=session_id)
+                )
+
+                seen_plan_ids: list[str] = []
+                seen_task_kinds: set[tuple[str, str]] = set()
+
+                async def drain() -> None:
+                    async for upd in watch:
+                        kind = upd.WhichOneof("kind")
+                        if kind == "goldfive_event":
+                            which = upd.goldfive_event.WhichOneof("payload")
+                            if which == "plan_submitted":
+                                seen_plan_ids.append(
+                                    upd.goldfive_event.plan_submitted.plan.id
+                                )
+                            elif which in (
+                                "task_started",
+                                "task_completed",
+                                "task_failed",
+                                "task_blocked",
+                                "task_cancelled",
+                            ):
+                                tid = getattr(
+                                    getattr(upd.goldfive_event, which), "task_id", ""
+                                )
+                                seen_task_kinds.add((which, tid))
+                        elif kind == "burst_complete":
+                            return
+
+                await asyncio.wait_for(drain(), timeout=5.0)
+                watch.cancel()
+
+            assert seen_plan_ids == [stored.id]
+            # At minimum we expect one task_* event per task that advanced
+            # past PENDING. Whether they are task_started or task_completed
+            # depends on how quickly the runner finished, but every task
+            # id must appear at least once.
+            covered_task_ids = {tid for _, tid in seen_task_kinds}
+            assert covered_task_ids >= {"t1", "t2", "t3"}
+
         finally:
             client.shutdown(flush_timeout=2.0)
 

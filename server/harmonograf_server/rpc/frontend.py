@@ -25,11 +25,17 @@ from harmonograf_server.bus import (
     DELTA_AGENT_UPSERT,
     DELTA_ANNOTATION,
     DELTA_BACKPRESSURE,
+    DELTA_DRIFT,
+    DELTA_GOAL_DERIVED,
     DELTA_HEARTBEAT,
+    DELTA_RUN_ABORTED,
+    DELTA_RUN_COMPLETED,
+    DELTA_RUN_STARTED,
     DELTA_SPAN_END,
     DELTA_SPAN_START,
     DELTA_SPAN_UPDATE,
     DELTA_TASK_PLAN,
+    DELTA_TASK_PROGRESS,
     DELTA_TASK_REPORT,
     DELTA_TASK_STATUS,
     DELTA_CONTEXT_WINDOW_SAMPLE,
@@ -40,13 +46,18 @@ from harmonograf_server.control_router import ControlRouter, DeliveryResult
 from harmonograf_server.convert import (
     _AGENT_STATUS_TO_PB,
     _ANNOTATION_KIND_TO_PB,
+    _drift_kind_string_to_pb,
+    _drift_severity_string_to_pb,
     float_to_ts,
     py_to_attr_value,
     storage_agent_to_pb,
+    storage_plan_to_goldfive_pb,
     storage_span_to_pb,
     task_status_to_pb,
     ts_to_float,
 )
+from goldfive.v1 import events_pb2 as goldfive_events_pb2
+from goldfive.v1 import types_pb2 as goldfive_types_pb2
 from harmonograf_server.ingest import IngestPipeline
 from harmonograf_server.pb import frontend_pb2, types_pb2
 from harmonograf_server.storage import (
@@ -57,6 +68,8 @@ from harmonograf_server.storage import (
     SessionStatus,
     Span,
     Store,
+    Task,
+    TaskStatus,
 )
 
 
@@ -250,9 +263,29 @@ class FrontendServicerMixin:
                     initial_annotation=_storage_annotation_to_pb(ann)
                 )
 
-            # 4b. Task plan burst suppressed during Phase A of the goldfive
-            # migration (issue #2). SessionUpdate.task_plan is reserved until
-            # Phase B adds goldfive_event-based plan deltas.
+            # 4b. Replay persisted plans + task state as synthesized
+            # goldfive.v1.Event frames so a client that joins after the
+            # orchestrator already ran still sees a populated Tasks panel.
+            # Plans are emitted in created_at order; for each plan we emit
+            # PlanSubmitted, then one event per task whose status has
+            # advanced past PENDING (TaskStarted for RUNNING, plus the
+            # terminal event for COMPLETED/FAILED/BLOCKED/CANCELLED so
+            # the frontend lands in the right final state).
+            try:
+                plans = await self._store.list_task_plans_for_session(session_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("list_task_plans_for_session failed: %s", exc)
+                plans = []
+            plans = sorted(plans, key=lambda p: p.created_at)
+            for plan in plans:
+                submitted = frontend_pb2.SessionUpdate()
+                submitted.goldfive_event.plan_submitted.plan.CopyFrom(
+                    storage_plan_to_goldfive_pb(plan)
+                )
+                yield submitted
+                for task in plan.tasks:
+                    for ev in _synthesize_task_events(task):
+                        yield frontend_pb2.SessionUpdate(goldfive_event=ev)
 
             # 4c. Context window samples — replay the most recent per-agent
             # series so the Gantt context-window lane renders immediately
@@ -697,13 +730,70 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
         ts.nanos = int((recorded_at_f - int(recorded_at_f)) * 1e9)
         tr.recorded_at.CopyFrom(ts)
         return frontend_pb2.SessionUpdate(task_report=tr)
-    if delta.kind == DELTA_TASK_PLAN or delta.kind == DELTA_TASK_STATUS:
-        # Phase A of the goldfive migration (issue #2) reserves the
-        # SessionUpdate.task_plan / updated_task_status fields. Plan and
-        # task deltas are paused until Phase B rewires them through
-        # goldfive_event. Drop the delta rather than raise — the bus may
-        # still fan them out from storage bootstrap paths.
-        return None
+    if delta.kind == DELTA_TASK_PLAN:
+        plan = delta.payload
+        ev = goldfive_events_pb2.Event()
+        ev.plan_submitted.plan.CopyFrom(storage_plan_to_goldfive_pb(plan))
+        return frontend_pb2.SessionUpdate(goldfive_event=ev)
+    if delta.kind == DELTA_TASK_STATUS:
+        p = delta.payload
+        task = p["task"]
+        ev = _task_status_to_goldfive_event(task)
+        if ev is None:
+            return None
+        return frontend_pb2.SessionUpdate(goldfive_event=ev)
+    if delta.kind == DELTA_RUN_STARTED:
+        p = delta.payload
+        ev = goldfive_events_pb2.Event(run_id=p.get("run_id", ""))
+        ev.run_started.run_id = p.get("run_id", "")
+        ev.run_started.goal_summary = p.get("goal_summary", "") or ""
+        started_at = p.get("started_at")
+        if started_at is not None:
+            ts = float_to_ts(started_at)
+            if ts is not None:
+                ev.run_started.started_at.CopyFrom(ts)
+        return frontend_pb2.SessionUpdate(goldfive_event=ev)
+    if delta.kind == DELTA_RUN_COMPLETED:
+        p = delta.payload
+        ev = goldfive_events_pb2.Event(run_id=p.get("run_id", ""))
+        ev.run_completed.outcome_summary = p.get("outcome_summary", "") or ""
+        return frontend_pb2.SessionUpdate(goldfive_event=ev)
+    if delta.kind == DELTA_RUN_ABORTED:
+        p = delta.payload
+        ev = goldfive_events_pb2.Event(run_id=p.get("run_id", ""))
+        ev.run_aborted.reason = p.get("reason", "") or ""
+        return frontend_pb2.SessionUpdate(goldfive_event=ev)
+    if delta.kind == DELTA_GOAL_DERIVED:
+        p = delta.payload
+        ev = goldfive_events_pb2.Event(run_id=p.get("run_id", ""))
+        for goal_dict in p.get("goals", []) or []:
+            g = ev.goal_derived.goals.add(
+                id=goal_dict.get("id", "") or "",
+                summary=goal_dict.get("summary", "") or "",
+            )
+            for k, v in (goal_dict.get("metadata") or {}).items():
+                g.metadata[k] = v
+            if goal_dict.get("has_success_predicate"):
+                g.has_success_predicate = True
+        return frontend_pb2.SessionUpdate(goldfive_event=ev)
+    if delta.kind == DELTA_DRIFT:
+        p = delta.payload
+        ev = goldfive_events_pb2.Event(run_id=p.get("run_id", ""))
+        ev.drift_detected.kind = _drift_kind_string_to_pb(p.get("kind", "") or "")
+        ev.drift_detected.severity = _drift_severity_string_to_pb(
+            p.get("severity", "") or ""
+        )
+        ev.drift_detected.detail = p.get("detail", "") or ""
+        ev.drift_detected.current_task_id = p.get("current_task_id", "") or ""
+        ev.drift_detected.current_agent_id = p.get("current_agent_id", "") or ""
+        return frontend_pb2.SessionUpdate(goldfive_event=ev)
+    if delta.kind == DELTA_TASK_PROGRESS:
+        p = delta.payload
+        ev = goldfive_events_pb2.Event(run_id=p.get("run_id", ""))
+        ev.task_progress.task_id = p.get("task_id", "") or ""
+        ev.task_progress.fraction = float(p.get("fraction", 0.0) or 0.0)
+        ev.task_progress.detail = p.get("detail", "") or ""
+        return frontend_pb2.SessionUpdate(goldfive_event=ev)
     if delta.kind == DELTA_CONTEXT_WINDOW_SAMPLE:
         p = delta.payload
         pb_sample = frontend_pb2.ContextWindowSample(
@@ -720,3 +810,50 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
     if delta.kind == DELTA_BACKPRESSURE:
         return None
     return None
+
+
+def _task_status_to_goldfive_event(task: Task) -> Optional[goldfive_events_pb2.Event]:
+    """Map a terminal/running storage ``Task`` to a ``goldfive.v1.Event``.
+
+    PENDING maps to ``None`` — the plan itself already carries PENDING as
+    the default state, so re-emitting it as an event would be noise.
+    """
+
+    ev = goldfive_events_pb2.Event()
+    if task.status == TaskStatus.RUNNING:
+        ev.task_started.task_id = task.id
+        return ev
+    if task.status == TaskStatus.COMPLETED:
+        ev.task_completed.task_id = task.id
+        return ev
+    if task.status == TaskStatus.FAILED:
+        ev.task_failed.task_id = task.id
+        return ev
+    if task.status == TaskStatus.BLOCKED:
+        ev.task_blocked.task_id = task.id
+        return ev
+    if task.status == TaskStatus.CANCELLED:
+        ev.task_cancelled.task_id = task.id
+        return ev
+    return None
+
+
+def _synthesize_task_events(task: Task) -> list[goldfive_events_pb2.Event]:
+    """Produce the ordered events a late-joining watcher needs for this task.
+
+    The orchestrator would normally emit ``TaskStarted`` before any terminal
+    event; replaying that sequence keeps frontend state machines that gate
+    on "saw started first" behaving identically to the live path.
+    """
+
+    if task.status in (TaskStatus.PENDING, None):
+        return []
+    events: list[goldfive_events_pb2.Event] = []
+    if task.status != TaskStatus.RUNNING:
+        started = goldfive_events_pb2.Event()
+        started.task_started.task_id = task.id
+        events.append(started)
+    terminal = _task_status_to_goldfive_event(task)
+    if terminal is not None:
+        events.append(terminal)
+    return events
