@@ -7,6 +7,7 @@ import { SessionPicker } from '../SessionPicker/SessionPicker';
 import { HelpOverlay } from './HelpOverlay';
 import { GanttLegend } from '../Gantt/GanttLegend';
 import { ShellErrorBoundary } from './ErrorBoundary';
+import { ApprovalDrawer } from '../Interaction/ApprovalDrawer';
 import { SessionsSyncer } from '../../rpc/SessionsSyncer';
 import { useGlobalShortcuts } from '../../lib/shortcuts';
 import { useUiStore } from '../../state/uiStore';
@@ -39,6 +40,7 @@ export function Shell() {
       <SessionPicker />
       <HelpOverlay />
       <GanttLegend />
+      <ApprovalDrawer />
     </div>
   );
 }

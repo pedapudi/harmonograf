@@ -20,6 +20,7 @@ import {
   DriftSeverity as GoldfiveDriftSeverityEnum,
 } from '../pb/goldfive/v1/types_pb.js';
 import type { Event as GoldfiveEvent } from '../pb/goldfive/v1/events_pb.js';
+import { useApprovalsStore } from '../state/approvalsStore';
 
 // goldfive.v1.TaskStatus enum values are identical to harmonograf's
 // TaskStatus strings at indices 0..5, plus BLOCKED = 6 (goldfive-only).
@@ -109,6 +110,7 @@ export function applyGoldfiveEvent(
   event: GoldfiveEvent,
   store: SessionStore,
   sessionStartMs: number,
+  sessionId: string | null = null,
 ): void {
   const payload = event.payload;
   if (!payload.case) return;
@@ -136,15 +138,55 @@ export function applyGoldfiveEvent(
     case 'taskCancelled':
       store.tasks.updateTaskStatusByTaskId(payload.value.taskId, 'CANCELLED');
       return;
+    case 'approvalRequested': {
+      if (!sessionId) return;
+      const r = payload.value;
+      // Best-effort binding back to the originating span: if goldfive has
+      // already emitted a TaskStarted for the same task_id, the plan's task
+      // row has a boundSpanId set — use that agent/span so APPROVE/REJECT
+      // routes to the exact executor. Falls back to empty strings when the
+      // span isn't known yet; the server-side ControlChannel bridge accepts
+      // session-level approvals without a specific agentId/spanId.
+      const found = r.taskId ? store.tasks.findPlanForTask(r.taskId) : null;
+      const boundSpanId = found?.task.boundSpanId ?? '';
+      const span = boundSpanId ? store.spans.get(boundSpanId) : null;
+      const requestedAtMs = event.emittedAt
+        ? Number(event.emittedAt.seconds) * 1000 +
+          Math.floor(event.emittedAt.nanos / 1_000_000) -
+          sessionStartMs
+        : 0;
+      useApprovalsStore.getState().request({
+        sessionId,
+        targetId: r.targetId,
+        kind: r.kind,
+        prompt: r.prompt,
+        taskId: r.taskId,
+        metadata: { ...r.metadata },
+        requestedAtMs,
+        agentId: span?.agentId ?? found?.task.assigneeAgentId ?? '',
+        spanId: boundSpanId,
+      });
+      return;
+    }
+    case 'approvalGranted':
+    case 'approvalRejected': {
+      if (!sessionId) return;
+      useApprovalsStore
+        .getState()
+        .resolve(sessionId, payload.value.targetId);
+      return;
+    }
     case 'taskProgress':
     case 'driftDetected':
     case 'runStarted':
     case 'goalDerived':
     case 'runCompleted':
     case 'runAborted':
-      // No-op. task_progress / drift / run_* are observable on the wire
-      // (useful for analytics or a future drift timeline), but the
-      // Gantt renderer does not consume them today.
+    case 'conversationStarted':
+    case 'conversationEnded':
+      // No-op. task_progress / drift / run_* / conversation_* are
+      // observable on the wire (useful for analytics or a future drift
+      // timeline), but the Gantt renderer does not consume them today.
       return;
   }
 }

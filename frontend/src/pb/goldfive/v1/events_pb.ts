@@ -26,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file goldfive/v1/events.proto.
  */
 export const file_goldfive_v1_events: GenFile = /*@__PURE__*/
-  fileDesc("Chhnb2xkZml2ZS92MS9ldmVudHMucHJvdG8SC2dvbGRmaXZlLnYxIo4GCgVFdmVudBIQCghldmVudF9pZBgBIAEoCRIOCgZydW5faWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAQSLgoKZW1pdHRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoLcnVuX3N0YXJ0ZWQYCiABKAsyFy5nb2xkZml2ZS52MS5SdW5TdGFydGVkSAASMAoMZ29hbF9kZXJpdmVkGAsgASgLMhguZ29sZGZpdmUudjEuR29hbERlcml2ZWRIABI0Cg5wbGFuX3N1Ym1pdHRlZBgMIAEoCzIaLmdvbGRmaXZlLnYxLlBsYW5TdWJtaXR0ZWRIABIwCgxwbGFuX3JldmlzZWQYDSABKAsyGC5nb2xkZml2ZS52MS5QbGFuUmV2aXNlZEgAEjAKDHRhc2tfc3RhcnRlZBgOIAEoCzIYLmdvbGRmaXZlLnYxLlRhc2tTdGFydGVkSAASMgoNdGFza19wcm9ncmVzcxgPIAEoCzIZLmdvbGRmaXZlLnYxLlRhc2tQcm9ncmVzc0gAEjQKDnRhc2tfY29tcGxldGVkGBAgASgLMhouZ29sZGZpdmUudjEuVGFza0NvbXBsZXRlZEgAEi4KC3Rhc2tfZmFpbGVkGBEgASgLMhcuZ29sZGZpdmUudjEuVGFza0ZhaWxlZEgAEjAKDHRhc2tfYmxvY2tlZBgSIAEoCzIYLmdvbGRmaXZlLnYxLlRhc2tCbG9ja2VkSAASNAoOdGFza19jYW5jZWxsZWQYEyABKAsyGi5nb2xkZml2ZS52MS5UYXNrQ2FuY2VsbGVkSAASNAoOZHJpZnRfZGV0ZWN0ZWQYFCABKAsyGi5nb2xkZml2ZS52MS5EcmlmdERldGVjdGVkSAASMgoNcnVuX2NvbXBsZXRlZBgVIAEoCzIZLmdvbGRmaXZlLnYxLlJ1bkNvbXBsZXRlZEgAEi4KC3J1bl9hYm9ydGVkGBYgASgLMhcuZ29sZGZpdmUudjEuUnVuQWJvcnRlZEgAQgkKB3BheWxvYWQiYgoKUnVuU3RhcnRlZBIOCgZydW5faWQYASABKAkSFAoMZ29hbF9zdW1tYXJ5GAIgASgJEi4KCnN0YXJ0ZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIi8KC0dvYWxEZXJpdmVkEiAKBWdvYWxzGAEgAygLMhEuZ29sZGZpdmUudjEuR29hbCIwCg1QbGFuU3VibWl0dGVkEh8KBHBsYW4YASABKAsyES5nb2xkZml2ZS52MS5QbGFuIrABCgtQbGFuUmV2aXNlZBIfCgRwbGFuGAEgASgLMhEuZ29sZGZpdmUudjEuUGxhbhIqCgpkcmlmdF9raW5kGAIgASgOMhYuZ29sZGZpdmUudjEuRHJpZnRLaW5kEiwKCHNldmVyaXR5GAMgASgOMhouZ29sZGZpdmUudjEuRHJpZnRTZXZlcml0eRIOCgZyZWFzb24YBCABKAkSFgoOcmV2aXNpb25faW5kZXgYBSABKA0iLgoLVGFza1N0YXJ0ZWQSDwoHdGFza19pZBgBIAEoCRIOCgZkZXRhaWwYAiABKAkiQQoMVGFza1Byb2dyZXNzEg8KB3Rhc2tfaWQYASABKAkSEAoIZnJhY3Rpb24YAiABKAISDgoGZGV0YWlsGAMgASgJIqEBCg1UYXNrQ29tcGxldGVkEg8KB3Rhc2tfaWQYASABKAkSDwoHc3VtbWFyeRgCIAEoCRI8CglhcnRpZmFjdHMYAyADKAsyKS5nb2xkZml2ZS52MS5UYXNrQ29tcGxldGVkLkFydGlmYWN0c0VudHJ5GjAKDkFydGlmYWN0c0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiQgoKVGFza0ZhaWxlZBIPCgd0YXNrX2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCRITCgtyZWNvdmVyYWJsZRgDIAEoCCI/CgtUYXNrQmxvY2tlZBIPCgd0YXNrX2lkGAEgASgJEg8KB2Jsb2NrZXIYAiABKAkSDgoGbmVlZGVkGAMgASgJIjAKDVRhc2tDYW5jZWxsZWQSDwoHdGFza19pZBgBIAEoCRIOCgZyZWFzb24YAiABKAkipgEKDURyaWZ0RGV0ZWN0ZWQSJAoEa2luZBgBIAEoDjIWLmdvbGRmaXZlLnYxLkRyaWZ0S2luZBIsCghzZXZlcml0eRgCIAEoDjIaLmdvbGRmaXZlLnYxLkRyaWZ0U2V2ZXJpdHkSDgoGZGV0YWlsGAMgASgJEhcKD2N1cnJlbnRfdGFza19pZBgEIAEoCRIYChBjdXJyZW50X2FnZW50X2lkGAUgASgJIicKDFJ1bkNvbXBsZXRlZBIXCg9vdXRjb21lX3N1bW1hcnkYASABKAkiHAoKUnVuQWJvcnRlZBIOCgZyZWFzb24YASABKAlCOVo3Z2l0aHViLmNvbS9wZWRhcHVkaS9nb2xkZml2ZS9nZW4vZ29sZGZpdmUvdjE7Z29sZGZpdmV2MWIGcHJvdG8z", [file_google_protobuf_timestamp, file_goldfive_v1_types]);
+  fileDesc("Chhnb2xkZml2ZS92MS9ldmVudHMucHJvdG8SC2dvbGRmaXZlLnYxIsIICgVFdmVudBIQCghldmVudF9pZBgBIAEoCRIOCgZydW5faWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAQSLgoKZW1pdHRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoLcnVuX3N0YXJ0ZWQYCiABKAsyFy5nb2xkZml2ZS52MS5SdW5TdGFydGVkSAASMAoMZ29hbF9kZXJpdmVkGAsgASgLMhguZ29sZGZpdmUudjEuR29hbERlcml2ZWRIABI0Cg5wbGFuX3N1Ym1pdHRlZBgMIAEoCzIaLmdvbGRmaXZlLnYxLlBsYW5TdWJtaXR0ZWRIABIwCgxwbGFuX3JldmlzZWQYDSABKAsyGC5nb2xkZml2ZS52MS5QbGFuUmV2aXNlZEgAEjAKDHRhc2tfc3RhcnRlZBgOIAEoCzIYLmdvbGRmaXZlLnYxLlRhc2tTdGFydGVkSAASMgoNdGFza19wcm9ncmVzcxgPIAEoCzIZLmdvbGRmaXZlLnYxLlRhc2tQcm9ncmVzc0gAEjQKDnRhc2tfY29tcGxldGVkGBAgASgLMhouZ29sZGZpdmUudjEuVGFza0NvbXBsZXRlZEgAEi4KC3Rhc2tfZmFpbGVkGBEgASgLMhcuZ29sZGZpdmUudjEuVGFza0ZhaWxlZEgAEjAKDHRhc2tfYmxvY2tlZBgSIAEoCzIYLmdvbGRmaXZlLnYxLlRhc2tCbG9ja2VkSAASNAoOdGFza19jYW5jZWxsZWQYEyABKAsyGi5nb2xkZml2ZS52MS5UYXNrQ2FuY2VsbGVkSAASNAoOZHJpZnRfZGV0ZWN0ZWQYFCABKAsyGi5nb2xkZml2ZS52MS5EcmlmdERldGVjdGVkSAASMgoNcnVuX2NvbXBsZXRlZBgVIAEoCzIZLmdvbGRmaXZlLnYxLlJ1bkNvbXBsZXRlZEgAEi4KC3J1bl9hYm9ydGVkGBYgASgLMhcuZ29sZGZpdmUudjEuUnVuQWJvcnRlZEgAEkAKFGNvbnZlcnNhdGlvbl9zdGFydGVkGBcgASgLMiAuZ29sZGZpdmUudjEuQ29udmVyc2F0aW9uU3RhcnRlZEgAEjwKEmNvbnZlcnNhdGlvbl9lbmRlZBgYIAEoCzIeLmdvbGRmaXZlLnYxLkNvbnZlcnNhdGlvbkVuZGVkSAASPAoSYXBwcm92YWxfcmVxdWVzdGVkGBkgASgLMh4uZ29sZGZpdmUudjEuQXBwcm92YWxSZXF1ZXN0ZWRIABI4ChBhcHByb3ZhbF9ncmFudGVkGBogASgLMhwuZ29sZGZpdmUudjEuQXBwcm92YWxHcmFudGVkSAASOgoRYXBwcm92YWxfcmVqZWN0ZWQYGyABKAsyHS5nb2xkZml2ZS52MS5BcHByb3ZhbFJlamVjdGVkSABCCQoHcGF5bG9hZCJiCgpSdW5TdGFydGVkEg4KBnJ1bl9pZBgBIAEoCRIUCgxnb2FsX3N1bW1hcnkYAiABKAkSLgoKc3RhcnRlZF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiLwoLR29hbERlcml2ZWQSIAoFZ29hbHMYASADKAsyES5nb2xkZml2ZS52MS5Hb2FsIjAKDVBsYW5TdWJtaXR0ZWQSHwoEcGxhbhgBIAEoCzIRLmdvbGRmaXZlLnYxLlBsYW4isAEKC1BsYW5SZXZpc2VkEh8KBHBsYW4YASABKAsyES5nb2xkZml2ZS52MS5QbGFuEioKCmRyaWZ0X2tpbmQYAiABKA4yFi5nb2xkZml2ZS52MS5EcmlmdEtpbmQSLAoIc2V2ZXJpdHkYAyABKA4yGi5nb2xkZml2ZS52MS5EcmlmdFNldmVyaXR5Eg4KBnJlYXNvbhgEIAEoCRIWCg5yZXZpc2lvbl9pbmRleBgFIAEoDSIuCgtUYXNrU3RhcnRlZBIPCgd0YXNrX2lkGAEgASgJEg4KBmRldGFpbBgCIAEoCSJBCgxUYXNrUHJvZ3Jlc3MSDwoHdGFza19pZBgBIAEoCRIQCghmcmFjdGlvbhgCIAEoAhIOCgZkZXRhaWwYAyABKAkioQEKDVRhc2tDb21wbGV0ZWQSDwoHdGFza19pZBgBIAEoCRIPCgdzdW1tYXJ5GAIgASgJEjwKCWFydGlmYWN0cxgDIAMoCzIpLmdvbGRmaXZlLnYxLlRhc2tDb21wbGV0ZWQuQXJ0aWZhY3RzRW50cnkaMAoOQXJ0aWZhY3RzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASJCCgpUYXNrRmFpbGVkEg8KB3Rhc2tfaWQYASABKAkSDgoGcmVhc29uGAIgASgJEhMKC3JlY292ZXJhYmxlGAMgASgIIj8KC1Rhc2tCbG9ja2VkEg8KB3Rhc2tfaWQYASABKAkSDwoHYmxvY2tlchgCIAEoCRIOCgZuZWVkZWQYAyABKAkiMAoNVGFza0NhbmNlbGxlZBIPCgd0YXNrX2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCSKmAQoNRHJpZnREZXRlY3RlZBIkCgRraW5kGAEgASgOMhYuZ29sZGZpdmUudjEuRHJpZnRLaW5kEiwKCHNldmVyaXR5GAIgASgOMhouZ29sZGZpdmUudjEuRHJpZnRTZXZlcml0eRIOCgZkZXRhaWwYAyABKAkSFwoPY3VycmVudF90YXNrX2lkGAQgASgJEhgKEGN1cnJlbnRfYWdlbnRfaWQYBSABKAkiJwoMUnVuQ29tcGxldGVkEhcKD291dGNvbWVfc3VtbWFyeRgBIAEoCSIcCgpSdW5BYm9ydGVkEg4KBnJlYXNvbhgBIAEoCSJeChNDb252ZXJzYXRpb25TdGFydGVkEhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCRIuCgpzdGFydGVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJQChFDb252ZXJzYXRpb25FbmRlZBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSEgoKdHVybl9jb3VudBgCIAEoDRIOCgZyZWFzb24YAyABKAkixgEKEUFwcHJvdmFsUmVxdWVzdGVkEhEKCXRhcmdldF9pZBgBIAEoCRIMCgRraW5kGAIgASgJEg4KBnByb21wdBgDIAEoCRIPCgd0YXNrX2lkGAQgASgJEj4KCG1ldGFkYXRhGAUgAygLMiwuZ29sZGZpdmUudjEuQXBwcm92YWxSZXF1ZXN0ZWQuTWV0YWRhdGFFbnRyeRovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiNAoPQXBwcm92YWxHcmFudGVkEhEKCXRhcmdldF9pZBgBIAEoCRIOCgZkZXRhaWwYAiABKAkiNQoQQXBwcm92YWxSZWplY3RlZBIRCgl0YXJnZXRfaWQYASABKAkSDgoGZGV0YWlsGAIgASgJQjlaN2dpdGh1Yi5jb20vcGVkYXB1ZGkvZ29sZGZpdmUvZ2VuL2dvbGRmaXZlL3YxO2dvbGRmaXZldjFiBnByb3RvMw", [file_google_protobuf_timestamp, file_goldfive_v1_types]);
 
 /**
  * Event is the uniform envelope wrapping every goldfive event. Sinks
@@ -148,6 +148,36 @@ export type Event = Message<"goldfive.v1.Event"> & {
      */
     value: RunAborted;
     case: "runAborted";
+  } | {
+    /**
+     * @generated from field: goldfive.v1.ConversationStarted conversation_started = 23;
+     */
+    value: ConversationStarted;
+    case: "conversationStarted";
+  } | {
+    /**
+     * @generated from field: goldfive.v1.ConversationEnded conversation_ended = 24;
+     */
+    value: ConversationEnded;
+    case: "conversationEnded";
+  } | {
+    /**
+     * @generated from field: goldfive.v1.ApprovalRequested approval_requested = 25;
+     */
+    value: ApprovalRequested;
+    case: "approvalRequested";
+  } | {
+    /**
+     * @generated from field: goldfive.v1.ApprovalGranted approval_granted = 26;
+     */
+    value: ApprovalGranted;
+    case: "approvalGranted";
+  } | {
+    /**
+     * @generated from field: goldfive.v1.ApprovalRejected approval_rejected = 27;
+     */
+    value: ApprovalRejected;
+    case: "approvalRejected";
   } | { case: undefined; value?: undefined };
 };
 
@@ -536,4 +566,175 @@ export type RunAborted = Message<"goldfive.v1.RunAborted"> & {
  */
 export const RunAbortedSchema: GenMessage<RunAborted> = /*@__PURE__*/
   messageDesc(file_goldfive_v1_events, 13);
+
+/**
+ * Emitted once per Conversation on the first turn that uses it. Sinks
+ * that render cross-turn chat history use this to open a new
+ * conversation context. `run_id` on the envelope is the first turn's
+ * run_id; `conversation_id` below is the stable identifier shared by
+ * every turn in the conversation.
+ *
+ * @generated from message goldfive.v1.ConversationStarted
+ */
+export type ConversationStarted = Message<"goldfive.v1.ConversationStarted"> & {
+  /**
+   * @generated from field: string conversation_id = 1;
+   */
+  conversationId: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp started_at = 2;
+   */
+  startedAt?: Timestamp;
+};
+
+/**
+ * Describes the message goldfive.v1.ConversationStarted.
+ * Use `create(ConversationStartedSchema)` to create a new message.
+ */
+export const ConversationStartedSchema: GenMessage<ConversationStarted> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 14);
+
+/**
+ * Emitted when a caller invokes `Runner.new_conversation()` or closes
+ * the Runner. Signals that no further turns will share this
+ * conversation_id. `turn_count` is the number of turns that ran before
+ * the reset, so sinks can render "3-turn conversation ended".
+ *
+ * @generated from message goldfive.v1.ConversationEnded
+ */
+export type ConversationEnded = Message<"goldfive.v1.ConversationEnded"> & {
+  /**
+   * @generated from field: string conversation_id = 1;
+   */
+  conversationId: string;
+
+  /**
+   * @generated from field: uint32 turn_count = 2;
+   */
+  turnCount: number;
+
+  /**
+   * @generated from field: string reason = 3;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message goldfive.v1.ConversationEnded.
+ * Use `create(ConversationEndedSchema)` to create a new message.
+ */
+export const ConversationEndedSchema: GenMessage<ConversationEnded> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 15);
+
+/**
+ * A human yes/no is required before the run can proceed. Surfaced by:
+ *   * the `report_awaiting_approval` reporting tool (task-level, Flow A),
+ *     where `target_id` is the task id and `kind` = "task";
+ *   * the ADKAdapter's before_tool_callback on a `require_confirmation=True`
+ *     tool (tool-level, Flow B), where `target_id` is the ADK function-call
+ *     id and `kind` = "tool".
+ * Either flow resolves with a ControlMessage(APPROVE|REJECT, {"target_id": ...})
+ * which the executor dispatches back onto `session.pending_approvals`.
+ *
+ * @generated from message goldfive.v1.ApprovalRequested
+ */
+export type ApprovalRequested = Message<"goldfive.v1.ApprovalRequested"> & {
+  /**
+   * Target the APPROVE/REJECT control must quote back: task_id for Flow A,
+   * ADK function-call id (e.g. "adk-<uuid>") for Flow B.
+   *
+   * @generated from field: string target_id = 1;
+   */
+  targetId: string;
+
+  /**
+   * "task" or "tool".
+   *
+   * @generated from field: string kind = 2;
+   */
+  kind: string;
+
+  /**
+   * Human-readable question the UI should render to the human ("ok to spend
+   * $500?", "Run write_file(path='/etc/passwd')?").
+   *
+   * @generated from field: string prompt = 3;
+   */
+  prompt: string;
+
+  /**
+   * The goldfive task context in which the approval arose. Same as
+   * `target_id` for Flow A; the task the agent was working on for Flow B.
+   *
+   * @generated from field: string task_id = 4;
+   */
+  taskId: string;
+
+  /**
+   * Free-form metadata. Tool-level approvals set "tool_name" and
+   * "args_json"; task-level approvals may set custom keys.
+   *
+   * @generated from field: map<string, string> metadata = 5;
+   */
+  metadata: { [key: string]: string };
+};
+
+/**
+ * Describes the message goldfive.v1.ApprovalRequested.
+ * Use `create(ApprovalRequestedSchema)` to create a new message.
+ */
+export const ApprovalRequestedSchema: GenMessage<ApprovalRequested> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 16);
+
+/**
+ * APPROVE resolution for an ApprovalRequested. Emitted after the control
+ * dispatcher sets the pending-approval waiter.
+ *
+ * @generated from message goldfive.v1.ApprovalGranted
+ */
+export type ApprovalGranted = Message<"goldfive.v1.ApprovalGranted"> & {
+  /**
+   * @generated from field: string target_id = 1;
+   */
+  targetId: string;
+
+  /**
+   * @generated from field: string detail = 2;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message goldfive.v1.ApprovalGranted.
+ * Use `create(ApprovalGrantedSchema)` to create a new message.
+ */
+export const ApprovalGrantedSchema: GenMessage<ApprovalGranted> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 17);
+
+/**
+ * REJECT resolution for an ApprovalRequested. The agent (Flow A) decides
+ * whether this maps to TaskFailed; the adapter (Flow B) returns a skipped-
+ * tool response to the model.
+ *
+ * @generated from message goldfive.v1.ApprovalRejected
+ */
+export type ApprovalRejected = Message<"goldfive.v1.ApprovalRejected"> & {
+  /**
+   * @generated from field: string target_id = 1;
+   */
+  targetId: string;
+
+  /**
+   * @generated from field: string detail = 2;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message goldfive.v1.ApprovalRejected.
+ * Use `create(ApprovalRejectedSchema)` to create a new message.
+ */
+export const ApprovalRejectedSchema: GenMessage<ApprovalRejected> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 18);
 

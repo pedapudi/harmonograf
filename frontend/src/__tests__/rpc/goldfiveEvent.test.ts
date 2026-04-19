@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { create } from '@bufbuild/protobuf';
 import { SessionStore } from '../../gantt/index';
 import { applyGoldfiveEvent } from '../../rpc/goldfiveEvent';
@@ -13,6 +13,9 @@ import {
   TaskCancelledSchema,
   DriftDetectedSchema,
   RunStartedSchema,
+  ApprovalRequestedSchema,
+  ApprovalGrantedSchema,
+  ApprovalRejectedSchema,
 } from '../../pb/goldfive/v1/events_pb';
 import {
   PlanSchema,
@@ -21,6 +24,7 @@ import {
   DriftKind,
   DriftSeverity,
 } from '../../pb/goldfive/v1/types_pb';
+import { useApprovalsStore } from '../../state/approvalsStore';
 
 function makePbTask(id: string, status: TaskStatus = TaskStatus.PENDING) {
   return create(TaskSchema, {
@@ -194,6 +198,198 @@ describe('applyGoldfiveEvent', () => {
       ),
     ).not.toThrow();
     expect(store.tasks.size).toBe(0);
+  });
+
+  describe('approval events', () => {
+    beforeEach(() => {
+      useApprovalsStore.setState({ bySession: new Map() });
+    });
+
+    it('approvalRequested pushes a PendingApproval into the approvals store', () => {
+      const store = new SessionStore();
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev-ar',
+          runId: 'run-1',
+          sequence: 0n,
+          payload: {
+            case: 'approvalRequested',
+            value: create(ApprovalRequestedSchema, {
+              targetId: 'adk-call-1',
+              kind: 'tool',
+              prompt: 'Run write_file(path=/etc/passwd)?',
+              taskId: 't-1',
+              metadata: {
+                tool_name: 'write_file',
+                args_json: '{"path": "/etc/passwd"}',
+              },
+            }),
+          },
+        }),
+        store,
+        0,
+        'sess-x',
+      );
+
+      const list = useApprovalsStore.getState().list('sess-x');
+      expect(list).toHaveLength(1);
+      expect(list[0].targetId).toBe('adk-call-1');
+      expect(list[0].kind).toBe('tool');
+      expect(list[0].prompt).toBe('Run write_file(path=/etc/passwd)?');
+      expect(list[0].taskId).toBe('t-1');
+      expect(list[0].metadata.tool_name).toBe('write_file');
+      expect(list[0].metadata.args_json).toBe('{"path": "/etc/passwd"}');
+    });
+
+    it('approvalRequested without a sessionId is a no-op', () => {
+      const store = new SessionStore();
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev-ar',
+          runId: 'run-1',
+          sequence: 0n,
+          payload: {
+            case: 'approvalRequested',
+            value: create(ApprovalRequestedSchema, {
+              targetId: 't-1',
+              kind: 'task',
+              prompt: 'ok?',
+              taskId: 't-1',
+            }),
+          },
+        }),
+        store,
+        0,
+      );
+      expect(useApprovalsStore.getState().bySession.size).toBe(0);
+    });
+
+    it('approvalGranted dismisses the matching ApprovalRequested', () => {
+      const store = new SessionStore();
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev-ar',
+          runId: 'run-1',
+          sequence: 0n,
+          payload: {
+            case: 'approvalRequested',
+            value: create(ApprovalRequestedSchema, {
+              targetId: 't-1',
+              kind: 'task',
+              prompt: 'ok?',
+              taskId: 't-1',
+            }),
+          },
+        }),
+        store,
+        0,
+        'sess-x',
+      );
+      expect(useApprovalsStore.getState().list('sess-x')).toHaveLength(1);
+
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev-ag',
+          runId: 'run-1',
+          sequence: 1n,
+          payload: {
+            case: 'approvalGranted',
+            value: create(ApprovalGrantedSchema, {
+              targetId: 't-1',
+              detail: 'user approved',
+            }),
+          },
+        }),
+        store,
+        0,
+        'sess-x',
+      );
+      expect(useApprovalsStore.getState().list('sess-x')).toHaveLength(0);
+    });
+
+    it('approvalRejected dismisses the matching ApprovalRequested', () => {
+      const store = new SessionStore();
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev-ar',
+          runId: 'run-1',
+          sequence: 0n,
+          payload: {
+            case: 'approvalRequested',
+            value: create(ApprovalRequestedSchema, {
+              targetId: 't-1',
+              kind: 'task',
+              prompt: 'ok?',
+              taskId: 't-1',
+            }),
+          },
+        }),
+        store,
+        0,
+        'sess-x',
+      );
+
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev-aj',
+          runId: 'run-1',
+          sequence: 1n,
+          payload: {
+            case: 'approvalRejected',
+            value: create(ApprovalRejectedSchema, {
+              targetId: 't-1',
+              detail: 'nope',
+            }),
+          },
+        }),
+        store,
+        0,
+        'sess-x',
+      );
+      expect(useApprovalsStore.getState().list('sess-x')).toHaveLength(0);
+    });
+
+    it('binds the approval to the assignee agent when the plan has seen the task', () => {
+      const store = new SessionStore();
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev-plan',
+          runId: 'run-1',
+          sequence: 0n,
+          payload: {
+            case: 'planSubmitted',
+            value: create(PlanSubmittedSchema, {
+              plan: makePbPlan('p1', ['t-1']),
+            }),
+          },
+        }),
+        store,
+        0,
+        'sess-x',
+      );
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev-ar',
+          runId: 'run-1',
+          sequence: 1n,
+          payload: {
+            case: 'approvalRequested',
+            value: create(ApprovalRequestedSchema, {
+              targetId: 't-1',
+              kind: 'task',
+              prompt: 'ok?',
+              taskId: 't-1',
+            }),
+          },
+        }),
+        store,
+        0,
+        'sess-x',
+      );
+      const [entry] = useApprovalsStore.getState().list('sess-x');
+      // makePbTask sets assigneeAgentId = 'agent-a'.
+      expect(entry.agentId).toBe('agent-a');
+    });
   });
 
   it('drift_detected / run_started are accepted without mutating the task store', () => {

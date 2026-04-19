@@ -343,7 +343,12 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
               // PR #14). Dispatch lives in goldfiveEvent.ts so the
               // translation is testable without standing up a mocked
               // Connect transport.
-              applyGoldfiveEvent(kind.value, store, origin?.startMs ?? 0);
+              applyGoldfiveEvent(
+                kind.value,
+                store,
+                origin?.startMs ?? 0,
+                sessionId,
+              );
               break;
             }
             case 'taskReport': {
