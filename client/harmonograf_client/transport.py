@@ -52,6 +52,10 @@ RECONNECT_INITIAL_MS = 100
 RECONNECT_MAX_MS = 30_000
 SEND_BATCH_MAX = 64
 PAYLOAD_CHUNK_INTERLEAVE = 10  # one chunk per N span messages
+# Upper bound on the shutdown-time wait for the server to close its
+# response stream after we sent Goodbye + EOF. Keeps a flush_timeout=5s
+# Client.shutdown from stalling indefinitely on a hung server.
+_SHUTDOWN_DRAIN_TIMEOUT_S = 2.0
 BREAKER_FAILURE_THRESHOLD = 10
 BREAKER_COOLDOWN_MS = 60_000
 
@@ -450,6 +454,24 @@ class Transport:
             {recv_task, control_task, send_task},
             return_when=asyncio.FIRST_COMPLETED,
         )
+        # On clean shutdown — send_task exited because ``_stop`` was set —
+        # the send_loop has already drained the ring buffer and put Goodbye
+        # + EOF on the queue. gRPC is still yielding those items to the
+        # server; cancelling recv_task now would abort the bidi call and
+        # drop pending events in transit. Wait for the server to close
+        # its side (recv_task returns naturally) before tearing down.
+        if (
+            self._stop.is_set()
+            and send_task in done
+            and not send_task.cancelled()
+            and recv_task not in done
+        ):
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(recv_task), timeout=_SHUTDOWN_DRAIN_TIMEOUT_S
+                )
+            except (asyncio.TimeoutError, Exception):
+                pass
         for t in pending:
             t.cancel()
         for t in pending:
@@ -457,15 +479,6 @@ class Transport:
                 await t
             except Exception:
                 pass
-        # If the stop flag is set, send a Goodbye and close the queue.
-        if self._stop.is_set():
-            try:
-                await send_queue.put(
-                    telemetry_pb2.TelemetryUp(goodbye=telemetry_pb2.Goodbye(reason="shutdown"))
-                )
-            except Exception:
-                pass
-            await send_queue.put(None)
         for t in done:
             exc = t.exception()
             if exc is not None and not isinstance(exc, asyncio.CancelledError):
@@ -479,43 +492,72 @@ class Transport:
         from .pb import telemetry_pb2
 
         last_hb = time.monotonic()
-        while not self._stop.is_set():
-            try:
-                await asyncio.wait_for(self._wake.wait(), timeout=self._config.heartbeat_interval_s)
-            except asyncio.TimeoutError:
-                pass
-            self._wake.clear()
+        try:
+            while not self._stop.is_set():
+                try:
+                    await asyncio.wait_for(self._wake.wait(), timeout=self._config.heartbeat_interval_s)
+                except asyncio.TimeoutError:
+                    pass
+                self._wake.clear()
 
-            # Drain envelopes in small batches, interleaving payload chunks.
-            sent_since_chunk = 0
-            batch = self._events.pop_batch(SEND_BATCH_MAX)
-            for env in batch:
-                up = self._envelope_to_up(env, telemetry_pb2)
-                if up is not None:
-                    # Track resume token: server will ack via normal
-                    # downstream, but we also keep the last span id we
-                    # sent so reconnect can resume from there.
-                    self._resume_token = env.span_id or self._resume_token
-                    await send_queue.put(up)
+                # Drain envelopes in small batches, interleaving payload chunks.
+                sent_since_chunk = 0
+                batch = self._events.pop_batch(SEND_BATCH_MAX)
+                for env in batch:
+                    up = self._envelope_to_up(env, telemetry_pb2)
+                    if up is not None:
+                        # Track resume token: server will ack via normal
+                        # downstream, but we also keep the last span id we
+                        # sent so reconnect can resume from there.
+                        self._resume_token = env.span_id or self._resume_token
+                        await send_queue.put(up)
+                        self._mark_healthy()
+                        sent_since_chunk += 1
+                    if sent_since_chunk >= PAYLOAD_CHUNK_INTERLEAVE:
+                        await self._maybe_send_chunk(send_queue, telemetry_pb2)
+                        sent_since_chunk = 0
+
+                # Flush any leftover payload chunks if we weren't busy.
+                while True:
+                    pushed = await self._maybe_send_chunk(send_queue, telemetry_pb2)
+                    if not pushed:
+                        break
+
+                # Heartbeat tick.
+                now = time.monotonic()
+                if now - last_hb >= self._config.heartbeat_interval_s:
+                    last_hb = now
+                    hb = self._build_heartbeat(telemetry_pb2)
+                    await send_queue.put(telemetry_pb2.TelemetryUp(heartbeat=hb))
                     self._mark_healthy()
-                    sent_since_chunk += 1
-                if sent_since_chunk >= PAYLOAD_CHUNK_INTERLEAVE:
-                    await self._maybe_send_chunk(send_queue, telemetry_pb2)
-                    sent_since_chunk = 0
-
-            # Flush any leftover payload chunks if we weren't busy.
-            while True:
-                pushed = await self._maybe_send_chunk(send_queue, telemetry_pb2)
-                if not pushed:
-                    break
-
-            # Heartbeat tick.
-            now = time.monotonic()
-            if now - last_hb >= self._config.heartbeat_interval_s:
-                last_hb = now
-                hb = self._build_heartbeat(telemetry_pb2)
-                await send_queue.put(telemetry_pb2.TelemetryUp(heartbeat=hb))
-                self._mark_healthy()
+        finally:
+            # Shutdown path. Drain any envelopes still in the ring buffer —
+            # Client.shutdown spins until the buffer is empty, but a race
+            # can leave a trailing batch that the while-loop never observed
+            # (stop was set between the last pop_batch and the next check).
+            # Without this flush, events the caller *successfully emitted*
+            # get silently dropped. Then send Goodbye + EOF so gRPC closes
+            # the request side cleanly after yielding every queued item.
+            try:
+                remaining = self._events.pop_batch(self._events.capacity)
+                for env in remaining:
+                    up = self._envelope_to_up(env, telemetry_pb2)
+                    if up is not None:
+                        self._resume_token = env.span_id or self._resume_token
+                        await send_queue.put(up)
+                try:
+                    await send_queue.put(
+                        telemetry_pb2.TelemetryUp(
+                            goodbye=telemetry_pb2.Goodbye(reason="shutdown")
+                        )
+                    )
+                except Exception:
+                    pass
+                await send_queue.put(None)
+            except Exception:
+                # Best-effort: if the loop is tearing down for any reason,
+                # don't mask the original error.
+                pass
 
     async def _maybe_send_chunk(self, send_queue: asyncio.Queue, telemetry_pb2: Any) -> bool:
         with self._chunk_lock:
