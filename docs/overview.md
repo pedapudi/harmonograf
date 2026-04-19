@@ -89,40 +89,33 @@ traced back to at least one of them.
 
 ### 1. Explicit state machine beats span inference
 
-Task state in harmonograf transitions only when an agent explicitly says so, via a
-small set of reporting tools injected into every sub-agent:
+Task state transitions only when an agent explicitly says so, via a small set of
+reporting tools injected into every sub-agent: `report_task_started`,
+`report_task_progress`, `report_task_completed`, `report_task_failed`,
+`report_task_blocked`, `report_new_work_discovered`, `report_plan_divergence`.
+The tools themselves, the state machine they drive, and the monotonicity
+invariants live in [goldfive](https://github.com/pedapudi/goldfive) — the
+orchestration project harmonograf composes with. Goldfive emits
+`TaskStarted` / `TaskCompleted` / `TaskFailed` / `DriftDetected` events, and
+`HarmonografSink` ships them up the harmonograf telemetry stream as
+`TelemetryUp.goldfive_event`.
 
-- `report_task_started`
-- `report_task_progress`
-- `report_task_completed`
-- `report_task_failed`
-- `report_task_blocked`
-- `report_new_work_discovered`
-- `report_plan_divergence`
-
-The tool bodies return `{"acknowledged": true}` and nothing else; the real side
-effect happens in `before_tool_callback`, which routes the call into the client
-library's `_AdkState` and applies the transition. Spans are still emitted for every
-ADK callback — they are telemetry, they are not state.
-
-The state machine is monotonic and single-writer per task: one call, one
-transition, one source of truth. Full reference:
-[reporting-tools.md](reporting-tools.md).
+Spans are still emitted for every ADK callback — they are telemetry, not
+state. The separation is the single most important architectural commitment
+in the stack.
 
 ### 2. Drift is a first-class event
 
 When something about the plan no longer matches reality — a tool errored, an agent
-refused, a new sub-task was discovered, a deadline slipped, a user steered, context
-pressure crossed a threshold — the client library fires a *deferential refine*: a
-structured call back into the planner with the current plan and the drift context.
-The planner returns a revised plan, which flows back through `TaskRegistry` and
-produces a plan diff (added / removed / reordered / re-parented tasks). The frontend
-renders that diff as a banner with a side-drawer comparison.
+refused, a new sub-task was discovered, context pressure crossed a threshold — goldfive
+fires a *deferential refine*: a structured call back into the planner with the
+current plan and the drift context. The planner returns a revised plan; goldfive
+emits a `PlanRevised` event, which flows through `HarmonografSink` → server
+ingest → the frontend's `TaskRegistry` → `computePlanDiff`. The frontend renders
+the resulting diff as a banner with a side-drawer comparison.
 
-The drift taxonomy has roughly two dozen kinds today, ranging from `tool_error` and
-`agent_refusal` through `context_pressure`, `new_work_discovered`,
-`plan_divergence`, `user_steer`, `user_cancel`, `task_failed_recoverable`, and
-`task_failed_fatal`. Each kind has a defined refine behaviour.
+The drift taxonomy is goldfive's. Harmonograf maps each `DriftKind` to a UI
+badge in `frontend/src/gantt/driftKinds.ts`.
 
 ### 3. Bidirectional by default
 
@@ -135,15 +128,13 @@ task) goes through this path.
 
 ### 4. Respect the framework sandbox
 
-Harmonograf integrates with ADK through the official seams: callbacks
-(`before_tool_callback`, `after_model_callback`, `on_event_callback`), session
-state (`session.state["harmonograf.*"]`), and normal tools. It does not monkeypatch
-ADK internals. One consequence: if a feature cannot be expressed inside ADK's
-model, harmonograf does without it rather than reaching around the framework.
-
-The client library is framework-agnostic at its core; the ADK-specific code lives
-in `client/harmonograf_client/adk.py` so a future Strands or OpenAI Agents SDK
-adapter is a sibling module, not a rewrite.
+Goldfive's `ADKAdapter` integrates with ADK through the official seams:
+callbacks (`before_tool_callback`, `after_model_callback`,
+`on_event_callback`), session state (`SessionContext` on `session.state`),
+and normal tools. Harmonograf's own `HarmonografTelemetryPlugin` is a plain
+ADK `BasePlugin` that emits spans for each callback. Neither monkeypatches
+ADK. A future OpenAI Agents SDK / Strands adapter would be a sibling module
+inside goldfive, not a rewrite.
 
 ### 5. One canonical timeline
 
@@ -162,18 +153,17 @@ landing continuously.
 
 ### Client library (`client/`)
 
-- **ADK plugin** (`attach_adk`) that wires reporting tools, callbacks, session-state
-  keys, and the ingest transport into an existing ADK agent graph.
-- **Reporting tools** injected into every sub-agent wrapped by `HarmonografAgent`.
-- **Session-state protocol** (`state_protocol.py`) defining the canonical
-  `harmonograf.*` keys agents read and write.
-- **Three orchestration modes** — sequential, parallel (DAG walker), delegated.
-- **Dynamic replan** with ~26 drift kinds and plan-diff computation on the server.
-- **Buffered transport** (`buffer.py`, `transport.py`) that survives server
-  restarts and short network blips without dropping telemetry.
+- **`Client`** — non-blocking handle over a buffered gRPC transport
+  (`buffer.py`, `transport.py`) that survives server restarts and short network
+  blips without dropping telemetry; owns identity, heartbeat, control-handler
+  registration.
+- **`HarmonografSink`** — `goldfive.EventSink` adapter that ships every
+  goldfive plan / task / drift event up the telemetry stream via a
+  `TelemetryUp.goldfive_event` variant.
+- **`HarmonografTelemetryPlugin`** — optional ADK `BasePlugin` that emits
+  harmonograf spans for ADK lifecycle callbacks.
 - **Heartbeat + liveness tracking** so the UI can show stuck / slow agents.
-- **Identity and invariants** — agent naming, span ordering guarantees, monotonic
-  task state invariants.
+- **Agent identity on disk** so a restarted agent reclaims its Gantt row.
 
 ### Server (`server/`)
 

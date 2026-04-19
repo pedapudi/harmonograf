@@ -1,5 +1,10 @@
 # Runbook: Task stuck in RUNNING
 
+> **Post-goldfive note.** Task state transitions and drift throttling
+> live in [goldfive](https://github.com/pedapudi/goldfive). `adk.py`
+> line-number references below are historical; check goldfive's
+> `DefaultSteerer` for current implementation.
+
 A task entered RUNNING and never completes. The agent row has an amber
 "stuck" marker; heartbeats still arrive; spans still end, but the task
 itself never progresses.

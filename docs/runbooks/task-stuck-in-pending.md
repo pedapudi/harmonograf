@@ -1,5 +1,12 @@
 # Runbook: Task stuck in PENDING
 
+> **Post-goldfive note.** Reporting-tool interception, the plan walker,
+> and the task state machine live in
+> [goldfive](https://github.com/pedapudi/goldfive) now. Line numbers
+> below reference the pre-migration `adk.py` and will not resolve.
+> Treat the conceptual triage as still accurate, but look in goldfive's
+> `DefaultSteerer` / `ADKAdapter` / executor code for the actual logic.
+
 The plan is rendered, tasks are visible in the Gantt and drawer, but
 they never transition to RUNNING. The current-task strip stays empty
 or keeps displaying "no current task".

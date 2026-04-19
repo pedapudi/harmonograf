@@ -140,11 +140,14 @@ flowchart TD
     Server <-- "gRPC :7531" --> C
 ```
 
-**Client library** (`client/`). Embedded inside each agent process. Ships an
-ADK plugin (`attach_adk`) that wires reporting tools, callbacks, session-state
-keys, and the ingest transport into an existing ADK agent graph with one line
-of code. Owns the task state machine, the drift taxonomy, the refine
-pipeline, and the buffered transport that survives server restarts.
+**Client library** (`client/`). Embedded inside each agent process. Exposes
+`Client` for span transport, `HarmonografSink` (a `goldfive.EventSink`) to
+ship plan/task/drift events up the telemetry stream, and an optional
+`HarmonografTelemetryPlugin` ADK `BasePlugin` that emits spans on lifecycle
+callbacks. The orchestration logic — task state machine, drift taxonomy,
+refine pipeline, planner — lives in
+[goldfive](https://github.com/pedapudi/goldfive); the harmonograf client
+is the observability tap on top of it.
 
 **Server** (`server/`). Terminates every client connection. Owns the
 canonical timeline. Persists it to SQLite (or in-memory for tests). Fans out
@@ -198,8 +201,8 @@ sequenceDiagram
 Now in detail, at a level you can see in the harmonograf UI:
 
 **Step 1 — the coordinator plans.** ADK routes your prompt to
-`presentation_agent`, which is wrapped by `HarmonografAgent`. The
-coordinator LLM is asked to produce a plan. It emits a structured plan with
+`presentation_agent`. `goldfive.Runner` owns the outer loop and asks the
+coordinator LLM to produce a plan via `goldfive.LLMPlanner`. It emits a structured plan with
 tasks like `research_python`, `design_outline`, `build_slides`, `review`.
 Harmonograf's client library sees the plan and calls `TaskRegistry.upsertPlan`
 on the server, which stores it and pushes it out to any subscribed frontend.

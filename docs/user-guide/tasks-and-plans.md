@@ -72,20 +72,20 @@ strip sticks to the completed task so you still have context.
 
 ### Orchestration modes
 
-The mode chip corresponds to one of three `HarmonografAgent` modes:
+The mode chip corresponds to the executor chosen when the agent's
+`goldfive.Runner` was constructed:
 
 | Chip | Mode | Tooltip |
 |---|---|---|
-| `SEQ` | **Sequential** | Single-pass coordinator LLM executes the full plan; lifecycle reported via reporting tools. |
-| `PAR` | **Parallel** | Rigid DAG batch walker drives sub-agents directly, respecting plan edge dependencies. |
-| `OBS` | **Delegated / Observer** | Inner agent owns its sequencing; harmonograf only watches for drift. |
+| `SEQ` | **Sequential** (`SequentialExecutor`) | Single-pass coordinator LLM executes the full plan; lifecycle reported via reporting tools. |
+| `PAR` | **Parallel** (`ParallelDAGExecutor`) | Rigid DAG batch walker drives sub-agents directly, respecting plan edge dependencies. |
+| `OBS` | **Delegated / Observer** | Inner agent owns its sequencing; goldfive watches for drift after the fact. |
 
 The strip reads the mode from the assignee agent's metadata. Agents
 without metadata don't render a chip.
 
-When is each mode in use? All three are available to `HarmonografAgent`
-(see `AGENTS.md`). Which one actually runs is determined by how the agent
-was constructed, not by anything the UI controls.
+Which mode runs is determined by how the agent's `goldfive.Runner` was
+constructed, not by anything the UI controls.
 
 ## PlanRevisionBanner
 

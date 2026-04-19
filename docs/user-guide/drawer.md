@@ -99,9 +99,9 @@ several attributes the client may have written to this span:
 - **Current Task report** — the `task_report` attribute, shown in a
   monospace pre block. This is what the agent is telling harmonograf it's
   doing right now.
-- **Model thinking** — prefers `llm.thought` (the HarmonografAgent
-  aggregate), falls back to `thinking_text` and then `thinking_preview`
-  (the plugin's streaming capture). Rendered monospace, ≤300px tall with
+- **Model thinking** — prefers `llm.thought` (the goldfive-side aggregate),
+  falls back to `thinking_text` and then `thinking_preview` (the plugin's
+  streaming capture). Rendered monospace, ≤300px tall with
   its own scroll. The label says `(live)` when the span is still running
   and `has_thinking` is true.
 - **Agent Role** — the `agent_description` attribute, if the client wrote

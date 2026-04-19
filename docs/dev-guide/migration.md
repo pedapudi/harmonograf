@@ -18,7 +18,7 @@ stubs and you are about to commit.
 |---|---|---|
 | Wire protocol | `proto/harmonograf/v1/*.proto` | Field numbers, enum tags, oneof membership |
 | Storage schema | `SqliteStore.SCHEMA` at `sqlite.py:45-168` | `CREATE TABLE` DDL + `ALTER TABLE` backfill |
-| Session-state keys | `client/harmonograf_client/state_protocol.py` | String keys agents read/write in `session.state` |
+| Session-state keys | goldfive `SessionContext` (`goldfive.adapters.adk`) | Typed context agents read/write on ADK `session.state` |
 
 They evolve at different speeds and under different rules. Protos are
 the hardest to change because the generated code lands in three
@@ -392,25 +392,11 @@ corrupting old sessions is worse than dropping them loudly.
 
 ## Session-state key evolution
 
-The `harmonograf.*` keys in `session.state` are defined in
-`client/harmonograf_client/state_protocol.py` and documented in
-[`AGENTS.md`](../../AGENTS.md) §"Plan execution protocol". They are
-in-process only — keys do not cross a process boundary, they cross a
-function call inside the agent runtime. Evolution rules are
-correspondingly relaxed:
-
-- **Adding a key** is always safe. Reader code uses `dict.get(key, default)`.
-- **Renaming a key** is a one-commit change: update the writers and
-  the readers in lockstep because they all live in the same
-  package.
-- **Removing a key** is a one-commit change as long as the removal
-  leaves no dangling reader. Grep for the string before deleting.
-
-The only cross-version hazard here is **persisted state** — if a
-session is resumed from a crash dump that contains the old key,
-the new code will not see it. The reporting protocol does not
-persist session state across process restarts in v0, so this is
-theoretical.
+After the goldfive migration, session-state coordination lives in
+goldfive's `SessionContext` dataclass (`goldfive.adapters.adk`) —
+harmonograf no longer owns the `harmonograf.*` key schema. Evolution
+of that schema is a goldfive concern. See goldfive's docs for the
+current reader/writer contract.
 
 ## Checklist for a proto change
 

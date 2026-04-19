@@ -1,5 +1,12 @@
 # Runbook: Thinking not visible
 
+> **Post-goldfive note.** The `llm.thought` aggregate referenced below
+> is now emitted by goldfive's `ADKAdapter`, not the old
+> `HarmonografAgent`. Harmonograf still stamps `thinking_text` /
+> `thinking_preview` from its telemetry plugin. The UI selection order
+> is unchanged; log lines about `record_llm_thought` / `agent.py` come
+> from goldfive now.
+
 The agent's LLM is emitting reasoning ("thinking") content but the UI
 isn't rendering it. Either the bars are missing from the Gantt's
 thinking track, or the drawer's Thinking tab is empty.

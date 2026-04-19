@@ -31,7 +31,7 @@ sequenceDiagram
 - All three advertise `PAUSE_RESUME` and `STEERING`. Approve / reject
   are always available regardless of capabilities (see
   [control-actions.md → capability negotiation](../control-actions.md#capability-negotiation)).
-- Framework: ADK with `HarmonografAgent` wrapping the coordinator.
+- Framework: ADK wired through `goldfive.Runner` + `goldfive.adapters.adk.ADKAdapter`; harmonograf contributes span telemetry via `HarmonografTelemetryPlugin`.
 
 ## Timeline
 

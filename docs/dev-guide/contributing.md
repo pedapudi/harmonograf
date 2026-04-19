@@ -124,9 +124,9 @@ in the PR.
 |---|---|
 | A new field on a domain type | `proto/harmonograf/v1/types.proto`, regen, then `convert.py`, `storage/base.py`, `storage/sqlite.py` |
 | A new RPC | `proto/harmonograf/v1/service.proto` or `frontend.proto`, regen, then a handler in `server/harmonograf_server/rpc/` |
-| A new reporting tool | `client/harmonograf_client/tools.py` + interception in `adk.py` + invariant rule in `invariants.py` + test in `test_reporting_tools.py` |
-| A new drift kind | `client/harmonograf_client/adk.py` (`DRIFT_KIND_*` constants + classifier) + `frontend/src/gantt/driftKinds.ts` + test in `test_drift_taxonomy.py` |
-| A new invariant rule | `client/harmonograf_client/invariants.py` + test in `test_invariants.py` |
+| A new reporting tool | Lands in [goldfive](https://github.com/pedapudi/goldfive) (`goldfive.reporting` + `goldfive.DefaultSteerer`). Harmonograf picks it up because `HarmonografSink` forwards every `goldfive.v1.Event` variant. |
+| A new drift kind | Lands in goldfive (`goldfive.DriftKind` + classifier). In harmonograf: add a UI badge in `frontend/src/gantt/driftKinds.ts`. |
+| A new invariant rule | Lands in goldfive — harmonograf no longer owns plan-state invariants. |
 | A new storage backend | `server/harmonograf_server/storage/<kind>.py` implementing `Storage` ABC, register in `factory.py`, tested via `test_storage_extensive.py` |
 | A new UI view | `frontend/src/components/shell/views/` + wire into `Shell.tsx` + state in `uiStore.ts` |
 | A new frontend RPC hook | `frontend/src/rpc/hooks.ts` |

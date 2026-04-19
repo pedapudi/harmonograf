@@ -145,7 +145,7 @@ tab exposes `Approve` / `Reject` buttons while the status holds. See
 
 Click a running INVOCATION or LLM span on the Gantt. In the drawer's
 **Task** tab, look for the **Model thinking** block. It prefers
-`llm.thought` (the HarmonografAgent aggregate), falls back to
+`llm.thought` (the goldfive-side aggregate), falls back to
 `thinking_text`, then `thinking_preview`. The label says `(live)` while
 the span is running and `has_thinking=true`. See
 [drawer.md → task tab](drawer.md#task-tab).
@@ -173,29 +173,31 @@ See [`docs/protocol/data-model.md`](../protocol/data-model.md) :: Span.attribute
 
 ### What are `SEQ`, `PAR`, and `OBS`?
 
-The three orchestration modes of `HarmonografAgent`, rendered as chips on
+The three executor modes exposed by
+[goldfive](https://github.com/pedapudi/goldfive), rendered as chips on
 the current task strip and described in
 [tasks-and-plans.md → orchestration modes](tasks-and-plans.md#orchestration-modes):
 
-- **`SEQ`** — Sequential. Single-pass coordinator LLM runs the whole
-  plan; per-task lifecycle reported via reporting tools.
-- **`PAR`** — Parallel. A rigid DAG batch walker drives sub-agents
-  directly, respecting plan edges as dependencies.
-- **`OBS`** — Delegated / Observer. Inner agent owns its own task
-  sequencing; harmonograf only watches for drift.
+- **`SEQ`** — `goldfive.SequentialExecutor`. Single-pass coordinator LLM
+  runs the whole plan; per-task lifecycle reported via reporting tools.
+- **`PAR`** — `goldfive.ParallelDAGExecutor`. A DAG batch walker drives
+  sub-agents directly, respecting plan edges as dependencies.
+- **`OBS`** — Delegated / observer mode. Inner agent owns its own task
+  sequencing; goldfive and harmonograf watch for drift.
 
-Which mode a session is in is fixed at agent construction time, not
+Which mode a session is in is fixed at `Runner` construction time, not
 toggleable from the UI.
 
 ### How do sub-agents know which task they are on in parallel mode?
 
-The parallel walker sets a `forced_task_id` ContextVar before invoking
-the sub-agent; the harmonograf client reads it in
-`_stamp_attrs_with_task` and writes `hgraf.task_id = <task.id>` on every
-span opened during the sub-agent's run. The terminal transition is
-enforced monotonic, so the walker cannot rewind a completed task. See
-`AGENTS.md` for the full protocol and
-`client/harmonograf_client/adk.py` for the implementation.
+The parallel executor sets a task-id ContextVar before invoking the
+sub-agent; goldfive's `ADKAdapter` stamps it on agent traffic. The
+harmonograf side reads it and writes `hgraf.task_id = <task.id>` on
+every span opened during the sub-agent's run. Task terminal transitions
+are enforced monotonic inside goldfive's `DefaultSteerer`, so the
+walker cannot rewind a completed task. See
+[../goldfive-integration.md](../goldfive-integration.md) for the
+integration overview.
 
 ## Payloads
 

@@ -14,11 +14,15 @@ A filled 16 px-wide box on an agent column in the [Graph view](graph-view.md#act
 marking the time range of one INVOCATION span on that agent.
 
 ### ADK
-Google's **Agent Development Kit**. Harmonograf's client library has
-first-class support for ADK — the `adk.py` module wires into ADK's
-`before_model_callback`, `after_model_callback`, `before_tool_callback`,
-`after_tool_callback`, and `on_event_callback`. See `AGENTS.md` for
-the full execution protocol.
+Google's **Agent Development Kit**. The orchestration adapter for ADK
+lives in [goldfive](https://github.com/pedapudi/goldfive)
+(`goldfive.adapters.adk.ADKAdapter`). Harmonograf contributes an
+optional observability plugin (`HarmonografTelemetryPlugin`) that hooks
+ADK's `before_model_callback`, `after_model_callback`,
+`before_tool_callback`, `after_tool_callback`, and `on_event_callback`
+to emit spans. See `AGENTS.md` for the project-level split and
+[goldfive-integration.md](../goldfive-integration.md) for the composition
+pattern.
 
 ### Agent
 One entity that reports telemetry to the harmonograf server. Identified
@@ -106,11 +110,10 @@ plan in one turn and reports per-task lifecycle via the reporting tools.
 Contrast with the **walker** in parallel mode.
 
 ### `ContextVar`
-Python primitive (`contextvars.ContextVar`) used by the client's
-parallel walker to plumb a `forced_task_id` down to the sub-agent call
-site without threading it through every argument. Read by
-`_stamp_attrs_with_task` to stamp spans with their owning task. See
-`AGENTS.md` and `client/harmonograf_client/adk.py`.
+Python primitive (`contextvars.ContextVar`) used by goldfive's
+`ParallelDAGExecutor` to plumb a `forced_task_id` down to the sub-agent
+call site without threading it through every argument. The harmonograf
+telemetry plugin reads it and stamps it onto spans as `hgraf.task_id`.
 
 ### `ControlAck`
 The response message the agent sends back for a `ControlEvent`. Carries
@@ -195,10 +198,10 @@ clicking its name. Other rows remain visible. See
 [gantt-view.md → focused and hidden agents](gantt-view.md#focused-and-hidden-agents).
 
 ### `forced_task_id`
-The task id the parallel walker forces onto the sub-agent's
+The task id goldfive's parallel walker forces onto the sub-agent's
 ContextVar so every span opened by that sub-agent stamps `hgraf.task_id`
-correctly. Monotonic: `set_forced_task_id` refuses already-terminal
-tasks. See `client/harmonograf_client/adk.py` and `AGENTS.md`.
+correctly. Monotonic: already-terminal tasks are refused by goldfive's
+`DefaultSteerer`. See [../goldfive-integration.md](../goldfive-integration.md).
 
 ### Framework
 Categorical tag on `Agent.framework`: `FRAMEWORK_ADK`,
@@ -247,10 +250,9 @@ Common idiom for the coordinator / top-level agent that owns the root
 invocation and delegates to sub-agents. Not a formal term in the proto.
 
 ### `hsession_id`
-Internal variable name in the client library for the harmonograf
-session id as it flows through callback inspection — shows up in
-`adk.py` and its tests. On the wire it is just `session_id`. See
-`client/harmonograf_client/adk.py`.
+Internal variable name for the harmonograf session id as it flows
+through ADK callback inspection; on the wire it is just `session_id`.
+Now used inside goldfive's `ADKAdapter`.
 
 ### `HUMAN_RESPONSE`
 Annotation kind used to reply to a span blocked in `AWAITING_HUMAN`. The
@@ -318,17 +320,18 @@ a viewport rectangle showing the currently-visible region. See
 reflecting the assignee agent's orchestration mode.
 
 ### Monotonic state machine
-Task state transitions cannot go backwards.
-`set_forced_task_id` refuses already-terminal tasks; the walker cannot
-reset a completed task even after a refine. See
-`client/harmonograf_client/adk.py :: _AdkState` and `AGENTS.md`.
+Task state transitions cannot go backwards. Goldfive's `DefaultSteerer`
+enforces this: already-terminal tasks are refused; the walker cannot
+reset a completed task even after a refine.
 
 ## O
 
 ### Orchestration events
-Session-level events emitted by the `HarmonografAgent`: start,
-progress, complete, fail, block, discovered, divergence. Surfaced in
-the drawer's Task tab via the embedded `OrchestrationTimeline`. See
+Session-level events emitted by goldfive: `RunStarted`, `GoalDerived`,
+`PlanSubmitted`, `PlanRevised`, `TaskStarted`, `TaskCompleted`,
+`TaskFailed`, `DriftDetected`, `RunCompleted`, `RunAborted`. They
+travel up via `TelemetryUp.goldfive_event` and surface in the drawer's
+Task tab via the embedded `OrchestrationTimeline`. See
 [drawer.md → orchestration events section](drawer.md#orchestration-events-section).
 
 ### Orchestration mode
@@ -336,9 +339,9 @@ One of `sequential` / `parallel` / `delegated`. See
 [tasks-and-plans.md → orchestration modes](tasks-and-plans.md#orchestration-modes).
 
 ### Orchestrator
-The `HarmonografAgent` wrapper that drives sub-agents and reports plan
-state. Three modes — see above. The mode chip in the UI reads
-`SEQ` / `PAR` / `OBS`.
+`goldfive.Runner` driving sub-agents through one of three executors
+(`SequentialExecutor`, `ParallelDAGExecutor`, or delegated). The mode
+chip in the UI reads `SEQ` / `PAR` / `OBS`.
 
 ## P
 
@@ -411,12 +414,14 @@ carry a rejection reason. See
 [control-actions.md → approve / reject](control-actions.md#approve--reject).
 
 ### Reporting tool
-A tool injected into every sub-agent by `HarmonografAgent` for explicit
-plan-state reporting: `report_task_started`, `report_task_progress`,
-`report_task_completed`, `report_task_failed`, `report_task_blocked`,
-`report_new_work_discovered`, `report_plan_divergence`. Intercepted in
-`before_tool_callback` and applied directly in `_AdkState`. See
-`AGENTS.md` and [`docs/reporting-tools.md`](../reporting-tools.md).
+A tool injected into every sub-agent by goldfive's `ADKAdapter` for
+explicit plan-state reporting: `report_task_started`,
+`report_task_progress`, `report_task_completed`, `report_task_failed`,
+`report_task_blocked`, `report_new_work_discovered`,
+`report_plan_divergence`. Intercepted by goldfive's `DefaultSteerer`
+which fires the corresponding event (`TaskStarted`, `TaskCompleted`,
+…) on every sink, including `HarmonografSink`. See
+[`../reporting-tools.md`](../reporting-tools.md).
 
 ### `REPLACES`
 `LinkRelation` value indicating this span supersedes a prior one — e.g.
@@ -452,7 +457,7 @@ Mode chip value for sequential orchestration.
 ### Sequential
 Orchestration mode where the whole plan is fed as one user turn and the
 coordinator LLM executes it; per-task lifecycle reported via the
-reporting tools. Default for `HarmonografAgent`. See `AGENTS.md`.
+reporting tools. Implemented as `goldfive.SequentialExecutor`.
 
 ### Session
 One end-to-end run identified by a `session_id`. Everything in the UI
@@ -466,11 +471,11 @@ title and id; three buckets (Live / Recent / Archive). See
 [sessions.md → opening the picker](sessions.md#opening-the-picker).
 
 ### `session.state`
-ADK's shared mutable dict. Harmonograf writes keys under the
-`harmonograf.*` namespace before each model call (current task id, plan
-summary, available tasks, completed task results) and reads back the
-agent's task progress, outcome, note, and divergence flag. Full schema
-in `client/harmonograf_client/state_protocol.py`.
+ADK's shared mutable dict. Goldfive writes a `SessionContext` (current
+task id, plan summary, available tasks, completed task results) before
+each model call and reads back task progress, outcome, note, and
+divergence flag. Full schema in goldfive's `SessionContext` class
+(`goldfive.adapters.adk`).
 
 ### Span
 The core timeline primitive. One unit of work: an invocation, an LLM
@@ -502,8 +507,9 @@ Lifecycle state: `PENDING`, `RUNNING`, `COMPLETED`, `FAILED`,
 
 ### Stamp (task binding)
 Writing `hgraf.task_id` onto a span as it opens, so the `TaskRegistry`
-can bind it back to its owning task. Done by
-`_stamp_attrs_with_task` in `client/harmonograf_client/adk.py`.
+can bind it back to its owning task. `HarmonografTelemetryPlugin` reads
+the `forced_task_id` ContextVar set by goldfive's executor and stamps
+it on the outgoing `SpanStart`.
 
 ### `STATUS_QUERY`
 Control kind. Asks the agent to report its current activity. The ack's
@@ -630,11 +636,10 @@ Span kind for a span blocked on a human decision. Drives the
 `AWAITING_HUMAN` UI state.
 
 ### Walker
-In parallel orchestration mode, the rigid DAG batch driver that iterates
-through PENDING tasks, forces their task id onto the ContextVar, and
-runs the sub-agent once per task. Enforces monotonic state and refuses
-to rebind terminal tasks. See `AGENTS.md` and
-`client/harmonograf_client/adk.py`.
+In parallel orchestration mode, goldfive's `ParallelDAGExecutor` batch
+driver that iterates through PENDING tasks, forces their task id onto
+the ContextVar, and runs the sub-agent once per task. Enforces
+monotonic state via `DefaultSteerer`.
 
 ### `WatchSession`
 Downstream gRPC stream from server → frontend delivering session

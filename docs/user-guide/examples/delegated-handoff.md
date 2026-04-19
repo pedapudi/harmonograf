@@ -32,8 +32,9 @@ sequenceDiagram
 ## Set-up
 
 - Agents (all ADK):
-  - `coordinator` — `HarmonografAgent`, `orchestrator_mode=False`.
-    Mode chip `OBS`. Wraps the inner `presentation_agent`-style team.
+  - `coordinator` — driven by `goldfive.Runner` in delegated mode (no
+    executor-side plan rewrite). Mode chip `OBS`. Wraps the inner
+    `presentation_agent`-style team.
   - `researcher`, `web_developer`, `reviewer`, `debugger` — sub-agents
     composed as `AgentTool` instances on the coordinator. See
     `tests/reference_agents/presentation_agent/agent.py`.

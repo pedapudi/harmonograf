@@ -1,5 +1,12 @@
 # Runbook: Drift not firing
 
+> **Post-goldfive note.** Drift detection and the refine pipeline live
+> in [goldfive](https://github.com/pedapudi/goldfive) now
+> (`goldfive.DefaultSteerer`, `goldfive.drift`). Line numbers into
+> `adk.py` / `agent.py` are historical; look in goldfive for current
+> fire sites. Check goldfive logs for `drift observed` /
+> `refine: entry` lines rather than harmonograf-client loggers.
+
 A tool failed, the agent refused, or the user sent a steer — and
 nothing happened. No `drift observed` log line, no refine, no plan
 revision.

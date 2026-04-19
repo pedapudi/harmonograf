@@ -6,6 +6,13 @@ Inside each milestone, 4–5 streams run in parallel.
 
 Auth is deferred to its own project — local-only for now.
 
+> **Note (2026-04).** Milestones A–D below predate the goldfive migration.
+> References to `attach_adk`, `HarmonografAgent`, reporting-tool
+> interception, etc. describe the pre-migration implementation — the
+> integration surface today is `goldfive.Runner` + `HarmonografSink` +
+> an optional `HarmonografTelemetryPlugin`. The milestone *goals* are
+> still useful context; the code pointers are not.
+
 The roadmap at a glance — five milestones, each ending in a thing the user can run and react to:
 
 ```mermaid

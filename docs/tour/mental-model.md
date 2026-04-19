@@ -1,5 +1,15 @@
 # The harmonograf mental model
 
+> **Post-goldfive reframe.** The orchestration concepts below (reporting
+> tools, task state machine, `session.state["harmonograf.*"]` keys,
+> `_AdkState`, `state_protocol.extract_agent_writes`, walker) now live
+> in [goldfive](https://github.com/pedapudi/goldfive). Harmonograf still
+> owns the span timeline, the control stream, the session + storage, and
+> the UI. Read the mental model with that substitution in mind — the
+> *composition* story is accurate; the module names are out of date.
+> See [../goldfive-integration.md](../goldfive-integration.md) for the
+> current surface.
+
 This document is not a glossary. A glossary defines terms in isolation; a
 mental model explains how the pieces *compose*. By the end you should be
 able to close your eyes and trace a prompt from the user through the

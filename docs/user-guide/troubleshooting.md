@@ -161,10 +161,9 @@ revisions section of the drawer has no new entry.
 
 ### The planner may not have recognized the drift
 
-- Drift detection is a client-side heuristic in `HarmonografAgent`. It
-  can miss signals — e.g. a tool that swallowed its own error and
-  returned a success value will not produce a `tool_error` drift
-  kind.
+- Drift detection is a goldfive heuristic. It can miss signals — e.g. a
+  tool that swallowed its own error and returned a success value will
+  not produce a `tool_error` drift kind.
 - Check the drawer's **Task tab** for the latest revision. If it says
   "last revised 10 minutes ago" and matches the kind you expected,
   you may just have missed the ~4s pill window.

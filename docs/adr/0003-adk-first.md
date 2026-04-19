@@ -1,8 +1,19 @@
 # ADR 0003 — ADK as the first-class integration target
 
+> **Reframed by the goldfive migration (2026-04).** The original decision
+> — anchor the first-class adapter on ADK — still holds, but the ADK
+> integration itself now lives in [goldfive](https://github.com/pedapudi/goldfive)
+> (`goldfive.adapters.adk.ADKAdapter`). Harmonograf contributes the
+> observability piece (`HarmonografTelemetryPlugin` as a `BasePlugin`)
+> and consumes goldfive events via `HarmonografSink`. The reasons below
+> are recorded as they stood when harmonograf owned the full adapter;
+> substitute `ADKAdapter` for the pre-migration `HarmonografAgent` and
+> `HarmonografAdkPlugin` when reading. Current integration doc:
+> [../goldfive-integration.md](../goldfive-integration.md).
+
 ## Status
 
-Accepted.
+Accepted — extended by the goldfive migration.
 
 ## Context
 

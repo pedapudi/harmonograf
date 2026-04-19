@@ -25,11 +25,10 @@ flowchart LR
 ## Set-up
 
 - Agents:
-  - `orchestrator` — `HarmonografAgent`, `orchestrator_mode=True,
-    parallel_mode=True`. Mode chip reads `PAR`.
-  - `worker-a`, `worker-b` — ADK sub-agents, no harmonograf wrapper of
-    their own. They are driven by the walker directly via the forced
-    `task_id` ContextVar.
+  - `orchestrator` — `goldfive.Runner` with `ParallelDAGExecutor`.
+    Mode chip reads `PAR`.
+  - `worker-a`, `worker-b` — ADK sub-agents driven by goldfive's
+    parallel walker via the forced `task_id` ContextVar.
 - Plan:
   - Tasks `m1…m8` — map, each assignee either `worker-a` or `worker-b`.
   - Task `r1` — reduce, assignee `orchestrator`, with edges from every
