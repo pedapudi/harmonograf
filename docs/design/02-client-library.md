@@ -1,6 +1,15 @@
 # 02 — Client Library
 
-Status: **DRAFT**
+> **DEPRECATED (goldfive migration).** This draft describes the pre-goldfive
+> client library (`attach_adk`, `HarmonografAgent`, in-client planning / drift
+> logic). Those pieces moved to [goldfive](https://github.com/pedapudi/goldfive)
+> in Phases A–D. The surviving harmonograf client is `Client` (span transport)
+> + `HarmonografSink` (goldfive event adapter) + `HarmonografTelemetryPlugin`
+> (ADK span emission). See [../goldfive-integration.md](../goldfive-integration.md)
+> for the current integration story and [../goldfive-migration-plan.md](../goldfive-migration-plan.md)
+> for the design record.
+
+Status: **DRAFT (superseded)**
 Scope: the Python package that runs inside an agent process and emits telemetry to the harmonograf server. Includes the ADK adapter as the reference framework integration.
 
 This doc presupposes the wire protocol in `01-data-model-and-rpc.md`. Anything wire-shaped (message names, field names, RPC contracts) is authoritative there, not here.

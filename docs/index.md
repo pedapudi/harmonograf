@@ -123,10 +123,13 @@ shape matters.
 | [internals/index.md](internals/index.md) | Reading order, per-hot-path guide, source-reference conventions. |
 
 Individual tours (per the reading order in `internals/index.md`):
-`adk-plugin-tour.md`, `harmonograf-agent-tour.md`,
-`drift-taxonomy-catalog.md`, `invariant-validator.md`,
+`server-ingest-bus.md`, `storage-sqlite.md`,
 `session-store-task-registry.md`, `renderer-pipeline.md`,
-`server-ingest-bus.md`, `storage-sqlite.md`.
+`drift-taxonomy-catalog.md`.
+
+Tours of the pre-goldfive orchestration layer (HarmonografAgent, the
+ADK state machine, invariants) were removed with the goldfive migration;
+orchestration internals now live in [goldfive](https://github.com/pedapudi/goldfive).
 
 ---
 
