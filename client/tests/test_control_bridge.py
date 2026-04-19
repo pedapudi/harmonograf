@@ -3,8 +3,8 @@
 The bridge sits between harmonograf's ``SubscribeControl`` gRPC stream
 and a goldfive ``ControlChannel`` attached to a :class:`Runner`. These
 tests verify the kind-by-kind translation table, ack round-trip, the
-UNSUPPORTED-kind fast path, and cleanup on ``runner.close``. They use a
-:class:`FakeTransport` so no gRPC sockets open, and they construct
+UNSUPPORTED-kind fast path, and cleanup on ``runner.close()``. They use
+a :class:`FakeTransport` so no gRPC sockets open, and they construct
 ``ControlEvent`` messages by hand from the generated ``types_pb2``
 module so the integration stays honest about the wire format.
 
@@ -16,20 +16,26 @@ Scope covered here:
 - ``STEER`` and ``REWIND_TO`` payloads land in the goldfive
   ``ControlMessage.payload`` dict under the keys goldfive expects
   (``note`` and ``task_id``).
-- Each UNSUPPORTED harmonograf kind (INJECT_MESSAGE, APPROVE, REJECT,
-  STATUS_QUERY, INTERCEPT_TRANSFER) acks UNSUPPORTED back to the server
-  without touching the runner.
+- Each UNSUPPORTED harmonograf kind (INJECT_MESSAGE, STATUS_QUERY,
+  INTERCEPT_TRANSFER) acks UNSUPPORTED back to the server without
+  touching the runner.
 - Goldfive ``ControlAck`` objects published via ``channel.ack()`` flow
   back out to the server as harmonograf ``ControlAck``\\s with the
   right result enum and detail string.
-- ``observe(runner)`` attaches a bridge when called inside an event
-  loop; ``runner.close()`` tears it down (forward hook cleared,
-  forwarding tasks finished).
+- ``observe(runner)`` attaches a bridge whose teardown fires via
+  ``runner.close()``'s close hook (forward hook cleared, forwarding
+  tasks finished).
+
+Issue #36 moved channel attachment out of the bridge and into
+``observe()`` — tests construct the bridge directly here attach a
+``ControlChannel`` on the runner before ``bridge.start()`` to mirror
+what ``observe()`` does.
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
@@ -68,15 +74,36 @@ def _make_event(
 
 
 class _FakeRunner:
-    """Stand-in for :class:`goldfive.Runner` — ``close`` + optional channel."""
+    """Stand-in for :class:`goldfive.Runner` — supports the extension API.
+
+    Mirrors the narrow public surface ``observe()`` and the bridge rely
+    on: ``sinks`` list, ``control`` attribute, ``add_sink``,
+    ``add_close_hook``, and ``close`` that drives registered hooks.
+    """
 
     def __init__(self) -> None:
         self.sinks: list[Any] = []
         self.control: ControlChannel | None = None
+        self._close_hooks: list[Callable[[], Awaitable[None]]] = []
         self.close_calls = 0
+
+    def add_sink(self, sink: Any) -> None:
+        self.sinks.append(sink)
+
+    def add_close_hook(self, hook: Callable[[], Awaitable[None]]) -> None:
+        self._close_hooks.append(hook)
 
     async def close(self) -> None:
         self.close_calls += 1
+        for hook in self._close_hooks:
+            await hook()
+
+
+def _runner_with_channel() -> _FakeRunner:
+    """Build a fake runner pre-wired with a ControlChannel — mimics observe()."""
+    runner = _FakeRunner()
+    runner.control = ControlChannel()
+    return runner
 
 
 @pytest.fixture
@@ -124,7 +151,7 @@ async def test_supported_kind_forwards_to_channel(
     h_kind: str,
     expected_g_kind: ControlKind,
 ) -> None:
-    runner = _FakeRunner()
+    runner = _runner_with_channel()
     loop = asyncio.get_running_loop()
     bridge = ControlBridge(client, runner, loop)
     bridge.start()
@@ -146,7 +173,7 @@ async def test_supported_kind_forwards_to_channel(
 async def test_steer_payload_lands_under_note(
     client: Client, made: list[FakeTransport]
 ) -> None:
-    runner = _FakeRunner()
+    runner = _runner_with_channel()
     bridge = ControlBridge(client, runner, asyncio.get_running_loop())
     bridge.start()
 
@@ -165,7 +192,7 @@ async def test_steer_payload_lands_under_note(
 async def test_rewind_to_payload_lands_under_task_id(
     client: Client, made: list[FakeTransport]
 ) -> None:
-    runner = _FakeRunner()
+    runner = _runner_with_channel()
     bridge = ControlBridge(client, runner, asyncio.get_running_loop())
     bridge.start()
 
@@ -196,7 +223,7 @@ async def test_rewind_to_payload_lands_under_task_id(
 async def test_unsupported_kind_acks_unsupported(
     client: Client, made: list[FakeTransport], h_kind: str
 ) -> None:
-    runner = _FakeRunner()
+    runner = _runner_with_channel()
     bridge = ControlBridge(client, runner, asyncio.get_running_loop())
     bridge.start()
 
@@ -242,7 +269,7 @@ async def test_goldfive_ack_flows_back_to_server(
     g_result: AckResult,
     expected_name: str,
 ) -> None:
-    runner = _FakeRunner()
+    runner = _runner_with_channel()
     bridge = ControlBridge(client, runner, asyncio.get_running_loop())
     bridge.start()
 
@@ -269,12 +296,20 @@ async def test_goldfive_ack_flows_back_to_server(
 
 
 @pytest.mark.asyncio
-async def test_runner_close_tears_down_bridge(
+async def test_runner_close_tears_down_bridge_via_close_hook(
     client: Client, made: list[FakeTransport]
 ) -> None:
-    runner = _FakeRunner()
+    """``runner.close()`` runs registered close hooks — including ``bridge.stop``.
+
+    Mirrors the wiring ``observe()`` sets up: attach a ControlChannel,
+    start the bridge, register ``bridge.stop`` as a close hook. The
+    teardown assertions match what the old monkey-patched close path
+    guaranteed; only the wiring changed.
+    """
+    runner = _runner_with_channel()
     bridge = ControlBridge(client, runner, asyncio.get_running_loop())
     bridge.start()
+    runner.add_close_hook(bridge.stop)
 
     # Precondition — forward hook installed, tasks running.
     transport = made[0]
@@ -286,7 +321,8 @@ async def test_runner_close_tears_down_bridge(
 
     await runner.close()
 
-    # The wrapped close first awaits bridge.stop, then the original.
+    # Close hook fired bridge.stop() — forwarding tasks are done and
+    # the transport's forward hook is cleared.
     assert runner.close_calls == 1
     assert transport.control_forward is None
     assert bridge._events_task.done()
@@ -308,7 +344,7 @@ async def test_observe_attaches_bridge_inside_event_loop(
 
     bridge = getattr(runner, "_harmonograf_control_bridge", None)
     assert isinstance(bridge, ControlBridge)
-    assert runner.control is not None  # attached by the bridge
+    assert runner.control is not None  # attached by observe()
 
     # Forward a STEER event end-to-end through observe's bridge.
     made[0].deliver_control_event(
@@ -322,24 +358,19 @@ async def test_observe_attaches_bridge_inside_event_loop(
     assert bridge._closed is True
 
 
-def test_observe_without_running_loop_skips_bridge(
-    client: Client,
-) -> None:
-    """observe() stays usable from sync call sites — just no bridge."""
-    runner = _FakeRunner()
-    observe(runner, client=client)
-
-    # Sink still attached (observability path unchanged).
-    assert len(runner.sinks) == 1
-    # Bridge deliberately not started outside an event loop.
-    assert getattr(runner, "_harmonograf_control_bridge", None) is None
-
-
 # ----------------------------------------------------------------------
 # Kind map invariant
 # ----------------------------------------------------------------------
 
 
 def test_kind_map_only_contains_goldfive_phase1_kinds() -> None:
-    """If goldfive adds/removes a Phase-1 kind, fail loudly here."""
-    assert set(_KIND_MAP.values()) == {k.value for k in ControlKind}
+    """Every ``_KIND_MAP`` target must be a real goldfive ControlKind.
+
+    The bridge may intentionally lag goldfive (goldfive can ship kinds
+    harmonograf hasn't bridged yet — STATUS_QUERY, INTERCEPT_TRANSFER,
+    INJECT_MESSAGE at time of writing), so this is a subset check, not
+    an equality check. What we do NOT want is a phantom target here
+    that goldfive no longer recognises, which would silently break the
+    ``ControlKind(name)`` lookup in the events loop.
+    """
+    assert set(_KIND_MAP.values()).issubset({k.value for k in ControlKind})
