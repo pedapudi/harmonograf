@@ -2,6 +2,7 @@ import datetime
 
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
 from harmonograf.v1 import types_pb2 as _types_pb2
+from goldfive.v1 import events_pb2 as _events_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
@@ -61,7 +62,7 @@ class WatchSessionRequest(_message.Message):
     def __init__(self, session_id: _Optional[str] = ..., window_start: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., window_end: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class SessionUpdate(_message.Message):
-    __slots__ = ("session", "agent", "initial_span", "initial_annotation", "burst_complete", "new_span", "updated_span", "ended_span", "new_annotation", "agent_joined", "agent_left", "agent_status_changed", "session_ended", "payload_available", "task_report", "context_window_sample")
+    __slots__ = ("session", "agent", "initial_span", "initial_annotation", "burst_complete", "new_span", "updated_span", "ended_span", "new_annotation", "agent_joined", "agent_left", "agent_status_changed", "session_ended", "payload_available", "task_report", "context_window_sample", "goldfive_event")
     SESSION_FIELD_NUMBER: _ClassVar[int]
     AGENT_FIELD_NUMBER: _ClassVar[int]
     INITIAL_SPAN_FIELD_NUMBER: _ClassVar[int]
@@ -78,6 +79,7 @@ class SessionUpdate(_message.Message):
     PAYLOAD_AVAILABLE_FIELD_NUMBER: _ClassVar[int]
     TASK_REPORT_FIELD_NUMBER: _ClassVar[int]
     CONTEXT_WINDOW_SAMPLE_FIELD_NUMBER: _ClassVar[int]
+    GOLDFIVE_EVENT_FIELD_NUMBER: _ClassVar[int]
     session: _types_pb2.Session
     agent: _types_pb2.Agent
     initial_span: _types_pb2.Span
@@ -94,7 +96,8 @@ class SessionUpdate(_message.Message):
     payload_available: PayloadAvailable
     task_report: TaskReport
     context_window_sample: ContextWindowSample
-    def __init__(self, session: _Optional[_Union[_types_pb2.Session, _Mapping]] = ..., agent: _Optional[_Union[_types_pb2.Agent, _Mapping]] = ..., initial_span: _Optional[_Union[_types_pb2.Span, _Mapping]] = ..., initial_annotation: _Optional[_Union[_types_pb2.Annotation, _Mapping]] = ..., burst_complete: _Optional[_Union[InitialBurstComplete, _Mapping]] = ..., new_span: _Optional[_Union[NewSpan, _Mapping]] = ..., updated_span: _Optional[_Union[UpdatedSpan, _Mapping]] = ..., ended_span: _Optional[_Union[EndedSpan, _Mapping]] = ..., new_annotation: _Optional[_Union[NewAnnotation, _Mapping]] = ..., agent_joined: _Optional[_Union[AgentJoined, _Mapping]] = ..., agent_left: _Optional[_Union[AgentLeft, _Mapping]] = ..., agent_status_changed: _Optional[_Union[AgentStatusChanged, _Mapping]] = ..., session_ended: _Optional[_Union[SessionEnded, _Mapping]] = ..., payload_available: _Optional[_Union[PayloadAvailable, _Mapping]] = ..., task_report: _Optional[_Union[TaskReport, _Mapping]] = ..., context_window_sample: _Optional[_Union[ContextWindowSample, _Mapping]] = ...) -> None: ...
+    goldfive_event: _events_pb2.Event
+    def __init__(self, session: _Optional[_Union[_types_pb2.Session, _Mapping]] = ..., agent: _Optional[_Union[_types_pb2.Agent, _Mapping]] = ..., initial_span: _Optional[_Union[_types_pb2.Span, _Mapping]] = ..., initial_annotation: _Optional[_Union[_types_pb2.Annotation, _Mapping]] = ..., burst_complete: _Optional[_Union[InitialBurstComplete, _Mapping]] = ..., new_span: _Optional[_Union[NewSpan, _Mapping]] = ..., updated_span: _Optional[_Union[UpdatedSpan, _Mapping]] = ..., ended_span: _Optional[_Union[EndedSpan, _Mapping]] = ..., new_annotation: _Optional[_Union[NewAnnotation, _Mapping]] = ..., agent_joined: _Optional[_Union[AgentJoined, _Mapping]] = ..., agent_left: _Optional[_Union[AgentLeft, _Mapping]] = ..., agent_status_changed: _Optional[_Union[AgentStatusChanged, _Mapping]] = ..., session_ended: _Optional[_Union[SessionEnded, _Mapping]] = ..., payload_available: _Optional[_Union[PayloadAvailable, _Mapping]] = ..., task_report: _Optional[_Union[TaskReport, _Mapping]] = ..., context_window_sample: _Optional[_Union[ContextWindowSample, _Mapping]] = ..., goldfive_event: _Optional[_Union[_events_pb2.Event, _Mapping]] = ...) -> None: ...
 
 class ContextWindowSample(_message.Message):
     __slots__ = ("agent_id", "recorded_at", "tokens", "limit_tokens")

@@ -14,6 +14,7 @@ package harmonograf.v1;
 
 import "google/protobuf/timestamp.proto";
 import "harmonograf/v1/types.proto";
+import "goldfive/v1/events.proto";
 
 option go_package = "github.com/pedapudi/harmonograf/gen/harmonograf/v1;harmonografv1";
 
@@ -70,8 +71,9 @@ message WatchSessionRequest {
 message SessionUpdate {
   // Reserved: were TaskPlan task_plan = 16 / UpdatedTaskStatus
   // updated_task_status = 17 before the goldfive migration (issue #2).
-  // Plan + task deltas will return in Phase B, carried inside a
-  // goldfive.v1.Event variant.
+  // Plan + task deltas now ride on goldfive_event (field 19) instead,
+  // carrying a goldfive.v1.Event so the wire is a straight passthrough
+  // of whatever the orchestrator emitted.
   reserved 16, 17;
   oneof kind {
     // Initial burst messages. Multiple of each may be sent before the
@@ -104,6 +106,13 @@ message SessionUpdate {
     // the most recent samples from sqlite) and live as each heartbeat
     // ingests.
     ContextWindowSample context_window_sample = 18;
+    // Goldfive orchestration event (plan_submitted / plan_revised /
+    // task_started / task_progress / task_completed / task_failed /
+    // task_blocked / task_cancelled / drift_detected / run_started /
+    // run_completed / run_aborted / goal_derived). Replayed during the
+    // initial burst from persisted plans + task state, then streamed
+    // live as HarmonografSink ingest fans out deltas on the bus.
+    goldfive.v1.Event goldfive_event = 19;
   }
 }
 
