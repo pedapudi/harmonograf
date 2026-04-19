@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file harmonograf/v1/types.proto.
  */
 export const file_harmonograf_v1_types: GenFile = /*@__PURE__*/
-  fileDesc("ChpoYXJtb25vZ3JhZi92MS90eXBlcy5wcm90bxIOaGFybW9ub2dyYWYudjEirgIKB1Nlc3Npb24SCgoCaWQYASABKAkSDQoFdGl0bGUYAiABKAkSLgoKY3JlYXRlZF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi0KBnN0YXR1cxgFIAEoDjIdLmhhcm1vbm9ncmFmLnYxLlNlc3Npb25TdGF0dXMSEQoJYWdlbnRfaWRzGAYgAygJEjcKCG1ldGFkYXRhGAcgAygLMiUuaGFybW9ub2dyYWYudjEuU2Vzc2lvbi5NZXRhZGF0YUVudHJ5Gi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASKrAwoFQWdlbnQSCgoCaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEiwKCWZyYW1ld29yaxgEIAEoDjIZLmhhcm1vbm9ncmFmLnYxLkZyYW1ld29yaxIZChFmcmFtZXdvcmtfdmVyc2lvbhgFIAEoCRIwCgxjYXBhYmlsaXRpZXMYBiADKA4yGi5oYXJtb25vZ3JhZi52MS5DYXBhYmlsaXR5EjUKCG1ldGFkYXRhGAcgAygLMiMuaGFybW9ub2dyYWYudjEuQWdlbnQuTWV0YWRhdGFFbnRyeRIwCgxjb25uZWN0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjIKDmxhc3RfaGVhcnRiZWF0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIrCgZzdGF0dXMYCiABKA4yGy5oYXJtb25vZ3JhZi52MS5BZ2VudFN0YXR1cxovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiawoIU3BhbkxpbmsSFgoOdGFyZ2V0X3NwYW5faWQYASABKAkSFwoPdGFyZ2V0X2FnZW50X2lkGAIgASgJEi4KCHJlbGF0aW9uGAMgASgOMhwuaGFybW9ub2dyYWYudjEuTGlua1JlbGF0aW9uIsIBCg5BdHRyaWJ1dGVWYWx1ZRIWCgxzdHJpbmdfdmFsdWUYASABKAlIABITCglpbnRfdmFsdWUYAiABKANIABIWCgxkb3VibGVfdmFsdWUYAyABKAFIABIUCgpib29sX3ZhbHVlGAQgASgISAASFQoLYnl0ZXNfdmFsdWUYBSABKAxIABI1CgthcnJheV92YWx1ZRgGIAEoCzIeLmhhcm1vbm9ncmFmLnYxLkF0dHJpYnV0ZUFycmF5SABCBwoFdmFsdWUiQAoOQXR0cmlidXRlQXJyYXkSLgoGdmFsdWVzGAEgAygLMh4uaGFybW9ub2dyYWYudjEuQXR0cmlidXRlVmFsdWUiaAoKUGF5bG9hZFJlZhIOCgZkaWdlc3QYASABKAkSDAoEc2l6ZRgCIAEoAxIMCgRtaW1lGAMgASgJEg8KB3N1bW1hcnkYBCABKAkSDAoEcm9sZRgFIAEoCRIPCgdldmljdGVkGAYgASgIIjkKCUVycm9ySW5mbxIMCgR0eXBlGAEgASgJEg8KB21lc3NhZ2UYAiABKAkSDQoFc3RhY2sYAyABKAkitwQKBFNwYW4SCgoCaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIQCghhZ2VudF9pZBgDIAEoCRIWCg5wYXJlbnRfc3Bhbl9pZBgEIAEoCRImCgRraW5kGAUgASgOMhguaGFybW9ub2dyYWYudjEuU3BhbktpbmQSEwoLa2luZF9zdHJpbmcYBiABKAkSKgoGc3RhdHVzGAcgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIMCgRuYW1lGAggASgJEi4KCnN0YXJ0X3RpbWUYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiwKCGVuZF90aW1lGAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI4CgphdHRyaWJ1dGVzGAsgAygLMiQuaGFybW9ub2dyYWYudjEuU3Bhbi5BdHRyaWJ1dGVzRW50cnkSMAoMcGF5bG9hZF9yZWZzGAwgAygLMhouaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlZhInCgVsaW5rcxgNIAMoCzIYLmhhcm1vbm9ncmFmLnYxLlNwYW5MaW5rEigKBWVycm9yGA4gASgLMhkuaGFybW9ub2dyYWYudjEuRXJyb3JJbmZvGlEKD0F0dHJpYnV0ZXNFbnRyeRILCgNrZXkYASABKAkSLQoFdmFsdWUYAiABKAsyHi5oYXJtb25vZ3JhZi52MS5BdHRyaWJ1dGVWYWx1ZToCOAEiNAoIVGFza0VkZ2USFAoMZnJvbV90YXNrX2lkGAEgASgJEhIKCnRvX3Rhc2tfaWQYAiABKAkizwEKBFRhc2sSCgoCaWQYASABKAkSDQoFdGl0bGUYAiABKAkSEwoLZGVzY3JpcHRpb24YAyABKAkSGQoRYXNzaWduZWVfYWdlbnRfaWQYBCABKAkSKgoGc3RhdHVzGAUgASgOMhouaGFybW9ub2dyYWYudjEuVGFza1N0YXR1cxIaChJwcmVkaWN0ZWRfc3RhcnRfbXMYBiABKAMSHQoVcHJlZGljdGVkX2R1cmF0aW9uX21zGAcgASgDEhUKDWJvdW5kX3NwYW5faWQYCCABKAki0gIKCFRhc2tQbGFuEgoKAmlkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSaW52b2NhdGlvbl9zcGFuX2lkGAMgASgJEhgKEHBsYW5uZXJfYWdlbnRfaWQYBCABKAkSLgoKY3JlYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDwoHc3VtbWFyeRgGIAEoCRIjCgV0YXNrcxgHIAMoCzIULmhhcm1vbm9ncmFmLnYxLlRhc2sSJwoFZWRnZXMYCCADKAsyGC5oYXJtb25vZ3JhZi52MS5UYXNrRWRnZRIXCg9yZXZpc2lvbl9yZWFzb24YCSABKAkSFQoNcmV2aXNpb25fa2luZBgKIAEoCRIZChFyZXZpc2lvbl9zZXZlcml0eRgLIAEoCRIWCg5yZXZpc2lvbl9pbmRleBgMIAEoAyKoAQoRVXBkYXRlZFRhc2tTdGF0dXMSDwoHcGxhbl9pZBgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEioKBnN0YXR1cxgDIAEoDjIaLmhhcm1vbm9ncmFmLnYxLlRhc2tTdGF0dXMSFQoNYm91bmRfc3Bhbl9pZBgEIAEoCRIuCgp1cGRhdGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJlChBBbm5vdGF0aW9uVGFyZ2V0EhEKB3NwYW5faWQYASABKAlIABI0CgphZ2VudF90aW1lGAIgASgLMh4uaGFybW9ub2dyYWYudjEuQWdlbnRUaW1lUG9pbnRIAEIICgZ0YXJnZXQiSgoOQWdlbnRUaW1lUG9pbnQSEAoIYWdlbnRfaWQYASABKAkSJgoCYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIowCCgpBbm5vdGF0aW9uEgoKAmlkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSMAoGdGFyZ2V0GAMgASgLMiAuaGFybW9ub2dyYWYudjEuQW5ub3RhdGlvblRhcmdldBIOCgZhdXRob3IYBCABKAkSLgoKY3JlYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoEa2luZBgGIAEoDjIeLmhhcm1vbm9ncmFmLnYxLkFubm90YXRpb25LaW5kEgwKBGJvZHkYByABKAkSMAoMZGVsaXZlcmVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCIyCg1Db250cm9sVGFyZ2V0EhAKCGFnZW50X2lkGAEgASgJEg8KB3NwYW5faWQYAiABKAkitAEKDENvbnRyb2xFdmVudBIKCgJpZBgBIAEoCRItCglpc3N1ZWRfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi0KBnRhcmdldBgDIAEoCzIdLmhhcm1vbm9ncmFmLnYxLkNvbnRyb2xUYXJnZXQSKQoEa2luZBgEIAEoDjIbLmhhcm1vbm9ncmFmLnYxLkNvbnRyb2xLaW5kEg8KB3BheWxvYWQYBSABKAwikAEKCkNvbnRyb2xBY2sSEgoKY29udHJvbF9pZBgBIAEoCRIwCgZyZXN1bHQYAiABKA4yIC5oYXJtb25vZ3JhZi52MS5Db250cm9sQWNrUmVzdWx0Eg4KBmRldGFpbBgDIAEoCRIsCghhY2tlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAqggEKDVNlc3Npb25TdGF0dXMSHgoaU0VTU0lPTl9TVEFUVVNfVU5TUEVDSUZJRUQQABIXChNTRVNTSU9OX1NUQVRVU19MSVZFEAESHAoYU0VTU0lPTl9TVEFUVVNfQ09NUExFVEVEEAISGgoWU0VTU0lPTl9TVEFUVVNfQUJPUlRFRBADKoABCgtBZ2VudFN0YXR1cxIcChhBR0VOVF9TVEFUVVNfVU5TUEVDSUZJRUQQABIaChZBR0VOVF9TVEFUVVNfQ09OTkVDVEVEEAESHQoZQUdFTlRfU1RBVFVTX0RJU0NPTk5FQ1RFRBACEhgKFEFHRU5UX1NUQVRVU19DUkFTSEVEEAMqTwoJRnJhbWV3b3JrEhkKFUZSQU1FV09SS19VTlNQRUNJRklFRBAAEhQKEEZSQU1FV09SS19DVVNUT00QARIRCg1GUkFNRVdPUktfQURLEAIqzQEKCkNhcGFiaWxpdHkSGgoWQ0FQQUJJTElUWV9VTlNQRUNJRklFRBAAEhsKF0NBUEFCSUxJVFlfUEFVU0VfUkVTVU1FEAESFQoRQ0FQQUJJTElUWV9DQU5DRUwQAhIVChFDQVBBQklMSVRZX1JFV0lORBADEhcKE0NBUEFCSUxJVFlfU1RFRVJJTkcQBBIcChhDQVBBQklMSVRZX0hVTUFOX0lOX0xPT1AQBRIhCh1DQVBBQklMSVRZX0lOVEVSQ0VQVF9UUkFOU0ZFUhAGKowCCghTcGFuS2luZBIZChVTUEFOX0tJTkRfVU5TUEVDSUZJRUQQABIYChRTUEFOX0tJTkRfSU5WT0NBVElPThABEhYKElNQQU5fS0lORF9MTE1fQ0FMTBACEhcKE1NQQU5fS0lORF9UT09MX0NBTEwQAxIaChZTUEFOX0tJTkRfVVNFUl9NRVNTQUdFEAQSGwoXU1BBTl9LSU5EX0FHRU5UX01FU1NBR0UQBRIWChJTUEFOX0tJTkRfVFJBTlNGRVIQBhIcChhTUEFOX0tJTkRfV0FJVF9GT1JfSFVNQU4QBxIVChFTUEFOX0tJTkRfUExBTk5FRBAIEhQKEFNQQU5fS0lORF9DVVNUT00QCSrJAQoKU3BhblN0YXR1cxIbChdTUEFOX1NUQVRVU19VTlNQRUNJRklFRBAAEhcKE1NQQU5fU1RBVFVTX1BFTkRJTkcQARIXChNTUEFOX1NUQVRVU19SVU5OSU5HEAISGQoVU1BBTl9TVEFUVVNfQ09NUExFVEVEEAMSFgoSU1BBTl9TVEFUVVNfRkFJTEVEEAQSGQoVU1BBTl9TVEFUVVNfQ0FOQ0VMTEVEEAUSHgoaU1BBTl9TVEFUVVNfQVdBSVRJTkdfSFVNQU4QBiq9AQoMTGlua1JlbGF0aW9uEh0KGUxJTktfUkVMQVRJT05fVU5TUEVDSUZJRUQQABIZChVMSU5LX1JFTEFUSU9OX0lOVk9LRUQQARIcChhMSU5LX1JFTEFUSU9OX1dBSVRJTkdfT04QAhIeChpMSU5LX1JFTEFUSU9OX1RSSUdHRVJFRF9CWRADEhkKFUxJTktfUkVMQVRJT05fRk9MTE9XUxAEEhoKFkxJTktfUkVMQVRJT05fUkVQTEFDRVMQBSqpAQoKVGFza1N0YXR1cxIbChdUQVNLX1NUQVRVU19VTlNQRUNJRklFRBAAEhcKE1RBU0tfU1RBVFVTX1BFTkRJTkcQARIXChNUQVNLX1NUQVRVU19SVU5OSU5HEAISGQoVVEFTS19TVEFUVVNfQ09NUExFVEVEEAMSFgoSVEFTS19TVEFUVVNfRkFJTEVEEAQSGQoVVEFTS19TVEFUVVNfQ0FOQ0VMTEVEEAUqkAEKDkFubm90YXRpb25LaW5kEh8KG0FOTk9UQVRJT05fS0lORF9VTlNQRUNJRklFRBAAEhsKF0FOTk9UQVRJT05fS0lORF9DT01NRU5UEAESHAoYQU5OT1RBVElPTl9LSU5EX1NURUVSSU5HEAISIgoeQU5OT1RBVElPTl9LSU5EX0hVTUFOX1JFU1BPTlNFEAMqwQIKC0NvbnRyb2xLaW5kEhwKGENPTlRST0xfS0lORF9VTlNQRUNJRklFRBAAEhYKEkNPTlRST0xfS0lORF9QQVVTRRABEhcKE0NPTlRST0xfS0lORF9SRVNVTUUQAhIXChNDT05UUk9MX0tJTkRfQ0FOQ0VMEAMSGgoWQ09OVFJPTF9LSU5EX1JFV0lORF9UTxAEEh8KG0NPTlRST0xfS0lORF9JTkpFQ1RfTUVTU0FHRRAFEhgKFENPTlRST0xfS0lORF9BUFBST1ZFEAYSFwoTQ09OVFJPTF9LSU5EX1JFSkVDVBAHEiMKH0NPTlRST0xfS0lORF9JTlRFUkNFUFRfVFJBTlNGRVIQCBIWChJDT05UUk9MX0tJTkRfU1RFRVIQCRIdChlDT05UUk9MX0tJTkRfU1RBVFVTX1FVRVJZEAoqmgEKEENvbnRyb2xBY2tSZXN1bHQSIgoeQ09OVFJPTF9BQ0tfUkVTVUxUX1VOU1BFQ0lGSUVEEAASHgoaQ09OVFJPTF9BQ0tfUkVTVUxUX1NVQ0NFU1MQARIeChpDT05UUk9MX0FDS19SRVNVTFRfRkFJTFVSRRACEiIKHkNPTlRST0xfQUNLX1JFU1VMVF9VTlNVUFBPUlRFRBADQkJaQGdpdGh1Yi5jb20vcGVkYXB1ZGkvaGFybW9ub2dyYWYvZ2VuL2hhcm1vbm9ncmFmL3YxO2hhcm1vbm9ncmFmdjFiBnByb3RvMw", [file_google_protobuf_timestamp]);
+  fileDesc("ChpoYXJtb25vZ3JhZi92MS90eXBlcy5wcm90bxIOaGFybW9ub2dyYWYudjEirgIKB1Nlc3Npb24SCgoCaWQYASABKAkSDQoFdGl0bGUYAiABKAkSLgoKY3JlYXRlZF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi0KBnN0YXR1cxgFIAEoDjIdLmhhcm1vbm9ncmFmLnYxLlNlc3Npb25TdGF0dXMSEQoJYWdlbnRfaWRzGAYgAygJEjcKCG1ldGFkYXRhGAcgAygLMiUuaGFybW9ub2dyYWYudjEuU2Vzc2lvbi5NZXRhZGF0YUVudHJ5Gi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASKrAwoFQWdlbnQSCgoCaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEiwKCWZyYW1ld29yaxgEIAEoDjIZLmhhcm1vbm9ncmFmLnYxLkZyYW1ld29yaxIZChFmcmFtZXdvcmtfdmVyc2lvbhgFIAEoCRIwCgxjYXBhYmlsaXRpZXMYBiADKA4yGi5oYXJtb25vZ3JhZi52MS5DYXBhYmlsaXR5EjUKCG1ldGFkYXRhGAcgAygLMiMuaGFybW9ub2dyYWYudjEuQWdlbnQuTWV0YWRhdGFFbnRyeRIwCgxjb25uZWN0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjIKDmxhc3RfaGVhcnRiZWF0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIrCgZzdGF0dXMYCiABKA4yGy5oYXJtb25vZ3JhZi52MS5BZ2VudFN0YXR1cxovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiawoIU3BhbkxpbmsSFgoOdGFyZ2V0X3NwYW5faWQYASABKAkSFwoPdGFyZ2V0X2FnZW50X2lkGAIgASgJEi4KCHJlbGF0aW9uGAMgASgOMhwuaGFybW9ub2dyYWYudjEuTGlua1JlbGF0aW9uIsIBCg5BdHRyaWJ1dGVWYWx1ZRIWCgxzdHJpbmdfdmFsdWUYASABKAlIABITCglpbnRfdmFsdWUYAiABKANIABIWCgxkb3VibGVfdmFsdWUYAyABKAFIABIUCgpib29sX3ZhbHVlGAQgASgISAASFQoLYnl0ZXNfdmFsdWUYBSABKAxIABI1CgthcnJheV92YWx1ZRgGIAEoCzIeLmhhcm1vbm9ncmFmLnYxLkF0dHJpYnV0ZUFycmF5SABCBwoFdmFsdWUiQAoOQXR0cmlidXRlQXJyYXkSLgoGdmFsdWVzGAEgAygLMh4uaGFybW9ub2dyYWYudjEuQXR0cmlidXRlVmFsdWUiaAoKUGF5bG9hZFJlZhIOCgZkaWdlc3QYASABKAkSDAoEc2l6ZRgCIAEoAxIMCgRtaW1lGAMgASgJEg8KB3N1bW1hcnkYBCABKAkSDAoEcm9sZRgFIAEoCRIPCgdldmljdGVkGAYgASgIIjkKCUVycm9ySW5mbxIMCgR0eXBlGAEgASgJEg8KB21lc3NhZ2UYAiABKAkSDQoFc3RhY2sYAyABKAkitwQKBFNwYW4SCgoCaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIQCghhZ2VudF9pZBgDIAEoCRIWCg5wYXJlbnRfc3Bhbl9pZBgEIAEoCRImCgRraW5kGAUgASgOMhguaGFybW9ub2dyYWYudjEuU3BhbktpbmQSEwoLa2luZF9zdHJpbmcYBiABKAkSKgoGc3RhdHVzGAcgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIMCgRuYW1lGAggASgJEi4KCnN0YXJ0X3RpbWUYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiwKCGVuZF90aW1lGAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI4CgphdHRyaWJ1dGVzGAsgAygLMiQuaGFybW9ub2dyYWYudjEuU3Bhbi5BdHRyaWJ1dGVzRW50cnkSMAoMcGF5bG9hZF9yZWZzGAwgAygLMhouaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlZhInCgVsaW5rcxgNIAMoCzIYLmhhcm1vbm9ncmFmLnYxLlNwYW5MaW5rEigKBWVycm9yGA4gASgLMhkuaGFybW9ub2dyYWYudjEuRXJyb3JJbmZvGlEKD0F0dHJpYnV0ZXNFbnRyeRILCgNrZXkYASABKAkSLQoFdmFsdWUYAiABKAsyHi5oYXJtb25vZ3JhZi52MS5BdHRyaWJ1dGVWYWx1ZToCOAEiZQoQQW5ub3RhdGlvblRhcmdldBIRCgdzcGFuX2lkGAEgASgJSAASNAoKYWdlbnRfdGltZRgCIAEoCzIeLmhhcm1vbm9ncmFmLnYxLkFnZW50VGltZVBvaW50SABCCAoGdGFyZ2V0IkoKDkFnZW50VGltZVBvaW50EhAKCGFnZW50X2lkGAEgASgJEiYKAmF0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKMAgoKQW5ub3RhdGlvbhIKCgJpZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEjAKBnRhcmdldBgDIAEoCzIgLmhhcm1vbm9ncmFmLnYxLkFubm90YXRpb25UYXJnZXQSDgoGYXV0aG9yGAQgASgJEi4KCmNyZWF0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiwKBGtpbmQYBiABKA4yHi5oYXJtb25vZ3JhZi52MS5Bbm5vdGF0aW9uS2luZBIMCgRib2R5GAcgASgJEjAKDGRlbGl2ZXJlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiMgoNQ29udHJvbFRhcmdldBIQCghhZ2VudF9pZBgBIAEoCRIPCgdzcGFuX2lkGAIgASgJIrQBCgxDb250cm9sRXZlbnQSCgoCaWQYASABKAkSLQoJaXNzdWVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBItCgZ0YXJnZXQYAyABKAsyHS5oYXJtb25vZ3JhZi52MS5Db250cm9sVGFyZ2V0EikKBGtpbmQYBCABKA4yGy5oYXJtb25vZ3JhZi52MS5Db250cm9sS2luZBIPCgdwYXlsb2FkGAUgASgMIpABCgpDb250cm9sQWNrEhIKCmNvbnRyb2xfaWQYASABKAkSMAoGcmVzdWx0GAIgASgOMiAuaGFybW9ub2dyYWYudjEuQ29udHJvbEFja1Jlc3VsdBIOCgZkZXRhaWwYAyABKAkSLAoIYWNrZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wKoIBCg1TZXNzaW9uU3RhdHVzEh4KGlNFU1NJT05fU1RBVFVTX1VOU1BFQ0lGSUVEEAASFwoTU0VTU0lPTl9TVEFUVVNfTElWRRABEhwKGFNFU1NJT05fU1RBVFVTX0NPTVBMRVRFRBACEhoKFlNFU1NJT05fU1RBVFVTX0FCT1JURUQQAyqAAQoLQWdlbnRTdGF0dXMSHAoYQUdFTlRfU1RBVFVTX1VOU1BFQ0lGSUVEEAASGgoWQUdFTlRfU1RBVFVTX0NPTk5FQ1RFRBABEh0KGUFHRU5UX1NUQVRVU19ESVNDT05ORUNURUQQAhIYChRBR0VOVF9TVEFUVVNfQ1JBU0hFRBADKk8KCUZyYW1ld29yaxIZChVGUkFNRVdPUktfVU5TUEVDSUZJRUQQABIUChBGUkFNRVdPUktfQ1VTVE9NEAESEQoNRlJBTUVXT1JLX0FESxACKs0BCgpDYXBhYmlsaXR5EhoKFkNBUEFCSUxJVFlfVU5TUEVDSUZJRUQQABIbChdDQVBBQklMSVRZX1BBVVNFX1JFU1VNRRABEhUKEUNBUEFCSUxJVFlfQ0FOQ0VMEAISFQoRQ0FQQUJJTElUWV9SRVdJTkQQAxIXChNDQVBBQklMSVRZX1NURUVSSU5HEAQSHAoYQ0FQQUJJTElUWV9IVU1BTl9JTl9MT09QEAUSIQodQ0FQQUJJTElUWV9JTlRFUkNFUFRfVFJBTlNGRVIQBiqMAgoIU3BhbktpbmQSGQoVU1BBTl9LSU5EX1VOU1BFQ0lGSUVEEAASGAoUU1BBTl9LSU5EX0lOVk9DQVRJT04QARIWChJTUEFOX0tJTkRfTExNX0NBTEwQAhIXChNTUEFOX0tJTkRfVE9PTF9DQUxMEAMSGgoWU1BBTl9LSU5EX1VTRVJfTUVTU0FHRRAEEhsKF1NQQU5fS0lORF9BR0VOVF9NRVNTQUdFEAUSFgoSU1BBTl9LSU5EX1RSQU5TRkVSEAYSHAoYU1BBTl9LSU5EX1dBSVRfRk9SX0hVTUFOEAcSFQoRU1BBTl9LSU5EX1BMQU5ORUQQCBIUChBTUEFOX0tJTkRfQ1VTVE9NEAkqyQEKClNwYW5TdGF0dXMSGwoXU1BBTl9TVEFUVVNfVU5TUEVDSUZJRUQQABIXChNTUEFOX1NUQVRVU19QRU5ESU5HEAESFwoTU1BBTl9TVEFUVVNfUlVOTklORxACEhkKFVNQQU5fU1RBVFVTX0NPTVBMRVRFRBADEhYKElNQQU5fU1RBVFVTX0ZBSUxFRBAEEhkKFVNQQU5fU1RBVFVTX0NBTkNFTExFRBAFEh4KGlNQQU5fU1RBVFVTX0FXQUlUSU5HX0hVTUFOEAYqvQEKDExpbmtSZWxhdGlvbhIdChlMSU5LX1JFTEFUSU9OX1VOU1BFQ0lGSUVEEAASGQoVTElOS19SRUxBVElPTl9JTlZPS0VEEAESHAoYTElOS19SRUxBVElPTl9XQUlUSU5HX09OEAISHgoaTElOS19SRUxBVElPTl9UUklHR0VSRURfQlkQAxIZChVMSU5LX1JFTEFUSU9OX0ZPTExPV1MQBBIaChZMSU5LX1JFTEFUSU9OX1JFUExBQ0VTEAUqkAEKDkFubm90YXRpb25LaW5kEh8KG0FOTk9UQVRJT05fS0lORF9VTlNQRUNJRklFRBAAEhsKF0FOTk9UQVRJT05fS0lORF9DT01NRU5UEAESHAoYQU5OT1RBVElPTl9LSU5EX1NURUVSSU5HEAISIgoeQU5OT1RBVElPTl9LSU5EX0hVTUFOX1JFU1BPTlNFEAMqwQIKC0NvbnRyb2xLaW5kEhwKGENPTlRST0xfS0lORF9VTlNQRUNJRklFRBAAEhYKEkNPTlRST0xfS0lORF9QQVVTRRABEhcKE0NPTlRST0xfS0lORF9SRVNVTUUQAhIXChNDT05UUk9MX0tJTkRfQ0FOQ0VMEAMSGgoWQ09OVFJPTF9LSU5EX1JFV0lORF9UTxAEEh8KG0NPTlRST0xfS0lORF9JTkpFQ1RfTUVTU0FHRRAFEhgKFENPTlRST0xfS0lORF9BUFBST1ZFEAYSFwoTQ09OVFJPTF9LSU5EX1JFSkVDVBAHEiMKH0NPTlRST0xfS0lORF9JTlRFUkNFUFRfVFJBTlNGRVIQCBIWChJDT05UUk9MX0tJTkRfU1RFRVIQCRIdChlDT05UUk9MX0tJTkRfU1RBVFVTX1FVRVJZEAoqmgEKEENvbnRyb2xBY2tSZXN1bHQSIgoeQ09OVFJPTF9BQ0tfUkVTVUxUX1VOU1BFQ0lGSUVEEAASHgoaQ09OVFJPTF9BQ0tfUkVTVUxUX1NVQ0NFU1MQARIeChpDT05UUk9MX0FDS19SRVNVTFRfRkFJTFVSRRACEiIKHkNPTlRST0xfQUNLX1JFU1VMVF9VTlNVUFBPUlRFRBADQkJaQGdpdGh1Yi5jb20vcGVkYXB1ZGkvaGFybW9ub2dyYWYvZ2VuL2hhcm1vbm9ncmFmL3YxO2hhcm1vbm9ncmFmdjFiBnByb3RvMw", [file_google_protobuf_timestamp]);
 
 /**
  * Session is the unit a user opens in the console. Multiple agents
@@ -423,228 +423,6 @@ export const SpanSchema: GenMessage<Span> = /*@__PURE__*/
   messageDesc(file_harmonograf_v1_types, 7);
 
 /**
- * Directed edge in the task dependency DAG. from_task_id must complete before
- * to_task_id can start.
- *
- * @generated from message harmonograf.v1.TaskEdge
- */
-export type TaskEdge = Message<"harmonograf.v1.TaskEdge"> & {
-  /**
-   * @generated from field: string from_task_id = 1;
-   */
-  fromTaskId: string;
-
-  /**
-   * @generated from field: string to_task_id = 2;
-   */
-  toTaskId: string;
-};
-
-/**
- * Describes the message harmonograf.v1.TaskEdge.
- * Use `create(TaskEdgeSchema)` to create a new message.
- */
-export const TaskEdgeSchema: GenMessage<TaskEdge> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_types, 8);
-
-/**
- * @generated from message harmonograf.v1.Task
- */
-export type Task = Message<"harmonograf.v1.Task"> & {
-  /**
-   * @generated from field: string id = 1;
-   */
-  id: string;
-
-  /**
-   * @generated from field: string title = 2;
-   */
-  title: string;
-
-  /**
-   * @generated from field: string description = 3;
-   */
-  description: string;
-
-  /**
-   * Agent id expected to execute this task. May be empty if the planner is
-   * deferring assignment.
-   *
-   * @generated from field: string assignee_agent_id = 4;
-   */
-  assigneeAgentId: string;
-
-  /**
-   * @generated from field: harmonograf.v1.TaskStatus status = 5;
-   */
-  status: TaskStatus;
-
-  /**
-   * Planner's predicted schedule, session-relative milliseconds. Optional —
-   * the frontend falls back to t=0 stacking when these are zero.
-   *
-   * @generated from field: int64 predicted_start_ms = 6;
-   */
-  predictedStartMs: bigint;
-
-  /**
-   * @generated from field: int64 predicted_duration_ms = 7;
-   */
-  predictedDurationMs: bigint;
-
-  /**
-   * Span id that is executing (or has executed) this task. Empty until a
-   * span stamped with this task's id begins running.
-   *
-   * @generated from field: string bound_span_id = 8;
-   */
-  boundSpanId: string;
-};
-
-/**
- * Describes the message harmonograf.v1.Task.
- * Use `create(TaskSchema)` to create a new message.
- */
-export const TaskSchema: GenMessage<Task> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_types, 9);
-
-/**
- * @generated from message harmonograf.v1.TaskPlan
- */
-export type TaskPlan = Message<"harmonograf.v1.TaskPlan"> & {
-  /**
-   * @generated from field: string id = 1;
-   */
-  id: string;
-
-  /**
-   * @generated from field: string session_id = 2;
-   */
-  sessionId: string;
-
-  /**
-   * The invocation span that prompted the plan, if any.
-   *
-   * @generated from field: string invocation_span_id = 3;
-   */
-  invocationSpanId: string;
-
-  /**
-   * Agent that produced the plan (usually the receiving agent, whose client
-   * library ran a PlannerHelper before normal execution).
-   *
-   * @generated from field: string planner_agent_id = 4;
-   */
-  plannerAgentId: string;
-
-  /**
-   * @generated from field: google.protobuf.Timestamp created_at = 5;
-   */
-  createdAt?: Timestamp;
-
-  /**
-   * One-line natural-language summary of the plan, shown in the graph view
-   * header when a plan is selected.
-   *
-   * @generated from field: string summary = 6;
-   */
-  summary: string;
-
-  /**
-   * @generated from field: repeated harmonograf.v1.Task tasks = 7;
-   */
-  tasks: Task[];
-
-  /**
-   * @generated from field: repeated harmonograf.v1.TaskEdge edges = 8;
-   */
-  edges: TaskEdge[];
-
-  /**
-   * When the plan was revised in-flight by the observer in response to drift,
-   * this captures the human-readable reason. Empty on initial plans.
-   *
-   * @generated from field: string revision_reason = 9;
-   */
-  revisionReason: string;
-
-  /**
-   * Structured drift kind for the revision that produced this plan (e.g.
-   * "tool_error", "new_work_discovered", "wrong_agent"). Empty on initial
-   * plans. Frontend uses this for drift icons / filters without having to
-   * regex the revision_reason.
-   *
-   * @generated from field: string revision_kind = 10;
-   */
-  revisionKind: string;
-
-  /**
-   * Severity of the drift that triggered the revision: "info" | "warning"
-   * | "critical". Empty on initial plans.
-   *
-   * @generated from field: string revision_severity = 11;
-   */
-  revisionSeverity: string;
-
-  /**
-   * Monotonic revision index within a plan lineage. 0 for initial plans,
-   * incrementing by one on each refine. Drives deterministic ordering of
-   * revisions in the UI timeline.
-   *
-   * @generated from field: int64 revision_index = 12;
-   */
-  revisionIndex: bigint;
-};
-
-/**
- * Describes the message harmonograf.v1.TaskPlan.
- * Use `create(TaskPlanSchema)` to create a new message.
- */
-export const TaskPlanSchema: GenMessage<TaskPlan> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_types, 10);
-
-/**
- * Explicit task status delta. In most cases the server derives task status
- * from span lifecycle events (via the "hgraf.task_id" span attribute); this
- * message is an escape hatch for non-span-bound updates.
- *
- * @generated from message harmonograf.v1.UpdatedTaskStatus
- */
-export type UpdatedTaskStatus = Message<"harmonograf.v1.UpdatedTaskStatus"> & {
-  /**
-   * @generated from field: string plan_id = 1;
-   */
-  planId: string;
-
-  /**
-   * @generated from field: string task_id = 2;
-   */
-  taskId: string;
-
-  /**
-   * @generated from field: harmonograf.v1.TaskStatus status = 3;
-   */
-  status: TaskStatus;
-
-  /**
-   * @generated from field: string bound_span_id = 4;
-   */
-  boundSpanId: string;
-
-  /**
-   * @generated from field: google.protobuf.Timestamp updated_at = 5;
-   */
-  updatedAt?: Timestamp;
-};
-
-/**
- * Describes the message harmonograf.v1.UpdatedTaskStatus.
- * Use `create(UpdatedTaskStatusSchema)` to create a new message.
- */
-export const UpdatedTaskStatusSchema: GenMessage<UpdatedTaskStatus> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_types, 11);
-
-/**
  * Annotations target either a span or a (agent_id, time) point on the
  * timeline.
  *
@@ -674,7 +452,7 @@ export type AnnotationTarget = Message<"harmonograf.v1.AnnotationTarget"> & {
  * Use `create(AnnotationTargetSchema)` to create a new message.
  */
 export const AnnotationTargetSchema: GenMessage<AnnotationTarget> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_types, 12);
+  messageDesc(file_harmonograf_v1_types, 8);
 
 /**
  * @generated from message harmonograf.v1.AgentTimePoint
@@ -696,7 +474,7 @@ export type AgentTimePoint = Message<"harmonograf.v1.AgentTimePoint"> & {
  * Use `create(AgentTimePointSchema)` to create a new message.
  */
 export const AgentTimePointSchema: GenMessage<AgentTimePoint> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_types, 13);
+  messageDesc(file_harmonograf_v1_types, 9);
 
 /**
  * @generated from message harmonograf.v1.Annotation
@@ -750,7 +528,7 @@ export type Annotation = Message<"harmonograf.v1.Annotation"> & {
  * Use `create(AnnotationSchema)` to create a new message.
  */
 export const AnnotationSchema: GenMessage<Annotation> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_types, 14);
+  messageDesc(file_harmonograf_v1_types, 10);
 
 /**
  * ControlTarget points at the agent (and optionally a span on it) the
@@ -775,7 +553,7 @@ export type ControlTarget = Message<"harmonograf.v1.ControlTarget"> & {
  * Use `create(ControlTargetSchema)` to create a new message.
  */
 export const ControlTargetSchema: GenMessage<ControlTarget> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_types, 15);
+  messageDesc(file_harmonograf_v1_types, 11);
 
 /**
  * ControlEvent flows server → agent on SubscribeControl. The id correlates
@@ -815,7 +593,7 @@ export type ControlEvent = Message<"harmonograf.v1.ControlEvent"> & {
  * Use `create(ControlEventSchema)` to create a new message.
  */
 export const ControlEventSchema: GenMessage<ControlEvent> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_types, 16);
+  messageDesc(file_harmonograf_v1_types, 12);
 
 /**
  * ControlAck rides upstream on StreamTelemetry (NOT on a separate stream).
@@ -852,7 +630,7 @@ export type ControlAck = Message<"harmonograf.v1.ControlAck"> & {
  * Use `create(ControlAckSchema)` to create a new message.
  */
 export const ControlAckSchema: GenMessage<ControlAck> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_types, 17);
+  messageDesc(file_harmonograf_v1_types, 13);
 
 /**
  * Status of a session in the registry.
@@ -1156,47 +934,6 @@ export const LinkRelationSchema: GenEnum<LinkRelation> = /*@__PURE__*/
   enumDesc(file_harmonograf_v1_types, 6);
 
 /**
- * @generated from enum harmonograf.v1.TaskStatus
- */
-export enum TaskStatus {
-  /**
-   * @generated from enum value: TASK_STATUS_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * @generated from enum value: TASK_STATUS_PENDING = 1;
-   */
-  PENDING = 1,
-
-  /**
-   * @generated from enum value: TASK_STATUS_RUNNING = 2;
-   */
-  RUNNING = 2,
-
-  /**
-   * @generated from enum value: TASK_STATUS_COMPLETED = 3;
-   */
-  COMPLETED = 3,
-
-  /**
-   * @generated from enum value: TASK_STATUS_FAILED = 4;
-   */
-  FAILED = 4,
-
-  /**
-   * @generated from enum value: TASK_STATUS_CANCELLED = 5;
-   */
-  CANCELLED = 5,
-}
-
-/**
- * Describes the enum harmonograf.v1.TaskStatus.
- */
-export const TaskStatusSchema: GenEnum<TaskStatus> = /*@__PURE__*/
-  enumDesc(file_harmonograf_v1_types, 7);
-
-/**
  * AnnotationKind: COMMENT is UI-only; STEERING is delivered to the agent
  * as a control event; HUMAN_RESPONSE answers a WAIT_FOR_HUMAN span.
  *
@@ -1228,7 +965,7 @@ export enum AnnotationKind {
  * Describes the enum harmonograf.v1.AnnotationKind.
  */
 export const AnnotationKindSchema: GenEnum<AnnotationKind> = /*@__PURE__*/
-  enumDesc(file_harmonograf_v1_types, 8);
+  enumDesc(file_harmonograf_v1_types, 7);
 
 /**
  * ControlKind enumerates the operations the frontend can issue against an
@@ -1314,7 +1051,7 @@ export enum ControlKind {
  * Describes the enum harmonograf.v1.ControlKind.
  */
 export const ControlKindSchema: GenEnum<ControlKind> = /*@__PURE__*/
-  enumDesc(file_harmonograf_v1_types, 9);
+  enumDesc(file_harmonograf_v1_types, 8);
 
 /**
  * @generated from enum harmonograf.v1.ControlAckResult
@@ -1345,5 +1082,5 @@ export enum ControlAckResult {
  * Describes the enum harmonograf.v1.ControlAckResult.
  */
 export const ControlAckResultSchema: GenEnum<ControlAckResult> = /*@__PURE__*/
-  enumDesc(file_harmonograf_v1_types, 10);
+  enumDesc(file_harmonograf_v1_types, 9);
 
