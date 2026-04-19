@@ -62,6 +62,22 @@ Integration is a single-line install: construct a `goldfive.Runner`, attach a
 
 ---
 
+## Get running in 10 minutes
+
+The fastest path from clone to a live-rendering Gantt is the goldfive
+observability quickstart. It installs goldfive + harmonograf, boots this
+stack via `make demo`, runs a CallableAdapter agent in a second shell,
+and shows the events flowing into the UI — no LLM credentials required.
+
+1. `make install` in this repo (see the full [quickstart](docs/quickstart.md) for prereqs).
+2. `make demo` to bring up the server + frontend + ADK web.
+3. Install `goldfive` in a second shell and run
+   `examples/harmonograf_observed/agent.py`.
+
+Full walkthrough (lives in the goldfive repo): **[observability-with-harmonograf.md](https://github.com/pedapudi/goldfive/blob/main/docs/guides/observability-with-harmonograf.md)**.
+
+---
+
 ## Architecture
 
 Harmonograf is three components that share one data model. Telemetry (spans +
