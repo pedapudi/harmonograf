@@ -187,7 +187,7 @@ grep 'ignoring hgraf.task_id=.*on non-leaf span kind=' data/harmonograf-server.l
 
 - [`dev-guide/debugging.md`](../dev-guide/debugging.md) §"A span is
   missing from the UI".
-- [`protocol/wire-format.md`](../protocol/wire-format.md) for span
+- [`protocol/data-model.md`](../protocol/data-model.md) for span
   field definitions.
 - [`runbooks/agent-disconnects-repeatedly.md`](agent-disconnects-repeatedly.md)
   for buffer-driven drops.

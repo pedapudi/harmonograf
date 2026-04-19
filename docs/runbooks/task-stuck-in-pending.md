@@ -41,9 +41,8 @@ flowchart TD
 - **Client log** (nothing helpful by default, but with `LOG_LEVEL=DEBUG`):
   - `DEBUG harmonograf_client.adk: ...` callback traces showing no
     `state.on_task_start` lines
-  - Possibly `WARN harmonograf_client.invariants: InvariantViolation(...)`
-    on attempted transitions (see
-    [`invariant-violations.md`](invariant-violations.md))
+  - Possibly `WARN goldfive.*` InvariantViolation lines on attempted
+    transitions — check goldfive's steerer log
 - **Server log**:
   - `DEBUG harmonograf_server.ingest: hgraf.task_id=... on span=... has no matching plan in session=...`
     (`ingest.py:714`)
@@ -227,5 +226,5 @@ in the message will name the culprit.
   advance".
 - [`runbooks/task-stuck-in-running.md`](task-stuck-in-running.md) — the
   symmetric case.
-- [`runbooks/orchestration-mode-mismatch.md`](orchestration-mode-mismatch.md)
-  — picking the right mode.
+- goldfive docs for choosing the right executor
+  (`SequentialExecutor` vs `ParallelDAGExecutor` vs delegated).
