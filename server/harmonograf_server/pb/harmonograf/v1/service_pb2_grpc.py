@@ -3,10 +3,10 @@
 import grpc
 import warnings
 
+from goldfive.v1 import control_pb2 as goldfive_dot_v1_dot_control__pb2
 from harmonograf.v1 import control_pb2 as harmonograf_dot_v1_dot_control__pb2
 from harmonograf.v1 import frontend_pb2 as harmonograf_dot_v1_dot_frontend__pb2
 from harmonograf.v1 import telemetry_pb2 as harmonograf_dot_v1_dot_telemetry__pb2
-from harmonograf.v1 import types_pb2 as harmonograf_dot_v1_dot_types__pb2
 
 GRPC_GENERATED_VERSION = '1.80.0'
 GRPC_VERSION = grpc.__version__
@@ -46,7 +46,7 @@ class HarmonografStub(object):
         self.SubscribeControl = channel.unary_stream(
                 '/harmonograf.v1.Harmonograf/SubscribeControl',
                 request_serializer=harmonograf_dot_v1_dot_control__pb2.SubscribeControlRequest.SerializeToString,
-                response_deserializer=harmonograf_dot_v1_dot_types__pb2.ControlEvent.FromString,
+                response_deserializer=goldfive_dot_v1_dot_control__pb2.ControlEvent.FromString,
                 _registered_method=True)
         self.ListSessions = channel.unary_unary(
                 '/harmonograf.v1.Harmonograf/ListSessions',
@@ -107,8 +107,8 @@ class HarmonografServicer(object):
         """--- Server → agent: low-volume control delivery ---------------------
 
         Server-streaming. Agent opens this once after StreamTelemetry's
-        Welcome. Server pushes ControlEvents. Agent ACKs travel back
-        upstream on StreamTelemetry (not on this stream), preserving
+        Welcome. Server pushes goldfive.v1.ControlEvents. Agent ACKs travel
+        back upstream on StreamTelemetry (not on this stream), preserving
         happens-before and avoiding a third RPC.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -190,7 +190,7 @@ def add_HarmonografServicer_to_server(servicer, server):
             'SubscribeControl': grpc.unary_stream_rpc_method_handler(
                     servicer.SubscribeControl,
                     request_deserializer=harmonograf_dot_v1_dot_control__pb2.SubscribeControlRequest.FromString,
-                    response_serializer=harmonograf_dot_v1_dot_types__pb2.ControlEvent.SerializeToString,
+                    response_serializer=goldfive_dot_v1_dot_control__pb2.ControlEvent.SerializeToString,
             ),
             'ListSessions': grpc.unary_unary_rpc_method_handler(
                     servicer.ListSessions,
@@ -287,7 +287,7 @@ class Harmonograf(object):
             target,
             '/harmonograf.v1.Harmonograf/SubscribeControl',
             harmonograf_dot_v1_dot_control__pb2.SubscribeControlRequest.SerializeToString,
-            harmonograf_dot_v1_dot_types__pb2.ControlEvent.FromString,
+            goldfive_dot_v1_dot_control__pb2.ControlEvent.FromString,
             options,
             channel_credentials,
             insecure,

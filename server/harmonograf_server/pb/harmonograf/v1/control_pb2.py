@@ -22,9 +22,10 @@ _runtime_version.ValidateProtobufRuntimeVersion(
 _sym_db = _symbol_database.Default()
 
 
+from goldfive.v1 import control_pb2 as goldfive_dot_v1_dot_control__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1charmonograf/v1/control.proto\x12\x0eharmonograf.v1\"R\n\x17SubscribeControlRequest\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x10\n\x08\x61gent_id\x18\x02 \x01(\t\x12\x11\n\tstream_id\x18\x03 \x01(\tBBZ@github.com/pedapudi/harmonograf/gen/harmonograf/v1;harmonografv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1charmonograf/v1/control.proto\x12\x0eharmonograf.v1\x1a\x19goldfive/v1/control.proto\"R\n\x17SubscribeControlRequest\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x10\n\x08\x61gent_id\x18\x02 \x01(\t\x12\x11\n\tstream_id\x18\x03 \x01(\tBBZ@github.com/pedapudi/harmonograf/gen/harmonograf/v1;harmonografv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,6 +33,6 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'harmonograf.v1.control_pb2'
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'Z@github.com/pedapudi/harmonograf/gen/harmonograf/v1;harmonografv1'
-  _globals['_SUBSCRIBECONTROLREQUEST']._serialized_start=48
-  _globals['_SUBSCRIBECONTROLREQUEST']._serialized_end=130
+  _globals['_SUBSCRIBECONTROLREQUEST']._serialized_start=75
+  _globals['_SUBSCRIBECONTROLREQUEST']._serialized_end=157
 # @@protoc_insertion_point(module_scope)

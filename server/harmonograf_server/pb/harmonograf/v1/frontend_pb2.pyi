@@ -2,6 +2,7 @@ import datetime
 
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
 from harmonograf.v1 import types_pb2 as _types_pb2
+from goldfive.v1 import control_pb2 as _control_pb2
 from goldfive.v1 import events_pb2 as _events_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
@@ -292,25 +293,21 @@ class PostAnnotationResponse(_message.Message):
     DELIVERY_FIELD_NUMBER: _ClassVar[int]
     DELIVERY_DETAIL_FIELD_NUMBER: _ClassVar[int]
     annotation: _types_pb2.Annotation
-    delivery: _types_pb2.ControlAckResult
+    delivery: _control_pb2.ControlAckResult
     delivery_detail: str
-    def __init__(self, annotation: _Optional[_Union[_types_pb2.Annotation, _Mapping]] = ..., delivery: _Optional[_Union[_types_pb2.ControlAckResult, str]] = ..., delivery_detail: _Optional[str] = ...) -> None: ...
+    def __init__(self, annotation: _Optional[_Union[_types_pb2.Annotation, _Mapping]] = ..., delivery: _Optional[_Union[_control_pb2.ControlAckResult, str]] = ..., delivery_detail: _Optional[str] = ...) -> None: ...
 
 class SendControlRequest(_message.Message):
-    __slots__ = ("session_id", "target", "kind", "payload", "ack_timeout_ms", "require_all_acks")
+    __slots__ = ("session_id", "event", "ack_timeout_ms", "require_all_acks")
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
-    TARGET_FIELD_NUMBER: _ClassVar[int]
-    KIND_FIELD_NUMBER: _ClassVar[int]
-    PAYLOAD_FIELD_NUMBER: _ClassVar[int]
+    EVENT_FIELD_NUMBER: _ClassVar[int]
     ACK_TIMEOUT_MS_FIELD_NUMBER: _ClassVar[int]
     REQUIRE_ALL_ACKS_FIELD_NUMBER: _ClassVar[int]
     session_id: str
-    target: _types_pb2.ControlTarget
-    kind: _types_pb2.ControlKind
-    payload: bytes
+    event: _control_pb2.ControlEvent
     ack_timeout_ms: int
     require_all_acks: bool
-    def __init__(self, session_id: _Optional[str] = ..., target: _Optional[_Union[_types_pb2.ControlTarget, _Mapping]] = ..., kind: _Optional[_Union[_types_pb2.ControlKind, str]] = ..., payload: _Optional[bytes] = ..., ack_timeout_ms: _Optional[int] = ..., require_all_acks: bool = ...) -> None: ...
+    def __init__(self, session_id: _Optional[str] = ..., event: _Optional[_Union[_control_pb2.ControlEvent, _Mapping]] = ..., ack_timeout_ms: _Optional[int] = ..., require_all_acks: bool = ...) -> None: ...
 
 class SendControlResponse(_message.Message):
     __slots__ = ("control_id", "result", "acks")
@@ -318,9 +315,9 @@ class SendControlResponse(_message.Message):
     RESULT_FIELD_NUMBER: _ClassVar[int]
     ACKS_FIELD_NUMBER: _ClassVar[int]
     control_id: str
-    result: _types_pb2.ControlAckResult
+    result: _control_pb2.ControlAckResult
     acks: _containers.RepeatedCompositeFieldContainer[StreamAck]
-    def __init__(self, control_id: _Optional[str] = ..., result: _Optional[_Union[_types_pb2.ControlAckResult, str]] = ..., acks: _Optional[_Iterable[_Union[StreamAck, _Mapping]]] = ...) -> None: ...
+    def __init__(self, control_id: _Optional[str] = ..., result: _Optional[_Union[_control_pb2.ControlAckResult, str]] = ..., acks: _Optional[_Iterable[_Union[StreamAck, _Mapping]]] = ...) -> None: ...
 
 class StreamAck(_message.Message):
     __slots__ = ("stream_id", "result", "detail", "acked_at")
@@ -329,10 +326,10 @@ class StreamAck(_message.Message):
     DETAIL_FIELD_NUMBER: _ClassVar[int]
     ACKED_AT_FIELD_NUMBER: _ClassVar[int]
     stream_id: str
-    result: _types_pb2.ControlAckResult
+    result: _control_pb2.ControlAckResult
     detail: str
     acked_at: _timestamp_pb2.Timestamp
-    def __init__(self, stream_id: _Optional[str] = ..., result: _Optional[_Union[_types_pb2.ControlAckResult, str]] = ..., detail: _Optional[str] = ..., acked_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    def __init__(self, stream_id: _Optional[str] = ..., result: _Optional[_Union[_control_pb2.ControlAckResult, str]] = ..., detail: _Optional[str] = ..., acked_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class DeleteSessionRequest(_message.Message):
     __slots__ = ("session_id", "force")
