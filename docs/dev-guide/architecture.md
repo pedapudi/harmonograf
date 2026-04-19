@@ -6,42 +6,18 @@ all three before you start.
 
 ## The three components
 
-```
-┌────────────────────────────┐        ┌────────────────────────────┐        ┌─────────────────────────┐
-│  Agent process (N of them) │        │  Harmonograf server (1)    │        │  Frontend (browser)     │
-│                            │        │                            │        │                         │
-│   ┌──────────────────┐     │        │   ┌──────────────────┐     │        │   ┌────────────────┐    │
-│   │  ADK Runner +    │     │        │   │  IngestPipeline  │◀────┼────────┼──▶│  SessionStore  │    │
-│   │  user LlmAgent   │     │        │   └────────┬─────────┘     │        │   │  TaskRegistry  │    │
-│   └────────┬─────────┘     │        │            │               │        │   └────────┬───────┘    │
-│            │ callbacks     │        │            ▼               │        │            │            │
-│   ┌────────▼─────────┐     │        │   ┌──────────────────┐     │        │   ┌────────▼───────┐    │
-│   │  HarmonografAgent│     │   gRPC │   │  Storage (sqlite)│     │ gRPC‑  │   │  GanttRenderer │    │
-│   │  + AdkAdapter    │◀────┼────────┼──▶│  + SessionBus    │────▶│  Web   │   │  (canvas)      │    │
-│   │  + _AdkState     │     │        │   │  + ControlRouter │     │        │   └────────┬───────┘    │
-│   └────────┬─────────┘     │        │   └────────┬─────────┘     │        │            │            │
-│            ▼               │        │            │               │        │            ▼            │
-│   ┌──────────────────┐     │        │            ▼               │        │   ┌────────────────┐    │
-│   │  EventRingBuffer │     │        │   ┌──────────────────┐     │        │   │  uiStore       │    │
-│   │  + Transport     │─────┼────────┼──▶│  WatchSession    │─────┼────────┼──▶│  (zustand)     │    │
-│   └──────────────────┘     │        │   │  stream          │     │        │   └────────────────┘    │
-│                            │        │   └──────────────────┘     │        │                         │
-└────────────────────────────┘        └────────────────────────────┘        └─────────────────────────┘
-         many agents                          one server                         one UI (N tabs)
-```
-
-The same picture as a structured diagram showing the three components and their cross-process channels:
-
 ```mermaid
 flowchart LR
     subgraph A[Agent process N]
-        runner[ADK Runner +<br/>user LlmAgent]
-        hagent[HarmonografAgent<br/>+ AdkAdapter<br/>+ _AdkState]
-        buf[EventRingBuffer<br/>+ Transport]
-        runner -- callbacks --> hagent --> buf
+        runner[goldfive.Runner<br/>+ ADKAdapter]
+        plugin[HarmonografTelemetryPlugin<br/>span emission]
+        sink[HarmonografSink<br/>goldfive event adapter]
+        client[Client<br/>buffer + transport]
+        runner -- ADK callbacks --> plugin --> client
+        runner -- goldfive events --> sink --> client
     end
     subgraph S[Harmonograf server]
-        ingest[IngestPipeline]
+        ingest[IngestPipeline<br/>+ goldfive_event dispatch]
         store[Storage<br/>sqlite]
         bus[SessionBus]
         router[ControlRouter]
@@ -58,8 +34,8 @@ flowchart LR
         sstore --> renderer
         renderer --> ui
     end
-    buf -- gRPC StreamTelemetry --> ingest
-    router -- gRPC SubscribeControl --> hagent
+    client -- gRPC StreamTelemetry --> ingest
+    router -- gRPC SubscribeControl --> client
     watch -- gRPC-Web WatchSession --> sstore
     ui -- SendControl/PostAnnotation --> router
 ```
@@ -74,40 +50,50 @@ Three things to notice in this picture:
    the server fans back out to agents. That's why the gRPC channel is
    bidirectional (`StreamTelemetry`) plus a separate server-streaming
    (`SubscribeControl`).
-3. **The client library lives inside the agent process.** It is a library, not
-   a sidecar. `HarmonografAgent` wraps a user-supplied `LlmAgent`, and
-   `AdkAdapter` installs callbacks on the ADK `Runner`. No separate service.
+3. **Harmonograf is the observability tap.** Orchestration — planning, task
+   dispatch, drift detection, reinvocation — lives in
+   [goldfive](https://github.com/pedapudi/goldfive), inside the same agent
+   process. `HarmonografSink` is the `goldfive.EventSink` that ships plan /
+   task / drift events to the server; `HarmonografTelemetryPlugin` emits
+   ADK-level spans for lifecycle callbacks.
 
 ## Component 1: the client library (`client/`)
 
-**Role:** Embed inside an ADK agent process. Observe ADK lifecycle events,
-emit spans and heartbeats to the server, enforce the plan-execution protocol,
-and react to control events from the server.
+**Role:** Embed inside an agent process. Ship spans and goldfive orchestration
+events to the server, react to control events. After the goldfive migration
+(PRs [#6](https://github.com/pedapudi/harmonograf/pull/6),
+[#7](https://github.com/pedapudi/harmonograf/pull/7),
+[#9](https://github.com/pedapudi/harmonograf/pull/9),
+[#11](https://github.com/pedapudi/harmonograf/pull/11)), the library is
+observability-only — orchestration lives in
+[goldfive](https://github.com/pedapudi/goldfive).
 
-The library has two public entry points:
+Three public surfaces:
 
-| Public entry | Role | Code |
+| Public surface | Role | Code |
 |---|---|---|
-| `HarmonografAgent` | A `BaseAgent` that wraps a user's `LlmAgent` (or any sub-agent tree) and enforces the plan-execution state machine. Primary integration point. | `client/harmonograf_client/agent.py:207` |
-| `AdkAdapter` / `attach_adk` / `make_adk_plugin` | Lower-level: install callbacks on an ADK `Runner` without wrapping the agent. Used when you want observation but not orchestration. | `client/harmonograf_client/adk.py:973` |
+| `Client` | Non-blocking handle owning the ring buffer, identity, transport, payload staging, and control-handler registry. | `client/harmonograf_client/client.py` |
+| `HarmonografSink` | A `goldfive.EventSink` that translates goldfive `Event` envelopes into harmonograf `TelemetryUp(goldfive_event=…)` frames. | `client/harmonograf_client/sink.py` |
+| `HarmonografTelemetryPlugin` | Optional ADK `BasePlugin` that emits harmonograf spans for ADK lifecycle callbacks. Pure observability. | `client/harmonograf_client/telemetry_plugin.py` |
 
 Under those sit:
 
-- `Client` (`client/harmonograf_client/client.py:64`) — non-blocking handle
-  used by both entry points. Owns the ring buffer, identity, and transport.
-- `EventRingBuffer` / `PayloadBuffer` (`client/harmonograf_client/buffer.py:83`)
-  — bounded buffers with tiered drop policy. Critical spans never drop;
-  non-critical spans and payloads drop first when a slow network backs up.
-- `Transport` (`client/harmonograf_client/transport.py:88`) — gRPC bidi stream
-  with exponential-backoff reconnect, resume token handling, and Hello/Welcome
-  handshake.
-- `InvariantChecker` (`client/harmonograf_client/invariants.py:78`) — runs
-  in-process to catch plan-state violations before they ship to the server.
-- `ProtocolMetrics` (`client/harmonograf_client/metrics.py:17`) — lightweight
-  counters on the ADK callback path. Zero-cost; kept in production.
+- `EventRingBuffer` / `PayloadBuffer` (`client/harmonograf_client/buffer.py`)
+  — bounded buffers with tiered drop policy. Critical spans and goldfive
+  events never drop; non-critical spans and payloads drop first when the
+  network backs up.
+- `Transport` (`client/harmonograf_client/transport.py`) — gRPC bidi stream
+  with exponential-backoff reconnect, resume token handling, Hello/Welcome
+  handshake, and serialisation of each envelope variant (`SPAN_*`,
+  `PAYLOAD_UPLOAD`, `HEARTBEAT`, `GOLDFIVE_EVENT`, `CONTROL_ACK`) onto the
+  right `TelemetryUp` oneof field.
+- `Heartbeat` (`client/harmonograf_client/heartbeat.py`) — periodic
+  liveness beacon.
+- `Identity` (`client/harmonograf_client/identity.py`) — persisted
+  agent_id so restarts reclaim their Gantt row.
 
-The hard part of the client library isn't the network — it's the plan
-enforcement. That gets its own chapter in [`client-library.md`](client-library.md).
+Plan state, task state, drift — not in this library. See
+[client-library.md](client-library.md) for the full internals tour.
 
 ## Component 2: the server (`server/`)
 
@@ -161,32 +147,42 @@ view mode, drawer state, time window. The data layer holds the stream.
 
 ## The data model
 
-All three components agree on a small domain vocabulary. It's defined exactly
-once in `proto/harmonograf/v1/types.proto` and regenerated into language-specific
-stubs:
+All three components agree on a small domain vocabulary. Harmonograf-owned
+types live in `proto/harmonograf/v1/types.proto`; `Plan`, `Task`, `TaskEdge`,
+`TaskStatus`, `DriftKind` come from `proto/goldfive/v1/types.proto` and are
+imported (not re-declared) into harmonograf's proto tree.
 
-| Concept | Proto message | Python storage | Frontend type |
-|---|---|---|---|
-| Session | `Session` | `storage.base.Session` | `SessionRow` |
-| Agent | `Agent` | `storage.base.Agent` | `AgentRow` |
-| Span | `Span` | `storage.base.Span` | `SpanRow` |
-| TaskPlan | `TaskPlan` | `storage.base.TaskPlan` | `TaskPlanRow` |
-| Task | `Task` | `storage.base.Task` | `TaskRow` |
-| TaskEdge | `TaskEdge` | `storage.base.TaskEdge` | `TaskEdgeRow` |
-| Annotation | `Annotation` | `storage.base.Annotation` | `AnnotationRow` |
-| ControlEvent / ControlAck | `ControlEvent`, `ControlAck` | — (in-flight only) | — |
-| PayloadRef | `PayloadRef` | `storage.base.PayloadMeta` | `PayloadMetaRow` |
+| Concept | Owner | Proto message | Python storage | Frontend type |
+|---|---|---|---|---|
+| Session | harmonograf | `harmonograf.v1.Session` | `storage.base.Session` | `SessionRow` |
+| Agent | harmonograf | `harmonograf.v1.Agent` | `storage.base.Agent` | `AgentRow` |
+| Span | harmonograf | `harmonograf.v1.Span` | `storage.base.Span` | `SpanRow` |
+| Plan | goldfive | `goldfive.v1.Plan` | `storage.base.Plan` | via `SessionUpdate.goldfive_event` |
+| Task | goldfive | `goldfive.v1.Task` | `storage.base.Task` | via `SessionUpdate.goldfive_event` |
+| TaskEdge | goldfive | `goldfive.v1.TaskEdge` | `storage.base.TaskEdge` | via `SessionUpdate.goldfive_event` |
+| Annotation | harmonograf | `harmonograf.v1.Annotation` | `storage.base.Annotation` | `AnnotationRow` |
+| ControlEvent / ControlAck | harmonograf | `harmonograf.v1.ControlEvent`, `ControlAck` | — (in-flight only) | — |
+| PayloadRef | harmonograf | `harmonograf.v1.PayloadRef` | `storage.base.PayloadMeta` | `PayloadMetaRow` |
+
+Plan / task / drift state reaches the frontend through the
+`SessionUpdate.goldfive_event` variant on `WatchSession` (see
+[../internals/server-ingest-bus.md](../internals/server-ingest-bus.md)). The
+server's ingest builds a plan/task index from the event stream; the
+frontend subscribes to the raw events and reduces them into its own
+`TaskRegistry`.
 
 Converters between proto and storage types live in
-`server/harmonograf_server/convert.py` (`pb_span_to_storage` at line 251,
-inverse at 304, etc.). Converters for the frontend live in
+`server/harmonograf_server/convert.py`. Converters for the frontend live in
 `frontend/src/rpc/convert.ts`.
 
-**Invariant:** if you add a field, you add it to `types.proto` first, then
-regen, then update `storage/base.py` dataclass, then teach `convert.py` to
-carry it, then (if it needs to reach the UI) teach
-`frontend/src/rpc/convert.ts` and the renderer. Skipping any layer silently
-drops the field.
+**Invariant:** if you add a harmonograf-owned field, you add it to
+`proto/harmonograf/v1/types.proto` first, then regen, then update
+`storage/base.py` dataclass, then teach `convert.py` to carry it, then (if
+it needs to reach the UI) teach `frontend/src/rpc/convert.ts` and the
+renderer. Skipping any layer silently drops the field. For goldfive-owned
+fields (`Plan`, `Task`, `DriftKind`) the edit lands in goldfive first;
+harmonograf picks it up by bumping the goldfive dependency and running
+`make proto`.
 
 ### Process boundaries and trust
 
@@ -219,64 +215,40 @@ Every ADK lifecycle callback produces a span. The kinds are defined once in
 
 | SpanKind | Emitted when | Source |
 |---|---|---|
-| `INVOCATION` | A Runner.run_async invocation begins/ends | `adk.py` callbacks |
-| `LLM_CALL` | `before_model_callback` → `after_model_callback` | `adk.py:1227` |
-| `TOOL_CALL` | `before_tool_callback` → `after_tool_callback` | `adk.py:1299` |
-| `USER_MESSAGE` | A human message is injected | `adk.py` |
-| `AGENT_MESSAGE` | Model emits text | `adk.py` |
-| `TRANSFER` | Control transfers to a sub-agent | `adk.py:1391` |
-| `WAIT_FOR_HUMAN` | Agent is awaiting human response | `adk.py` |
-| `PLANNED` | Rigid-DAG walker planned a task but hasn't started it yet | agent walker |
+| `INVOCATION` | A Runner.run_async invocation begins/ends | `telemetry_plugin.py` |
+| `LLM_CALL` | `before_model_callback` → `after_model_callback` | `telemetry_plugin.py` |
+| `TOOL_CALL` | `before_tool_callback` → `after_tool_callback` | `telemetry_plugin.py` |
+| `USER_MESSAGE` | A human message is injected | `telemetry_plugin.py` |
+| `AGENT_MESSAGE` | Model emits text | `telemetry_plugin.py` |
+| `TRANSFER` | Control transfers to a sub-agent | `telemetry_plugin.py` |
+| `WAIT_FOR_HUMAN` | Agent is awaiting human response | `telemetry_plugin.py` |
 | `CUSTOM` | User code emits its own span via the Client API | `Client.emit_span_*` |
 
-Spans are **telemetry only**. They do not drive task state. The plan state
-machine lives in `_AdkState` and is advanced by reporting-tool interception
-and callback signals, not span lifecycle. See `client-library.md` for why.
+Spans are **telemetry only**. They do not drive task state. Task state is
+driven by goldfive events (`TaskStarted`, `TaskCompleted`, `TaskFailed`,
+`DriftDetected`, …) emitted by `goldfive.DefaultSteerer` when a reporting
+tool fires or when an ADK event implies a transition. Harmonograf sees
+those transitions only through `HarmonografSink`.
 
-## Plan-execution protocol at a glance
+## Orchestration: read it in goldfive
 
-Harmonograf coordinates agents along a plan (a task DAG). Plan state moves
-through three coordinated channels — this is the core abstraction and it
-deserves its own chapter ([`client-library.md`](client-library.md)), but the
-summary is:
+Plan DAG construction, task dispatch (sequential / parallel-DAG / delegated),
+drift detection, the refine loop, reporting tools, and session-state
+coordination are all in [goldfive](https://github.com/pedapudi/goldfive).
+Harmonograf sees the outcome as goldfive events on the sink; it does not
+decide what runs next. If you are adding a new drift kind or a new
+reporting-tool behaviour, start in goldfive and bump the dependency here
+after it lands.
 
-| Channel | Direction | Mechanism |
-|---|---|---|
-| `session.state` | Both ways | Shared mutable dict. Harmonograf writes `harmonograf.*` keys before each model call; agents read them and may write back `harmonograf.task_progress`, etc. Schema in `state_protocol.py`. |
-| Reporting tools | Agent → harmonograf | `report_task_started`, `report_task_completed`, etc. Agents call these as normal tools; `before_tool_callback` intercepts them and applies state transitions directly. |
-| ADK callbacks | ADK → harmonograf | `after_model_callback` parses model output for structured signals; `on_event_callback` watches for transfers, escalates, and `state_delta` events. Belt-and-suspenders for models that describe their work in prose. |
+### How a replan reaches the UI
 
-Spans are emitted in parallel but do not drive this machine. That separation
-is the single most important design decision in the client library.
-
-## Three orchestration modes
-
-`HarmonografAgent` runs in one of three modes, selected by constructor flags
-(`client/harmonograf_client/agent.py:211-246`):
-
-| Mode | Constructor | Who drives task sequencing |
-|---|---|---|
-| **Sequential** (default) | `orchestrator_mode=True, parallel_mode=False` | Plan is fed as one user turn; the coordinator LLM executes it; per-task lifecycle is reported via reporting tools. |
-| **Parallel** | `orchestrator_mode=True, parallel_mode=True` | A rigid DAG batch walker drives sub-agents directly per task. Uses a `task_id` `ContextVar` (`_forced_task_id_var` at `adk.py:320`) to force binding. |
-| **Delegated** | `orchestrator_mode=False` | A single delegation; the inner agent owns sequencing. Harmonograf observes via `on_event_callback` and scans for drift after the fact. |
-
-Each mode is covered in detail in `client-library.md`. The **parallel** mode is
-the only one where harmonograf actually drives which agent runs next — the
-other two treat the LLM as the orchestrator.
-
-## Dynamic replan
-
-When drift is detected (tool errors, context pressure, user steering, agent
-escalation, reported divergence, unexpected transfers, new-work discovery, …),
-harmonograf calls `PlannerHelper.refine()`
-(`client/harmonograf_client/planner.py:138`) and upserts the resulting revised
-plan through the `TaskRegistry` on the frontend. `computePlanDiff`
-(`frontend/src/gantt/index.ts:130`) compares old vs new and produces the
-diff banner you see in the UI.
-
-The full list of drift reasons lives at `client/harmonograf_client/adk.py:352-368`
-(search for `DRIFT_KIND_*` constants). New drift kinds go in that table plus
-`frontend/src/gantt/driftKinds.ts` for the UI mapping.
+When goldfive emits `PlanRevised`, the sink pushes a `GOLDFIVE_EVENT`
+envelope; the transport serialises it onto `TelemetryUp.goldfive_event`;
+the server's ingest dispatches on `Event.payload` and publishes a bus
+delta; the frontend's `WatchSession` subscription receives the event
+inside `SessionUpdate.goldfive_event`; the frontend reduces the new plan
+into its `TaskRegistry` and `computePlanDiff` compares old vs new for the
+diff banner.
 
 ### Data flow overview
 
@@ -306,9 +278,9 @@ process to a rectangle on the Gantt canvas. Every step is a place you might
 have to touch.
 
 1. **Agent process.** The ADK `Runner` reaches the model call and fires
-   `before_model_callback`. The harmonograf plugin's callback starts a
-   `LLM_CALL` span. See `client/harmonograf_client/adk.py` (search for the
-   `before_model_callback` registration near the top of `AdkAdapter`).
+   `before_model_callback`. `HarmonografTelemetryPlugin` starts a `LLM_CALL`
+   span. See `client/harmonograf_client/telemetry_plugin.py` for the
+   callback registrations.
 2. **Span envelope.** The client wraps the span in a `SpanEnvelope`
    (`client/harmonograf_client/buffer.py:55`) and enqueues it on the
    `EventRingBuffer`. Non-blocking.
@@ -347,7 +319,7 @@ The same ten steps as a sequence:
 ```mermaid
 sequenceDiagram
     participant ADK as ADK Runner
-    participant Plug as harmonograf plugin<br/>(adk.py)
+    participant Plug as HarmonografTelemetryPlugin
     participant Buf as EventRingBuffer
     participant Tx as Transport
     participant Ing as IngestPipeline
