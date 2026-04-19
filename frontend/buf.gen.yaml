@@ -10,4 +10,10 @@ plugins:
       - target=ts
       - import_extension=js
 inputs:
+  # Harmonograf's own protos. telemetry.proto / frontend.proto import
+  # goldfive/v1/events.proto, so we also include the goldfive proto tree
+  # below. The vendor-proto/ directory is a symlink into the installed
+  # goldfive package, populated by `make proto-ts` so the path tracks
+  # the editable dependency and is never committed.
   - directory: ../proto
+  - directory: ./vendor-proto
