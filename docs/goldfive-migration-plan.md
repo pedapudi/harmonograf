@@ -347,7 +347,7 @@ HarmonografAgent's value was the re-invocation loop + orchestration-mode switchi
 Old:
 ```python
 from harmonograf_client import Client, HarmonografAgent, make_harmonograf_runner
-client = Client(name="research", server_addr="localhost:50431")
+client = Client(name="research", server_addr="127.0.0.1:7531")
 wrapper = make_harmonograf_runner(agent=inner_agent, client=client)
 async for ev in wrapper.run_async(...):
     ...
@@ -359,7 +359,7 @@ from harmonograf_client import Client, HarmonografSink
 from goldfive import Runner, SequentialExecutor, LLMPlanner
 from goldfive.adapters.adk import ADKAdapter
 
-client = Client(name="research", server_addr="localhost:50431")
+client = Client(name="research", server_addr="127.0.0.1:7531")
 runner = Runner(
     agent=ADKAdapter(inner_agent),
     planner=LLMPlanner(...),
@@ -428,7 +428,7 @@ from harmonograf_client import make_runner
 
 runner, client = make_runner(
     inner_agent=root_agent,
-    server_addr=os.environ.get("HARMONOGRAF_SERVER", "localhost:50431"),
+    server_addr=os.environ.get("HARMONOGRAF_SERVER", "127.0.0.1:7531"),
     planner=goldfive.LLMPlanner(call_llm=..., model=root_agent.model),
 )
 # `app` is rebuilt to point at the goldfive Runner's underlying ADK runner.

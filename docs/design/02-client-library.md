@@ -22,7 +22,7 @@ This doc presupposes the wire protocol in `01-data-model-and-rpc.md`. Anything w
 2. **One-line ADK integration.** `harmonograf_client.attach_adk(runner)` is the whole onboarding story for the most common case. Custom frameworks get a thin manual API and the same primitives the ADK adapter uses.
 3. **Crash-safe identity.** A restarted agent reclaims its row in the Gantt chart. Restarts don't fragment the timeline.
 4. **Visible failure.** When the client drops events or evicts payloads, the user sees it in the Gantt agent header — not in a log file the user will never read.
-5. **No required configuration.** `Client()` with zero args produces a working setup against `127.0.0.1:50431` (the default local server port) with sensible defaults for everything.
+5. **No required configuration.** `Client()` with zero args produces a working setup against `127.0.0.1:7531` (the default local server port) with sensible defaults for everything.
 
 ---
 
@@ -117,7 +117,7 @@ client = Client(
     name="research-agent",        # required, display name
     session_id=None,              # None → auto-generate or join
     agent_id=None,                # None → load-or-create from disk
-    server_addr="127.0.0.1:50431",
+    server_addr="127.0.0.1:7531",
     capabilities={Capability.PAUSE_RESUME, Capability.STEERING},
     framework="custom",
     framework_version="0.1.0",
@@ -507,7 +507,7 @@ This keeps the Gantt y-axis count manageable: one row per process, not one row p
 
 | Field | Default | Env var |
 |---|---|---|
-| `server_addr` | `"127.0.0.1:50431"` | `HARMONOGRAF_SERVER_ADDR` |
+| `server_addr` | `"127.0.0.1:7531"` | `HARMONOGRAF_SERVER_ADDR` |
 | `event_buffer_capacity` | 2000 | `HARMONOGRAF_EVENT_BUFFER` |
 | `payload_buffer_bytes` | 16 << 20 (16 MiB) | `HARMONOGRAF_PAYLOAD_BUFFER` |
 | `chunk_size_bytes` | 256 << 10 (256 KiB) | `HARMONOGRAF_CHUNK_SIZE` |

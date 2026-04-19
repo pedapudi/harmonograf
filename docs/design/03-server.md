@@ -468,7 +468,7 @@ usage: harmonograf-server [-h] [--port PORT] [--data-dir DATA_DIR]
 Harmonograf coordination console server.
 
 options:
-  --port PORT          gRPC port (default: 50431)
+  --port PORT          gRPC port (default: 7531)
   --data-dir DIR       Data directory for sqlite + payloads
                        (default: ~/.harmonograf/data)
   --store BACKEND      Storage backend: memory | sqlite (default: sqlite)
@@ -477,7 +477,7 @@ options:
   --log-level LEVEL    DEBUG | INFO | WARNING | ERROR (default: INFO)
 ```
 
-Defaults are chosen so `harmonograf-server` with no arguments runs a working server against a local SQLite store under `~/.harmonograf/data/` on port 50431. The client library defaults match.
+Defaults are chosen so `harmonograf-server` with no arguments runs a working server against a local SQLite store under `~/.harmonograf/data/` on port 7531. The client library defaults match.
 
 ### 8.1 Static frontend serving
 
