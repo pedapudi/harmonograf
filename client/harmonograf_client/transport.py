@@ -63,7 +63,7 @@ BREAKER_HALF_OPEN = "half_open"
 
 @dataclasses.dataclass
 class TransportConfig:
-    server_addr: str = "127.0.0.1:50431"
+    server_addr: str = "127.0.0.1:7531"
     heartbeat_interval_s: float = HEARTBEAT_INTERVAL_S
     reconnect_initial_ms: int = RECONNECT_INITIAL_MS
     reconnect_max_ms: int = RECONNECT_MAX_MS

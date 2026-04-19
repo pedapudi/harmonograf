@@ -78,7 +78,7 @@ class Client:
         framework: str = "CUSTOM",
         framework_version: str = "",
         capabilities: Iterable[str | Capability] = (),
-        server_addr: str = "127.0.0.1:50431",
+        server_addr: str = "127.0.0.1:7531",
         buffer_size: int = 2000,
         payload_buffer_bytes: int = 16 * 1024 * 1024,
         payload_chunk_bytes: int = 256 * 1024,
