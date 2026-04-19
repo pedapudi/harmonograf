@@ -188,7 +188,10 @@ async def test_rewind_to_payload_lands_under_task_id(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "h_kind",
-    ["INJECT_MESSAGE", "APPROVE", "REJECT", "STATUS_QUERY", "INTERCEPT_TRANSFER"],
+    # APPROVE and REJECT are now bridged to goldfive (landed alongside
+    # goldfive #83). INJECT_MESSAGE, STATUS_QUERY, INTERCEPT_TRANSFER
+    # remain out of scope and still ack UNSUPPORTED.
+    ["INJECT_MESSAGE", "STATUS_QUERY", "INTERCEPT_TRANSFER"],
 )
 async def test_unsupported_kind_acks_unsupported(
     client: Client, made: list[FakeTransport], h_kind: str
