@@ -1,53 +1,54 @@
 """Harmonograf Python client library.
 
 Emits agent activity spans to a harmonograf server over a bidirectional
-gRPC stream. Designed to be non-blocking: agent code never waits on the
-network, disk, or a full queue.
+gRPC stream and ships goldfive orchestration events via
+:class:`HarmonografSink`. Designed to be non-blocking: agent code never
+waits on the network, disk, or a full queue.
+
+Post-goldfive-migration (issue #4), the client is an observability-only
+library. Plan-driven orchestration, drift detection, steering, and
+reporting tools all live in ``goldfive``. Use a
+:class:`goldfive.Runner` with a :class:`HarmonografSink` for telemetry
+and (optionally) a :class:`HarmonografTelemetryPlugin` installed on the
+ADK app for per-span observability::
+
+    from goldfive import Runner, SequentialExecutor, LLMPlanner
+    from goldfive.adapters.adk import ADKAdapter
+    from harmonograf_client import Client, HarmonografSink
+
+    client = Client(name="research", server_addr="127.0.0.1:50431")
+    runner = Runner(
+        agent=ADKAdapter(root_agent),
+        planner=LLMPlanner(call_llm=...),
+        executor=SequentialExecutor(),
+        sinks=[HarmonografSink(client)],
+    )
+    await runner.run("user request")
 
 Public surface (stable):
-    Client              — top-level handle; owns buffer, identity, transport
-    attach_adk          — one-liner integration for google.adk Runners
+    Client                      — top-level handle; owns buffer, identity, transport
+    HarmonografSink             — goldfive.EventSink adapter
+    HarmonografTelemetryPlugin  — optional ADK plugin emitting lifecycle spans
     SpanKind, SpanStatus, Capability — enum mirrors of the wire protocol
+    ControlAckSpec              — control-handler return type
 """
 
-from .adk import AdkAdapter, attach_adk, make_adk_plugin
-from .agent import HarmonografAgent, make_harmonograf_agent
+from __future__ import annotations
+
 from .client import Client
 from .enums import Capability, SpanKind, SpanStatus
-from .planner import (
-    LLMPlanner,
-    PassthroughPlanner,
-    Plan,
-    PlannerHelper,
-    Task,
-    TaskEdge,
-    make_default_adk_call_llm,
-)
-from .runner import HarmonografRunner, make_harmonograf_runner
 from .sink import HarmonografSink
+from .telemetry_plugin import HarmonografTelemetryPlugin
 from .transport import ControlAckSpec
 
 __all__ = [
-    "AdkAdapter",
     "Capability",
     "Client",
     "ControlAckSpec",
-    "HarmonografAgent",
-    "HarmonografRunner",
     "HarmonografSink",
-    "LLMPlanner",
-    "PassthroughPlanner",
-    "Plan",
-    "PlannerHelper",
+    "HarmonografTelemetryPlugin",
     "SpanKind",
     "SpanStatus",
-    "Task",
-    "TaskEdge",
-    "attach_adk",
-    "make_adk_plugin",
-    "make_default_adk_call_llm",
-    "make_harmonograf_agent",
-    "make_harmonograf_runner",
 ]
 
 __version__ = "0.0.0"

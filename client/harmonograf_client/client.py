@@ -181,10 +181,9 @@ class Client:
         """Set a key in the agent metadata dict carried on the Hello frame.
 
         Mutates the transport's metadata snapshot directly. Intended to be
-        called *before* the transport connects for the first time (e.g.
-        from HarmonografAgent's model_validator); later connects and
-        reconnects will carry the update. A no-op if the key and value
-        already match.
+        called *before* the transport connects for the first time; later
+        connects and reconnects will carry the update. A no-op if the key
+        and value already match.
         """
         existing = self._transport._metadata.get(key)
         if existing == value:

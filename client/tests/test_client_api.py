@@ -14,7 +14,6 @@ import pytest
 
 from harmonograf_client.buffer import EnvelopeKind
 from harmonograf_client.client import Client
-from harmonograf_client.planner import Plan, Task, TaskEdge
 from harmonograf_client.transport import ControlAckSpec
 
 from tests._fixtures import FakeTransport, make_factory
