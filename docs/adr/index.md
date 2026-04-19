@@ -8,6 +8,15 @@ should be able to read any one ADR and understand *why* that piece of
 harmonograf is shaped the way it is, without having to spelunk commit
 history or reverse-engineer proto files.
 
+> **Post-migration note (2026-04).** ADRs 0011, 0011a, 0012, 0013, 0014,
+> 0015, 0017, and 0019 cover orchestration concerns that moved to
+> [goldfive](https://github.com/pedapudi/goldfive) during the
+> harmonograf → goldfive split. Each has a deprecation / superseded
+> banner at the top. The reasoning is preserved as historical record;
+> the decisions themselves now live in goldfive's docs. Read
+> [../goldfive-integration.md](../goldfive-integration.md) first if you
+> are here to understand the current shape rather than the archaeology.
+
 ## Reading order
 
 If you are new to harmonograf, read in this order:

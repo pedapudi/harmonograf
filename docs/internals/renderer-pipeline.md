@@ -299,9 +299,9 @@ renders a React tooltip showing tokens/limit/ratio at that time.
 Already described above in the bucketing section, but the full pipeline
 is:
 
-1. `on_model_end` in the client writes `has_thinking=true` and
-   `thinking_text` onto the LLM_CALL span's attributes
-   (see [`adk-plugin-tour.md`](adk-plugin-tour.md#thinking-capture)).
+1. `HarmonografTelemetryPlugin.after_model_callback` writes
+   `has_thinking=true` and `thinking_text` onto the LLM_CALL span's
+   attributes.
 2. Server forwards the attributes on the wire.
 3. Frontend `SessionStore.spans` stores the span with its attrs.
 4. During the gather phase, the bucketing pass checks

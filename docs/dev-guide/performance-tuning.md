@@ -22,7 +22,7 @@ are:
 
 | Hot path | Location | Dominant cost |
 |---|---|---|
-| ADK callback fires → span enqueued | `client/harmonograf_client/adk.py` (the `on_*` methods on `_AdkState`) | Plan state lookups, invariant check if enabled, `emit_span_*` marshal |
+| ADK callback fires → span enqueued | `client/harmonograf_client/telemetry_plugin.py` (ADK lifecycle callbacks) | `emit_span_*` marshal + ring push |
 | Ring buffer push | `client/harmonograf_client/buffer.py:111` | One deque append under `threading.Lock` |
 | Transport drain | `client/harmonograf_client/transport.py:478` (`_send_loop`) | `pop_batch` + proto marshal + gRPC queue put |
 | Server ingest | `server/harmonograf_server/ingest.py:241` (`handle_message`) | `pb_span_to_storage` + `store.upsert_span` + `bus.publish_*` |
@@ -153,111 +153,27 @@ per digest (`ingest.py:65`). That is the cliff; do not touch it without
 also auditing `_PayloadAssembler.add()` (`ingest.py:99`) for memory
 safety.
 
-### Invariant validator cost
+### Orchestration performance: tune it in goldfive
 
-`InvariantChecker.check()` (`client/harmonograf_client/invariants.py:93`)
-runs **eight** read-only passes over the plan state after every walker
-turn:
+After the goldfive migration, plan-walker cost, invariant-checker cost,
+protocol-metric counters, and orchestration-mode trade-offs all live in
+[goldfive](https://github.com/pedapudi/goldfive), not harmonograf. If
+you are chasing a regression in how long a task takes to dispatch, how
+often the planner refines, or how expensive the steerer's state machine
+is under load, profile inside goldfive. Harmonograf's client sees each
+goldfive `Event` exactly once and drops it on the ring buffer — that
+cost is a handful of microseconds and is dominated by the proto
+serialisation, not by anything harmonograf does.
 
-1. `_check_monotonic` — O(tasks) with a transition-history lookup.
-2. `_check_dependency_consistency` — O(edges).
-3. `_check_assignee_validity` — O(tasks).
-4. `_check_plan_id_uniqueness` — O(sessions).
-5. `_check_forced_task` — O(1).
-6. `_check_task_results_keys` — O(results).
-7. `_check_revision_history_monotone` — O(revisions).
-8. `_check_span_bindings` — O(span_to_task map).
+### Profiling the span callback hot path
 
-For normal plans (< 100 tasks, < 500 edges) the whole pass is
-sub-millisecond. For pathological plans it scales linearly. The
-validator is **on** by default because it catches real bugs — see
-`enforce()` at `invariants.py:402` and the walker integration in
-`adk.py`.
-
-**When to disable.** Never in production; always in hot-path
-micro-benchmarks. If you are measuring the overhead of a specific
-callback in isolation (e.g., a pytest that drives `_AdkState` directly
-and wants per-call ns-precision timing), skip the `enforce()` call
-path or construct your own `InvariantChecker` and never call `.check()`.
-The `test_callback_perf.py` harness at `client/tests/test_callback_perf.py`
-is the canonical example of how to run the state machine without the
-validator in the loop.
-
-Do not try to disable the validator via an env var; it is not wired
-up that way deliberately. The validator is a correctness guard, not a
-performance knob.
-
-### Protocol metrics counters
-
-`ProtocolMetrics` (`client/harmonograf_client/metrics.py:17`) is a
-zero-cost counter struct — every recorded event is a single
-`defaultdict[str, int]` increment under the hot path. The module
-docstring is explicit: "no I/O, no allocations, no locks".
-
-It tracks:
-
-- `callbacks_fired[callback_name]`
-- `task_transitions[from_to]`
-- `refine_fires[drift_kind]`
-- `reporting_tools_invoked[tool_name]`
-- `state_state_reads`, `state_state_writes`
-- `walker_iterations`
-- `invariant_violations`
-
-Reads via `format_protocol_metrics()` (`metrics.py:36`) are diagnostic
-only and may be slow (they sort by count and format strings). Never
-call them from a hot loop.
-
-**How to interpret.** A run where `callbacks_fired` is evenly spread
-across `on_model_*`, `on_tool_*`, `on_invocation_*` is healthy. A run
-where `before_model_write_plan_ctx` dominates every other bucket means
-the walker is spinning on plan context writes — likely a supersession
-bug. A run where `refine_fires` is non-zero but the drift kind is
-`tool_error` on every entry means a specific tool is misbehaving and
-you should fix the tool, not tune the metric.
-
-### Profiling the callback hot path
-
-The canonical pattern is in `client/tests/test_callback_perf.py:215-268`.
-It uses `time.perf_counter_ns()` before and after every callback and
-accumulates samples into a `TimingBucket` (`test_callback_perf.py:168`)
-that reports `mean_ms` and `p95_ms`:
-
-```python
-t0 = time.perf_counter_ns()
-state.on_model_start(cc, _mk_llm_request())
-buckets["on_model_start"].record(time.perf_counter_ns() - t0)
-```
-
-The design target documented in that file is **~5 ms p95 per callback**.
-Breaches are logged, not asserted, so CI stays green on slow machines —
-but any real regression is visible to anyone reading the log.
-
-If you are adding a new callback or bending an existing one, copy that
-harness, drive your scenario through it, and look at the distribution.
-Do not trust the mean; the mean of a 1 ms p50 / 50 ms p95 distribution
-reads "5 ms average" and you will ship the regression.
-
-### Orchestration mode trade-offs
-
-The three orchestration modes (`sequential`, `parallel`, `delegated`)
-differ in throughput, not just semantics:
-
-| Mode | When it wins | When it loses |
-|---|---|---|
-| **Sequential** | Plan is strictly linear; the LLM is cheap relative to tool calls; simpler debug story. | Two independent tasks have to run back-to-back even though they could overlap. |
-| **Parallel** | Plan DAG has real fan-out; tasks have few cross-task dependencies; tool calls dominate runtime. | Walker bookkeeping is pure overhead on a linear plan; harder to reason about when drift fires. |
-| **Delegated** | The inner agent has its own orchestrator you want to trust; harmonograf is pure observation. | Drift detection is best-effort via `on_event_callback` (see `architecture.md` §"Three orchestration modes"); you miss subtler drift signals. |
-
-The **parallel** mode is the only one where harmonograf actually drives
-which agent runs next. The walker uses a `task_id` ContextVar
-(`_forced_task_id_var` at `adk.py:320`) to pin sub-agents to specific
-tasks. That pinning costs a few microseconds per task and is usually
-invisible — **but** the walker also has to diff the plan after every
-turn to decide what runs next, and on a 100-task DAG that diff is the
-dominant cost of the mode. If your plan is flat and linear, prefer
-sequential; if your plan is 20 tasks and genuinely parallel, prefer
-parallel; if in doubt, start sequential and profile.
+`HarmonografTelemetryPlugin` (`client/harmonograf_client/telemetry_plugin.py`)
+is the only harmonograf code that runs on the ADK callback hot path.
+Each callback wraps a proto build + one ring-buffer push. Target budget
+is ~1 ms p95 per callback; regressions past that are usually a
+consequence of payload growth or a misbehaving `attach_payload` caller.
+Measure with `time.perf_counter_ns()` around the callback body; nothing
+harmonograf-side should show up above a millisecond.
 
 ### Backpressure handling
 

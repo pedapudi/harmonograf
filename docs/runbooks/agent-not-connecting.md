@@ -218,8 +218,8 @@ will appear here.
 
 ## Cross-links
 
-- [`protocol/wire-format.md`](../protocol/wire-format.md) — exact Hello
-  framing.
+- [`protocol/telemetry-stream.md`](../protocol/telemetry-stream.md) —
+  exact Hello framing.
 - [`dev-guide/debugging.md`](../dev-guide/debugging.md) §1 "The Gantt is
   empty".
 - [`runbooks/agent-disconnects-repeatedly.md`](agent-disconnects-repeatedly.md)

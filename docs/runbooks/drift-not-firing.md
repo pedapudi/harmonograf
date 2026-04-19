@@ -1,5 +1,12 @@
 # Runbook: Drift not firing
 
+> **Post-goldfive note.** Drift detection and the refine pipeline live
+> in [goldfive](https://github.com/pedapudi/goldfive) now
+> (`goldfive.DefaultSteerer`, `goldfive.drift`). Line numbers into
+> `adk.py` / `agent.py` are historical; look in goldfive for current
+> fire sites. Check goldfive logs for `drift observed` /
+> `refine: entry` lines rather than harmonograf-client loggers.
+
 A tool failed, the agent refused, or the user sent a steer — and
 nothing happened. No `drift observed` log line, no refine, no plan
 revision.
@@ -154,10 +161,9 @@ If present, the detector *is* running; it's just quiet at INFO.
    callback, or implement your own wrapper.
 4. **Tool swallowed error**: stop swallowing; let exceptions propagate
    so `on_tool_end` sees `error=<exc>`.
-5. **Throttled**: not a bug; see
-   [`plan-revisions-not-appearing.md`](plan-revisions-not-appearing.md).
-6. **Plan missing**: ensure the plan is submitted first; see
-   [`plan-never-gets-submitted.md`](plan-never-gets-submitted.md).
+5. **Throttled**: not a bug; see goldfive's refine-throttle settings.
+6. **Plan missing**: ensure goldfive has submitted a plan for this run
+   (look for a `PlanSubmitted` event in the timeline).
 7. **Severity = DEBUG**: raise log level or change the detector to
    emit at INFO.
 
@@ -174,5 +180,5 @@ If present, the detector *is* running; it's just quiet at INFO.
 
 - [`dev-guide/debugging.md`](../dev-guide/debugging.md) §"A drift fires
   repeatedly" — symmetric problem.
-- [`runbooks/plan-revisions-not-appearing.md`](plan-revisions-not-appearing.md).
-- [`runbooks/orchestration-mode-mismatch.md`](orchestration-mode-mismatch.md).
+- [`runbooks/frontend-shows-stale-data.md`](frontend-shows-stale-data.md)
+  — if the revision is happening but not reaching the UI.

@@ -1,5 +1,13 @@
 # Runbook: High-latency callbacks
 
+> **Post-goldfive note.** The heavy callbacks that used to live in
+> `harmonograf_client.adk._AdkState.*` (planner refine, drift
+> detection, context-window accounting) now run in
+> [goldfive](https://github.com/pedapudi/goldfive). Profile goldfive's
+> `DefaultSteerer` / `LLMPlanner.refine` / drift classifiers when
+> chasing hot-path latency; the harmonograf side is span marshal +
+> ring-buffer push only.
+
 The agent's hot path is slow. Spans take a long time to end, the
 client buffer backs up, the UI feels laggy. Py-spy shows most time
 inside `harmonograf_client.adk` callbacks.

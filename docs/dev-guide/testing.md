@@ -10,7 +10,7 @@ flaky, or useless tests.
 |---|---|---|---|---|
 | Unit (Python) | `pytest` + `pytest-asyncio` | `client/tests/`, `server/tests/` | `make client-test`, `make server-test` | Pure logic. No network, no real LLM, no real DB unless you're testing the store itself. |
 | Unit (TypeScript) | `vitest` + `@testing-library/react` | `frontend/src/__tests__/` | `pnpm test` (inside `frontend/`) | Pure TS logic: `SessionStore`, `computePlanDiff`, spatial index, viewport math, component render snapshots. |
-| Integration (Python) | `pytest` with real ADK | `client/tests/test_dynamic_plans_real_adk.py`, `client/tests/test_orchestration_modes.py`, etc. | `make client-test` (with `google-adk` installed) | Exercise the ADK callback surface with a real `Runner`, but still with a scripted `FakeLlm`. |
+| Integration (Python) | `pytest` with real ADK + goldfive | `tests/e2e/test_presentation_agent.py`, `tests/e2e/test_goldfive_end_to_end.py` | `cd tests/e2e && uv run pytest` (or `make e2e`) | Exercise the ADK callback surface + goldfive Runner with a scripted `FakeLlm`. |
 | End-to-end | `pytest` + real server + real ADK | `tests/e2e/` | `cd tests/e2e && uv run --with google-adk pytest` (or `make e2e`) | Full stack. Client → gRPC → server → store → bus → (optional) frontend via Playwright. |
 | Frontend E2E | Playwright | `tests/integration/` | `pnpm --dir tests/integration test` | UI interop with a live server. |
 
@@ -19,7 +19,7 @@ The test pyramid — wider tiers at the bottom run on every commit; narrower tie
 ```mermaid
 flowchart TB
     e2e[End-to-end<br/>tests/e2e/<br/>real ADK + real server<br/>SLOW, manual / nightly]
-    integ[Integration<br/>client/tests/test_*_real_adk.py<br/>real ADK + FakeLlm]
+    integ[Integration<br/>tests/e2e/ mock mode<br/>real ADK + goldfive + FakeLlm]
     unit_py[Python unit<br/>client/tests + server/tests<br/>pytest, in-memory store]
     unit_ts[TypeScript unit<br/>frontend/src/__tests__<br/>vitest, no canvas]
     pwt[Frontend E2E<br/>tests/integration/<br/>Playwright + real server]
@@ -105,7 +105,8 @@ Key examples:
 | `server/tests/test_rpc_frontend.py` | End-to-end servicer tests — build a servicer, simulate RPC calls, assert responses. |
 | `server/tests/test_payload_gc.py` | Payload dedup and eviction behavior. |
 | `server/tests/test_retention.py` | Retention sweeper correctness. |
-| `server/tests/test_task_plans.py` | `TaskPlan` ingestion + revision history. |
+| `server/tests/test_task_plans.py` | Plan / task storage invariants (now driven by `goldfive_event` ingest). |
+| `server/tests/test_goldfive_ingest.py` | `TelemetryUp.goldfive_event` dispatch on `RunStarted`, `PlanSubmitted`, `PlanRevised`, `TaskStarted/Completed/Failed`, `DriftDetected`. |
 
 ### The in-memory store for tests
 
@@ -141,21 +142,25 @@ renderer is broken. Cover the renderer through:
 - Playwright integration tests that launch a real browser (see
   `tests/integration/`).
 
-## Writing integration tests (client ↔ real ADK)
+## Writing integration tests (client ↔ real ADK ↔ real goldfive)
 
-`client/tests/test_orchestration_modes.py` and
-`client/tests/test_dynamic_plans_real_adk.py` exercise real ADK with a
-scripted LLM. These are the most valuable tests in the repo because they
-catch regressions in the callback dispatch contract with ADK itself.
+`tests/e2e/test_presentation_agent.py` and
+`tests/e2e/test_goldfive_end_to_end.py` exercise real ADK + a real
+`goldfive.Runner` against a real harmonograf server. These are the most
+valuable tests in the repo — they catch regressions in the callback
+dispatch contract, in goldfive's event emission, and in harmonograf's
+ingest dispatch, all at once.
 
 Guidelines:
 
-- Always use `FakeLlm` for deterministic response sequences.
-- Always assert on `_AdkState` transitions, not on span content.
-- Prefer asserting "task X is in state Y" over "agent said Z" — model
-  output is fragile, state transitions are not.
-- Clean up: ADK `Runner` holds goroutines/tasks. Use the fixtures in
-  `conftest.py` to ensure cleanup between tests.
+- Use `build_goldfive_runner(mock=True)` from the reference agent for a
+  deterministic offline run — canned plan, canned LLM responses, fixed
+  timing.
+- Assert on the resulting stored state (spans, plan rows, task rows,
+  drift annotations) via the server's `GetSession` / `GetSpanTree` RPCs.
+  Don't assert on model prose.
+- Clean up: both ADK and goldfive hold tasks; use `tests/e2e/conftest.py`
+  fixtures for setup and teardown.
 
 ## Writing end-to-end tests
 
@@ -165,8 +170,9 @@ Guidelines:
 |---|---|
 | `tests/e2e/test_scenarios.py` | Scripted multi-task scenarios through a real harmonograf server. |
 | `tests/e2e/test_adk_hello.py` | Basic ADK integration smoke — agent connects, emits one span, server stores it. |
-| `tests/e2e/test_planner_e2e.py` | `LLMPlanner` + real ADK. Requires an LLM endpoint. |
-| `tests/e2e/test_presentation_agent.py` | Full presentation agent demo under test harness. |
+| `tests/e2e/test_planner_e2e.py` | goldfive `LLMPlanner` + real ADK. Requires an LLM endpoint. |
+| `tests/e2e/test_presentation_agent.py` | Full presentation agent demo via `build_goldfive_runner`. |
+| `tests/e2e/test_goldfive_end_to_end.py` | `HarmonografSink` → server ingest → store round-trip for every goldfive event variant. |
 
 ### Local LLM env for e2e
 
@@ -204,27 +210,20 @@ Don't use it for:
 - Logic that can be tested in a vitest unit (too slow).
 - Anything that doesn't require the full browser environment.
 
-## Invariant checker as a test tool
+## Plan-state invariants live in goldfive
 
-`client/harmonograf_client/invariants.py` is useful in tests, not just in
-production:
-
-```python
-from harmonograf_client.invariants import check_plan_state
-check_plan_state(plan, span_history)  # raises InvariantViolation if bad
-```
-
-Drop this into any test that builds a plan + span history by hand and you
-will catch illegal transitions, cycles, duplicate IDs, and forced-task
-violations for free. See `client/tests/test_invariants.py` for the full
-coverage of what it checks.
+The invariant validator migrated to goldfive with the rest of the
+orchestration pieces. If you want to assert "this plan + task history is
+legal" in a harmonograf test, import goldfive's invariant helpers; the
+goldfive test suite is the place to add new plan-state checks.
 
 ## When to write which tier
 
 | You changed… | First test | Why |
 |---|---|---|
-| A pure helper in `state_protocol.py`, `planner.py`, `buffer.py` | Python unit | No external deps. |
-| Callback dispatch in `adk.py` | Integration (real ADK + `FakeLlm`) | ADK's contract is the thing under test. |
+| A pure helper in `buffer.py`, `identity.py`, or `telemetry_plugin.py` | Python unit | No external deps. |
+| `HarmonografSink` envelope packing or `Client` API shape | Python unit (`test_harmonograf_sink.py`, `test_client_api.py`) | Hermetic, fast. |
+| ADK callback dispatch via `HarmonografTelemetryPlugin` | Integration / e2e | ADK's contract is the thing under test. |
 | Ingest pipeline branching in `ingest.py` | Server unit with in-memory store | Hermetic, fast. |
 | Bus fan-out in `bus.py` | Server unit | Subscription lifecycle is the thing. |
 | Storage schema in `sqlite.py` | Server unit against `SqliteStore` | Only sqlite-specific behavior. |

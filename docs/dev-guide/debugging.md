@@ -43,18 +43,19 @@ Particularly useful loggers when debugging:
 ### Client library
 
 Set `LOG_LEVEL=DEBUG` in the agent process environment. The client library
-also respects Python's standard `logging` config. Interesting loggers:
+respects Python's standard `logging` config. Interesting loggers:
 
 | Logger | What it tells you |
 |---|---|
-| `harmonograf_client.adk` | Every ADK callback and the resulting state transition. |
+| `harmonograf_client.telemetry_plugin` | Every ADK callback and the span it produced. |
+| `harmonograf_client.sink` | Every goldfive event converted to `GOLDFIVE_EVENT` envelope. |
 | `harmonograf_client.transport` | gRPC connection state, reconnect attempts, Hello/Welcome handshake. |
 | `harmonograf_client.buffer` | Ring buffer pressure and drops. |
-| `harmonograf_client.invariants` | Invariant violations. |
 
-When you want to see the full plan state machine in motion, turn
-`harmonograf_client.adk` up to `DEBUG` — you'll see every callback, every
-reporting tool interception, and every `_AdkState` transition.
+To see the orchestration state machine in motion — task transitions,
+reporting-tool interceptions, drift fires, invariant checks — turn on
+goldfive's loggers instead. Those live in
+[goldfive](https://github.com/pedapudi/goldfive), not harmonograf.
 
 ### Frontend
 
@@ -74,44 +75,14 @@ dev builds shows the live transport state. If it says "disconnected",
 the backend is unreachable — check the server is up and the CORS allow
 list in `_cors.py`.
 
-## Invariant violations
+## Plan-state invariants: debug them in goldfive
 
-The `InvariantChecker` (`client/harmonograf_client/invariants.py:78`) is
-the single best tool for catching plan-state bugs. It runs in-process in
-the client library and logs a warning whenever a rule is violated.
-
-### Reading a violation log
-
-```
-WARN harmonograf_client.invariants: InvariantViolation(rule='monotonic',
-     severity='error', detail='task t3 transitioned COMPLETED -> IN_PROGRESS')
-```
-
-The three fields are:
-
-- `rule` — which check fired (see table in `client-library.md` for all
-  rules).
-- `severity` — `error` for hard violations, `warn` for soft.
-- `detail` — a human-readable breadcrumb.
-
-Each violation also bumps `ProtocolMetrics.invariant_violations`. The
-metrics dataclass is shipped on the invocation span as attributes, so you
-can see a count in the UI without grepping logs.
-
-### Running the checker in dev
-
-In an ad-hoc REPL or notebook:
-
-```python
-from harmonograf_client.invariants import check_plan_state
-from harmonograf_client.planner import Plan
-
-# Build a plan + span history from your data
-check_plan_state(plan, span_history)
-```
-
-It raises `InvariantViolation` on failure, which gives you a stack trace
-pointing straight at the bad transition.
+The invariant validator that used to live in harmonograf's client
+(`invariants.py`) moved to goldfive during the migration. If the UI is
+showing a task transition that looks impossible (`COMPLETED →
+IN_PROGRESS`, say), the bug is in goldfive's steerer / reporting-tool
+handling. Follow the trail there — goldfive has its own debug harness
+and invariant suite.
 
 ## Common failure modes
 
@@ -183,9 +154,9 @@ are not ending.
    for reconnect loops.
 2. The `stuck_reason` annotation (if any) — written by the server when
    the sweeper can infer a reason (no progress, no spans, no heartbeat).
-3. The agent's `_AdkState` — is it waiting on a task that will never
-   complete? Look at `current_activity` in the heartbeat; it should name
-   the current task.
+3. Is the orchestrator waiting on a task that will never complete? Look
+   at `current_activity` in the heartbeat — it should name the current
+   task. For the underlying task state, consult goldfive logs.
 4. Context window pressure — check `Heartbeat.context_window_tokens` vs
    `context_window_limit_tokens`. Near the limit means the model is about
    to refuse, which usually shows up as `DRIFT_KIND_CONTEXT_PRESSURE`.
@@ -212,15 +183,20 @@ agent clearly finishing it.
 
 **Check:**
 
-1. Did the agent call a reporting tool? Grep the client log for the tool
-   name. If not, the agent's instruction template is wrong — see
-   `tools.augment_instruction()`.
-2. Did the reporting tool get intercepted? Check
-   `ProtocolMetrics.reporting_tools_invoked` on the invocation span.
-3. Was the transition rejected by an invariant? Grep for `InvariantViolation`.
-4. In parallel mode, is the task bound via `_forced_task_id_var`? If the
-   walker dispatches without setting the ContextVar, the span will have
-   no `hgraf.task_id` attribute and the task state machine won't advance.
+1. Did the agent call a reporting tool? Grep the goldfive log for the
+   tool name. If not, the agent's instruction template is missing the
+   reporting-tool appendix — goldfive's `ADKAdapter` is supposed to
+   inject it; check that the subtree you're looking at is reachable
+   from the `ADKAdapter` root.
+2. Did goldfive's steerer process the tool call? Look for the
+   matching `TaskStarted` / `TaskCompleted` / `TaskFailed` event in
+   goldfive logs.
+3. Is the corresponding `goldfive_event` landing on the harmonograf
+   server? Grep `harmonograf_server.ingest` for `goldfive_event` —
+   every dispatched variant should appear.
+4. Is the frontend reducing it? Check browser devtools for the
+   `SessionUpdate.goldfive_event` in the `WatchSession` stream and
+   confirm `TaskRegistry` is applying it.
 
 ### 5. "The UI shows stale data after a refine"
 
@@ -228,13 +204,16 @@ Symptoms: a plan was refined but the UI still shows the old plan.
 
 **Check:**
 
-1. Did the client emit the new `TaskPlan`? Grep
-   `harmonograf_client.planner` for the refine call.
-2. Did the server ingest it? Grep `harmonograf_server.ingest` for
-   `task_plan` handling. It should upsert and publish a `plan_delta`.
-3. Did `TaskRegistry.upsert` run `computePlanDiff` correctly? Add a
+1. Did goldfive emit `PlanRevised`? Grep the goldfive log for the event
+   (goldfive's `Runner` / `DefaultSteerer` logs this).
+2. Did the harmonograf server ingest it? Grep `harmonograf_server.ingest`
+   for `goldfive_event` + `PlanRevised`; it should update the plan index
+   and publish a `goldfive_event` bus delta.
+3. Did the frontend receive the `SessionUpdate.goldfive_event`? Check
+   DevTools → Network → `WatchSession` stream.
+4. Did `TaskRegistry` reduce it and run `computePlanDiff`? Add a
    `console.log` in `computePlanDiff` and hover the refine.
-4. Did the renderer pick up the mutation? `TaskRegistry` notifies
+5. Did the renderer pick up the mutation? `TaskRegistry` notifies
    subscribers; verify the drawer is subscribed.
 
 ### 6. "`make demo` starts but nothing works"
@@ -319,23 +298,6 @@ Heartbeats are your primary debug instrument for agent health. Shape
 active subscriptions, and so on. Quick sanity check when you can't tell
 if the server is alive.
 
-## Using the invariant checker in dev
-
-From a Python REPL inside the client venv:
-
-```python
-import asyncio
-from harmonograf_client.invariants import InvariantChecker, InvariantViolation
-
-ic = InvariantChecker()
-try:
-    ic.check(plan, span_history)
-except InvariantViolation as v:
-    print(v)
-```
-
-This is useful when a bug report includes a plan snapshot and a span log —
-you can reproduce offline without re-running the agent.
 
 ## Common "but that's impossible" causes
 
@@ -349,21 +311,13 @@ A running list of things that have bitten people and look unbelievable:
   the UI sort wrong. Use `SpanStart.start_time` from the client, not
   server receive time.
 - **A task is marked complete before its span ends.** Plan state and span
-  lifecycle are decoupled (see `client-library.md`). This is by design.
-  The reporting tool fires first; the span ends when the ADK callback
-  eventually runs.
-- **`session.state` mutation silently lost.** Two common causes: the
-  mutation was made inside a nested agent and didn't propagate up; or
-  `clear_current_task()` fired in the wrong place and wiped it.
-- **`_forced_task_id_var` is `None` when you didn't expect it.** The
-  ContextVar is per-async-context. If you spawn a new task with
-  `asyncio.create_task`, the ContextVar is copied at creation time;
-  mutations after that won't be visible. Set before the spawn.
-- **A drift fires repeatedly.** The throttle
-  (`_DRIFT_REFINE_THROTTLE_SECONDS = 2.0` at `adk.py:378`) suppresses
-  duplicate fires within 2s, but the drift reason cycle itself may be
-  unbounded. Check `ProtocolMetrics.refine_fires` for the kind and go fix
-  the detector.
+  lifecycle are decoupled by design. Goldfive's reporting-tool intercept
+  fires first; the harmonograf span ends when the ADK callback
+  eventually runs. See [client-library.md](client-library.md).
+- **`session.state` mutation silently lost.** Session-state coordination
+  is goldfive's `SessionContext` — chase this inside goldfive.
+- **A drift fires repeatedly.** Drift detection and throttling are in
+  goldfive; check goldfive's drift logger and refine-throttle settings.
 
 ## When you really can't figure it out
 
@@ -373,9 +327,8 @@ A running list of things that have bitten people and look unbelievable:
    decent starting point.
 3. Ask for a second pair of eyes. The client library in particular has
    gotchas that are hard to see if you wrote them yourself.
-4. If the invariant checker is silent but something is obviously wrong,
-   the invariant checker itself may be missing a rule. Consider adding
-   one.
+4. If goldfive's invariant suite is silent but something is obviously
+   wrong, the invariant itself may be missing — file an issue upstream.
 
 ## Next
 

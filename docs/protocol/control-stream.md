@@ -126,12 +126,14 @@ Implementation pointers:
   `expected_stream_ids`; each `record_ack` ticks one off and resolves
   the future when either the first success arrives (default) or every
   expected stream has ack'd (`require_all_acks=true`).
-- On the client, the harmonograf-for-ADK adapter routes PAUSE / RESUME
-  / STATUS_QUERY through dedicated handlers in
-  [`client/harmonograf_client/adk.py`](../../client/harmonograf_client/adk.py)
-  and reports acks via `transport.send_control_ack(...)` — which emits
-  a `TelemetryUp.control_ack` on the same telemetry stream that
-  originated the agent.
+- On the client, control events are dispatched to per-kind handlers
+  registered via `Client.on_control(kind, handler)` in
+  [`client/harmonograf_client/client.py`](../../client/harmonograf_client/client.py).
+  Each handler returns a `ControlAckSpec`; the transport packs it into
+  a `CONTROL_ACK` envelope that rides back to the server on the same
+  telemetry stream (`TelemetryUp.control_ack`). Goldfive's ADK adapter
+  is one consumer of this API — it registers handlers for PAUSE /
+  RESUME / CANCEL / STEER to drive the orchestration loop.
 
 ## Multi-stream fan-out
 

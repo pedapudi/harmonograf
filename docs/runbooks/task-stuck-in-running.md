@@ -1,5 +1,10 @@
 # Runbook: Task stuck in RUNNING
 
+> **Post-goldfive note.** Task state transitions and drift throttling
+> live in [goldfive](https://github.com/pedapudi/goldfive). `adk.py`
+> line-number references below are historical; check goldfive's
+> `DefaultSteerer` for current implementation.
+
 A task entered RUNNING and never completes. The agent row has an amber
 "stuck" marker; heartbeats still arrive; spans still end, but the task
 itself never progresses.
@@ -87,9 +92,8 @@ grep -E 'drift observed|plan refined|refine:' /path/to/agent.log | tail -20
    over the shared dict, one spinning waiting for a state flag the
    other never sets.
 6. **Reporting-tool side effect never fired** — the LLM emitted
-   `report_task_completed` text instead of calling the tool. The state
-   machine never gets the signal. See
-   [`plan-revisions-not-appearing.md`](plan-revisions-not-appearing.md).
+   `report_task_completed` text instead of calling the tool. Goldfive's
+   steerer never gets the signal. See goldfive's steerer logs.
 7. **Drift throttled** — a detected drift that would have refined the
    plan was suppressed by `_DRIFT_REFINE_THROTTLE_SECONDS = 2.0`
    (`client/harmonograf_client/adk.py:378`). Usually not the root

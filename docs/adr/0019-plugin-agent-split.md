@@ -1,8 +1,16 @@
 # ADR 0019 — `HarmonografAgent` and `HarmonografAdkPlugin` are separate
 
+> **SUPERSEDED (goldfive migration).** `HarmonografAgent` and the old
+> `HarmonografAdkPlugin` were deleted in the goldfive migration. The
+> modern split is `goldfive.adapters.adk.ADKAdapter` (orchestration —
+> owned by goldfive) vs. `HarmonografTelemetryPlugin` (observability —
+> owned by harmonograf), composed in the ADK App. The principle — two
+> extension points, one App — still holds; the code is just two repos
+> wide. See [../goldfive-integration.md](../goldfive-integration.md).
+
 ## Status
 
-Accepted.
+Superseded by the goldfive migration.
 
 ## Context
 

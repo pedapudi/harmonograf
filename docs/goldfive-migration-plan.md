@@ -399,6 +399,13 @@ runner = Runner(agent=adk_adapter, sinks=[HarmonografSink(client)], ...)
 
 ### 4.4 Factory convenience (optional)
 
+> **Post-merge note:** this factory was *not* shipped in `harmonograf_client`.
+> The public surface stayed minimal — `Client`, `HarmonografSink`,
+> `HarmonografTelemetryPlugin`. The demo-agent convenience wrapper lives in
+> the reference-agent module itself
+> (`tests/reference_agents/presentation_agent/agent.py::build_goldfive_runner`)
+> rather than in the library. The design sketch below is preserved for context.
+
 If users find the two-step dance awkward, harmonograf can ship a one-liner:
 
 ```python
@@ -416,8 +423,6 @@ def make_runner(inner_agent, *, server_addr, planner=None, ...):
         sinks=[HarmonografSink(client)],
     ), client
 ```
-
-Recommendation: ship this factory. It keeps the demo scripts short and provides a smooth migration from `make_harmonograf_runner`.
 
 ### 4.5 Demo-agent migration
 

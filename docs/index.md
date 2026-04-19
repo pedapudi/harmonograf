@@ -82,7 +82,7 @@ If you're editing the client library, server, frontend, or protos.
 | [dev-guide/index.md](dev-guide/index.md) | Developer guide hub; reading-order and conventions. |
 | [dev-guide/setup.md](dev-guide/setup.md) | Day-one setup: clone, install, run `make demo`, smoke-test. |
 | [dev-guide/architecture.md](dev-guide/architecture.md) | Three-component architecture and the end-to-end span walk-through. |
-| [dev-guide/client-library.md](dev-guide/client-library.md) | `client/` internals: orchestration modes, reporting tools, `_AdkState`, invariants. |
+| [dev-guide/client-library.md](dev-guide/client-library.md) | `client/` internals: `Client` transport, `HarmonografSink`, `HarmonografTelemetryPlugin`, envelope kinds, reconnect. |
 | [dev-guide/server.md](dev-guide/server.md) | `server/` internals: ingest pipeline, bus, storage, RPC surface. |
 | [dev-guide/frontend.md](dev-guide/frontend.md) | `frontend/` internals: SessionStore, renderer, uiStore, Connect-RPC. |
 | [dev-guide/working-with-protos.md](dev-guide/working-with-protos.md) | Proto codegen and forward-compat rules. |
@@ -104,8 +104,8 @@ the server, or debugging a wire-level issue.
 | [protocol/telemetry-stream.md](protocol/telemetry-stream.md) | `StreamTelemetry` bidirectional stream, `Hello`/`Welcome`, resume tokens, goodbye. |
 | [protocol/control-stream.md](protocol/control-stream.md) | `SubscribeControl` server-streaming RPC; control event / ack lifecycle; capability negotiation. |
 | [protocol/frontend-rpcs.md](protocol/frontend-rpcs.md) | `ListSessions`, `WatchSession`, `GetPayload`, `GetSpanTree`, `PostAnnotation`, `SendControl`, `DeleteSession`, `GetStats`. |
-| [protocol/data-model.md](protocol/data-model.md) | Every shared `types.proto` message: Session, Agent, Span, PayloadRef, ErrorInfo, TaskPlan, Task, TaskEdge, Annotation, ControlEvent, ControlAck. |
-| [protocol/task-state-machine.md](protocol/task-state-machine.md) | Plan execution protocol: session.state schema, reporting tools, orchestration modes, drift taxonomy, refine pipeline, invariant validator. |
+| [protocol/data-model.md](protocol/data-model.md) | Harmonograf-owned `types.proto` messages (Session, Agent, Span, PayloadRef, ErrorInfo, Annotation, ControlEvent, ControlAck). Plan / Task / TaskEdge / DriftKind are imported from `goldfive/v1/types.proto`. |
+| [protocol/task-state-machine.md](protocol/task-state-machine.md) | Redirect — plan / task / drift / reporting tools / invariant validator all live in goldfive after the migration. |
 | [protocol/span-lifecycle.md](protocol/span-lifecycle.md) | SpanStart / SpanUpdate / SpanEnd, attribute merging, `hgraf.task_id` binding, cross-agent links. |
 | [protocol/payload-flow.md](protocol/payload-flow.md) | Content-addressed payload uploads, chunked transport, eviction, server-side re-request. |
 | [protocol/wire-ordering.md](protocol/wire-ordering.md) | Happens-before guarantees, control-ack colocation, duplicate span dedup on reconnect, resume_token semantics. |

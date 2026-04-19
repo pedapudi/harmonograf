@@ -33,7 +33,8 @@ sequenceDiagram
 - Orchestration mode: **sequential** (default). Mode chip on the current
   task strip reads `SEQ`.
 - Tools: `web_search(query)`, `read_url(url)`, no approval gate.
-- Planner: `HarmonografAgent` with the default drift taxonomy. See
+- Planner: `goldfive.LLMPlanner` + `SequentialExecutor` driving the
+  default drift taxonomy. See
   [tasks-and-plans.md → drift kinds](../tasks-and-plans.md#drift-kinds).
 - Capabilities advertised in `Hello`: `PAUSE_RESUME`, `STEERING`. No
   `REWIND`.

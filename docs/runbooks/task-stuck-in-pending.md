@@ -1,5 +1,12 @@
 # Runbook: Task stuck in PENDING
 
+> **Post-goldfive note.** Reporting-tool interception, the plan walker,
+> and the task state machine live in
+> [goldfive](https://github.com/pedapudi/goldfive) now. Line numbers
+> below reference the pre-migration `adk.py` and will not resolve.
+> Treat the conceptual triage as still accurate, but look in goldfive's
+> `DefaultSteerer` / `ADKAdapter` / executor code for the actual logic.
+
 The plan is rendered, tasks are visible in the Gantt and drawer, but
 they never transition to RUNNING. The current-task strip stays empty
 or keeps displaying "no current task".
@@ -34,9 +41,8 @@ flowchart TD
 - **Client log** (nothing helpful by default, but with `LOG_LEVEL=DEBUG`):
   - `DEBUG harmonograf_client.adk: ...` callback traces showing no
     `state.on_task_start` lines
-  - Possibly `WARN harmonograf_client.invariants: InvariantViolation(...)`
-    on attempted transitions (see
-    [`invariant-violations.md`](invariant-violations.md))
+  - Possibly `WARN goldfive.*` InvariantViolation lines on attempted
+    transitions — check goldfive's steerer log
 - **Server log**:
   - `DEBUG harmonograf_server.ingest: hgraf.task_id=... on span=... has no matching plan in session=...`
     (`ingest.py:714`)
@@ -220,5 +226,5 @@ in the message will name the culprit.
   advance".
 - [`runbooks/task-stuck-in-running.md`](task-stuck-in-running.md) — the
   symmetric case.
-- [`runbooks/orchestration-mode-mismatch.md`](orchestration-mode-mismatch.md)
-  — picking the right mode.
+- goldfive docs for choosing the right executor
+  (`SequentialExecutor` vs `ParallelDAGExecutor` vs delegated).

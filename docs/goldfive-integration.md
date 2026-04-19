@@ -55,23 +55,23 @@ from goldfive.adapters.adk import ADKAdapter
 from google.adk.agents import Agent
 from harmonograf_client import Client, HarmonografSink
 
-root = Agent(name="researcher", model="openai/gpt-4o-mini")
-
-client = Client(name="researcher", server_addr="127.0.0.1:7531")
-sink = HarmonografSink(client)
-
-runner = Runner(
-    agent=ADKAdapter(root),
-    planner=LLMPlanner(call_llm=my_llm_call, model="openai/gpt-4o-mini"),
-    executor=SequentialExecutor(),
-    sinks=[sink, goldfive.sinks.LoggingSink()],
-)
-
 async def main() -> None:
+    root = Agent(name="researcher", model="openai/gpt-4o-mini")
+
+    client = Client(name="researcher")  # defaults to 127.0.0.1:7531
+
+    runner = Runner(
+        agent=ADKAdapter(root),
+        planner=LLMPlanner(call_llm=my_llm_call, model="openai/gpt-4o-mini"),
+        executor=SequentialExecutor(),
+        sinks=[HarmonografSink(client), goldfive.sinks.LoggingSink()],
+    )
+
     outcome = await runner.run("Summarise recent observability research.")
     print("ok" if outcome.success else outcome.reason)
     await runner.close()           # flushes every sink, including ours
     client.shutdown(flush_timeout=5.0)
+
 
 asyncio.run(main())
 ```
