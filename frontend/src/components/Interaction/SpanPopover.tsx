@@ -178,14 +178,14 @@ function PopoverCard({
     const text = steerText.trim();
     if (!text) return;
     setSteerSending(true);
-    const encoder = new TextEncoder();
-    const payload = JSON.stringify({ mode: steerMode, text });
+    // suggestedAction carries the "cancel" vs "append" intent; goldfive's
+    // STEER payload has both note and suggested_action by design.
     await send({
       sessionId,
       agentId: span.agentId,
-      spanId: span.id,
       kind: 'STEER',
-      payload: encoder.encode(payload),
+      note: text,
+      suggestedAction: steerMode,
     }).catch(() => {});
     setSteerText('');
     setSteerOpen(false);

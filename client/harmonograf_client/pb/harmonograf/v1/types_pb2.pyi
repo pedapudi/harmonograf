@@ -78,27 +78,6 @@ class AnnotationKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     ANNOTATION_KIND_COMMENT: _ClassVar[AnnotationKind]
     ANNOTATION_KIND_STEERING: _ClassVar[AnnotationKind]
     ANNOTATION_KIND_HUMAN_RESPONSE: _ClassVar[AnnotationKind]
-
-class ControlKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = ()
-    CONTROL_KIND_UNSPECIFIED: _ClassVar[ControlKind]
-    CONTROL_KIND_PAUSE: _ClassVar[ControlKind]
-    CONTROL_KIND_RESUME: _ClassVar[ControlKind]
-    CONTROL_KIND_CANCEL: _ClassVar[ControlKind]
-    CONTROL_KIND_REWIND_TO: _ClassVar[ControlKind]
-    CONTROL_KIND_INJECT_MESSAGE: _ClassVar[ControlKind]
-    CONTROL_KIND_APPROVE: _ClassVar[ControlKind]
-    CONTROL_KIND_REJECT: _ClassVar[ControlKind]
-    CONTROL_KIND_INTERCEPT_TRANSFER: _ClassVar[ControlKind]
-    CONTROL_KIND_STEER: _ClassVar[ControlKind]
-    CONTROL_KIND_STATUS_QUERY: _ClassVar[ControlKind]
-
-class ControlAckResult(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = ()
-    CONTROL_ACK_RESULT_UNSPECIFIED: _ClassVar[ControlAckResult]
-    CONTROL_ACK_RESULT_SUCCESS: _ClassVar[ControlAckResult]
-    CONTROL_ACK_RESULT_FAILURE: _ClassVar[ControlAckResult]
-    CONTROL_ACK_RESULT_UNSUPPORTED: _ClassVar[ControlAckResult]
 SESSION_STATUS_UNSPECIFIED: SessionStatus
 SESSION_STATUS_LIVE: SessionStatus
 SESSION_STATUS_COMPLETED: SessionStatus
@@ -144,21 +123,6 @@ ANNOTATION_KIND_UNSPECIFIED: AnnotationKind
 ANNOTATION_KIND_COMMENT: AnnotationKind
 ANNOTATION_KIND_STEERING: AnnotationKind
 ANNOTATION_KIND_HUMAN_RESPONSE: AnnotationKind
-CONTROL_KIND_UNSPECIFIED: ControlKind
-CONTROL_KIND_PAUSE: ControlKind
-CONTROL_KIND_RESUME: ControlKind
-CONTROL_KIND_CANCEL: ControlKind
-CONTROL_KIND_REWIND_TO: ControlKind
-CONTROL_KIND_INJECT_MESSAGE: ControlKind
-CONTROL_KIND_APPROVE: ControlKind
-CONTROL_KIND_REJECT: ControlKind
-CONTROL_KIND_INTERCEPT_TRANSFER: ControlKind
-CONTROL_KIND_STEER: ControlKind
-CONTROL_KIND_STATUS_QUERY: ControlKind
-CONTROL_ACK_RESULT_UNSPECIFIED: ControlAckResult
-CONTROL_ACK_RESULT_SUCCESS: ControlAckResult
-CONTROL_ACK_RESULT_FAILURE: ControlAckResult
-CONTROL_ACK_RESULT_UNSUPPORTED: ControlAckResult
 
 class Session(_message.Message):
     __slots__ = ("id", "title", "created_at", "ended_at", "status", "agent_ids", "metadata")
@@ -348,37 +312,3 @@ class Annotation(_message.Message):
     body: str
     delivered_at: _timestamp_pb2.Timestamp
     def __init__(self, id: _Optional[str] = ..., session_id: _Optional[str] = ..., target: _Optional[_Union[AnnotationTarget, _Mapping]] = ..., author: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., kind: _Optional[_Union[AnnotationKind, str]] = ..., body: _Optional[str] = ..., delivered_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
-
-class ControlTarget(_message.Message):
-    __slots__ = ("agent_id", "span_id")
-    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    SPAN_ID_FIELD_NUMBER: _ClassVar[int]
-    agent_id: str
-    span_id: str
-    def __init__(self, agent_id: _Optional[str] = ..., span_id: _Optional[str] = ...) -> None: ...
-
-class ControlEvent(_message.Message):
-    __slots__ = ("id", "issued_at", "target", "kind", "payload")
-    ID_FIELD_NUMBER: _ClassVar[int]
-    ISSUED_AT_FIELD_NUMBER: _ClassVar[int]
-    TARGET_FIELD_NUMBER: _ClassVar[int]
-    KIND_FIELD_NUMBER: _ClassVar[int]
-    PAYLOAD_FIELD_NUMBER: _ClassVar[int]
-    id: str
-    issued_at: _timestamp_pb2.Timestamp
-    target: ControlTarget
-    kind: ControlKind
-    payload: bytes
-    def __init__(self, id: _Optional[str] = ..., issued_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., target: _Optional[_Union[ControlTarget, _Mapping]] = ..., kind: _Optional[_Union[ControlKind, str]] = ..., payload: _Optional[bytes] = ...) -> None: ...
-
-class ControlAck(_message.Message):
-    __slots__ = ("control_id", "result", "detail", "acked_at")
-    CONTROL_ID_FIELD_NUMBER: _ClassVar[int]
-    RESULT_FIELD_NUMBER: _ClassVar[int]
-    DETAIL_FIELD_NUMBER: _ClassVar[int]
-    ACKED_AT_FIELD_NUMBER: _ClassVar[int]
-    control_id: str
-    result: ControlAckResult
-    detail: str
-    acked_at: _timestamp_pb2.Timestamp
-    def __init__(self, control_id: _Optional[str] = ..., result: _Optional[_Union[ControlAckResult, str]] = ..., detail: _Optional[str] = ..., acked_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...

@@ -6,8 +6,16 @@ import asyncio
 
 import pytest
 
+from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
+
 from harmonograf_server.control_router import ControlRouter, DeliveryResult
-from harmonograf_server.pb import types_pb2
+
+
+def _event(kind: int, *, agent_id: str = "agent-1") -> gf_control_pb2.ControlEvent:
+    return gf_control_pb2.ControlEvent(
+        kind=kind,
+        target=gf_control_pb2.ControlTarget(agent_id=agent_id),
+    )
 
 
 async def test_unavailable_when_no_subscribers():
@@ -15,7 +23,7 @@ async def test_unavailable_when_no_subscribers():
     outcome = await router.deliver(
         session_id="sess",
         agent_id="agent-1",
-        kind=types_pb2.CONTROL_KIND_PAUSE,
+        event=_event(gf_control_pb2.CONTROL_KIND_PAUSE),
         timeout_s=0.1,
     )
     assert outcome.result == DeliveryResult.UNAVAILABLE
@@ -31,7 +39,7 @@ async def test_subscribe_deliver_ack_roundtrip():
         router.deliver(
             session_id="sess",
             agent_id="agent-1",
-            kind=types_pb2.CONTROL_KIND_PAUSE,
+            event=_event(gf_control_pb2.CONTROL_KIND_PAUSE),
             timeout_s=2.0,
         )
     )
@@ -39,11 +47,11 @@ async def test_subscribe_deliver_ack_roundtrip():
     # Simulate the agent draining its queue and acking via the telemetry stream.
     event = await asyncio.wait_for(sub.queue.get(), timeout=1)
     assert event.target.agent_id == "agent-1"
-    assert event.kind == types_pb2.CONTROL_KIND_PAUSE
+    assert event.kind == gf_control_pb2.CONTROL_KIND_PAUSE
 
-    ack = types_pb2.ControlAck(
+    ack = gf_control_pb2.ControlAck(
         control_id=event.id,
-        result=types_pb2.CONTROL_ACK_RESULT_SUCCESS,
+        result=gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS,
         detail="",
     )
     router.record_ack(ack, stream_id="stream-a")
@@ -65,7 +73,7 @@ async def test_multi_stream_fanout_first_success_resolves():
         router.deliver(
             session_id="sess",
             agent_id="agent-multi",
-            kind=types_pb2.CONTROL_KIND_CANCEL,
+            event=_event(gf_control_pb2.CONTROL_KIND_CANCEL, agent_id="agent-multi"),
             timeout_s=2.0,
             require_all_acks=False,
         )
@@ -76,8 +84,8 @@ async def test_multi_stream_fanout_first_success_resolves():
     assert ev_a.id == ev_b.id  # fan-out: same control_id to both
 
     router.record_ack(
-        types_pb2.ControlAck(
-            control_id=ev_a.id, result=types_pb2.CONTROL_ACK_RESULT_SUCCESS
+        gf_control_pb2.ControlAck(
+            control_id=ev_a.id, result=gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
         ),
         stream_id="str-a",
     )
@@ -94,11 +102,17 @@ async def test_require_all_acks_waits_for_every_stream():
     sub_a = await router.subscribe("sess", "agent-multi", "str-a")
     sub_b = await router.subscribe("sess", "agent-multi", "str-b")
 
+    steer_event = gf_control_pb2.ControlEvent(
+        kind=gf_control_pb2.CONTROL_KIND_STEER,
+        target=gf_control_pb2.ControlTarget(agent_id="agent-multi"),
+    )
+    steer_event.steer.note = "refocus"
+
     deliver_task = asyncio.create_task(
         router.deliver(
             session_id="sess",
             agent_id="agent-multi",
-            kind=types_pb2.CONTROL_KIND_STEER,
+            event=steer_event,
             timeout_s=2.0,
             require_all_acks=True,
         )
@@ -106,10 +120,11 @@ async def test_require_all_acks_waits_for_every_stream():
 
     ev_a = await asyncio.wait_for(sub_a.queue.get(), timeout=1)
     ev_b = await asyncio.wait_for(sub_b.queue.get(), timeout=1)
+    assert ev_a.steer.note == "refocus"
 
     router.record_ack(
-        types_pb2.ControlAck(
-            control_id=ev_a.id, result=types_pb2.CONTROL_ACK_RESULT_SUCCESS
+        gf_control_pb2.ControlAck(
+            control_id=ev_a.id, result=gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
         ),
         stream_id="str-a",
     )
@@ -118,8 +133,8 @@ async def test_require_all_acks_waits_for_every_stream():
     assert not deliver_task.done()
 
     router.record_ack(
-        types_pb2.ControlAck(
-            control_id=ev_b.id, result=types_pb2.CONTROL_ACK_RESULT_SUCCESS
+        gf_control_pb2.ControlAck(
+            control_id=ev_b.id, result=gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
         ),
         stream_id="str-b",
     )
@@ -140,7 +155,7 @@ async def test_deadline_exceeded_with_partial_acks():
         router.deliver(
             session_id="sess",
             agent_id="agent-1",
-            kind=types_pb2.CONTROL_KIND_PAUSE,
+            event=_event(gf_control_pb2.CONTROL_KIND_PAUSE),
             timeout_s=0.15,
             require_all_acks=True,
         )
@@ -151,8 +166,8 @@ async def test_deadline_exceeded_with_partial_acks():
 
     # Only str-a acks; str-b is slow → timeout
     router.record_ack(
-        types_pb2.ControlAck(
-            control_id=ev.id, result=types_pb2.CONTROL_ACK_RESULT_SUCCESS
+        gf_control_pb2.ControlAck(
+            control_id=ev.id, result=gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
         ),
         stream_id="str-a",
     )
@@ -174,7 +189,7 @@ async def test_unsubscribe_during_pending_deliver_resolves_future():
         router.deliver(
             session_id="sess",
             agent_id="agent-1",
-            kind=types_pb2.CONTROL_KIND_PAUSE,
+            event=_event(gf_control_pb2.CONTROL_KIND_PAUSE),
             timeout_s=2.0,
             require_all_acks=True,
         )

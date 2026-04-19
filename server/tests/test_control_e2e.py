@@ -12,6 +12,8 @@ import pytest_asyncio
 from harmonograf_server.bus import SessionBus
 from harmonograf_server.control_router import ControlRouter, DeliveryResult
 from harmonograf_server.ingest import IngestPipeline
+from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
+
 from harmonograf_server.pb import (
     control_pb2,
     service_pb2_grpc,
@@ -108,21 +110,24 @@ async def test_control_roundtrip_via_telemetry_ack(running_server, channel):
         router.deliver(
             session_id="sess_ctrl",
             agent_id="agent-ctrl",
-            kind=types_pb2.CONTROL_KIND_PAUSE,
+            event=gf_control_pb2.ControlEvent(
+                kind=gf_control_pb2.CONTROL_KIND_PAUSE,
+                target=gf_control_pb2.ControlTarget(agent_id="agent-ctrl"),
+            ),
             timeout_s=2.0,
         )
     )
 
     event = await asyncio.wait_for(control_call.read(), timeout=1)
-    assert event.kind == types_pb2.CONTROL_KIND_PAUSE
+    assert event.kind == gf_control_pb2.CONTROL_KIND_PAUSE
     assert event.target.agent_id == "agent-ctrl"
 
     # Ack rides TELEMETRY upstream, not the control stream.
     await telemetry_q.put(
         telemetry_pb2.TelemetryUp(
-            control_ack=types_pb2.ControlAck(
+            control_ack=gf_control_pb2.ControlAck(
                 control_id=event.id,
-                result=types_pb2.CONTROL_ACK_RESULT_SUCCESS,
+                result=gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS,
                 detail="paused",
             )
         )

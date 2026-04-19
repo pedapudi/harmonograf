@@ -18,6 +18,8 @@ import grpc
 import pytest
 import pytest_asyncio
 
+from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
+
 from harmonograf_server.bus import SessionBus
 from harmonograf_server.control_router import ControlRouter
 from harmonograf_server.ingest import IngestPipeline
@@ -317,9 +319,9 @@ async def test_post_annotation_steering_target_span_resolves_agent(harness, stub
     async def ack_agent():
         event = await asyncio.wait_for(sub.queue.get(), timeout=1)
         router.record_ack(
-            types_pb2.ControlAck(
+            gf_control_pb2.ControlAck(
                 control_id=event.id,
-                result=types_pb2.CONTROL_ACK_RESULT_SUCCESS,
+                result=gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS,
             ),
             stream_id="str-1",
         )
@@ -335,7 +337,7 @@ async def test_post_annotation_steering_target_span_resolves_agent(harness, stub
         )
     )
     await agent_task
-    assert resp.delivery == types_pb2.CONTROL_ACK_RESULT_SUCCESS
+    assert resp.delivery == gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
 
 
 async def test_post_annotation_requires_session_id(harness, stub):
@@ -355,7 +357,7 @@ async def test_post_annotation_steering_without_target_agent_fails(harness, stub
             ack_timeout_ms=100,
         )
     )
-    assert resp.delivery == types_pb2.CONTROL_ACK_RESULT_FAILURE
+    assert resp.delivery == gf_control_pb2.CONTROL_ACK_RESULT_FAILURE
     assert "no target agent" in resp.delivery_detail
 
 
@@ -365,7 +367,12 @@ async def test_post_annotation_steering_without_target_agent_fails(harness, stub
 async def test_send_control_requires_session_and_agent(harness, stub):
     with pytest.raises(grpc.aio.AioRpcError) as exc:
         await stub.SendControl(
-            frontend_pb2.SendControlRequest(session_id="", target=types_pb2.ControlTarget())
+            frontend_pb2.SendControlRequest(
+                session_id="",
+                event=gf_control_pb2.ControlEvent(
+                    target=gf_control_pb2.ControlTarget()
+                ),
+            )
         )
     assert exc.value.code() == grpc.StatusCode.INVALID_ARGUMENT
 
@@ -379,30 +386,34 @@ async def test_send_control_require_all_acks_honored(harness, stub):
         ev_a = await asyncio.wait_for(sub_a.queue.get(), timeout=1)
         ev_b = await asyncio.wait_for(sub_b.queue.get(), timeout=1)
         router.record_ack(
-            types_pb2.ControlAck(
-                control_id=ev_a.id, result=types_pb2.CONTROL_ACK_RESULT_SUCCESS
+            gf_control_pb2.ControlAck(
+                control_id=ev_a.id, result=gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
             ),
             stream_id="sa",
         )
         router.record_ack(
-            types_pb2.ControlAck(
-                control_id=ev_b.id, result=types_pb2.CONTROL_ACK_RESULT_SUCCESS
+            gf_control_pb2.ControlAck(
+                control_id=ev_b.id, result=gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
             ),
             stream_id="sb",
         )
 
     task = asyncio.create_task(ack_both())
+    steer_event = gf_control_pb2.ControlEvent(
+        kind=gf_control_pb2.CONTROL_KIND_STEER,
+        target=gf_control_pb2.ControlTarget(agent_id="ag"),
+    )
+    steer_event.steer.note = "go left"
     resp = await stub.SendControl(
         frontend_pb2.SendControlRequest(
             session_id="sess_all",
-            target=types_pb2.ControlTarget(agent_id="ag"),
-            kind=types_pb2.CONTROL_KIND_STEER,
+            event=steer_event,
             ack_timeout_ms=2000,
             require_all_acks=True,
         )
     )
     await task
-    assert resp.result == types_pb2.CONTROL_ACK_RESULT_SUCCESS
+    assert resp.result == gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
     assert len(resp.acks) == 2
 
 

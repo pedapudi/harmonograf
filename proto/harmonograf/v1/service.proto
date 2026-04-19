@@ -22,6 +22,7 @@ import "harmonograf/v1/telemetry.proto";
 import "harmonograf/v1/control.proto";
 import "harmonograf/v1/frontend.proto";
 import "harmonograf/v1/types.proto";
+import "goldfive/v1/control.proto";
 
 option go_package = "github.com/pedapudi/harmonograf/gen/harmonograf/v1;harmonografv1";
 
@@ -36,10 +37,10 @@ service Harmonograf {
   // --- Server → agent: low-volume control delivery ---------------------
 
   // Server-streaming. Agent opens this once after StreamTelemetry's
-  // Welcome. Server pushes ControlEvents. Agent ACKs travel back
-  // upstream on StreamTelemetry (not on this stream), preserving
+  // Welcome. Server pushes goldfive.v1.ControlEvents. Agent ACKs travel
+  // back upstream on StreamTelemetry (not on this stream), preserving
   // happens-before and avoiding a third RPC.
-  rpc SubscribeControl(SubscribeControlRequest) returns (stream ControlEvent);
+  rpc SubscribeControl(SubscribeControlRequest) returns (stream goldfive.v1.ControlEvent);
 
   // --- Frontend → server: UI RPCs ---------------------------------------
 

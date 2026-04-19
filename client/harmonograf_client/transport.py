@@ -241,14 +241,16 @@ class Transport:
         (e.g. during a reconnect) the ack is dropped — the server will
         re-deliver the ``ControlEvent`` on the next subscribe.
         """
-        from .pb import telemetry_pb2, types_pb2
+        from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
+
+        from .pb import telemetry_pb2
 
         result_enum = {
-            "success": types_pb2.CONTROL_ACK_RESULT_SUCCESS,
-            "failure": types_pb2.CONTROL_ACK_RESULT_FAILURE,
-            "unsupported": types_pb2.CONTROL_ACK_RESULT_UNSUPPORTED,
-        }.get(result.lower(), types_pb2.CONTROL_ACK_RESULT_UNSUPPORTED)
-        ack = types_pb2.ControlAck(
+            "success": gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS,
+            "failure": gf_control_pb2.CONTROL_ACK_RESULT_FAILURE,
+            "unsupported": gf_control_pb2.CONTROL_ACK_RESULT_UNSUPPORTED,
+        }.get(result.lower(), gf_control_pb2.CONTROL_ACK_RESULT_UNSUPPORTED)
+        ack = gf_control_pb2.ControlAck(
             control_id=control_id, result=result_enum, detail=detail
         )
         up = telemetry_pb2.TelemetryUp(control_ack=ack)
@@ -719,7 +721,9 @@ class Transport:
     # ------------------------------------------------------------------
 
     async def _control_loop(self, stub: Any, send_queue: asyncio.Queue) -> None:
-        from .pb import control_pb2, telemetry_pb2, types_pb2
+        from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
+
+        from .pb import control_pb2, telemetry_pb2
 
         req = control_pb2.SubscribeControlRequest(
             session_id=self._assigned_session_id,
@@ -741,7 +745,7 @@ class Transport:
                     except Exception:
                         log.exception("control forward raised")
                     continue
-                ack = self._dispatch_control(event, types_pb2)
+                ack = self._dispatch_control(event, gf_control_pb2)
                 await send_queue.put(
                     telemetry_pb2.TelemetryUp(control_ack=ack)
                 )
@@ -750,8 +754,8 @@ class Transport:
         except Exception as e:
             log.warning("control subscription ended: %s", e)
 
-    def _dispatch_control(self, event: Any, types_pb2: Any) -> Any:
-        kind_name = _control_kind_name(event.kind, types_pb2)
+    def _dispatch_control(self, event: Any, gf_control_pb2: Any) -> Any:
+        kind_name = _control_kind_name(event.kind, gf_control_pb2)
         with self._handlers_lock:
             handler = self._handlers.get(kind_name)
         result = "unsupported"
@@ -768,11 +772,11 @@ class Transport:
                 result = "failure"
                 detail = repr(e)
         result_enum = {
-            "success": types_pb2.CONTROL_ACK_RESULT_SUCCESS,
-            "failure": types_pb2.CONTROL_ACK_RESULT_FAILURE,
-            "unsupported": types_pb2.CONTROL_ACK_RESULT_UNSUPPORTED,
-        }.get(result, types_pb2.CONTROL_ACK_RESULT_UNSUPPORTED)
-        return types_pb2.ControlAck(
+            "success": gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS,
+            "failure": gf_control_pb2.CONTROL_ACK_RESULT_FAILURE,
+            "unsupported": gf_control_pb2.CONTROL_ACK_RESULT_UNSUPPORTED,
+        }.get(result, gf_control_pb2.CONTROL_ACK_RESULT_UNSUPPORTED)
+        return gf_control_pb2.ControlAck(
             control_id=event.id,
             result=result_enum,
             detail=detail,
@@ -801,9 +805,9 @@ class Transport:
         self.notify()
 
 
-def _control_kind_name(kind_value: int, types_pb2: Any) -> str:
+def _control_kind_name(kind_value: int, gf_control_pb2: Any) -> str:
     try:
-        raw = types_pb2.ControlKind.Name(kind_value)
+        raw = gf_control_pb2.ControlKind.Name(kind_value)
     except Exception:
         return "UNSPECIFIED"
     return raw.removeprefix("CONTROL_KIND_")

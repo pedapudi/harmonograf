@@ -37,6 +37,8 @@ from harmonograf_server.convert import (
     task_status_from_pb,
     ts_to_float,
 )
+from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
+
 from harmonograf_server.pb import telemetry_pb2, types_pb2
 from harmonograf_server.storage import (
     Agent,
@@ -79,13 +81,13 @@ class ControlAckSink(Protocol):
     """
 
     def record_ack(
-        self, ack: types_pb2.ControlAck, *, stream_id: Optional[str] = None
+        self, ack: gf_control_pb2.ControlAck, *, stream_id: Optional[str] = None
     ) -> None: ...
 
 
 class _NullControlAckSink:
     def record_ack(
-        self, ack: types_pb2.ControlAck, *, stream_id: Optional[str] = None
+        self, ack: gf_control_pb2.ControlAck, *, stream_id: Optional[str] = None
     ) -> None:  # pragma: no cover - trivial
         return None
 

@@ -15,13 +15,14 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import { file_goldfive_v1_control } from "../../goldfive/v1/control_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file harmonograf/v1/control.proto.
  */
 export const file_harmonograf_v1_control: GenFile = /*@__PURE__*/
-  fileDesc("ChxoYXJtb25vZ3JhZi92MS9jb250cm9sLnByb3RvEg5oYXJtb25vZ3JhZi52MSJSChdTdWJzY3JpYmVDb250cm9sUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEhEKCXN0cmVhbV9pZBgDIAEoCUJCWkBnaXRodWIuY29tL3BlZGFwdWRpL2hhcm1vbm9ncmFmL2dlbi9oYXJtb25vZ3JhZi92MTtoYXJtb25vZ3JhZnYxYgZwcm90bzM");
+  fileDesc("ChxoYXJtb25vZ3JhZi92MS9jb250cm9sLnByb3RvEg5oYXJtb25vZ3JhZi52MSJSChdTdWJzY3JpYmVDb250cm9sUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEhEKCXN0cmVhbV9pZBgDIAEoCUJCWkBnaXRodWIuY29tL3BlZGFwdWRpL2hhcm1vbm9ncmFmL2dlbi9oYXJtb25vZ3JhZi92MTtoYXJtb25vZ3JhZnYxYgZwcm90bzM", [file_goldfive_v1_control]);
 
 /**
  * Subscribes to control events for one telemetry stream. The session_id,

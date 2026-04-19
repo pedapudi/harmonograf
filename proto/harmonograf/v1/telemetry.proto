@@ -16,6 +16,7 @@ package harmonograf.v1;
 
 import "google/protobuf/timestamp.proto";
 import "harmonograf/v1/types.proto";
+import "goldfive/v1/control.proto";
 import "goldfive/v1/events.proto";
 
 option go_package = "github.com/pedapudi/harmonograf/gen/harmonograf/v1;harmonografv1";
@@ -144,8 +145,9 @@ message TelemetryUp {
     PayloadUpload payload = 5;
     Heartbeat heartbeat = 6;
     // Acks for ControlEvents received via SubscribeControl. Folded into
-    // telemetry to preserve happens-before. See types.proto ControlAck.
-    ControlAck control_ack = 7;
+    // telemetry to preserve happens-before. Wire type is goldfive's —
+    // see goldfive/v1/control.proto ControlAck.
+    goldfive.v1.ControlAck control_ack = 7;
     Goodbye goodbye = 8;
     // Goldfive orchestration event. Carries the full goldfive Event
     // envelope (RunStarted, GoalDerived, PlanSubmitted, PlanRevised,
