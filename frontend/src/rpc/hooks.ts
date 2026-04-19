@@ -473,10 +473,8 @@ export function usePayload(digest: string | null): PayloadState {
 
 // --- SendControl / PostAnnotation ------------------------------------------
 
-import {
-  ControlKind,
-  AnnotationKind,
-} from '../pb/harmonograf/v1/types_pb.js';
+import { AnnotationKind } from '../pb/harmonograf/v1/types_pb.js';
+import { ControlKind } from '../pb/goldfive/v1/control_pb.js';
 
 const CONTROL_KIND: Record<string, ControlKind> = {
   PAUSE: ControlKind.PAUSE,
@@ -490,23 +488,97 @@ const CONTROL_KIND: Record<string, ControlKind> = {
   STEER: ControlKind.STEER,
 };
 
+export type ControlKindName = keyof typeof CONTROL_KIND;
+
+/**
+ * Arguments for :func:`useSendControl`. ``targetId`` is an APPROVE/REJECT
+ * target (goldfive task_id for Flow A, ADK function-call id for Flow B);
+ * ``note`` populates STEER; ``taskId`` populates REWIND_TO; ``role`` /
+ * ``text`` populate INJECT_MESSAGE. Fields not applicable to the chosen
+ * kind are ignored.
+ */
 export interface SendControlArgs {
   sessionId: string;
   agentId: string;
-  spanId?: string;
-  kind: keyof typeof CONTROL_KIND;
-  payload?: Uint8Array;
+  toolCallId?: string;
+  kind: ControlKindName;
+  note?: string;
+  suggestedAction?: string;
+  taskId?: string;
+  targetId?: string;
+  detail?: string;
+  role?: string;
+  text?: string;
+}
+
+function buildControlEvent(args: SendControlArgs) {
+  const kind = CONTROL_KIND[args.kind] ?? ControlKind.UNSPECIFIED;
+  const event = {
+    id: '',
+    target: {
+      agentId: args.agentId,
+      taskId: '',
+      toolCallId: args.toolCallId ?? '',
+    },
+    kind,
+  } as Record<string, unknown>;
+  switch (args.kind) {
+    case 'STEER':
+      event.payload = {
+        case: 'steer',
+        value: {
+          note: args.note ?? '',
+          suggestedAction: args.suggestedAction ?? '',
+        },
+      };
+      break;
+    case 'REWIND_TO':
+      event.payload = {
+        case: 'rewind',
+        value: { taskId: args.taskId ?? '' },
+      };
+      break;
+    case 'APPROVE':
+      event.payload = {
+        case: 'approve',
+        value: {
+          targetId: args.targetId ?? '',
+          detail: args.detail ?? '',
+        },
+      };
+      break;
+    case 'REJECT':
+      event.payload = {
+        case: 'reject',
+        value: {
+          targetId: args.targetId ?? '',
+          detail: args.detail ?? '',
+        },
+      };
+      break;
+    case 'INJECT_MESSAGE':
+      event.payload = {
+        case: 'injectMessage',
+        value: {
+          role: args.role ?? '',
+          text: args.text ?? '',
+        },
+      };
+      break;
+    default:
+      // PAUSE / RESUME / CANCEL / STATUS_QUERY / INTERCEPT_TRANSFER — no payload.
+      break;
+  }
+  return event;
 }
 
 export function useSendControl(): (args: SendControlArgs) => Promise<void> {
   return useMemo(() => {
-    return async ({ sessionId, agentId, spanId, kind, payload }) => {
+    return async (args) => {
       const client = getHarmonografClient();
       await client.sendControl({
-        sessionId,
-        target: { agentId, spanId: spanId ?? '' },
-        kind: CONTROL_KIND[kind] ?? ControlKind.UNSPECIFIED,
-        payload: payload ?? new Uint8Array(0),
+        sessionId: args.sessionId,
+        event: buildControlEvent(args),
       });
     };
   }, []);
@@ -517,9 +589,11 @@ export async function sendStatusQuery(sessionId: string, agentId: string): Promi
     const client = getHarmonografClient();
     const resp = await client.sendControl({
       sessionId,
-      target: { agentId, spanId: '' },
-      kind: ControlKind.STATUS_QUERY,
-      payload: new Uint8Array(0),
+      event: {
+        id: '',
+        target: { agentId, taskId: '', toolCallId: '' },
+        kind: ControlKind.STATUS_QUERY,
+      },
       ackTimeoutMs: 8000n,
     });
     // Return detail from the first ack.

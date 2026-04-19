@@ -75,8 +75,6 @@ export function AttentionSnackbar({ store, sessionId }: Props) {
     span.attributes['tool.name']?.kind === 'string'
       ? (span.attributes['tool.name'] as { kind: 'string'; value: string }).value
       : span.name;
-  const encoder = new TextEncoder();
-
   const dispatch = async (kind: 'APPROVE' | 'REJECT') => {
     setBusy(kind);
     setError(null);
@@ -84,9 +82,8 @@ export function AttentionSnackbar({ store, sessionId }: Props) {
       await send({
         sessionId,
         agentId: span.agentId,
-        spanId: span.id,
         kind,
-        payload: kind === 'REJECT' ? encoder.encode('rejected via snackbar') : undefined,
+        detail: kind === 'REJECT' ? 'rejected via snackbar' : '',
       });
     } catch (e) {
       setError(String(e));

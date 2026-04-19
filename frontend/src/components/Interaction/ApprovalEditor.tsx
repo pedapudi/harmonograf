@@ -68,16 +68,18 @@ export function ApprovalEditor({ ctx, sessionId }: Props) {
   );
   const anchorY = Math.min(heightCss - 260, row.top + row.height + 8);
 
-  const dispatch = async (kind: 'APPROVE' | 'REJECT', payload?: Uint8Array) => {
+  const dispatch = async (
+    kind: 'APPROVE' | 'REJECT',
+    extra: { detail?: string } = {},
+  ) => {
     setBusy(kind);
     setError(null);
     try {
       await send({
         sessionId,
         agentId: span.agentId,
-        spanId: span.id,
         kind,
-        payload,
+        detail: extra.detail,
       });
     } catch (e) {
       setError(String(e));
@@ -85,8 +87,6 @@ export function ApprovalEditor({ ctx, sessionId }: Props) {
       setBusy(null);
     }
   };
-
-  const encoder = new TextEncoder();
 
   const onApprove = () => {
     if (editing) {
@@ -103,7 +103,7 @@ export function ApprovalEditor({ ctx, sessionId }: Props) {
         setError(`Edited args aren't valid JSON: ${String(e)}`);
         return;
       }
-      void dispatch('APPROVE', encoder.encode(text));
+      void dispatch('APPROVE', { detail: text });
     } else {
       void dispatch('APPROVE');
     }
@@ -205,7 +205,7 @@ export function ApprovalEditor({ ctx, sessionId }: Props) {
             </button>
             <button
               onClick={() =>
-                void dispatch('REJECT', encoder.encode('rejected via overlay'))
+                void dispatch('REJECT', { detail: 'rejected via overlay' })
               }
               disabled={busy !== null}
             >

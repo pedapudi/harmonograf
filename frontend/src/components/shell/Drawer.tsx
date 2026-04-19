@@ -1267,17 +1267,11 @@ function ControlTab({ span, sessionId }: { span: Span; sessionId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [steerBody, setSteerBody] = useState('');
 
-  const dispatch = async (kind: Parameters<typeof send>[0]['kind'], payload?: Uint8Array) => {
-    setBusy(kind);
+  const dispatch = async (args: Parameters<typeof send>[0]) => {
+    setBusy(args.kind);
     setError(null);
     try {
-      await send({
-        sessionId,
-        agentId: span.agentId,
-        spanId: span.id,
-        kind,
-        payload,
-      });
+      await send(args);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -1285,7 +1279,6 @@ function ControlTab({ span, sessionId }: { span: Span; sessionId: string }) {
     }
   };
 
-  const encoder = new TextEncoder();
   const awaiting = span.status === 'AWAITING_HUMAN';
 
   return (
@@ -1294,10 +1287,23 @@ function ControlTab({ span, sessionId }: { span: Span; sessionId: string }) {
         <div className="hg-drawer__approval">
           <p><strong>Agent is waiting for human approval.</strong></p>
           <div className="hg-drawer__row">
-            <button onClick={() => dispatch('APPROVE')} disabled={busy !== null}>
+            <button
+              onClick={() => dispatch({ sessionId, agentId: span.agentId, kind: 'APPROVE' })}
+              disabled={busy !== null}
+            >
               Approve
             </button>
-            <button onClick={() => dispatch('REJECT', encoder.encode('rejected'))} disabled={busy !== null}>
+            <button
+              onClick={() =>
+                dispatch({
+                  sessionId,
+                  agentId: span.agentId,
+                  kind: 'REJECT',
+                  detail: 'rejected',
+                })
+              }
+              disabled={busy !== null}
+            >
               Reject
             </button>
           </div>
@@ -1313,7 +1319,14 @@ function ControlTab({ span, sessionId }: { span: Span; sessionId: string }) {
       />
       <div className="hg-drawer__row">
         <button
-          onClick={() => dispatch('STEER', encoder.encode(steerBody))}
+          onClick={() =>
+            dispatch({
+              sessionId,
+              agentId: span.agentId,
+              kind: 'STEER',
+              note: steerBody,
+            })
+          }
           disabled={busy !== null || !steerBody.trim()}
         >
           {busy === 'STEER' ? 'Sending…' : 'Send steer'}
@@ -1321,16 +1334,35 @@ function ControlTab({ span, sessionId }: { span: Span; sessionId: string }) {
       </div>
       <h3>Transport</h3>
       <div className="hg-drawer__row">
-        <button onClick={() => dispatch('PAUSE')} disabled={busy !== null}>
+        <button
+          onClick={() => dispatch({ sessionId, agentId: span.agentId, kind: 'PAUSE' })}
+          disabled={busy !== null}
+        >
           Pause agent
         </button>
-        <button onClick={() => dispatch('RESUME')} disabled={busy !== null}>
+        <button
+          onClick={() => dispatch({ sessionId, agentId: span.agentId, kind: 'RESUME' })}
+          disabled={busy !== null}
+        >
           Resume
         </button>
-        <button onClick={() => dispatch('CANCEL')} disabled={busy !== null}>
+        <button
+          onClick={() => dispatch({ sessionId, agentId: span.agentId, kind: 'CANCEL' })}
+          disabled={busy !== null}
+        >
           Cancel
         </button>
-        <button onClick={() => dispatch('REWIND_TO', encoder.encode(span.id))} disabled={busy !== null}>
+        <button
+          onClick={() =>
+            dispatch({
+              sessionId,
+              agentId: span.agentId,
+              kind: 'REWIND_TO',
+              taskId: span.id,
+            })
+          }
+          disabled={busy !== null}
+        >
           Rewind to here
         </button>
       </div>

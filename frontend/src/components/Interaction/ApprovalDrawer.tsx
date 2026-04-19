@@ -92,19 +92,15 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
     setBusy(kind);
     setError(null);
     try {
-      // Encode target_id in the payload body so the server-side
-      // ControlChannel bridge can quote it back onto the
-      // pending-approval waiter regardless of which agent/span we
-      // happened to observe.
-      const payload = new TextEncoder().encode(
-        JSON.stringify({ target_id: approval.targetId }),
-      );
+      // targetId rides on the typed goldfive oneof payload
+      // (ApprovePayload / RejectPayload). The server-side ControlChannel
+      // bridge uses it to quote the pending-approval waiter regardless
+      // of which agent/span we happened to observe.
       await send({
         sessionId: approval.sessionId,
         agentId: approval.agentId,
-        spanId: approval.spanId,
         kind,
-        payload,
+        targetId: approval.targetId,
       });
     } catch (e) {
       setError(String(e));

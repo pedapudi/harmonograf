@@ -64,7 +64,6 @@ export function SpanContextMenu({ state, onClose }: Props) {
     }
   };
 
-  const encoder = new TextEncoder();
   const disabled = !sessionId || !span || busy;
 
   return (
@@ -122,7 +121,6 @@ export function SpanContextMenu({ state, onClose }: Props) {
                     await send({
                       sessionId: sessionId!,
                       agentId: span.agentId,
-                      spanId: span.id,
                       kind: 'APPROVE',
                     });
                   })
@@ -136,9 +134,8 @@ export function SpanContextMenu({ state, onClose }: Props) {
                     await send({
                       sessionId: sessionId!,
                       agentId: span.agentId,
-                      spanId: span.id,
                       kind: 'REJECT',
-                      payload: encoder.encode('rejected via context menu'),
+                      detail: 'rejected via context menu',
                     });
                   })
                 }
@@ -153,9 +150,8 @@ export function SpanContextMenu({ state, onClose }: Props) {
                 await send({
                   sessionId: sessionId!,
                   agentId: span!.agentId,
-                  spanId: span!.id,
                   kind: 'REWIND_TO',
-                  payload: encoder.encode(span!.id),
+                  taskId: span!.id,
                 });
               })
             }
@@ -200,9 +196,8 @@ export function SpanContextMenu({ state, onClose }: Props) {
               await send({
                 sessionId: sessionId!,
                 agentId: span!.agentId,
-                spanId: span!.id,
                 kind: 'STEER',
-                payload: encoder.encode(body),
+                note: body,
               });
               // Mirror the steering intent as an annotation for timeline pin
               // rendering once the canvas pin layer lands; posting the

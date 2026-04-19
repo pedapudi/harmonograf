@@ -9,9 +9,9 @@ import { create } from 'zustand';
 //
 // Entries carry the `agentId` observed on the most recent goldfive span for
 // the same target so the UI's Approve/Reject click can route the
-// ControlEvent to the exact agent (ControlRouter target = agentId + spanId).
-// If we haven't seen such a span, agentId stays empty; SendControl with an
-// empty agentId still reaches the session-level ControlChannel bridge.
+// ControlEvent to the exact agent (ControlRouter target = agentId). If we
+// haven't seen such a span, agentId stays empty; SendControl with an empty
+// agentId still reaches the session-level ControlChannel bridge.
 
 export interface PendingApproval {
   sessionId: string;
