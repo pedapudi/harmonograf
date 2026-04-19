@@ -14,6 +14,8 @@ import hashlib
 
 import pytest
 
+from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
+
 from harmonograf_client.buffer import (
     EnvelopeKind,
     EventRingBuffer,
@@ -149,10 +151,10 @@ class TestBuildHeartbeat:
 class TestDispatchControl:
     def test_unknown_kind_returns_unsupported(self):
         t = _make_transport()
-        evt = types_pb2.ControlEvent(id="c1", kind=types_pb2.CONTROL_KIND_PAUSE)
-        ack = t._dispatch_control(evt, types_pb2)
+        evt = gf_control_pb2.ControlEvent(id="c1", kind=gf_control_pb2.CONTROL_KIND_PAUSE)
+        ack = t._dispatch_control(evt, gf_control_pb2)
         assert ack.control_id == "c1"
-        assert ack.result == types_pb2.CONTROL_ACK_RESULT_UNSUPPORTED
+        assert ack.result == gf_control_pb2.CONTROL_ACK_RESULT_UNSUPPORTED
 
     def test_handler_success(self):
         t = _make_transport()
@@ -161,17 +163,17 @@ class TestDispatchControl:
             return ControlAckSpec(result="success", detail="ok")
 
         t.register_control_handler("PAUSE", h)
-        evt = types_pb2.ControlEvent(id="c2", kind=types_pb2.CONTROL_KIND_PAUSE)
-        ack = t._dispatch_control(evt, types_pb2)
-        assert ack.result == types_pb2.CONTROL_ACK_RESULT_SUCCESS
+        evt = gf_control_pb2.ControlEvent(id="c2", kind=gf_control_pb2.CONTROL_KIND_PAUSE)
+        ack = t._dispatch_control(evt, gf_control_pb2)
+        assert ack.result == gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
         assert ack.detail == "ok"
 
     def test_handler_none_means_success(self):
         t = _make_transport()
         t.register_control_handler("CANCEL", lambda e: None)
-        evt = types_pb2.ControlEvent(id="c3", kind=types_pb2.CONTROL_KIND_CANCEL)
-        ack = t._dispatch_control(evt, types_pb2)
-        assert ack.result == types_pb2.CONTROL_ACK_RESULT_SUCCESS
+        evt = gf_control_pb2.ControlEvent(id="c3", kind=gf_control_pb2.CONTROL_KIND_CANCEL)
+        ack = t._dispatch_control(evt, gf_control_pb2)
+        assert ack.result == gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
 
     def test_handler_exception_maps_to_failure(self):
         t = _make_transport()
@@ -180,9 +182,9 @@ class TestDispatchControl:
             raise RuntimeError("nope")
 
         t.register_control_handler("STEER", boom)
-        evt = types_pb2.ControlEvent(id="c4", kind=types_pb2.CONTROL_KIND_STEER)
-        ack = t._dispatch_control(evt, types_pb2)
-        assert ack.result == types_pb2.CONTROL_ACK_RESULT_FAILURE
+        evt = gf_control_pb2.ControlEvent(id="c4", kind=gf_control_pb2.CONTROL_KIND_STEER)
+        ack = t._dispatch_control(evt, gf_control_pb2)
+        assert ack.result == gf_control_pb2.CONTROL_ACK_RESULT_FAILURE
         assert "nope" in ack.detail
 
 
@@ -276,9 +278,9 @@ class TestControlHandlerRegistry:
         assert "PAUSE" in t._handlers
         t.register_control_handler("PAUSE", lambda e: ControlAckSpec(result="failure"))
         # Second registration wins.
-        evt = types_pb2.ControlEvent(id="c", kind=types_pb2.CONTROL_KIND_PAUSE)
-        ack = t._dispatch_control(evt, types_pb2)
-        assert ack.result == types_pb2.CONTROL_ACK_RESULT_FAILURE
+        evt = gf_control_pb2.ControlEvent(id="c", kind=gf_control_pb2.CONTROL_KIND_PAUSE)
+        ack = t._dispatch_control(evt, gf_control_pb2)
+        assert ack.result == gf_control_pb2.CONTROL_ACK_RESULT_FAILURE
 
 
 class TestBreakerState:

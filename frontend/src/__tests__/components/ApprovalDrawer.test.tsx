@@ -139,8 +139,9 @@ describe('<ApprovalDrawer />', () => {
     const call = sendSpy.mock.calls[0][0];
     expect(call.kind).toBe('APPROVE');
     expect(call.sessionId).toBe('sess-1');
-    const payload = JSON.parse(new TextDecoder().decode(call.payload));
-    expect(payload.target_id).toBe('adk-2');
+    // targetId is forwarded directly on the typed goldfive ApprovePayload
+    // rather than via a JSON-encoded bytes payload.
+    expect(call.targetId).toBe('adk-2');
   });
 
   it('clicking Reject dispatches REJECT via sendControl', async () => {

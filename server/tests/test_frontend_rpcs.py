@@ -17,6 +17,8 @@ import pytest
 import pytest_asyncio
 from google.protobuf.timestamp_pb2 import Timestamp
 
+from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
+
 from harmonograf_server.bus import SessionBus
 from harmonograf_server.control_router import ControlRouter
 from harmonograf_server.ingest import IngestPipeline
@@ -448,7 +450,7 @@ async def test_post_annotation_comment_skips_control(harness, stub):
         author="me",
     )
     resp = await stub.PostAnnotation(req)
-    assert resp.delivery == types_pb2.CONTROL_ACK_RESULT_SUCCESS
+    assert resp.delivery == gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
     assert resp.annotation.body == "note to self"
 
     stored = await store.list_annotations(session_id="sess_ann")
@@ -468,7 +470,7 @@ async def test_post_annotation_steering_no_live_agent_is_unavailable(harness, st
         ack_timeout_ms=200,
     )
     resp = await stub.PostAnnotation(req)
-    assert resp.delivery == types_pb2.CONTROL_ACK_RESULT_FAILURE
+    assert resp.delivery == gf_control_pb2.CONTROL_ACK_RESULT_FAILURE
     assert "offline" in resp.delivery_detail
 
 
@@ -481,12 +483,14 @@ async def test_send_control_unavailable_with_no_subscription(harness, stub):
     await _seed_session(store, session_id="sess_ctl", agent_id="agent-ctl")
     req = frontend_pb2.SendControlRequest(
         session_id="sess_ctl",
-        target=types_pb2.ControlTarget(agent_id="agent-ctl"),
-        kind=types_pb2.CONTROL_KIND_PAUSE,
+        event=gf_control_pb2.ControlEvent(
+            kind=gf_control_pb2.CONTROL_KIND_PAUSE,
+            target=gf_control_pb2.ControlTarget(agent_id="agent-ctl"),
+        ),
         ack_timeout_ms=200,
     )
     resp = await stub.SendControl(req)
-    assert resp.result == types_pb2.CONTROL_ACK_RESULT_UNSUPPORTED
+    assert resp.result == gf_control_pb2.CONTROL_ACK_RESULT_UNSUPPORTED
     assert resp.control_id
 
 
@@ -503,9 +507,9 @@ async def test_send_control_delivers_to_live_subscription_and_resolves_on_ack(
     async def agent_coroutine():
         event = await sub.queue.get()
         # Simulate ack coming back via the telemetry ingest path.
-        ack = types_pb2.ControlAck(
+        ack = gf_control_pb2.ControlAck(
             control_id=event.id,
-            result=types_pb2.CONTROL_ACK_RESULT_SUCCESS,
+            result=gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS,
         )
         router.record_ack(ack, stream_id="stream-xyz")
 
@@ -513,13 +517,15 @@ async def test_send_control_delivers_to_live_subscription_and_resolves_on_ack(
 
     req = frontend_pb2.SendControlRequest(
         session_id="sess_ctl2",
-        target=types_pb2.ControlTarget(agent_id="agent-ctl2"),
-        kind=types_pb2.CONTROL_KIND_PAUSE,
+        event=gf_control_pb2.ControlEvent(
+            kind=gf_control_pb2.CONTROL_KIND_PAUSE,
+            target=gf_control_pb2.ControlTarget(agent_id="agent-ctl2"),
+        ),
         ack_timeout_ms=2000,
     )
     resp = await stub.SendControl(req)
     await agent_task
-    assert resp.result == types_pb2.CONTROL_ACK_RESULT_SUCCESS
+    assert resp.result == gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
     assert len(resp.acks) == 1
     assert resp.acks[0].stream_id == "stream-xyz"
 

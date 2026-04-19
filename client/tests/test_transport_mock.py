@@ -24,6 +24,8 @@ from pathlib import Path
 import grpc
 import pytest
 
+from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
+
 from harmonograf_client import Client
 from harmonograf_client.pb import (
     control_pb2,
@@ -168,12 +170,11 @@ class FakeServerHarness:
         except Exception:
             pass
 
-    def push_control(self, agent_id: str, kind: int, payload: bytes = b"") -> None:
+    def push_control(self, agent_id: str, kind: int) -> None:
         assert self._loop is not None
-        event = types_pb2.ControlEvent(
+        event = gf_control_pb2.ControlEvent(
             id=f"ctrl-{int(time.time()*1e6)}",
             kind=kind,
-            payload=payload,
         )
 
         async def _deliver():
@@ -339,7 +340,7 @@ class TestControl:
             assert _wait(lambda: any(
                 k.startswith(client.agent_id + ":") for k in server.servicer.control_queues
             ), timeout=3.0)
-            server.push_control(client.agent_id, types_pb2.CONTROL_KIND_PAUSE)
+            server.push_control(client.agent_id, gf_control_pb2.CONTROL_KIND_PAUSE)
             assert _wait(lambda: len(handler_calls) == 1, timeout=3.0)
             assert _wait(lambda: server.servicer.ack_seen.is_set(), timeout=3.0)
             acks = [
@@ -348,7 +349,7 @@ class TestControl:
                 if m.WhichOneof("msg") == "control_ack"
             ]
             assert len(acks) >= 1
-            assert acks[0].result == types_pb2.CONTROL_ACK_RESULT_SUCCESS
+            assert acks[0].result == gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
         finally:
             client.shutdown(flush_timeout=1.0)
 

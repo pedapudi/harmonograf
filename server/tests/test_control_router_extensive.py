@@ -12,12 +12,23 @@ import asyncio
 
 import pytest
 
+from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
+
 from harmonograf_server.control_router import ControlRouter, DeliveryResult
-from harmonograf_server.pb import types_pb2
 
 
-def _ack(control_id: str, result=types_pb2.CONTROL_ACK_RESULT_SUCCESS, detail=""):
-    return types_pb2.ControlAck(control_id=control_id, result=result, detail=detail)
+def _ack(control_id: str, result=gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS, detail=""):
+    return gf_control_pb2.ControlAck(control_id=control_id, result=result, detail=detail)
+
+
+def _event(kind: int, *, agent_id: str, event_id: str = "") -> gf_control_pb2.ControlEvent:
+    ev = gf_control_pb2.ControlEvent(
+        kind=kind,
+        target=gf_control_pb2.ControlTarget(agent_id=agent_id),
+    )
+    if event_id:
+        ev.id = event_id
+    return ev
 
 
 async def test_live_stream_ids_returns_empty_on_unknown_agent():
@@ -46,7 +57,7 @@ async def test_alias_routes_control_to_transport_agent():
         router.deliver(
             session_id="sess",
             agent_id="sub-agent-name",
-            kind=types_pb2.CONTROL_KIND_PAUSE,
+            event=_event(gf_control_pb2.CONTROL_KIND_PAUSE, agent_id="sub-agent-name"),
             timeout_s=2.0,
         )
     )
@@ -72,7 +83,7 @@ async def test_deliver_unavailable_when_alias_targets_dead_agent():
     outcome = await router.deliver(
         session_id="sess",
         agent_id="adk-name",
-        kind=types_pb2.CONTROL_KIND_PAUSE,
+        event=_event(gf_control_pb2.CONTROL_KIND_PAUSE, agent_id="adk-name"),
         timeout_s=0.1,
     )
     assert outcome.result == DeliveryResult.UNAVAILABLE
@@ -91,13 +102,13 @@ async def test_failure_ack_yields_failed_outcome():
         router.deliver(
             session_id="sess",
             agent_id="ag",
-            kind=types_pb2.CONTROL_KIND_CANCEL,
+            event=_event(gf_control_pb2.CONTROL_KIND_CANCEL, agent_id="ag"),
             timeout_s=2.0,
         )
     )
     event = await asyncio.wait_for(sub.queue.get(), timeout=1)
     router.record_ack(
-        _ack(event.id, result=types_pb2.CONTROL_ACK_RESULT_FAILURE, detail="nope"),
+        _ack(event.id, result=gf_control_pb2.CONTROL_ACK_RESULT_FAILURE, detail="nope"),
         stream_id="s1",
     )
     outcome = await deliver
@@ -111,7 +122,8 @@ async def test_ack_without_stream_id_attributed_to_expected_stream():
     sub = await router.subscribe("sess", "ag", "s1")
     deliver = asyncio.create_task(
         router.deliver(
-            session_id="sess", agent_id="ag", kind=types_pb2.CONTROL_KIND_PAUSE,
+            session_id="sess", agent_id="ag",
+            event=_event(gf_control_pb2.CONTROL_KIND_PAUSE, agent_id="ag"),
             timeout_s=2.0,
         )
     )
@@ -129,10 +141,11 @@ async def test_queue_full_synthesizes_failure_ack():
     # Saturate the subscription's queue so deliver has nowhere to enqueue.
     for i in range(256):
         sub.queue.put_nowait(
-            types_pb2.ControlEvent(id=f"filler-{i}")
+            gf_control_pb2.ControlEvent(id=f"filler-{i}")
         )
     outcome = await router.deliver(
-        session_id="sess", agent_id="ag", kind=types_pb2.CONTROL_KIND_PAUSE,
+        session_id="sess", agent_id="ag",
+        event=_event(gf_control_pb2.CONTROL_KIND_PAUSE, agent_id="ag"),
         timeout_s=1.0,
     )
     assert outcome.result == DeliveryResult.FAILED
@@ -152,7 +165,8 @@ async def test_status_query_callback_fires_on_success_ack():
     deliver = asyncio.create_task(
         router.deliver(
             session_id="sess", agent_id="ag",
-            kind=types_pb2.CONTROL_KIND_STATUS_QUERY, timeout_s=2.0,
+            event=_event(gf_control_pb2.CONTROL_KIND_STATUS_QUERY, agent_id="ag"),
+            timeout_s=2.0,
         )
     )
     event = await asyncio.wait_for(sub.queue.get(), timeout=1)
@@ -178,12 +192,13 @@ async def test_status_query_callback_not_called_on_failure_ack():
     deliver = asyncio.create_task(
         router.deliver(
             session_id="sess", agent_id="ag",
-            kind=types_pb2.CONTROL_KIND_STATUS_QUERY, timeout_s=2.0,
+            event=_event(gf_control_pb2.CONTROL_KIND_STATUS_QUERY, agent_id="ag"),
+            timeout_s=2.0,
         )
     )
     event = await asyncio.wait_for(sub.queue.get(), timeout=1)
     router.record_ack(
-        _ack(event.id, result=types_pb2.CONTROL_ACK_RESULT_FAILURE), stream_id="s1"
+        _ack(event.id, result=gf_control_pb2.CONTROL_ACK_RESULT_FAILURE), stream_id="s1"
     )
     await deliver
     await asyncio.sleep(0.01)
@@ -203,8 +218,10 @@ async def test_control_id_can_be_supplied_and_echoed():
     router = ControlRouter()
     outcome = await router.deliver(
         session_id="sess", agent_id="nobody",
-        kind=types_pb2.CONTROL_KIND_PAUSE, timeout_s=0.1,
-        control_id="fixed-id-42",
+        event=_event(
+            gf_control_pb2.CONTROL_KIND_PAUSE, agent_id="nobody", event_id="fixed-id-42"
+        ),
+        timeout_s=0.1,
     )
     assert outcome.control_id == "fixed-id-42"
 
@@ -213,12 +230,18 @@ async def test_concurrent_delivers_independent_futures():
     router = ControlRouter()
     sub = await router.subscribe("sess", "ag", "s1")
     t1 = asyncio.create_task(
-        router.deliver(session_id="sess", agent_id="ag",
-                       kind=types_pb2.CONTROL_KIND_PAUSE, timeout_s=2.0)
+        router.deliver(
+            session_id="sess", agent_id="ag",
+            event=_event(gf_control_pb2.CONTROL_KIND_PAUSE, agent_id="ag"),
+            timeout_s=2.0,
+        )
     )
     t2 = asyncio.create_task(
-        router.deliver(session_id="sess", agent_id="ag",
-                       kind=types_pb2.CONTROL_KIND_CANCEL, timeout_s=2.0)
+        router.deliver(
+            session_id="sess", agent_id="ag",
+            event=_event(gf_control_pb2.CONTROL_KIND_CANCEL, agent_id="ag"),
+            timeout_s=2.0,
+        )
     )
     e1 = await asyncio.wait_for(sub.queue.get(), timeout=1)
     e2 = await asyncio.wait_for(sub.queue.get(), timeout=1)

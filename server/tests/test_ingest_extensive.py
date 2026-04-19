@@ -26,6 +26,8 @@ from harmonograf_server.bus import (
     DELTA_TASK_REPORT,
     SessionBus,
 )
+from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
+
 from harmonograf_server.ingest import IngestPipeline
 from harmonograf_server.pb import telemetry_pb2, types_pb2
 from harmonograf_server.storage import (
@@ -100,7 +102,7 @@ class _AckSink:
     """Fake ControlAckSink that records every ack it is told about."""
 
     def __init__(self):
-        self.acks: list[tuple[types_pb2.ControlAck, str]] = []
+        self.acks: list[tuple[gf_control_pb2.ControlAck, str]] = []
 
     def record_ack(self, ack, *, stream_id=None):
         self.acks.append((ack, stream_id or ""))
@@ -317,9 +319,9 @@ async def test_heartbeat_progress_change_clears_stuck(pipeline):
 
 async def test_control_ack_forwarded_to_sink(pipeline):
     ctx, _ = await pipeline.handle_hello(_hello(session_id="sess_ack"))
-    ack = types_pb2.ControlAck(
+    ack = gf_control_pb2.ControlAck(
         control_id="ctl-1",
-        result=types_pb2.CONTROL_ACK_RESULT_SUCCESS,
+        result=gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS,
     )
     await pipeline.handle_message(ctx, telemetry_pb2.TelemetryUp(control_ack=ack))
     sink = pipeline._sink  # type: ignore[attr-defined]
