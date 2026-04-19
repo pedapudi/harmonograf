@@ -55,7 +55,6 @@ from goldfive.adapters.adk import ADKAdapter
 from google.adk.agents import Agent
 from harmonograf_client import Client, HarmonografSink
 
-
 async def main() -> None:
     root = Agent(name="researcher", model="openai/gpt-4o-mini")
 

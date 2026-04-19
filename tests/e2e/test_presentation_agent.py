@@ -184,6 +184,105 @@ class TestPresentationGoldfiveRunner:
         finally:
             client.shutdown(flush_timeout=2.0)
 
+    @pytest.mark.asyncio
+    async def test_all_task_status_events_persist(
+        self,
+        presentation_agent_module: Any,
+        harmonograf_server: dict,
+    ) -> None:
+        """Regression for issue #18: every task_completed event the sink
+        observes must also land in harmonograf's storage with the matching
+        terminal status.
+
+        The original bug was a shutdown race in the Client transport:
+        Client.shutdown waited for the ring buffer to empty, but the
+        buffered events had only been moved onto an in-process gRPC
+        send_queue — not yet serialized to the wire. Cancelling recv_task
+        then aborted the bidirectional call and dropped every event in
+        flight, leaving research=COMPLETED but build/review still stuck
+        in RUNNING/PENDING.
+        """
+        from harmonograf_client import Client
+        from harmonograf_server.storage import TaskStatus
+
+        client = Client(
+            name="pres-e2e-regress",
+            server_addr=harmonograf_server["addr"],
+            framework="ADK",
+        )
+        try:
+            runner, memory_sink, _, _ = (
+                presentation_agent_module.build_goldfive_runner(
+                    topic="waffles",
+                    mock=True,
+                    client=client,
+                )
+            )
+            outcome = await runner.run("make a presentation about waffles")
+            await runner.close()
+            assert outcome.success is True, outcome.reason
+
+            completed_task_ids = {
+                evt.task_completed.task_id
+                for evt in memory_sink.events
+                if evt.WhichOneof("payload") == "task_completed"
+            }
+            assert completed_task_ids == {"research", "build", "review", "debug"}, (
+                f"goldfive sink did not observe all four task_completed events: "
+                f"{completed_task_ids}"
+            )
+        finally:
+            # ``Client.shutdown`` is synchronous and internally joins the
+            # transport thread. Running it from the event loop would block
+            # the same loop that the in-process harmonograf_server fixture
+            # uses to drain the wire, so queued events would never reach
+            # the servicer before the stream closed. Hand it off to a
+            # worker thread so the main loop keeps draining the socket.
+            await asyncio.to_thread(client.shutdown, 5.0)
+
+        # After the client flushes, storage must agree with the sink.
+        store = harmonograf_server["store"]
+        plans = await _wait_for_plan_with_tasks(
+            store, expected_task_ids=completed_task_ids, timeout=5.0
+        )
+        assert plans, "no plan landed on the server after mock run"
+        # Only the waffles plan should exist — no phantom plans from past runs.
+        assert len(plans) == 1
+        plan = plans[0]
+        assert "waffles" in plan.summary.lower()
+        task_by_id = {t.id: t for t in plan.tasks}
+        for tid in completed_task_ids:
+            assert task_by_id[tid].status == TaskStatus.COMPLETED, (
+                f"task {tid!r} persisted with status {task_by_id[tid].status.value} "
+                f"but the sink saw task_completed for it"
+            )
+
+
+async def _wait_for_plan_with_tasks(
+    store: Any, *, expected_task_ids: set, timeout: float
+) -> list[Any]:
+    """Poll until a plan whose tasks are all in a terminal state lands."""
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        sessions = await store.list_sessions()
+        for s in sessions or []:
+            plans = await store.list_task_plans_for_session(s.id)
+            for p in plans:
+                task_by_id = {t.id: t for t in p.tasks}
+                if expected_task_ids.issubset(task_by_id.keys()) and all(
+                    task_by_id[tid].status.value == "COMPLETED"
+                    for tid in expected_task_ids
+                ):
+                    return list(plans)
+        await asyncio.sleep(0.1)
+    # Timed out — return whatever we have so the assertion reports the
+    # actual persisted state.
+    sessions = await store.list_sessions()
+    plans: list[Any] = []
+    for s in sessions or []:
+        plans.extend(await store.list_task_plans_for_session(s.id))
+    return plans
+
 
 async def _wait_for_any_plan(store: Any, *, timeout: float) -> list[Any]:
     """Poll every session in the store until a plan is persisted. The
