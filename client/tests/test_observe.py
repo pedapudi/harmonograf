@@ -231,6 +231,85 @@ async def test_observe_on_adk_wrapped_runner() -> None:
 
 
 @pytest.mark.asyncio
+async def test_observe_installs_telemetry_plugin_on_adk_runner() -> None:
+    """``observe(goldfive.wrap(adk_agent))`` must auto-install the telemetry plugin."""
+    pytest.importorskip("google.adk.agents")
+    import goldfive
+    from google.adk.agents import BaseAgent  # type: ignore
+
+    from harmonograf_client import HarmonografTelemetryPlugin
+
+    class _NullADKAgent(BaseAgent):
+        pass
+
+    wrapped = goldfive.wrap(_NullADKAgent(name="null", description=""))
+
+    made: list[FakeTransport] = []
+    client = Client(
+        name="adk-telemetry",
+        agent_id="agent-tel",
+        session_id="sess-tel",
+        framework="ADK",
+        buffer_size=8,
+        _transport_factory=make_factory(made),
+    )
+
+    observe(wrapped, client=client)
+
+    pm = wrapped.runner.agent._runner.plugin_manager
+    plugins = list(getattr(pm, "plugins", []))
+    assert any(isinstance(p, HarmonografTelemetryPlugin) for p in plugins)
+
+    await wrapped.close()
+    client.shutdown(flush_timeout=0.1)
+
+
+@pytest.mark.asyncio
+async def test_observe_skips_telemetry_when_disabled() -> None:
+    """``install_adk_telemetry=False`` must suppress the auto-install."""
+    pytest.importorskip("google.adk.agents")
+    import goldfive
+    from google.adk.agents import BaseAgent  # type: ignore
+
+    from harmonograf_client import HarmonografTelemetryPlugin
+
+    class _NullADKAgent(BaseAgent):
+        pass
+
+    wrapped = goldfive.wrap(_NullADKAgent(name="null", description=""))
+
+    made: list[FakeTransport] = []
+    client = Client(
+        name="adk-telemetry-off",
+        agent_id="agent-tel-off",
+        session_id="sess-tel-off",
+        framework="ADK",
+        buffer_size=8,
+        _transport_factory=make_factory(made),
+    )
+
+    observe(wrapped, client=client, install_adk_telemetry=False)
+
+    pm = wrapped.runner.agent._runner.plugin_manager
+    plugins = list(getattr(pm, "plugins", []))
+    assert not any(isinstance(p, HarmonografTelemetryPlugin) for p in plugins)
+
+    await wrapped.close()
+    client.shutdown(flush_timeout=0.1)
+
+
+@pytest.mark.asyncio
+async def test_observe_no_op_when_runner_lacks_add_plugin(client: Client) -> None:
+    """A runner without ``add_plugin`` (e.g. plain non-ADK Runner) must not raise."""
+    runner = _FakeRunner()  # _FakeRunner has no add_plugin attr
+
+    observe(runner, client=client)  # must not raise
+
+    assert not hasattr(runner, "add_plugin")
+    await runner.close()
+
+
+@pytest.mark.asyncio
 async def test_observe_twice_appends_two_sinks(client: Client) -> None:
     runner = _FakeRunner()
 
