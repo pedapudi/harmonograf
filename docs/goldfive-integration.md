@@ -1,10 +1,20 @@
 # Goldfive integration
 
-Harmonograf is the observability console for agent workflows orchestrated by
-[goldfive](https://github.com/pedapudi/goldfive). Goldfive decides *what an
-agent should do next*; harmonograf records what actually happened and lets a
-human intervene. The two projects compose through a single adapter — the
-`HarmonografSink`.
+> **If you want plans + tasks + drift: this is the guide.**
+> If you just want a Gantt of agent activity without any orchestration
+> concepts, see [standalone-observability.md](standalone-observability.md)
+> instead — goldfive is optional.
+
+Harmonograf pairs naturally with
+[goldfive](https://github.com/pedapudi/goldfive) for multi-agent
+orchestration. Goldfive decides *what an agent should do next*;
+harmonograf records what actually happened and lets a human intervene.
+The two projects compose through a single adapter — the
+`HarmonografSink` — and are opted into via the `orchestration` extra:
+
+```bash
+uv sync --extra orchestration
+```
 
 ## Split of responsibilities
 

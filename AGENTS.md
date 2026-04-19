@@ -4,16 +4,33 @@ This file provides guidance to agents, including Claude Code, Antigravity, Openc
 
 ## Project vision
 
-Harmonograf is the observability console for agent workflows orchestrated by
-[goldfive](https://github.com/pedapudi/goldfive). Goldfive owns the plan, the
-task state machine, the drift taxonomy, the reporting tools, and the re-invocation
-loop. Harmonograf owns the session, the span timeline, the canonical storage, the
-Gantt/graph frontend, and the control router that lets a human intervene on the
-same connection they observe on.
+Harmonograf is an observability console for multi-agent workflows. **Goldfive
+is optional.** Harmonograf works standalone for any agent that emits spans via
+`harmonograf_client.Client`; plans, tasks, and drift come from
+[goldfive](https://github.com/pedapudi/goldfive) if you opt in via the
+`orchestration` extra. See [`docs/standalone-observability.md`](docs/standalone-observability.md)
+for the standalone guide and [`docs/goldfive-integration.md`](docs/goldfive-integration.md)
+for the orchestration path.
+
+When goldfive *is* in the picture: goldfive owns the plan, the task state
+machine, the drift taxonomy, the reporting tools, and the re-invocation loop.
+Harmonograf owns the session, the span timeline, the canonical storage, the
+Gantt/graph frontend, and the control router that lets a human intervene on
+the same connection they observe on.
 
 The line is load-bearing: orchestration changes belong in goldfive; observability
 and UI changes belong in harmonograf. If a change has to straddle both, the
 goldfive-side change lands first and harmonograf follows.
+
+### Proto coupling caveat
+
+Phase A of the goldfive migration (issue #6) moved plan/task/drift types into
+goldfive's proto package. Harmonograf's `TelemetryUp.goldfive_event` therefore
+references `goldfive.v1.Event` directly, and the generated pb stubs import
+from `goldfive.pb.goldfive.v1`. Consequence: `harmonograf_client` cannot be
+*installed* without goldfive present, but user code can (and should) be
+goldfive-import-free in the standalone case. The `standalone-test` CI job
+enforces this via `grep -i goldfive examples/standalone_observability/spans_only.py`.
 
 ## High-level architecture
 

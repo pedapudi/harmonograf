@@ -40,10 +40,10 @@ client/build/
 # Demo output tarballs
 waffle.tar.gz
 
-# Third-party vendored dependencies (read-only, cloned locally for editable
-# installs — never committed). Re-create by cloning the upstream repo into
-# third_party/adk-python/. See docs/dev-guide/setup.md.
-third_party/
+# Third-party vendored dependencies. ADK is cloned at first install and
+# never committed; goldfive is tracked as a git submodule. See
+# docs/dev-guide/setup.md.
+third_party/adk-python/
 
 # Claude Code runtime scratch (agent team state, scheduled task locks, etc.)
 .claude/

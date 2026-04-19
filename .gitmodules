@@ -1,0 +1,3 @@
+[submodule "third_party/goldfive"]
+	path = third_party/goldfive
+	url = https://github.com/pedapudi/goldfive.git

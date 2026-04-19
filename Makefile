@@ -14,7 +14,7 @@ FRONTEND_PB := $(ROOT)/frontend/src/pb
 
 .PHONY: help proto proto-python proto-ts \
         server-install client-install frontend-install install \
-        server-run frontend-dev demo demo-presentation .demo-agents-stage \
+        server-run frontend-dev demo demo-presentation demo-standalone .demo-agents-stage \
         test server-test client-test frontend-test e2e \
         lint format clean stats
 
@@ -26,6 +26,8 @@ help:
 	@echo "  install          Install all components"
 	@echo "  server-run       Run the server in dev mode"
 	@echo "  frontend-dev     Run the Vite dev server"
+	@echo "  demo             Boot server + frontend + goldfive-orchestrated ADK agent"
+	@echo "  demo-standalone  Boot server + frontend and emit spans from the standalone example"
 	@echo "  test             Run server + client + frontend tests"
 	@echo "  e2e              Run the end-to-end test against the ADK submodule"
 	@echo "  stats            Query the running server's GetStats RPC"
@@ -204,6 +206,41 @@ demo: .demo-agents-stage
 		echo "=================================================================="; \
 		echo "  Press Ctrl-C to stop all three."; \
 		echo ""; \
+		wait \
+	'
+
+# Standalone observability demo: boots the harmonograf server + Vite
+# frontend and runs examples/standalone_observability/spans_only.py to
+# push synthetic spans at them. No goldfive orchestration is involved —
+# this is the "use harmonograf without goldfive" demo.
+demo-standalone:
+	@bash -eu -c '\
+		cleanup() { \
+			echo; \
+			echo "[demo-standalone] shutting down..."; \
+			kill $$SERVER_PID $$FRONTEND_PID 2>/dev/null || true; \
+			wait 2>/dev/null || true; \
+			exit 0; \
+		}; \
+		trap cleanup INT TERM EXIT; \
+		echo "[demo-standalone] starting harmonograf-server on :$(SERVER_PORT) ..."; \
+		( cd $(ROOT)/server && uv run python -m harmonograf_server \
+			--store sqlite --data-dir $(ROOT)/data \
+			--port $(SERVER_PORT) ) & SERVER_PID=$$!; \
+		echo "[demo-standalone] starting frontend Vite dev server on :$(FRONTEND_PORT) ..."; \
+		( cd $(ROOT)/frontend && pnpm dev --port $(FRONTEND_PORT) --strictPort ) & FRONTEND_PID=$$!; \
+		sleep 3; \
+		echo ""; \
+		echo "=================================================================="; \
+		echo "  Harmonograf UI     : http://127.0.0.1:$(FRONTEND_PORT)"; \
+		echo "  harmonograf-server : 127.0.0.1:$(SERVER_PORT) (gRPC)"; \
+		echo "=================================================================="; \
+		echo "  Emitting spans via examples/standalone_observability/spans_only.py ..."; \
+		echo ""; \
+		( cd $(ROOT) && HARMONOGRAF_SERVER=127.0.0.1:$(SERVER_PORT) \
+			uv run python examples/standalone_observability/spans_only.py ); \
+		echo ""; \
+		echo "[demo-standalone] spans emitted. Press Ctrl-C to stop server + frontend."; \
 		wait \
 	'
 

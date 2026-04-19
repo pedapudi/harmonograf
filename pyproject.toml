@@ -6,25 +6,34 @@ requires-python = ">=3.11"
 dependencies = [
     "harmonograf-server",
     "harmonograf-client",
-    "goldfive",
+    # goldfive is not listed here: harmonograf can be used standalone for
+    # observability. Server + client still list goldfive directly because
+    # their generated proto stubs import goldfive.pb — that's an unavoidable
+    # consequence of Phase A (issue #6). The orchestration API (wrap(),
+    # Runner, adapters, planner, steerer) is opt-in via the extra below.
 ]
 
 [project.optional-dependencies]
+orchestration = [
+    "goldfive",
+]
 e2e = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "google-adk",
+    "goldfive",
 ]
 demo = [
     "google-adk",
     "litellm>=1.75.5",
+    "goldfive",
 ]
 
 [tool.uv.sources]
 harmonograf-server = { workspace = true }
 harmonograf-client = { workspace = true }
 google-adk = { path = "third_party/adk-python", editable = true }
-goldfive = { path = "../goldfive", editable = true }
+goldfive = { path = "third_party/goldfive", editable = true }
 
 [tool.uv.workspace]
 members = ["server", "client"]
