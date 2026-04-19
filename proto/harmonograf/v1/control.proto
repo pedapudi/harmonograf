@@ -13,6 +13,8 @@ syntax = "proto3";
 
 package harmonograf.v1;
 
+import "goldfive/v1/control.proto";
+
 option go_package = "github.com/pedapudi/harmonograf/gen/harmonograf/v1;harmonografv1";
 
 // Subscribes to control events for one telemetry stream. The session_id,
@@ -28,8 +30,9 @@ message SubscribeControlRequest {
   string stream_id = 3;
 }
 
-// The response stream is a sequence of ControlEvents to deliver. The
-// agent's reply for each (a ControlAck) is sent upstream on the
-// corresponding StreamTelemetry, not on this stream. ControlEvent itself
-// is defined in types.proto so that frontend.proto SendControl can also
-// reference it.
+// The response stream is a sequence of goldfive.v1.ControlEvents to
+// deliver. The agent's reply for each (a goldfive.v1.ControlAck) is sent
+// upstream on the corresponding StreamTelemetry, not on this stream.
+// harmonograf does not declare its own ControlEvent — the wire type is
+// goldfive's, imported via goldfive/v1/control.proto. See service.proto
+// for the RPC signature.

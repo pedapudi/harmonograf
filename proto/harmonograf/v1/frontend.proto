@@ -14,6 +14,7 @@ package harmonograf.v1;
 
 import "google/protobuf/timestamp.proto";
 import "harmonograf/v1/types.proto";
+import "goldfive/v1/control.proto";
 import "goldfive/v1/events.proto";
 
 option go_package = "github.com/pedapudi/harmonograf/gen/harmonograf/v1;harmonografv1";
@@ -273,7 +274,7 @@ message PostAnnotationRequest {
 message PostAnnotationResponse {
   Annotation annotation = 1;
   // For steering/human-response: the ack result from the agent.
-  ControlAckResult delivery = 2;
+  goldfive.v1.ControlAckResult delivery = 2;
   string delivery_detail = 3;
 }
 
@@ -283,22 +284,23 @@ message PostAnnotationResponse {
 
 // Synchronous control issue. Server fans out to every active
 // SubscribeControl stream for the target agent and waits for the first
-// ack (or aggregates — see detail below).
+// ack (or aggregates — see detail below). The payload is a fully formed
+// goldfive.v1.ControlEvent (typed oneof payload) so the wire contract
+// matches what the agent will observe on SubscribeControl — no bytes/JSON
+// translation in the server.
 message SendControlRequest {
   string session_id = 1;
-  ControlTarget target = 2;
-  ControlKind kind = 3;
-  bytes payload = 4;
+  goldfive.v1.ControlEvent event = 2;
   // 0 = server default (10s).
-  int64 ack_timeout_ms = 5;
+  int64 ack_timeout_ms = 3;
   // If true and the agent has multiple concurrent streams, wait for all
   // of them to ack (or timeout). Default (false) returns on the first ack.
-  bool require_all_acks = 6;
+  bool require_all_acks = 4;
 }
 
 message SendControlResponse {
   string control_id = 1;
-  ControlAckResult result = 2;
+  goldfive.v1.ControlAckResult result = 2;
   // Per-stream ack detail when require_all_acks = true; otherwise one
   // entry for the stream that answered first.
   repeated StreamAck acks = 3;
@@ -306,7 +308,7 @@ message SendControlResponse {
 
 message StreamAck {
   string stream_id = 1;
-  ControlAckResult result = 2;
+  goldfive.v1.ControlAckResult result = 2;
   string detail = 3;
   google.protobuf.Timestamp acked_at = 4;
 }

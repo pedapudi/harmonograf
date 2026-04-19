@@ -260,67 +260,14 @@ message Annotation {
 }
 
 // ---------------------------------------------------------------------------
-// Control
+// Control — MOVED TO GOLDFIVE (issue #37).
 // ---------------------------------------------------------------------------
-
-// ControlKind enumerates the operations the frontend can issue against an
-// agent. The agent advertises which it accepts via Capability.
-enum ControlKind {
-  CONTROL_KIND_UNSPECIFIED = 0;
-  CONTROL_KIND_PAUSE = 1;
-  CONTROL_KIND_RESUME = 2;
-  CONTROL_KIND_CANCEL = 3;
-  // payload: target span id (UTF-8 string)
-  CONTROL_KIND_REWIND_TO = 4;
-  // payload: text or structured message
-  CONTROL_KIND_INJECT_MESSAGE = 5;
-  // payload: optional edited args for the pending tool call (json)
-  CONTROL_KIND_APPROVE = 6;
-  // payload: reason string
-  CONTROL_KIND_REJECT = 7;
-  // payload: new target agent_id, or empty to block
-  CONTROL_KIND_INTERCEPT_TRANSFER = 8;
-  // payload: steering body (utf-8)
-  CONTROL_KIND_STEER = 9;
-
-  // Ask the agent to report what it is currently working on.
-  // The agent responds via ControlAck.detail with a plain-text description.
-  // The server also broadcasts the report to all WatchSession subscribers as
-  // a TaskReport delta so the Gantt and graph views update for all viewers.
-  CONTROL_KIND_STATUS_QUERY = 10;
-}
-
-// ControlTarget points at the agent (and optionally a span on it) the
-// event applies to.
-message ControlTarget {
-  string agent_id = 1;
-  string span_id = 2;
-}
-
-// ControlEvent flows server → agent on SubscribeControl. The id correlates
-// with the ControlAck that the agent sends back upstream on StreamTelemetry.
-message ControlEvent {
-  string id = 1;
-  google.protobuf.Timestamp issued_at = 2;
-  ControlTarget target = 3;
-  ControlKind kind = 4;
-  bytes payload = 5;
-}
-
-// ControlAck rides upstream on StreamTelemetry (NOT on a separate stream).
-// This colocation gives us happens-before for free: when the server sees
-// an ack, every span the client emitted before the ack is already on the
-// wire ahead of it. See docs/design/01 §4.2.1.
-message ControlAck {
-  string control_id = 1;
-  ControlAckResult result = 2;
-  string detail = 3;
-  google.protobuf.Timestamp acked_at = 4;
-}
-
-enum ControlAckResult {
-  CONTROL_ACK_RESULT_UNSPECIFIED = 0;
-  CONTROL_ACK_RESULT_SUCCESS = 1;
-  CONTROL_ACK_RESULT_FAILURE = 2;
-  CONTROL_ACK_RESULT_UNSUPPORTED = 3;
-}
+//
+// Harmonograf previously owned ControlKind / ControlAckResult / ControlTarget /
+// ControlEvent / ControlAck here. These types now live in
+// goldfive/v1/control.proto; harmonograf imports them wherever control
+// delivery crosses the wire (control.proto SubscribeControl stream,
+// telemetry.proto TelemetryUp.control_ack, frontend.proto SendControl).
+// The duplicate drifted twice (APPROVE/REJECT added in goldfive #83 then
+// backfilled here in harmonograf #34); collapsing the schema to one
+// source of truth eliminates the drift class.
