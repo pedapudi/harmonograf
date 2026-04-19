@@ -1,3 +1,10 @@
+> **DEPRECATED (goldfive migration).** `client/harmonograf_client/adk.py` has
+> been deleted. ADK integration now comes from goldfive's `ADKAdapter`
+> (`goldfive.adapters.adk`) plus a slim `HarmonografTelemetryPlugin` that
+> emits spans on the harmonograf side. See
+> [../goldfive-integration.md](../goldfive-integration.md) and
+> [../goldfive-migration-plan.md](../goldfive-migration-plan.md).
+
 # An annotated tour of `adk.py`
 
 `client/harmonograf_client/adk.py` is the single densest file in the repo, at

@@ -1,3 +1,10 @@
+> **DEPRECATED (goldfive migration).** The drift taxonomy and refine pipeline
+> now live in [goldfive](https://github.com/pedapudi/goldfive). Harmonograf
+> renders `DriftDetected` / `PlanRevised` events from the goldfive stream but
+> no longer owns the taxonomy. See
+> [../goldfive-integration.md](../goldfive-integration.md) and
+> [../goldfive-migration-plan.md](../goldfive-migration-plan.md).
+
 # ADR 0013 — Drift is a first-class event
 
 ## Status

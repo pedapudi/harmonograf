@@ -1,3 +1,9 @@
+> **DEPRECATED (goldfive migration).** The drift taxonomy has moved to
+> [goldfive](https://github.com/pedapudi/goldfive). Harmonograf renders drift
+> events from the goldfive stream but does not define the kinds. See
+> [../goldfive-integration.md](../goldfive-integration.md) and
+> [../goldfive-migration-plan.md](../goldfive-migration-plan.md).
+
 # Drift taxonomy catalog
 
 Every drift kind that harmonograf fires during a run. A drift is a

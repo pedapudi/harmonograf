@@ -4,39 +4,65 @@ This file provides guidance to agents, including Claude Code, Antigravity, Openc
 
 ## Project vision
 
-Harmonograf is a console for understanding, interacting with, and coordinating multi-agent frameworks. The repository is currently a blank slate (only a README) — architectural decisions below are intent, not yet implemented.
+Harmonograf is the observability console for agent workflows orchestrated by
+[goldfive](https://github.com/pedapudi/goldfive). Goldfive owns the plan, the
+task state machine, the drift taxonomy, the reporting tools, and the re-invocation
+loop. Harmonograf owns the session, the span timeline, the canonical storage, the
+Gantt/graph frontend, and the control router that lets a human intervene on the
+same connection they observe on.
+
+The line is load-bearing: orchestration changes belong in goldfive; observability
+and UI changes belong in harmonograf. If a change has to straddle both, the
+goldfive-side change lands first and harmonograf follows.
 
 ## High-level architecture
 
-Three components are planned, and changes usually span more than one of them:
+Three components, and changes usually span more than one of them:
 
-1. **Visual frontend** — a Gantt-chart-style view. X-axis is time, Y-axis is one row per agent, and each block represents an agent activity (e.g., a tool call, a step, a span). Blocks are interactive (clickable) to drill into details. This is the human-facing surface for observing and coordinating agents.
+1. **Visual frontend** (`frontend/`) — a Gantt-chart-style view. X-axis is time, Y-axis is one row per agent, and each block represents an agent activity (span, tool call, transfer). Blocks are interactive (clickable) to drill into details. Plan and task state surfaces are rendered from goldfive events (`PlanSubmitted`, `PlanRevised`, `TaskStarted`, `TaskCompleted`, `TaskFailed`, `DriftDetected`, …) delivered through the harmonograf server. This is the human-facing surface for observing and coordinating agents.
 
-2. **Client library** — embedded inside agent implementations to emit activity to the server. It must be compatible with ADK (Google's Agent Development Kit) as a first-class integration target, so its data model and hooks should map cleanly onto ADK concepts. Multiple agents (multiple processes) will use the client library concurrently.
+2. **Client library** (`client/`) — embedded inside agent processes. Two public surfaces: `Client` handles the span transport, payload upload, control-handler registration, identity, heartbeat; `HarmonografSink` is a `goldfive.EventSink` that translates goldfive `Event` envelopes into harmonograf `TelemetryUp` frames. Users construct a `goldfive.Runner`, install a `HarmonografSink`, and the run's plan/task/drift events reach the frontend alongside the span stream. An optional `HarmonografTelemetryPlugin` (ADK `BasePlugin`) emits spans for ADK callbacks when users want framework-level telemetry.
 
-3. **Server process** — hosts the visualization frontend and terminates connections from client libraries across all participating agents. It is the fan-in point: many clients, one server, one UI. It owns the canonical timeline and is the bridge that lets the frontend coordinate agents (not just observe them).
+3. **Server process** (`server/`) — hosts the frontend and terminates connections from client libraries across all participating agents. It is the fan-in point: many clients, one server, one UI. It owns the canonical timeline (sessions, agents, spans, annotations, payloads) and the derived plan/task index built from goldfive events. It is also the bridge that lets the frontend coordinate agents, not just observe them.
 
 Key cross-cutting concerns to keep in mind when designing any piece:
-- The data model (agent, activity/block, time range, metadata payload) is shared across all three components and should be defined once.
+- The data model for observability (session, agent, span, payload, annotation, control event) is defined once in `proto/harmonograf/v1/*.proto` and shared across all three components.
+- Plan, task, drift, and reporting-tool types are defined once in `proto/goldfive/v1/*.proto` and imported into harmonograf's proto tree. Do not re-declare them in harmonograf.
 - The frontend is not read-only — interactions flow back through the server to clients, so the client library needs a bidirectional channel, not just telemetry egress.
-- "Coordinating" implies the server may mediate control, not just display — design client APIs with that in mind rather than treating it purely as an observability tool.
+- "Coordinating" implies the server may mediate control (pause, resume, steer, cancel), not just display — design client APIs with that in mind rather than treating it purely as an observability tool.
 
-## Plan execution protocol
+## Goldfive integration
 
-Harmonograf tracks task progression via three coordinated channels, not via span-lifecycle inference:
+Harmonograf's protocol carries goldfive events as a first-class variant:
 
-1. **session.state** — ADK's shared mutable dict. Harmonograf writes `harmonograf.current_task_id`, `harmonograf.plan_id`, `harmonograf.plan_summary`, `harmonograf.available_tasks`, and `harmonograf.completed_task_results` before each model call. Agents read those keys and may write back `harmonograf.task_progress`, `harmonograf.task_outcome`, `harmonograf.agent_note`, and `harmonograf.divergence_flag`. The full schema (keys, readers, writers, diffing helper) lives in `client/harmonograf_client/state_protocol.py`.
+- `proto/harmonograf/v1/telemetry.proto` imports `goldfive/v1/events.proto` and declares a `goldfive.v1.Event goldfive_event` field inside `TelemetryUp`. Plan and task state ride that variant; the old harmonograf-native `task_plan` / `task_status_update` envelopes are retired.
+- `proto/harmonograf/v1/types.proto` imports goldfive's `Plan`, `Task`, `TaskEdge`, `TaskStatus`, and `DriftKind` rather than re-declaring them. Harmonograf-owned types (Session, Agent, Span, Payload, Annotation, Control*) stay local.
+- `client/harmonograf_client/sink.py` (`HarmonografSink`) is the adapter: `emit(event)` pushes a `GOLDFIVE_EVENT` envelope through the existing ring-buffered transport, which serialises it to a `TelemetryUp(goldfive_event=...)` frame.
+- `server/harmonograf_server/ingest.py` dispatches on `event.payload` (oneof) and updates the plan/task index, storage, and the session bus so frontend subscribers see deltas.
 
-2. **Reporting tools** — `report_task_started`, `report_task_progress`, `report_task_completed`, `report_task_failed`, `report_task_blocked`, `report_new_work_discovered`, and `report_plan_divergence` are injected into every sub-agent by `HarmonografAgent`. Agents call them explicitly at task boundaries; harmonograf intercepts the calls in `before_tool_callback` and applies state transitions directly in `_AdkState` — the tool bodies themselves only return `{"acknowledged": true}`. See [`docs/reporting-tools.md`](docs/reporting-tools.md) for the full reference.
+Orchestration semantics — session-state keys, reporting tool bodies, drift
+taxonomy, refine pipeline, invariant validator, parallel DAG walker — are
+goldfive concerns. When a question is "why does the agent state machine behave
+this way?", the answer lives in the goldfive repo. When a question is "why did
+the timeline render this span where it did?", the answer lives here.
 
-3. **ADK callback inspection** — `after_model_callback` parses response content for structured signals (function_calls, explicit markers like "Task complete:", state_delta writes). `on_event_callback` watches for transfer / escalate / state_delta events. These paths exist as belt-and-suspenders for models that describe their work in prose instead of calling the reporting tools.
+## Component boundaries
 
-Spans are still emitted for every ADK callback (INVOCATION / LLM_CALL / TOOL_CALL / TRANSFER / etc.), but they are **telemetry only** — they no longer drive task state. The state machine is monotonic, walker-owned for parallel mode, and callback-driven for sequential/delegated modes.
+- **Span emission is harmonograf's job.** ADK callbacks (BEFORE/AFTER model/tool/run, state_delta, transfer, escalate) are turned into spans by `HarmonografTelemetryPlugin`. Goldfive does not produce spans.
+- **Task state is goldfive's job.** State transitions happen inside goldfive's `DefaultSteerer` when a reporting tool is called or when an ADK event implies a transition. Harmonograf learns about those transitions only through goldfive events on the sink.
+- **Control routing is harmonograf's job.** The frontend → server → agent path (pause, resume, steer, cancel, annotate) rides harmonograf's control stream. Goldfive exposes hooks that let an orchestrated run react to delivered control events, but the wire is harmonograf's.
+- **Session is harmonograf's job.** Goldfive has a `run_id`; harmonograf pairs it with a `session_id` at the storage layer. One goldfive run maps to one harmonograf session.
 
-`HarmonografAgent` runs in one of three orchestration modes:
+## Things explicitly deleted from the pre-goldfive era
 
-- **Sequential** (default, `orchestrator_mode=True, parallel_mode=False`) — the whole plan is fed as one user turn and the coordinator LLM executes it; per-task lifecycle is reported via the reporting tools.
-- **Parallel** (`orchestrator_mode=True, parallel_mode=True`) — the rigid DAG batch walker drives sub-agents directly per task using a forced `task_id` ContextVar, respecting plan edges as dependencies.
-- **Delegated** (`orchestrator_mode=False`) — a single delegation with the event observer scanning for drift afterward; the inner agent is in charge of its own task sequencing.
+If you see these in docs or code, they are retired — do not bring them back:
 
-Dynamic replan triggers: tool errors, agent refusals, context pressure, new work discovered, plan divergence, user steer/cancel, and ~15 other drift kinds fire deferential `refine` calls that produce revised plans live in the UI. The refine path calls back into the planner with the current plan + drift context and upserts the result through `TaskRegistry`, which recomputes the diff so the frontend banner/drawer can visualize exactly what changed (see `frontend/src/gantt/index.ts :: computePlanDiff`).
+- `HarmonografAgent`, `HarmonografRunner`, `attach_adk`, `make_adk_plugin`, `make_harmonograf_agent`, `make_harmonograf_runner` — replaced by `goldfive.Runner` + `HarmonografSink`.
+- `_AdkState`, `PlannerHelper`, `LLMPlanner`, `PassthroughPlanner` — replaced by goldfive's steerer/planner.
+- `state_protocol.py` with the `harmonograf.*` session-state keys — replaced by goldfive's `SessionContext`.
+- `invariants.py`, `metrics.py` in the client — invariant checking is goldfive's responsibility.
+- `TaskPlan` / `UpdatedTaskStatus` envelopes in `TelemetryUp` — replaced by `goldfive_event`.
+- Duplicate `Task` / `TaskEdge` / `TaskStatus` / `DriftKind` messages in `types.proto` — imported from goldfive instead.
+
+The full inventory of what moved, what stayed, and what was deleted is in
+[docs/goldfive-migration-plan.md](docs/goldfive-migration-plan.md).

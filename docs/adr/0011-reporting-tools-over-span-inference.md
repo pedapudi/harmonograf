@@ -1,3 +1,11 @@
+> **DEPRECATED (goldfive migration).** Reporting-tool ownership and task-state
+> logic now live in [goldfive](https://github.com/pedapudi/goldfive). This ADR
+> records the reasoning as it stood when harmonograf owned orchestration; the
+> decision itself stands (reporting tools beat span inference), it is just
+> expressed in goldfive now. See
+> [../goldfive-integration.md](../goldfive-integration.md) and
+> [../goldfive-migration-plan.md](../goldfive-migration-plan.md).
+
 # ADR 0011 — Reporting tools drive task state, not span lifecycle
 
 ## Status

@@ -1,3 +1,11 @@
+> **DEPRECATED (goldfive migration).** This document describes the pre-goldfive
+> client library (HarmonografAgent, \_AdkState, attach\_adk, reporting-tool
+> injection). The orchestration pieces have moved to
+> [goldfive](https://github.com/pedapudi/goldfive); the surviving harmonograf
+> client is `Client` (span transport) + `HarmonografSink` (goldfive event
+> adapter). See [../goldfive-integration.md](../goldfive-integration.md) and
+> [../goldfive-migration-plan.md](../goldfive-migration-plan.md).
+
 # 12. Client Library and ADK Integration
 
 ## Executive Summary

@@ -1,3 +1,8 @@
+> **DEPRECATED (goldfive migration).** `client/harmonograf_client/invariants.py`
+> has been deleted. Invariant checking is a goldfive responsibility now. See
+> [../goldfive-integration.md](../goldfive-integration.md) and
+> [../goldfive-migration-plan.md](../goldfive-migration-plan.md).
+
 # The invariant validator
 
 `client/harmonograf_client/invariants.py` (427 lines) is a small, high-leverage

@@ -1,3 +1,9 @@
+> **DEPRECATED (goldfive migration).** Task-state ownership has moved to
+> [goldfive](https://github.com/pedapudi/goldfive). The monotonicity property
+> still holds, but it is enforced in goldfive's steerer now. See
+> [../goldfive-integration.md](../goldfive-integration.md) and
+> [../goldfive-migration-plan.md](../goldfive-migration-plan.md).
+
 # ADR 0017 — Task state is monotonic; terminal states absorb
 
 ## Status

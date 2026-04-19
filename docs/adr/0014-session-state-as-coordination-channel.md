@@ -1,3 +1,9 @@
+> **DEPRECATED (goldfive migration).** The `harmonograf.*` session-state keys
+> described here have been replaced by goldfive's `SessionContext`
+> (`goldfive.adapters.adk`). See
+> [../goldfive-integration.md](../goldfive-integration.md) and
+> [../goldfive-migration-plan.md](../goldfive-migration-plan.md).
+
 # ADR 0014 — `session.state` is the coordination channel
 
 ## Status

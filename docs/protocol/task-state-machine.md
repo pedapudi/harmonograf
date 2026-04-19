@@ -1,3 +1,10 @@
+> **DEPRECATED (goldfive migration).** The task state machine, drift taxonomy,
+> and reporting-tool protocol have moved to
+> [goldfive](https://github.com/pedapudi/goldfive). Harmonograf receives these
+> as goldfive events on the telemetry stream — see
+> [../goldfive-integration.md](../goldfive-integration.md) and
+> [../goldfive-migration-plan.md](../goldfive-migration-plan.md).
+
 # Task state machine and plan-execution protocol
 
 Harmonograf tracks task progression via **three coordinated channels**,
