@@ -1,5 +1,15 @@
 # 13. Human Interaction Model
 
+> **Note (2026-04 goldfive migration).** Figures on this page still use the
+> pre-migration vocabulary (`TaskPlan`, `planner.refine`, `detect_drift` as
+> harmonograf-side concepts). Those behaviours now live in
+> [goldfive](https://github.com/pedapudi/goldfive) — planner / drift / refine /
+> `Plan`. Harmonograf still owns the control stream, the annotation lifecycle,
+> and the frontend rendering of whatever goldfive emits. Read the diagrams
+> with that substitution in mind, and consult
+> [../goldfive-integration.md](../goldfive-integration.md) for the current
+> terminology.
+
 ## Executive Summary
 
 The paradigm of Human-Computer Interaction (HCI) with Large Language Models historically forces humans mapping vast topologies securely safely exclusively via linear chat lines intuitively organically inherently explicitly globally. 
