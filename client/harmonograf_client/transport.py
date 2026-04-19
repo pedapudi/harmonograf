@@ -128,6 +128,17 @@ class Transport:
         self._handlers: dict[str, ControlHandler] = {}
         self._handlers_lock = threading.Lock()
 
+        # Optional raw-event forwarder. When set, _control_loop routes every
+        # ControlEvent to this callback instead of _dispatch_control — the
+        # forwarder is then responsible for producing acks via
+        # :meth:`send_control_ack`. Used by the goldfive ControlChannel
+        # bridge (see ``harmonograf_client._control_bridge``).
+        self._control_forward: Optional[Callable[[Any], None]] = None
+        # Cached reference to the live bidi send queue, set at the start of
+        # each ``_serve`` call so ``send_control_ack`` can thread-safely
+        # push acks from the bridge's loop onto the transport's loop.
+        self._send_queue: Optional[asyncio.Queue] = None
+
         self._thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._loop_ready = threading.Event()
@@ -208,6 +219,47 @@ class Transport:
     def register_control_handler(self, kind: str, cb: ControlHandler) -> None:
         with self._handlers_lock:
             self._handlers[kind] = cb
+
+    def set_control_forward(self, fn: Optional[Callable[[Any], None]]) -> None:
+        """Install a raw-event forwarder. Pass ``None`` to uninstall.
+
+        When set, every incoming ``ControlEvent`` is handed to ``fn``
+        (on the transport's own loop) instead of being dispatched to the
+        per-kind handlers registered via :meth:`register_control_handler`.
+        The forwarder is responsible for eventually producing a
+        :class:`ControlAck` via :meth:`send_control_ack` — the transport
+        no longer acks synchronously on its behalf.
+        """
+        self._control_forward = fn
+
+    def send_control_ack(
+        self, control_id: str, result: str, detail: str = ""
+    ) -> None:
+        """Thread-safe ack push onto the current bidi send queue.
+
+        Safe to call from any thread. If no stream is currently live
+        (e.g. during a reconnect) the ack is dropped — the server will
+        re-deliver the ``ControlEvent`` on the next subscribe.
+        """
+        from .pb import telemetry_pb2, types_pb2
+
+        result_enum = {
+            "success": types_pb2.CONTROL_ACK_RESULT_SUCCESS,
+            "failure": types_pb2.CONTROL_ACK_RESULT_FAILURE,
+            "unsupported": types_pb2.CONTROL_ACK_RESULT_UNSUPPORTED,
+        }.get(result.lower(), types_pb2.CONTROL_ACK_RESULT_UNSUPPORTED)
+        ack = types_pb2.ControlAck(
+            control_id=control_id, result=result_enum, detail=detail
+        )
+        up = telemetry_pb2.TelemetryUp(control_ack=ack)
+        loop = self._loop
+        sq = self._send_queue
+        if loop is None or sq is None:
+            return
+        try:
+            loop.call_soon_threadsafe(sq.put_nowait, up)
+        except RuntimeError:
+            pass
 
     def shutdown(self, timeout: float = 5.0) -> None:
         self._stop.set()
@@ -404,6 +456,7 @@ class Transport:
 
         hello = self._build_hello(telemetry_pb2)
         send_queue: asyncio.Queue = asyncio.Queue()
+        self._send_queue = send_queue
         await send_queue.put(telemetry_pb2.TelemetryUp(hello=hello))
 
         async def request_iter():
@@ -482,7 +535,11 @@ class Transport:
         for t in done:
             exc = t.exception()
             if exc is not None and not isinstance(exc, asyncio.CancelledError):
+                # Clear send_queue so late bridge acks are not posted
+                # onto a stream that is already dead.
+                self._send_queue = None
                 raise exc
+        self._send_queue = None
 
     # ------------------------------------------------------------------
     # Send loop
@@ -677,6 +734,13 @@ class Transport:
         try:
             call = stub.SubscribeControl(req, **sub_kwargs)
             async for event in call:
+                fwd = self._control_forward
+                if fwd is not None:
+                    try:
+                        fwd(event)
+                    except Exception:
+                        log.exception("control forward raised")
+                    continue
                 ack = self._dispatch_control(event, types_pb2)
                 await send_queue.put(
                     telemetry_pb2.TelemetryUp(control_ack=ack)

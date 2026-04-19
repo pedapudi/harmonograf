@@ -16,6 +16,8 @@ See issue #22 for the motivation.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +26,8 @@ from .sink import HarmonografSink
 
 if TYPE_CHECKING:
     import goldfive
+
+log = logging.getLogger("harmonograf_client.observe")
 
 
 def observe(
@@ -86,4 +90,29 @@ def observe(
         client = Client(**client_kwargs)
 
     runner.sinks.append(HarmonografSink(client))
+
+    # Attach a goldfive ControlChannel bridge so pause/resume/cancel/
+    # steer/rewind issued from the harmonograf UI reach the live runner.
+    # The bridge needs a running asyncio loop to consume events on; when
+    # ``observe()`` is called outside async context (e.g. from a sync
+    # script), we skip it — the sink half of ``observe`` still works.
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is not None:
+        from ._control_bridge import ControlBridge
+
+        bridge = ControlBridge(client, runner, loop)
+        bridge.start()
+        # Stash for test + introspection access. Underscore prefix so
+        # it's clear this is private plumbing, not part of the Runner's
+        # public contract.
+        runner._harmonograf_control_bridge = bridge  # type: ignore[attr-defined]
+    else:
+        log.debug(
+            "observe(): no running event loop — control bridge not started"
+        )
+
     return runner
