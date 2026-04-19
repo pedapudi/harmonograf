@@ -22,59 +22,7 @@ import {
 import { useAnnotationStore } from '../state/annotationStore';
 import { packLanes } from '../gantt/layout';
 import type { ListSessionsResponse } from '../pb/harmonograf/v1/frontend_pb.js';
-import type {
-  TaskPlan as PbTaskPlan,
-  Task as PbTask,
-} from '../pb/harmonograf/v1/types_pb.js';
-import type { TaskPlan, Task, TaskStatus } from '../gantt/types';
-
-const TASK_STATUS_STRINGS: TaskStatus[] = [
-  'UNSPECIFIED',
-  'PENDING',
-  'RUNNING',
-  'COMPLETED',
-  'FAILED',
-  'CANCELLED',
-];
-
-function taskStatusFromInt(n: number): TaskStatus {
-  return TASK_STATUS_STRINGS[n] ?? 'UNSPECIFIED';
-}
-
-function tsToMsAbs(t: { seconds: bigint; nanos: number } | undefined): number {
-  if (!t) return 0;
-  return Number(t.seconds) * 1000 + Math.floor(t.nanos / 1_000_000);
-}
-
-function convertTask(t: PbTask): Task {
-  return {
-    id: t.id,
-    title: t.title,
-    description: t.description,
-    assigneeAgentId: t.assigneeAgentId,
-    status: taskStatusFromInt(t.status as unknown as number),
-    predictedStartMs: Number(t.predictedStartMs),
-    predictedDurationMs: Number(t.predictedDurationMs),
-    boundSpanId: t.boundSpanId,
-  };
-}
-
-function convertTaskPlan(p: PbTaskPlan, sessionStartMs: number): TaskPlan {
-  const createdAbs = tsToMsAbs(p.createdAt);
-  return {
-    id: p.id,
-    invocationSpanId: p.invocationSpanId,
-    plannerAgentId: p.plannerAgentId,
-    createdAtMs: createdAbs ? createdAbs - sessionStartMs : 0,
-    summary: p.summary,
-    tasks: p.tasks.map(convertTask),
-    edges: p.edges.map((e) => ({ fromTaskId: e.fromTaskId, toTaskId: e.toTaskId })),
-    revisionReason: p.revisionReason || '',
-    revisionKind: p.revisionKind || '',
-    revisionSeverity: p.revisionSeverity || '',
-    revisionIndex: Number(p.revisionIndex ?? 0n),
-  };
-}
+import { applyGoldfiveEvent } from './goldfiveEvent';
 
 // --- Sessions list (polled) -------------------------------------------------
 
@@ -385,19 +333,17 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
               );
               break;
             }
-            case 'taskPlan': {
-              const sessionStart = origin?.startMs ?? 0;
-              store.tasks.upsertPlan(convertTaskPlan(kind.value, sessionStart));
-              break;
-            }
-            case 'updatedTaskStatus': {
-              const u = kind.value;
-              store.tasks.updateTaskStatus(
-                u.planId,
-                u.taskId,
-                taskStatusFromInt(u.status as unknown as number),
-                u.boundSpanId,
-              );
+            case 'goldfiveEvent': {
+              // Every plan / task / drift delta rides on this oneof
+              // case — the server replays the persisted plan + task
+              // state during the initial burst as synthesized goldfive
+              // events, and fans live bus deltas (DELTA_TASK_PLAN /
+              // DELTA_TASK_STATUS / DELTA_DRIFT / DELTA_RUN_*) out on
+              // the same stream (see server/.../rpc/frontend.py and
+              // PR #14). Dispatch lives in goldfiveEvent.ts so the
+              // translation is testable without standing up a mocked
+              // Connect transport.
+              applyGoldfiveEvent(kind.value, store, origin?.startMs ?? 0);
               break;
             }
             case 'taskReport': {

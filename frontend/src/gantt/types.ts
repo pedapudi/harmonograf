@@ -89,13 +89,19 @@ export type Capability =
 // ── Task plan types (mirror harmonograf.v1.TaskStatus / Task / TaskPlan) ─────
 // Kept as plain TS types so the renderer never imports proto runtime objects.
 
+// BLOCKED is goldfive-only (no harmonograf TaskStatus mapping) — goldfive
+// emits it when a task is waiting on an external input (tool, another
+// agent, a human). The renderer treats it like PENDING visually; chrome
+// surfaces it explicitly so operators can tell the task is stalled vs.
+// merely not-yet-started.
 export type TaskStatus =
   | 'UNSPECIFIED'
   | 'PENDING'
   | 'RUNNING'
   | 'COMPLETED'
   | 'FAILED'
-  | 'CANCELLED';
+  | 'CANCELLED'
+  | 'BLOCKED';
 
 export interface Task {
   id: string;

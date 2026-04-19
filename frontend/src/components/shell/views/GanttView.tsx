@@ -33,6 +33,7 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
   COMPLETED: 'done',
   FAILED: 'failed',
   CANCELLED: 'cancelled',
+  BLOCKED: 'blocked',
 };
 
 const STATUS_COLOR: Record<TaskStatus, string> = {
@@ -42,6 +43,7 @@ const STATUS_COLOR: Record<TaskStatus, string> = {
   COMPLETED: '#4caf50',
   FAILED: '#e06070',
   CANCELLED: '#8d9199',
+  BLOCKED: '#f59e0b',
 };
 
 // GanttView composes the Live Activity summary panel, the Gantt canvas, the
