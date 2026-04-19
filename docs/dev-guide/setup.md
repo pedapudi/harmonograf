@@ -171,25 +171,19 @@ flowchart TD
 harmonograf/
 ├── proto/harmonograf/v1/      # Canonical wire schema (source of truth)
 │   ├── service.proto          #   gRPC service definition
-│   ├── telemetry.proto        #   TelemetryUp / TelemetryDown envelopes
+│   ├── telemetry.proto        #   TelemetryUp / TelemetryDown envelopes (+ goldfive_event variant)
 │   ├── control.proto          #   SubscribeControl RPC
-│   ├── types.proto            #   Span, Agent, Session, ControlEvent, enums
+│   ├── types.proto            #   Span, Agent, Session, ControlEvent, enums (Plan/Task imported from goldfive)
 │   └── frontend.proto         #   Frontend-only RPCs (WatchSession, GetSpanTree, …)
 ├── client/                    # Python client library (embedded in agents)
 │   ├── harmonograf_client/
-│   │   ├── adk.py             #   ADK plugin adapter (~5.8k lines; core integration)
-│   │   ├── agent.py           #   HarmonografAgent (orchestration mode enforcer)
-│   │   ├── state_protocol.py  #   session.state harmonograf.* key schema
-│   │   ├── planner.py         #   Plan/Task dataclasses + PlannerHelper interface
-│   │   ├── tools.py           #   report_task_* reporting tools
-│   │   ├── invariants.py      #   InvariantChecker (monotonic state machine)
-│   │   ├── metrics.py         #   ProtocolMetrics counters
+│   │   ├── sink.py            #   HarmonografSink (goldfive.EventSink adapter)
+│   │   ├── telemetry_plugin.py #  HarmonografTelemetryPlugin (ADK BasePlugin)
 │   │   ├── buffer.py          #   EventRingBuffer + PayloadBuffer
 │   │   ├── transport.py       #   gRPC transport + reconnect + resume
 │   │   ├── client.py          #   Client handle (non-blocking facade)
 │   │   ├── heartbeat.py       #   Heartbeat dataclass
 │   │   ├── identity.py        #   AgentIdentity (persisted to ~/.harmonograf)
-│   │   ├── runner.py          #   HarmonografRunner factory
 │   │   ├── enums.py           #   SpanKind / SpanStatus / Capability wire mirrors
 │   │   └── pb/                #   Generated protobuf stubs (committed; never edit)
 │   └── tests/                 #   pytest suite (see testing.md)
