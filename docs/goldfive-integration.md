@@ -65,6 +65,14 @@ runner = harmonograf_client.observe(goldfive.wrap(root_agent))
 outcome = await runner.run("make a presentation about waffles")
 ```
 
+These two lines produce **both** halves of full observability in one shot:
+
+- `HarmonografSink` attached to the goldfive `Runner` — plan rows, task
+  rows, drift markers, and lifecycle events show up in the harmonograf UI.
+- `HarmonografTelemetryPlugin` auto-installed on the underlying ADK
+  `Runner` (when `goldfive.wrap` wrapped an ADK agent) — invocation,
+  LLM-call, and tool-call spans render on the Gantt timeline.
+
 **First `goldfive.wrap` for orchestration, then `harmonograf_client.observe`
 for observability.** The layering is crystal-clear and each call owns exactly
 one concern:
@@ -73,12 +81,14 @@ one concern:
   default `LLMPlanner`, `SequentialExecutor`, adapter, and goal deriver, and
   returns a ready-to-run `goldfive.Runner`.
 - `harmonograf_client.observe(runner)` — the *only* observability wiring.
-  Constructs a `Client`, appends a `HarmonografSink` to `runner.sinks`, and
-  returns the same runner for chaining. Nothing about the runner's planning,
-  steering, goal derivation, or execution is touched.
+  Constructs a `Client`, appends a `HarmonografSink` to `runner.sinks`,
+  installs `HarmonografTelemetryPlugin` on the inner ADK runner if there is
+  one, and returns the same runner for chaining. Nothing about the runner's
+  planning, steering, goal derivation, or execution is touched.
 
 Neither call is implicit — if you want both you write both, and you can skip
-either one when you don't.
+either one when you don't. To opt out of the telemetry plugin (e.g. when one
+is already installed elsewhere), pass `install_adk_telemetry=False`.
 
 ### End-to-end
 
@@ -161,11 +171,22 @@ as the planner emits, each task's spans fill in as the adapter invokes the
 agent, and any `DriftDetected` event the steerer raises shows as a marker on
 the timeline.
 
-## Optional: ADK span telemetry
+## ADK span telemetry
 
-If the agent tree is wired through ADK's `App` (as `adk web` / `adk run` do),
-add `HarmonografTelemetryPlugin` so ADK lifecycle callbacks (invocation,
-LLM call, tool call) turn into harmonograf spans:
+When the wrapped agent is an ADK `BaseAgent`, `harmonograf_client.observe`
+auto-installs `HarmonografTelemetryPlugin` on the underlying ADK `Runner`,
+so invocation / LLM-call / tool-call spans render on the Gantt timeline
+without any extra setup. Opt out with `install_adk_telemetry=False`:
+
+```python
+runner = harmonograf_client.observe(
+    goldfive.wrap(root_agent), install_adk_telemetry=False
+)
+```
+
+For agent trees driven through ADK's `App` (as `adk web` / `adk run` do),
+add the plugin to the `App` directly — that path doesn't go through
+`goldfive.wrap`:
 
 ```python
 from google.adk.apps.app import App

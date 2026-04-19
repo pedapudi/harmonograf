@@ -37,6 +37,7 @@ def observe(
     name: str | None = None,
     framework: str = "CUSTOM",
     server_addr: str | None = None,
+    install_adk_telemetry: bool = True,
 ) -> "goldfive.Runner":
     """Attach a :class:`HarmonografSink` to ``runner`` and return it.
 
@@ -72,6 +73,14 @@ def observe(
         ``HARMONOGRAF_SERVER`` environment variable; falls back to
         ``Client``'s own default (``127.0.0.1:7531``). Ignored when
         ``client`` is provided.
+    install_adk_telemetry:
+        When ``True`` (default), best-effort install
+        :class:`HarmonografTelemetryPlugin` on the runner so ADK
+        lifecycle callbacks turn into harmonograf spans. The install is
+        skipped silently when the runner doesn't carry an
+        ``add_plugin`` hook (e.g. a non-ADK runner) and any failure is
+        DEBUG-logged rather than raised — a broken telemetry install
+        must never break the surrounding ``observe`` call.
 
     Returns
     -------
@@ -124,5 +133,18 @@ def observe(
     # clear this is private plumbing, not part of the Runner's public
     # contract.
     runner._harmonograf_control_bridge = bridge  # type: ignore[attr-defined]
+
+    # Best-effort: when the runner exposes an ADK plugin hook (i.e.
+    # goldfive.wrap'd an ADK agent and goldfive >= 0.x ships
+    # GoldfiveADKAgent.add_plugin), install the telemetry plugin so the
+    # 2-line API also produces ADK spans. Lazy-imported and wrapped so
+    # any failure DEBUG-logs instead of breaking observe().
+    if install_adk_telemetry and hasattr(runner, "add_plugin"):
+        try:
+            from .telemetry_plugin import HarmonografTelemetryPlugin
+
+            runner.add_plugin(HarmonografTelemetryPlugin(client))
+        except Exception as exc:  # noqa: BLE001
+            log.debug("observe: ADK telemetry plugin not attached: %s", exc)
 
     return runner
