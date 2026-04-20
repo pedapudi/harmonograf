@@ -24,10 +24,27 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import deque
+from dataclasses import dataclass, field
 from typing import Any
 
 from .client import Client
 from .enums import SpanKind, SpanStatus
+
+
+@dataclass
+class _ModelSpanSlot:
+    """Per-LLM-call bookkeeping kept in ``_model_spans[invocation_id]``.
+
+    ``reasoning_chunks`` accumulates partial reasoning text yielded by
+    streaming providers (LiteLlm emits one ``LlmResponse`` per chunk in
+    SSE mode); the non-partial finalize stitches them together and
+    attaches the result as ``llm.reasoning`` on the span.
+    """
+
+    span_id: str
+    reasoning_chunks: list[str] = field(default_factory=list)
+
 
 log = logging.getLogger("harmonograf_client.telemetry_plugin")
 
@@ -126,6 +143,32 @@ def _extract_reasoning(llm_response: Any) -> str:
     return ""
 
 
+def _join_reasoning(chunks: list[str]) -> str:
+    """Deduplicate and stitch reasoning fragments collected across partials.
+
+    LiteLlm streaming yields one ``LlmResponse`` per reasoning delta, so
+    the plugin sees ``["Let me ", "think step by ", "step."]``. The
+    finalize chunk also carries the aggregated reasoning as a thought
+    part, which would otherwise appear twice if we concatenated
+    naively; we drop the finalize duplicate when it is a prefix-equal
+    superstring of the stitched partials (LiteLlm's finalize path
+    always reproduces the full running buffer).
+    """
+    if not chunks:
+        return ""
+    if len(chunks) == 1:
+        return chunks[0]
+    stitched_partials = "".join(chunks[:-1])
+    last = chunks[-1]
+    if last == stitched_partials:
+        return stitched_partials
+    # Finalize may include the aggregated reasoning plus a trailing
+    # newline/punct; collapse the duplicate prefix when present.
+    if last.startswith(stitched_partials):
+        return last
+    return stitched_partials + last
+
+
 class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
     """Emit one harmonograf span per ADK lifecycle boundary.
 
@@ -136,10 +179,12 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
     * ``TOOL_CALL`` — one per ``before_tool`` / ``after_tool`` or
       ``on_tool_error`` pair.
 
-    Span IDs are keyed off the ADK callback objects so nested calls are
-    balanced even when the same plugin instance handles multiple
-    concurrent invocations (ADK guarantees one callback object per
-    lifecycle pair).
+    Invocation and tool spans are balanced via the Python object id
+    of the shared ADK context (``invocation_context`` / ``tool_context``).
+    Model-call spans are balanced via a per-``invocation_id`` FIFO
+    queue because ADK rebuilds the ``CallbackContext`` between
+    ``before_model`` and ``after_model``, making object identity
+    unreliable for that lifecycle pair.
     """
 
     def __init__(self, client: Client) -> None:
@@ -151,7 +196,20 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
             pass
         self._client = client
         self._invocation_spans: dict[str, str] = {}
-        self._model_spans: dict[int, str] = {}
+        # Model-call spans are keyed by ``invocation_id`` and tracked as
+        # FIFO queues: ADK rebuilds the ``CallbackContext`` between
+        # ``before_model`` and ``after_model`` (see
+        # ``flows/llm_flows/base_llm_flow.py::_handle_after_model_callback``),
+        # so ``id(callback_context)`` is never stable across a single LLM
+        # call. An agent invocation never overlaps LLM calls on its own
+        # flow, so a per-invocation FIFO balances before/after pairs
+        # correctly while still supporting concurrent invocations.
+        #
+        # Each queue entry also carries a reasoning accumulator so
+        # streaming partials (``LlmResponse.partial=True``) can be
+        # stitched into a single ``llm.reasoning`` attribute at the
+        # span's non-partial finalize.
+        self._model_spans: dict[str, deque[_ModelSpanSlot]] = {}
         self._tool_spans: dict[int, str] = {}
 
     @property
@@ -179,7 +237,28 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
 
     async def after_run_callback(self, *, invocation_context: Any) -> None:
         inv_id = str(_safe_attr(invocation_context, "invocation_id", "") or "")
-        key = inv_id if inv_id in self._invocation_spans else str(id(invocation_context))
+        # Close any model-call spans that never saw a non-partial
+        # finalize (error paths, client disconnect mid-stream). Without
+        # this sweep such spans would leak forever.
+        if inv_id:
+            leftover = self._model_spans.pop(inv_id, None)
+            if leftover:
+                for slot in leftover:
+                    reasoning = _join_reasoning(slot.reasoning_chunks)
+                    attributes = (
+                        {"has_reasoning": True, "llm.reasoning": reasoning}
+                        if reasoning
+                        and len(reasoning.encode("utf-8")) <= REASONING_INLINE_MAX_BYTES
+                        else ({"has_reasoning": True} if reasoning else None)
+                    )
+                    self._client.emit_span_end(
+                        slot.span_id,
+                        status=SpanStatus.COMPLETED,
+                        attributes=attributes,
+                    )
+        key = (
+            inv_id if inv_id in self._invocation_spans else str(id(invocation_context))
+        )
         sid = self._invocation_spans.pop(key, None)
         if sid is not None:
             self._client.emit_span_end(sid, status=SpanStatus.COMPLETED)
@@ -187,6 +266,25 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
     # ------------------------------------------------------------------
     # LLM call lifecycle
     # ------------------------------------------------------------------
+
+    def _model_span_key(self, callback_context: Any) -> str:
+        """Stable key for pairing ``before_model`` / ``after_model``.
+
+        ``CallbackContext`` is rebuilt between the two callbacks
+        (``_handle_after_model_callback`` in ADK's base flow constructs
+        a fresh ``CallbackContext(invocation_context)`` before running
+        plugin callbacks), so ``id(callback_context)`` changes. We fall
+        back to the invocation id — stable for the lifetime of an ADK
+        invocation — and multiplex via a FIFO queue so sequential LLM
+        calls within an invocation balance correctly.
+        """
+        inv_id = str(_safe_attr(callback_context, "invocation_id", "") or "")
+        if inv_id:
+            return inv_id
+        # Last-ditch fallback: use object id so we still *start* a span
+        # and will eventually close it on teardown. This path only
+        # triggers if ADK breaks the invocation_id contract.
+        return f"_ctx:{id(callback_context)}"
 
     async def before_model_callback(
         self, *, callback_context: Any, llm_request: Any
@@ -197,24 +295,46 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
             name=model or "llm_call",
             attributes={"llm.model": model} if model else None,
         )
-        self._model_spans[id(callback_context)] = sid
+        key = self._model_span_key(callback_context)
+        self._model_spans.setdefault(key, deque()).append(_ModelSpanSlot(span_id=sid))
 
     async def after_model_callback(
         self, *, callback_context: Any, llm_response: Any
     ) -> None:
-        sid = self._model_spans.pop(id(callback_context), None)
-        if sid is None:
+        key = self._model_span_key(callback_context)
+        queue = self._model_spans.get(key)
+        if not queue:
             return
+        slot = queue[0]
+        # Streaming providers (LiteLlm SSE) deliver partials first and a
+        # non-partial finalize last. Accumulate reasoning from every
+        # partial so the finalize can attach the full chain-of-thought,
+        # but only close the span on the finalize.
+        chunk = _extract_reasoning(llm_response)
+        if chunk:
+            slot.reasoning_chunks.append(chunk)
+
+        partial = bool(_safe_attr(llm_response, "partial", False))
+        if partial:
+            return
+
+        # Non-partial: close the span. Pop the slot from the queue so
+        # the next before_model_callback within the same invocation
+        # gets its own entry.
+        queue.popleft()
+        if not queue:
+            self._model_spans.pop(key, None)
+
         error_info = _safe_attr(llm_response, "error_message")
         if error_info:
             self._client.emit_span_end(
-                sid,
+                slot.span_id,
                 status=SpanStatus.FAILED,
                 error={"type": "LlmError", "message": str(error_info)},
             )
             return
 
-        reasoning = _extract_reasoning(llm_response)
+        reasoning = _join_reasoning(slot.reasoning_chunks)
         attributes: dict[str, Any] = {}
         payload: bytes | None = None
         payload_mime: str = "application/json"
@@ -237,7 +357,7 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
                 payload_role = "reasoning"
 
         self._client.emit_span_end(
-            sid,
+            slot.span_id,
             status=SpanStatus.COMPLETED,
             attributes=attributes or None,
             payload=payload,
