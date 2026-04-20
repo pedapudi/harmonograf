@@ -54,6 +54,78 @@ def _serialize_args(args: Any) -> bytes | None:
         return None
 
 
+# Reasoning content above this byte size is attached as a blob payload_ref
+# (fetched on-demand by the span drawer); smaller content rides inline as
+# a span attribute so the default drawer render does not pay a round trip.
+# 2 KiB is roughly 500 tokens -- large enough for short chain-of-thought
+# like o1-mini's reasoning summary, small enough to keep span-stream bytes
+# bounded.
+REASONING_INLINE_MAX_BYTES: int = 2048
+
+
+def _extract_reasoning(llm_response: Any) -> str:
+    """Best-effort per-provider reasoning-content extraction.
+
+    Surfaces chain-of-thought exposed by the three families of backends
+    ADK drives today:
+
+    * **Google / Gemini** — thought parts flagged with
+      ``part.thought=True`` inside ``response.content.parts``.
+    * **OpenAI-compatible** — ``response.choices[0].message.reasoning_content``
+      (Qwen3.5 via LiteLLM, some o1-series, Deepseek).
+    * **Anthropic** — ``content[i].type == "thinking"`` blocks on the
+      extended-thinking surface (``block.thinking``).
+
+    Returns the reasoning text as a ``str`` or ``""`` when the response
+    carries no chain-of-thought. Callers compare against the empty
+    string to decide whether to emit a payload.
+    """
+    # Google / Gemini-style thought parts.
+    content = _safe_attr(llm_response, "content")
+    if content is not None:
+        parts = _safe_attr(content, "parts") or []
+        thoughts: list[str] = []
+        for part in parts:
+            if not _safe_attr(part, "thought", False):
+                continue
+            text = _safe_attr(part, "text") or ""
+            if text:
+                thoughts.append(str(text))
+        if thoughts:
+            return "\n".join(thoughts)
+
+    # OpenAI-compatible: response.choices[0].message.reasoning_content.
+    try:
+        choices = _safe_attr(llm_response, "choices") or []
+        if choices:
+            msg = _safe_attr(choices[0], "message")
+            if msg is not None:
+                rc = _safe_attr(msg, "reasoning_content") or _safe_attr(
+                    msg, "reasoning"
+                )
+                if rc:
+                    return str(rc)
+    except Exception:  # noqa: BLE001 -- best-effort extraction
+        pass
+
+    # Anthropic: content blocks of type "thinking".
+    blocks = _safe_attr(llm_response, "content")
+    if isinstance(blocks, list):
+        for block in blocks:
+            if _safe_attr(block, "type") == "thinking":
+                t = _safe_attr(block, "thinking") or ""
+                if t:
+                    return str(t)
+
+    # Fallback: flat attribute.
+    for attr in ("reasoning_content", "reasoning", "thinking"):
+        v = _safe_attr(llm_response, attr)
+        if isinstance(v, str) and v:
+            return v
+
+    return ""
+
+
 class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
     """Emit one harmonograf span per ADK lifecycle boundary.
 
@@ -140,8 +212,38 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
                 status=SpanStatus.FAILED,
                 error={"type": "LlmError", "message": str(error_info)},
             )
-        else:
-            self._client.emit_span_end(sid, status=SpanStatus.COMPLETED)
+            return
+
+        reasoning = _extract_reasoning(llm_response)
+        attributes: dict[str, Any] = {}
+        payload: bytes | None = None
+        payload_mime: str = "application/json"
+        payload_role: str = "output"
+        if reasoning:
+            encoded = reasoning.encode("utf-8")
+            # has_reasoning is always set so the drawer can render a
+            # disclosure even when the reasoning is large enough to
+            # ride as a payload_ref instead of an inline attribute.
+            attributes["has_reasoning"] = True
+            if len(encoded) <= REASONING_INLINE_MAX_BYTES:
+                # Small reasoning: inline as a span attribute so the
+                # default drawer render doesn't fetch a blob.
+                attributes["llm.reasoning"] = reasoning
+            else:
+                # Large reasoning: upload as a blob and attach a
+                # payload_ref with role="reasoning".
+                payload = encoded
+                payload_mime = "text/plain"
+                payload_role = "reasoning"
+
+        self._client.emit_span_end(
+            sid,
+            status=SpanStatus.COMPLETED,
+            attributes=attributes or None,
+            payload=payload,
+            payload_mime=payload_mime,
+            payload_role=payload_role,
+        )
 
     # ------------------------------------------------------------------
     # Tool call lifecycle

@@ -8,6 +8,14 @@
 //   - ``thinking_text``     — full text captured by the plugin on span end.
 //   - ``thinking_preview``  — first 300 chars (set as a fallback).
 //   - ``has_thinking``      — bool flag set as soon as any reasoning lands.
+//   - ``llm.reasoning``     — per-response reasoning_content / thinking-block
+//                             capture emitted by
+//                             ``HarmonografTelemetryPlugin.after_model_callback``.
+//                             Small reasoning rides as a string attribute;
+//                             large reasoning lives in a payload_ref with
+//                             ``role="reasoning"`` (rendered by the Drawer's
+//                             ReasoningSection, not this helper).
+//   - ``has_reasoning``     — bool flag for the Drawer's Reasoning toggle.
 //
 // Every reader in the app (SpanPopover, Drawer, renderer, timeline, etc.)
 // routes through the functions here so that fallbacks are consistent and we
