@@ -103,6 +103,15 @@ def observe(
         client_kwargs: dict[str, Any] = {
             "name": name or "agent",
             "framework": framework,
+            # observe() attaches a ControlBridge below, which means this
+            # runner can receive STEER / CANCEL / PAUSE / APPROVE /
+            # REJECT control messages from the harmonograf UI. Advertise
+            # the matching capabilities so the UI's Steer and Approve
+            # buttons light up (frontend checks ``hasCapability(span,
+            # 'STEERING')`` before enabling the action). Callers who
+            # want a narrower capability set can pass their own pre-
+            # built ``client=`` with custom capabilities.
+            "capabilities": ["STEERING", "HUMAN_IN_LOOP"],
         }
         if resolved_addr:
             client_kwargs["server_addr"] = resolved_addr
