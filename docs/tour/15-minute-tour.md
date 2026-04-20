@@ -250,8 +250,18 @@ drift context (drift kind: `new_work_discovered`). The planner returns a
 revised plan with a new task spliced in. `TaskRegistry.upsertPlan` diffs the
 old and new plans and stores the result. The frontend renders the diff as a
 banner: "plan revised: +1 task". You can open the plan-diff drawer to see
-the added task highlighted in green. This is drift as a first-class event.
-Full mechanism: [docs/protocol/task-state-machine.md](../protocol/task-state-machine.md).
+the added task highlighted in green, or switch to the **Trajectory** view
+(`↪ Trajectory` in the nav rail) to see the full rev-by-rev history as a
+horizontal ribbon with one segment per rev and drift markers on each
+segment. Clicking a drift marker shows the kind, severity, and detail that
+caused the refine. See
+[docs/user-guide/trajectory-view.md](../user-guide/trajectory-view.md) for
+the vocabulary. In the Gantt itself, the drift also materializes a
+`goldfive` actor row at the top of the plot with a bar at the time of the
+refine — that row is part of the actor attribution model
+([docs/user-guide/actors.md](../user-guide/actors.md)). This is drift as a
+first-class event. Full mechanism:
+[docs/protocol/task-state-machine.md](../protocol/task-state-machine.md).
 
 **Step 7 — you intervene.** Say you notice `debugger_agent` is taking too
 long. You press Space to pause all agents, or click a specific row to pause

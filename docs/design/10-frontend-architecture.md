@@ -148,7 +148,35 @@ See [`GanttCanvas.tsx:L204-213`](file:///home/sunil/git/harmonograf/frontend/src
 To complete the Human-in-the-loop circle, the frontend possesses a structured channel for dispatching actions back into the system grid. 
 Instead of plain REST mutators, interaction intents execute bi-directional calls natively towards the root orchestrator pipelines.
 
-## 7. Conclusions
+## 7. Actor Attribution and Span Synthesis
+
+The frontend treats the two parties that act on a run from outside agent code — the human operator and the goldfive orchestrator — as first-class actor rows, on par with the worker agents. This is implemented entirely in the event-dispatch layer; neither the wire protocol nor the server has to know about it.
+
+**Reserved agent IDs.** [`theme/agentColors.ts`](file:///home/sunil/git/harmonograf/frontend/src/theme/agentColors.ts) defines two reserved ids: `__user__` and `__goldfive__`. Both sit outside the hashed `schemeTableau10` palette with fixed colors so a real agent's hash can never shadow them. `SYNTHETIC_ACTOR_IDS`, `isSyntheticActor()`, and `actorDisplayLabel()` export the membership check and display mapping.
+
+**Lazy materialization on drift.** [`rpc/goldfiveEvent.ts`](file:///home/sunil/git/harmonograf/frontend/src/rpc/goldfiveEvent.ts) routes `goldfive.v1.Event` payloads onto the session stores. The `driftDetected` case does two things in addition to appending to `store.drifts`:
+
+1. Decides the attribution actor — `user_steer` / `user_cancel` / `user_pause` → `__user__`; everything else → `__goldfive__`.
+2. Calls `ensureSyntheticActor(store, actorId)`, which `store.agents.upsert`s the row if absent (`connectedAtMs = 1` so real agents sort below it, `metadata["harmonograf.synthetic_actor"] = "1"` for downstream styling hooks).
+3. Calls `synthesizeDriftSpan(...)`, which `store.spans.append`s a fabricated span on the actor row. Span kind is `USER_MESSAGE` for the operator and `CUSTOM` for goldfive; attributes carry `drift.kind`, `drift.severity`, `drift.detail`, `drift.target_task_id`, `drift.target_agent_id`, and `harmonograf.synthetic_span = true` to distinguish from client-reported spans.
+
+```mermaid
+flowchart LR
+    Wire[driftDetected<br/>event] --> Dispatch[goldfiveEvent<br/>dispatch]
+    Dispatch --> Ring[store.drifts<br/>append DriftRecord]
+    Dispatch --> Decide{user_* kind?}
+    Decide -- yes --> Upsert1[agents.upsert<br/>__user__]
+    Decide -- no  --> Upsert2[agents.upsert<br/>__goldfive__]
+    Upsert1 --> Synth[spans.append<br/>synthetic span]
+    Upsert2 --> Synth
+    Synth --> Views[Gantt · Graph · Trajectory<br/>all re-render]
+```
+
+The net effect is that actor rows require no special-casing in the views. The Gantt renderer paints a bar on the actor row because the spans store has one; the Trajectory ribbon paints a drift marker because the drifts store has one. Both stores are subscribed to normally, which keeps the actor feature orthogonal to the rendering architecture described in §4.
+
+**Trajectory view.** [`components/shell/views/TrajectoryView.tsx`](file:///home/sunil/git/harmonograf/frontend/src/components/shell/views/TrajectoryView.tsx) is the primary plan-review surface and consumes the same drift records. Its `buildViewModel()` merges all plans for the session by `createdAtMs` (not by plan id — goldfive planners often mint fresh ids on each refine) and bins drifts into the rev that was live when each drift was observed. The ribbon then renders pivots (severity-colored `↻`) at rev boundaries and drift markers (stars for user-authored, circles for goldfive-authored) on each segment.
+
+## 8. Conclusions
 
 The Harmonograf frontend minimizes React render cycles, adopting an ECS-like game-engine loop for data rendering via HTML5 Canvas. By securely interleaving DOM elements exclusively for native text/form inputs, the topology maintains flawless 60 FPS frame rates processing potentially millions of unstructured telemetry events visually correctly.
 

@@ -7,6 +7,7 @@ export type NavSection =
   | 'sessions'
   | 'activity'
   | 'graph'
+  | 'trajectory'
   | 'annotations'
   | 'settings';
 

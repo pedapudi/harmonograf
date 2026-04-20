@@ -170,6 +170,25 @@ the **↩ Follow live** button on the transport bar to re-attach.
 Pausing agents also unfollows live (since "now" isn't moving any more).
 Resuming agents re-attaches.
 
+## Actor rows — `user` and `goldfive`
+
+Beyond the rows for the worker agents that connect into a session, the
+Gantt will grow two synthetic rows on demand: `user` (warm pastel) and
+`goldfive` (cool cyan). These represent the two parties that act on a run
+from outside agent code — the operator, via the UI, and the goldfive
+orchestrator, via drift detection and refines.
+
+![Gantt view with goldfive and worker rows](../images/27-gantt-actor-rows.png)
+
+The rows are lazy — they appear the first time the session emits a drift
+that attributes to them, and sit above the worker rows (they're the
+sources of work, not the performers of it). Click any bar on one of these
+rows to open the inspector drawer on the drift that produced it.
+
+The full attribution rules, row ordering trick, and the list of drift
+kinds that land on each row live on the dedicated [Actors](actors.md)
+page.
+
 ## Focused and hidden agents
 
 You can focus a specific agent row with `[` / `]` or by clicking its name in
