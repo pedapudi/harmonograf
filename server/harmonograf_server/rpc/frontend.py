@@ -288,6 +288,34 @@ class FrontendServicerMixin:
                     for ev in _synthesize_task_events(task):
                         yield frontend_pb2.SessionUpdate(goldfive_event=ev)
 
+            # 4b.1. Drifts — replay the in-memory drift ring so the
+            # synthetic-actor rows (user / goldfive) and trajectory drift
+            # markers reappear on reconnect. The ring is bounded and
+            # process-local (not persisted across server restarts); a
+            # full persistence layer is tracked as followup.
+            try:
+                drift_records = self._ingest.drifts_for_session(session_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("drifts_for_session failed: %s", exc)
+                drift_records = []
+            for dr in drift_records:
+                ev = goldfive_events_pb2.Event(run_id=dr.get("run_id", ""))
+                ev.drift_detected.kind = _drift_kind_string_to_pb(
+                    dr.get("kind", "") or ""
+                )
+                ev.drift_detected.severity = _drift_severity_string_to_pb(
+                    dr.get("severity", "") or ""
+                )
+                ev.drift_detected.detail = dr.get("detail", "") or ""
+                ev.drift_detected.current_task_id = dr.get("current_task_id", "") or ""
+                ev.drift_detected.current_agent_id = dr.get("current_agent_id", "") or ""
+                ra = dr.get("recorded_at")
+                if isinstance(ra, (int, float)):
+                    ts = float_to_ts(float(ra))
+                    if ts is not None:
+                        ev.emitted_at.CopyFrom(ts)
+                yield frontend_pb2.SessionUpdate(goldfive_event=ev)
+
             # 4c. Context window samples — replay the most recent per-agent
             # series so the Gantt context-window lane renders immediately
             # on reconnect instead of waiting for the next heartbeat tick.

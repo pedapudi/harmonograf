@@ -181,12 +181,26 @@ export function computePlanDiff(
   return { added, removed, modified, edgesChanged };
 }
 
+function clonePlan(p: TaskPlan): TaskPlan {
+  return {
+    ...p,
+    tasks: p.tasks.map((t) => ({ ...t })),
+    edges: p.edges.map((e) => ({ ...e })),
+  };
+}
+
 export class TaskRegistry {
   private plans: TaskPlan[] = [];
   private byId = new Map<string, TaskPlan>();
   private listeners = new Set<() => void>();
   private _revisionsByPlan = new Map<string, PlanRevision[]>();
   private _lastReasonByPlan = new Map<string, string>();
+  // Snapshots of each past plan rev, oldest-first, keyed by plan_id. Captured
+  // at the moment a new rev replaces an old one; the current rev is _not_
+  // duplicated here (callers read it via getPlan/listPlans instead). These
+  // snapshots are deep-cloned so later status mutations on the live plan
+  // don't leak into history.
+  private _snapshotsByPlan = new Map<string, TaskPlan[]>();
 
   listPlans(): readonly TaskPlan[] {
     return this.plans;
@@ -222,6 +236,16 @@ export class TaskRegistry {
     const existing = this.byId.get(plan.id);
     if (existing) {
       prevPlan = prevPlan ?? existing;
+      // A new revisionIndex means this is a true refine — snapshot the old
+      // plan before we overwrite it. Re-upserts with the same rev index
+      // (e.g. stream reconnects) don't produce a snapshot.
+      const existingRev = existing.revisionIndex ?? 0;
+      const incomingRev = plan.revisionIndex ?? 0;
+      if (existingRev !== incomingRev) {
+        const snaps = this._snapshotsByPlan.get(plan.id) ?? [];
+        snaps.push(clonePlan(existing));
+        this._snapshotsByPlan.set(plan.id, snaps);
+      }
       this.byId.set(plan.id, plan);
       const idx = this.plans.indexOf(existing);
       if (idx >= 0) {
@@ -253,6 +277,22 @@ export class TaskRegistry {
 
   revisionsForPlan(planId: string): ReadonlyArray<PlanRevision> {
     return this._revisionsByPlan.get(planId) ?? [];
+  }
+
+  // Past plan snapshots, oldest-first. Does NOT include the current live plan
+  // — combine with getPlan(planId) to get the full rev history.
+  snapshotsForPlan(planId: string): ReadonlyArray<TaskPlan> {
+    return this._snapshotsByPlan.get(planId) ?? [];
+  }
+
+  // Full rev sequence: every past snapshot plus the current live plan at the
+  // tail. Returns [] if the plan id is unknown. Used by the trajectory view
+  // to walk rev 0 → rev N in order.
+  allRevsForPlan(planId: string): ReadonlyArray<TaskPlan> {
+    const snaps = this._snapshotsByPlan.get(planId) ?? [];
+    const current = this.byId.get(planId);
+    if (!current) return snaps;
+    return [...snaps, current];
   }
 
   // Delta update: change one task's status and/or bound span id.
@@ -320,6 +360,7 @@ export class TaskRegistry {
     this.byId.clear();
     this._revisionsByPlan.clear();
     this._lastReasonByPlan.clear();
+    this._snapshotsByPlan.clear();
     this.emit();
   }
 
@@ -469,12 +510,60 @@ export class ContextSeriesRegistry {
 
 const EMPTY_SAMPLES: readonly ContextWindowSample[] = Object.freeze([]);
 
+// A captured goldfive DriftDetected event. The trajectory view anchors these
+// to their owning plan rev (by position in the event stream) and task.
+export interface DriftRecord {
+  seq: number;            // monotonic across the session, assigned on arrival
+  kind: string;           // lowercase DriftKind, e.g. 'user_steer'
+  severity: string;       // 'info' | 'warning' | 'critical' | ''
+  detail: string;
+  taskId: string;
+  agentId: string;
+  recordedAtMs: number;   // session-relative
+}
+
+// Drift registry — in-memory list of DriftDetected events received during
+// the session. Kept separate from TaskRegistry so the trajectory view can
+// subscribe to drift arrivals without re-rendering on every plan task
+// status change.
+export class DriftRegistry {
+  private drifts: DriftRecord[] = [];
+  private listeners = new Set<() => void>();
+  private nextSeq = 0;
+
+  list(): readonly DriftRecord[] {
+    return this.drifts;
+  }
+
+  append(d: Omit<DriftRecord, 'seq'>): void {
+    this.drifts.push({ ...d, seq: this.nextSeq++ });
+    this.emit();
+  }
+
+  clear(): void {
+    if (this.drifts.length === 0) return;
+    this.drifts = [];
+    this.nextSeq = 0;
+    this.emit();
+  }
+
+  subscribe(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  private emit(): void {
+    for (const fn of this.listeners) fn();
+  }
+}
+
 // A Session couples an AgentRegistry, a SpanIndex, and a TaskRegistry. The
 // renderer and chrome read directly from all three.
 export class SessionStore {
   readonly agents = new AgentRegistry();
   readonly spans = new SpanIndex();
   readonly tasks = new TaskRegistry();
+  readonly drifts = new DriftRegistry();
   readonly contextSeries = new ContextSeriesRegistry();
 
   // Scan the span index for TOOL_CALL spans whose name is one of the
@@ -606,6 +695,7 @@ export class SessionStore {
     this.agents.clear();
     this.spans.clear();
     this.tasks.clear();
+    this.drifts.clear();
     this.contextSeries.clear();
     this.nowMs = 0;
   }

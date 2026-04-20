@@ -23,7 +23,7 @@ one of the regions below. Mentally tag them as you read.
 | **App bar** | top strip | Session picker, attention badge, theme menu, legend button, settings. |
 | **Current task strip** | directly below app bar | Live current-task readout: title, status, orchestration mode chip, assignee, thinking dot, in-flight tool badge. |
 | **Plan revision banner** | below current task strip | Ephemeral pills announcing plan revisions as they arrive (auto-dismiss after ~4s). |
-| **Nav rail** | left edge | Switches between Sessions (Gantt), Activity, Graph, Notes, Settings. |
+| **Nav rail** | left edge | Switches between Sessions (Gantt), Activity, Graph, **Trajectory**, Notes, Settings. |
 | **Main area** | center | The current view — Gantt, Graph, etc. |
 | **Inspector drawer** | right edge, slides in | Deep inspector for the selected span or task. Tabs: Summary, Task, Payload, Timeline, Links, Annotations, Control. |
 | **Transport bar** | bottom of Gantt view | Pause / resume agents, live-follow toggle, elapsed clock, zoom. |
@@ -45,16 +45,22 @@ flowchart TD
     Sessions[sessions.md<br/>open the picker]
     Gantt[gantt-view.md]
     Graph[graph-view.md]
+    Traj[trajectory-view.md]
+    Actors[actors.md]
     Drawer[drawer.md]
     Tasks[tasks-and-plans.md]
     Control[control-actions.md]
     Annot[annotations.md]
     Sessions --> Gantt
     Gantt --> Graph
+    Gantt --> Traj
     Gantt --> Drawer
+    Traj --> Tasks
+    Traj --> Actors
     Drawer --> Tasks
     Drawer --> Control
     Drawer --> Annot
+    Actors -. attribution .-> Gantt
     Cookbook[cookbook.md] -. recipes touch .-> Drawer
     Trouble[troubleshooting.md] -. when stuck .-> Sessions
     Keys[keyboard-shortcuts.md] -. reference .-> Gantt
@@ -65,12 +71,14 @@ flowchart TD
 1. [Sessions — picker, filters, attention badges](sessions.md)
 2. [Gantt view — reading the timeline](gantt-view.md)
 3. [Graph view — sequence/topology and message flow](graph-view.md)
-4. [The inspector drawer](drawer.md)
-5. [Tasks and plans](tasks-and-plans.md)
-6. [Control actions — pause, resume, steer, rewind, approve](control-actions.md)
-7. [Annotations](annotations.md)
-8. [Keyboard shortcuts](keyboard-shortcuts.md)
-9. [Troubleshooting](troubleshooting.md)
+4. [Trajectory view — plan review, steering, and drift analysis](trajectory-view.md)
+5. [Actors — user and goldfive as first-class rows](actors.md)
+6. [The inspector drawer](drawer.md)
+7. [Tasks and plans](tasks-and-plans.md)
+8. [Control actions — pause, resume, steer, rewind, approve](control-actions.md)
+9. [Annotations](annotations.md)
+10. [Keyboard shortcuts](keyboard-shortcuts.md)
+11. [Troubleshooting](troubleshooting.md)
 
 ## Conventions in this guide
 
@@ -95,6 +103,7 @@ flowchart TD
 4. Press **Space** to pause all agents, **L** to jump the viewport back to the
    live edge, **?** to open the legend, **⇧?** for shortcuts.
 5. Switch to **Graph** in the nav rail to see the same run as a
-   [sequence/topology diagram](graph-view.md).
+   [sequence/topology diagram](graph-view.md), or to **Trajectory** to
+   review how the plan evolved from rev 0 to now.
 
 That's the core loop. The rest of this guide digs into each surface.

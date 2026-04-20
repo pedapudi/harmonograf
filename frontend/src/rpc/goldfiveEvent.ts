@@ -10,7 +10,7 @@
 // existing gantt stores without introducing any new store concepts.
 
 import type { SessionStore } from '../gantt/index';
-import type { TaskPlan, Task, TaskStatus } from '../gantt/types';
+import type { Span, SpanKind, TaskPlan, Task, TaskStatus } from '../gantt/types';
 import type {
   Plan as GoldfivePlan,
   Task as GoldfiveTask,
@@ -21,6 +21,81 @@ import {
 } from '../pb/goldfive/v1/types_pb.js';
 import type { Event as GoldfiveEvent } from '../pb/goldfive/v1/events_pb.js';
 import { useApprovalsStore } from '../state/approvalsStore';
+import {
+  USER_ACTOR_ID,
+  GOLDFIVE_ACTOR_ID,
+} from '../theme/agentColors';
+
+// Drift kinds that represent a user-authored intervention. Anything else is
+// a model-authored or executor-authored signal and is attributed to the
+// goldfive orchestrator actor.
+const USER_DRIFT_KINDS = new Set<string>([
+  'user_steer',
+  'user_cancel',
+  'user_pause',
+]);
+
+function ensureSyntheticActor(store: SessionStore, actorId: string): void {
+  if (store.agents.get(actorId)) return;
+  store.agents.upsert({
+    id: actorId,
+    name: actorId === USER_ACTOR_ID ? 'user' : 'goldfive',
+    framework: 'CUSTOM',
+    capabilities: [],
+    status: 'CONNECTED',
+    // connectedAtMs drives row ordering. Setting it to a tiny positive
+    // value (not zero, which would be 'not set') keeps real agents —
+    // which connect later — below the actor rows.
+    connectedAtMs: 1,
+    currentActivity: '',
+    stuck: false,
+    taskReport: '',
+    taskReportAt: 0,
+    metadata: {
+      'harmonograf.synthetic_actor': '1',
+    },
+  });
+}
+
+function synthesizeDriftSpan(
+  store: SessionStore,
+  sessionId: string | null,
+  actorId: string,
+  kind: string,
+  severity: string,
+  detail: string,
+  taskId: string,
+  targetAgentId: string,
+  recordedAtMs: number,
+): void {
+  const spanKind: SpanKind = actorId === USER_ACTOR_ID ? 'USER_MESSAGE' : 'CUSTOM';
+  const id = `drift-${actorId}-${recordedAtMs}-${kind}`;
+  const span: Span = {
+    id,
+    sessionId: sessionId ?? '',
+    agentId: actorId,
+    parentSpanId: null,
+    kind: spanKind,
+    status: 'COMPLETED',
+    name: kind || 'drift',
+    startMs: recordedAtMs,
+    endMs: recordedAtMs,
+    links: [],
+    attributes: {
+      'drift.kind': { kind: 'string', value: kind },
+      'drift.severity': { kind: 'string', value: severity },
+      'drift.detail': { kind: 'string', value: detail },
+      'drift.target_task_id': { kind: 'string', value: taskId },
+      'drift.target_agent_id': { kind: 'string', value: targetAgentId },
+      'harmonograf.synthetic_span': { kind: 'bool', value: true },
+    },
+    payloadRefs: [],
+    error: null,
+    lane: -1,
+    replaced: false,
+  };
+  store.spans.append(span);
+}
 
 // goldfive.v1.TaskStatus enum values are identical to harmonograf's
 // TaskStatus strings at indices 0..5, plus BLOCKED = 6 (goldfive-only).
@@ -176,17 +251,49 @@ export function applyGoldfiveEvent(
         .resolve(sessionId, payload.value.targetId);
       return;
     }
+    case 'driftDetected': {
+      const d = payload.value;
+      const emittedMs = event.emittedAt
+        ? Number(event.emittedAt.seconds) * 1000 +
+          Math.floor(event.emittedAt.nanos / 1_000_000) -
+          sessionStartMs
+        : 0;
+      const kindStr = driftKindToString(d.kind as unknown as number);
+      const sevStr = driftSeverityToString(d.severity as unknown as number);
+      store.drifts.append({
+        kind: kindStr,
+        severity: sevStr,
+        detail: d.detail,
+        taskId: d.currentTaskId,
+        agentId: d.currentAgentId,
+        recordedAtMs: emittedMs,
+      });
+      // Attribute the drift to an actor row so it shows up in gantt / graph /
+      // trajectory without those views having to special-case drift events.
+      const actorId = USER_DRIFT_KINDS.has(kindStr)
+        ? USER_ACTOR_ID
+        : GOLDFIVE_ACTOR_ID;
+      ensureSyntheticActor(store, actorId);
+      synthesizeDriftSpan(
+        store,
+        sessionId,
+        actorId,
+        kindStr,
+        sevStr,
+        d.detail,
+        d.currentTaskId,
+        d.currentAgentId,
+        emittedMs,
+      );
+      return;
+    }
     case 'taskProgress':
-    case 'driftDetected':
     case 'runStarted':
     case 'goalDerived':
     case 'runCompleted':
     case 'runAborted':
     case 'conversationStarted':
     case 'conversationEnded':
-      // No-op. task_progress / drift / run_* / conversation_* are
-      // observable on the wire (useful for analytics or a future drift
-      // timeline), but the Gantt renderer does not consume them today.
       return;
   }
 }

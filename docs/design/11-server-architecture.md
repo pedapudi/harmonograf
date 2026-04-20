@@ -114,14 +114,48 @@ flowchart LR
     class Bus,SP good
 ```
 
-## 5. System Health, Retention, and GC
+## 5. Drift Replay for Late Subscribers
+
+Goldfive `drift_detected` events are fanned out on the live bus the same way spans and plan events are. The catch is that drifts are also load-bearing for frontend-side features beyond the trajectory pane itself — the `__user__` and `__goldfive__` actor rows (see [frontend architecture §7](10-frontend-architecture.md#7-actor-attribution-and-span-synthesis)) are *lazily* materialized from drift events, so a frontend that subscribes after a drift has already fired would see only worker rows with no attribution for the existing pivots in the trajectory.
+
+The fix is a bounded in-memory ring on `IngestPipeline` that retains recent drifts per-session and replays them in `WatchSession`'s initial burst.
+
+**Ring structure** — [`ingest.py`](file:///home/sunil/git/harmonograf/server/harmonograf_server/ingest.py) holds `_drifts_by_session: dict[str, list[dict[str, Any]]]` with a per-session cap of `_drift_ring_max = 500`. The `_on_drift_detected` hook both publishes onto the bus *and* pushes a compact dict (kind, severity, detail, task_id, agent_id, emitted_at) onto the ring. `drifts_for_session(session_id)` exposes an iterable copy for replay.
+
+**Replay step** — [`rpc/frontend.py`](file:///home/sunil/git/harmonograf/server/harmonograf_server/rpc/frontend.py) `WatchSession` handler runs an initial burst before attaching to the live tail. Step 4b.1 iterates `self._ingest.drifts_for_session(session_id)` and re-emits each as a synthesized `goldfive.v1.Event` with `drift_detected` populated and the cached `emitted_at` timestamp preserved. The client observes the replayed event on the same oneof dispatch it would observe a live one, so actor synthesis and trajectory ribbon population happen identically for reconnects.
+
+```mermaid
+sequenceDiagram
+    participant Client as goldfive client
+    participant Ingest as IngestPipeline
+    participant Ring as drift ring<br/>(per session, 500 cap)
+    participant Bus as SessionBus
+    participant Watch as WatchSession handler
+    participant Fe as Frontend
+
+    Client->>Ingest: drift_detected
+    Ingest->>Ring: append compact dict
+    Ingest->>Bus: publish live event
+    Bus-->>Fe: live tail (if subscribed)
+
+    Note over Fe,Watch: later — frontend (re)connects
+    Fe->>Watch: WatchSession(session_id)
+    Watch->>Ring: drifts_for_session(session_id)
+    Ring-->>Watch: iterable of drift dicts
+    Watch-->>Fe: replay as goldfive.v1.Event[]
+    Watch-->>Fe: attach to live tail
+```
+
+Retention is deliberately cheap: drifts are orders of magnitude less voluminous than spans (one event per plan pivot, not per LLM call), and the 500 cap bounds memory per session without losing the useful prefix for any reasonable run. SQLite persistence is not used for drifts at the moment — the ring is rebuilt from the live stream on server restart, at the cost of losing pre-restart drift history for long-lived sessions. Adding a drift table to the storage layer is tracked in [milestones.md](../milestones.md) but not load-bearing for v0.
+
+## 6. System Health, Retention, and GC
 
 Large swarms of active autonomous agents flood bounding limitations frequently. The `retention.py` background chron process guarantees garbage collections natively:
 1. Validates timestamps dynamically globally.
 2. Removes inactive session records preserving database indexing arrays safely reliably natively.
 3. Automatically avoids quarantining loops mapping active processes explicitly structurally natively globally safely cleanly.
 
-## 6. Conclusion 
+## 7. Conclusion 
 
 By splitting synchronous database persistence (`SqliteStorage`) away from transient volatile memory routings (`SessionBus`), the Harmonograf architecture achieves microsecond ingest latencies scaling massively linearly without inducing architectural blocks organically natively globally completely.
 

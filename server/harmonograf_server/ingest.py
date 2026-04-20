@@ -168,6 +168,14 @@ class IngestPipeline:
         # attributes without a full table scan on every span start.
         self._task_index: dict[str, dict[str, str]] = {}
 
+        # Per-session ring of recent DriftDetected events. Frontend
+        # replays these on WatchSession initial burst so synthetic-actor
+        # rows (user / goldfive) and trajectory drift markers survive
+        # reconnects without requiring a Store schema migration. Bounded
+        # so a long-running session with many drifts cannot balloon RAM.
+        self._drifts_by_session: dict[str, list[dict[str, Any]]] = {}
+        self._drift_ring_max = 500
+
     # ---- public API ---------------------------------------------------
 
     @property
@@ -879,15 +887,37 @@ class IngestPipeline:
     def _on_drift_detected(
         self, ctx: StreamContext, payload: Any, run_id: str
     ) -> None:
+        record: dict[str, Any] = {
+            "run_id": run_id,
+            "kind": _drift_kind_pb_to_string(payload.kind),
+            "severity": _drift_severity_pb_to_string(payload.severity),
+            "detail": payload.detail,
+            "current_task_id": payload.current_task_id,
+            "current_agent_id": payload.current_agent_id,
+            "recorded_at": self._now(),
+        }
+        ring = self._drifts_by_session.setdefault(ctx.session_id, [])
+        ring.append(record)
+        if len(ring) > self._drift_ring_max:
+            del ring[: len(ring) - self._drift_ring_max]
         self._bus.publish_drift(
             ctx.session_id,
             run_id,
-            kind=_drift_kind_pb_to_string(payload.kind),
-            severity=_drift_severity_pb_to_string(payload.severity),
-            detail=payload.detail,
-            current_task_id=payload.current_task_id,
-            current_agent_id=payload.current_agent_id,
+            kind=record["kind"],
+            severity=record["severity"],
+            detail=record["detail"],
+            current_task_id=record["current_task_id"],
+            current_agent_id=record["current_agent_id"],
         )
+
+    def drifts_for_session(self, session_id: str) -> list[dict[str, Any]]:
+        """Return the in-memory drift ring for ``session_id`` (oldest first).
+
+        Called by the frontend RPC during WatchSession initial burst to
+        replay drifts that have been seen this process. Returns an empty
+        list when nothing has drifted yet or the session is unknown.
+        """
+        return list(self._drifts_by_session.get(session_id, []))
 
     def _on_run_completed(
         self, ctx: StreamContext, payload: Any, run_id: str

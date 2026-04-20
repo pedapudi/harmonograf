@@ -10,6 +10,7 @@ const ITEMS: NavItem[] = [
   { id: 'sessions', label: 'Sessions', icon: '◫' },
   { id: 'activity', label: 'Activity', icon: '!' },
   { id: 'graph', label: 'Graph', icon: '\u25C8' },
+  { id: 'trajectory', label: 'Trajectory', icon: '\u21AA' },
   { id: 'annotations', label: 'Notes', icon: '✎' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
 ];

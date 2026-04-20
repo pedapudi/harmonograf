@@ -14,6 +14,7 @@ import { useUiStore } from '../../state/uiStore';
 import { ActivityView } from './views/ActivityView';
 import { GanttView } from './views/GanttView';
 import { GraphView } from './views/GraphView';
+import { TrajectoryView } from './views/TrajectoryView';
 import { NotesView } from './views/NotesView';
 import { SettingsView } from './views/SettingsView';
 
@@ -32,6 +33,7 @@ export function Shell() {
           {navSection === 'sessions' && <GanttView />}
           {navSection === 'activity' && <ActivityView />}
           {navSection === 'graph' && <GraphView />}
+          {navSection === 'trajectory' && <TrajectoryView />}
           {navSection === 'annotations' && <NotesView />}
           {navSection === 'settings' && <SettingsView />}
         </ShellErrorBoundary>
