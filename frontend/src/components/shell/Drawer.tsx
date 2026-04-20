@@ -334,6 +334,10 @@ function TaskOverviewPanel({ span, sessionId }: { span: Span; sessionId: string 
   const hasThinking = span.attributes['has_thinking']?.kind === 'bool' && span.attributes['has_thinking'].value;
   const isRunning = span.endMs == null;
   const agentDesc = (span.attributes['agent_description']?.kind === 'string' ? span.attributes['agent_description'].value : undefined);
+  const reasoningInline = (span.attributes['llm.reasoning']?.kind === 'string' ? span.attributes['llm.reasoning'].value : undefined);
+  const hasReasoningAttr = span.attributes['has_reasoning']?.kind === 'bool' && span.attributes['has_reasoning'].value;
+  const reasoningRef = (span.payloadRefs ?? []).find((r) => r.role === 'reasoning');
+  const showReasoning = Boolean(reasoningInline || reasoningRef || hasReasoningAttr);
 
   return (
     <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -393,7 +397,18 @@ function TaskOverviewPanel({ span, sessionId }: { span: Span; sessionId: string 
         </section>
       )}
 
-      {(!taskReport && !llmThought && !thinkingText && !thinkingPreview && !agentDesc) && (
+      {/* Reasoning — chain-of-thought captured by the telemetry plugin.
+          Small reasoning rides as the ``llm.reasoning`` span attribute;
+          large reasoning lives in a payload_ref (role="reasoning") and
+          is fetched on-demand. */}
+      {showReasoning && (
+        <ReasoningSection
+          inline={reasoningInline}
+          payloadRef={reasoningRef}
+        />
+      )}
+
+      {(!taskReport && !llmThought && !thinkingText && !thinkingPreview && !agentDesc && !showReasoning) && (
         <div style={{ fontSize: 12, opacity: 0.5, textAlign: 'center', padding: '24px 0' }}>
           No task information available.
         </div>
@@ -408,6 +423,111 @@ function TaskOverviewPanel({ span, sessionId }: { span: Span; sessionId: string 
         <OrchestrationTimeline sessionId={sessionId} limit={20} />
       </section>
     </div>
+  );
+}
+
+// Reasoning section: surfaces `llm.reasoning` inline (small) or a
+// payload_ref with role="reasoning" (large, fetched on click). Collapsed
+// by default — reasoning traces can be long, and users usually only want
+// them when investigating a surprising decision.
+const REASONING_PREVIEW_CHARS = 5000;
+
+export function ReasoningSection({
+  inline,
+  payloadRef,
+}: {
+  inline: string | undefined;
+  payloadRef: PayloadRef | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  // When the reasoning rides inline we don't need to fetch; when it comes
+  // as a payload_ref we trigger the load on first open via the toggle
+  // handler so we stay out of useEffect (react-hooks/set-state-in-effect).
+  const needsFetch = !inline && payloadRef != null;
+  const { bytes, loading, error } = usePayload(
+    open && needsFetch && payloadRef ? payloadRef.digest : null,
+  );
+
+  const fetchedText = useMemo(() => {
+    if (!bytes) return null;
+    try {
+      return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    } catch {
+      return null;
+    }
+  }, [bytes]);
+
+  const fullText = inline ?? fetchedText ?? '';
+  const truncated = fullText.length > REASONING_PREVIEW_CHARS;
+  const previewText = truncated
+    ? fullText.slice(0, REASONING_PREVIEW_CHARS)
+    : fullText;
+
+  return (
+    <section data-testid="drawer-reasoning">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        data-testid="drawer-reasoning-toggle"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          width: '100%',
+          background: 'transparent',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          color: 'inherit',
+          fontSize: 10,
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+          opacity: 0.6,
+          marginBottom: 4,
+        }}
+      >
+        <span style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.1s' }}>▸</span>
+        <span>Reasoning</span>
+        {payloadRef && !inline && (
+          <span style={{ marginLeft: 'auto', fontSize: 9, opacity: 0.7 }}>
+            {formatBytes(payloadRef.size)}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div data-testid="drawer-reasoning-body">
+          {loading && <div style={{ fontSize: 11, opacity: 0.6 }}>Loading reasoning…</div>}
+          {error && <div className="hg-drawer__error" style={{ fontSize: 11 }}>{error}</div>}
+          {!loading && !error && fullText && (
+            <div
+              style={{
+                fontSize: 11,
+                lineHeight: 1.6,
+                background: 'rgba(168,200,255,0.05)',
+                borderRadius: 6,
+                padding: '8px 10px',
+                fontFamily: "ui-monospace, 'SF Mono', Consolas, 'Liberation Mono', monospace",
+                color: 'rgba(226,226,233,0.85)',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                maxHeight: 400,
+                overflow: 'auto',
+              }}
+            >
+              {previewText}
+              {truncated && (
+                <div style={{ fontSize: 10, opacity: 0.6, marginTop: 6 }}>
+                  … truncated ({fullText.length - REASONING_PREVIEW_CHARS} more chars)
+                </div>
+              )}
+            </div>
+          )}
+          {!loading && !error && !fullText && !needsFetch && (
+            <div style={{ fontSize: 11, opacity: 0.5 }}>No reasoning captured.</div>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
