@@ -135,7 +135,7 @@ trap-on-exit, so Ctrl-C takes all three down together:
 |---|---|---|
 | `harmonograf-server` | `127.0.0.1:7531` (gRPC) / `127.0.0.1:7532` (gRPC-Web) | The canonical timeline. Writes to `./data/` via SQLite. |
 | Vite frontend | `http://127.0.0.1:5173` | The harmonograf UI. Talks gRPC-Web to `:7532`. |
-| `adk web` | `http://127.0.0.1:8080` | ADK's own UI, hosting a staged copy of `presentation_agent` under `.demo-agents/`. |
+| `adk web` | `http://127.0.0.1:8080` | ADK's own UI. The picker lists **two** staged variants under `.demo-agents/`: `presentation_agent` (observation mode — plain ADK + harmonograf telemetry plugin) and `presentation_agent_orchestrated` (the same tree wrapped with `goldfive.wrap(...)` so you see the full plan / dispatch / drift stream). |
 
 Once all three are up `make demo` prints a summary block with the three URLs and
 waits. The harmonograf frontend is the one you care about; the ADK tab is where
@@ -150,7 +150,10 @@ make demo SERVER_PORT=17531 FRONTEND_PORT=15173 ADK_WEB_PORT=18080
 ## Step 5 — Drive a rollout
 
 1. Open the **ADK tab** at `http://127.0.0.1:8080`. You should see ADK's chat UI
-   with `presentation_agent` available.
+   with two agents in the picker: `presentation_agent` (observation mode)
+   and `presentation_agent_orchestrated` (orchestration mode). Pick the
+   orchestrated one to see the full goldfive plan / dispatch / drift stream;
+   pick the observation one if you only want per-span telemetry.
 2. In the ADK chat, type a prompt like:
 
    ```
@@ -184,7 +187,7 @@ A healthy first run looks like this on stdout:
 ```text
 [demo] starting harmonograf-server on :7531 ...
 [demo] starting frontend Vite dev server on :5173 ...
-[demo] starting adk web presentation_agent on :8080 ...
+[demo] starting adk web presentation_agent + presentation_agent_orchestrated on :8080 ...
 
 ==================================================================
   Harmonograf UI     : http://127.0.0.1:5173
@@ -208,8 +211,9 @@ In the harmonograf frontend, a successful rollout looks like:
 
 ## Troubleshooting
 
-**The ADK tab loads but `presentation_agent` is not listed.**
-`.demo-agents/` is regenerated fresh on every `make demo` invocation. If it is
+**The ADK tab loads but `presentation_agent` / `presentation_agent_orchestrated`
+are not listed.** `.demo-agents/` is regenerated fresh on every `make demo`
+invocation and stages both variants as sibling subdirectories. If either is
 missing, something interrupted the `.demo-agents-stage` step. Run `make demo`
 again; on a clean second invocation the stage step should succeed. If it keeps
 failing, look for a stale `.demo-agents/` directory and remove it manually, then

@@ -87,6 +87,18 @@ without metadata don't render a chip.
 Which mode runs is determined by how the agent's `goldfive.Runner` was
 constructed, not by anything the UI controls.
 
+!!! tip "Observation vs orchestration in the demo"
+    The reference demo ships two ADK agents side by side:
+    `presentation_agent` (observation — plain ADK tree with
+    `HarmonografTelemetryPlugin`) and `presentation_agent_orchestrated`
+    (orchestration — the same tree wrapped with `goldfive.wrap(...)`).
+    Orchestration mode is where you actually see goldfive plan,
+    dispatch, fire drift, and surface HITL/steering seams end-to-end.
+    In observation mode the coordinator's instruction text does the
+    routing and harmonograf only sees per-span telemetry — no plan, no
+    drift events. Both variants appear in `adk web`'s picker once
+    `make demo` has staged them.
+
 ## PlanRevisionBanner
 
 Whenever a plan's `revisionReason` changes, a pill appears in the

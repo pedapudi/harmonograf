@@ -175,10 +175,12 @@ make demo
 
 `make demo` starts three processes in one foreground shell: `harmonograf-server`
 on `127.0.0.1:7531` (gRPC) + `:7532` (gRPC-Web), the Vite frontend on
-`http://127.0.0.1:5173`, and `adk web` hosting the goldfive-orchestrated
-reference agent on `http://127.0.0.1:8080`. Drive a rollout from the ADK tab;
-watch the timeline materialise live in the harmonograf tab. Ctrl-C tears all
-three down.
+`http://127.0.0.1:5173`, and `adk web` hosting two reference-agent variants on
+`http://127.0.0.1:8080` — `presentation_agent` (observation; plain ADK +
+telemetry plugin) and `presentation_agent_orchestrated` (the same tree wrapped
+with `goldfive.wrap(...)` so you see the full plan / dispatch / drift stream).
+Pick a variant in the ADK picker, drive a rollout, and watch the timeline
+materialise live in the harmonograf tab. Ctrl-C tears all three down.
 
 ---
 
