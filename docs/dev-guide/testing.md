@@ -153,9 +153,10 @@ ingest dispatch, all at once.
 
 Guidelines:
 
-- Use `build_goldfive_runner(mock=True)` from the reference agent for a
-  deterministic offline run — canned plan, canned LLM responses, fixed
-  timing.
+- Use `build_goldfive_runner(mock=True)` from the orchestrated
+  reference agent (`tests.reference_agents.presentation_agent_orchestrated`)
+  for a deterministic offline run — canned plan, canned LLM responses,
+  fixed timing.
 - Assert on the resulting stored state (spans, plan rows, task rows,
   drift annotations) via the server's `GetSession` / `GetSpanTree` RPCs.
   Don't assert on model prose.
@@ -171,7 +172,7 @@ Guidelines:
 | `tests/e2e/test_scenarios.py` | Scripted multi-task scenarios through a real harmonograf server. |
 | `tests/e2e/test_adk_hello.py` | Basic ADK integration smoke — agent connects, emits one span, server stores it. |
 | `tests/e2e/test_planner_e2e.py` | goldfive `LLMPlanner` + real ADK. Requires an LLM endpoint. |
-| `tests/e2e/test_presentation_agent.py` | Full presentation agent demo via `build_goldfive_runner`. |
+| `tests/e2e/test_presentation_agent.py` | Full presentation agent demo — observation-mode app + orchestration-mode app + `build_goldfive_runner` end-to-end. |
 | `tests/e2e/test_goldfive_end_to_end.py` | `HarmonografSink` → server ingest → store round-trip for every goldfive event variant. |
 
 ### Local LLM env for e2e

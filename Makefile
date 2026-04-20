@@ -14,7 +14,7 @@ FRONTEND_PB := $(ROOT)/frontend/src/pb
 
 .PHONY: help proto proto-python proto-ts \
         server-install client-install frontend-install install \
-        server-run frontend-dev demo demo-presentation demo-standalone .demo-agents-stage \
+        server-run frontend-dev demo demo-presentation demo-presentation-orchestrated demo-standalone .demo-agents-stage \
         test server-test client-test frontend-test e2e \
         lint format clean stats
 
@@ -26,7 +26,9 @@ help:
 	@echo "  install          Install all components"
 	@echo "  server-run       Run the server in dev mode"
 	@echo "  frontend-dev     Run the Vite dev server"
-	@echo "  demo             Boot server + frontend + goldfive-orchestrated ADK agent"
+	@echo "  demo             Boot server + frontend + adk web (shows both presentation_agent variants)"
+	@echo "  demo-presentation              Boot adk web alone (both presentation_agent variants in picker)"
+	@echo "  demo-presentation-orchestrated Alias for demo-presentation (picker lists both variants)"
 	@echo "  demo-standalone  Boot server + frontend and emit spans from the standalone example"
 	@echo "  test             Run server + client + frontend tests"
 	@echo "  e2e              Run the end-to-end test against the ADK submodule"
@@ -115,21 +117,25 @@ server-run:
 frontend-dev:
 	@cd $(ROOT)/frontend && pnpm dev
 
-# Run the presentation_agent sample under the canonical `adk web` CLI
+# Run the presentation_agent samples under the canonical `adk web` CLI
 # with a harmonograf server at $(HARMONOGRAF_SERVER). Instrumentation
-# lives inside tests/reference_agents/presentation_agent/agent.py (the exported `app` attaches
-# a harmonograf plugin), so simply running the agent under adk web is
-# enough to emit spans.
+# lives inside each reference module (both modules export an `app` that
+# attaches a harmonograf plugin), so simply pointing adk web at the
+# staged agents dir is enough to emit spans.
 #
 # adk web expects an AGENTS_DIR where each subdirectory is one agent.
-# We stage a dedicated .demo-agents/presentation_agent/ as a real
-# passthrough package: a symlink would be rejected by ADK's
-# _resolve_agent_dir which calls Path.resolve() and refuses any
-# resolved path that escapes the agents_root sandbox. The passthrough
-# loads the real presentation_agent.agent module by absolute file path
-# from tests/reference_agents/presentation_agent/agent.py (not by package
-# import) to avoid colliding with the .demo-agents entry that ADK puts
-# on sys.path[0].
+# We stage two sibling packages under .demo-agents/ — both real
+# passthrough packages, not symlinks, because ADK's _resolve_agent_dir
+# calls Path.resolve() and refuses any resolved path that escapes the
+# agents_root sandbox. The passthroughs load their real modules by
+# absolute file path (not package import) to avoid colliding with the
+# .demo-agents entry that ADK puts on sys.path[0].
+#
+# .demo-agents/
+#   presentation_agent/               — observation mode (no goldfive.wrap)
+#   presentation_agent_orchestrated/  — orchestration mode (goldfive.wrap + plan)
+#
+# ADK's picker lists both by name so the user chooses at load time.
 #
 # Override HARMONOGRAF_SERVER / ADK_WEB_PORT as needed:
 #   make demo-presentation ADK_WEB_PORT=8080 HARMONOGRAF_SERVER=127.0.0.1:7531
@@ -138,11 +144,12 @@ ADK_WEB_PORT ?= 8080
 SERVER_PORT ?= 7531
 FRONTEND_PORT ?= 5173
 
-# Stage a real (non-symlink) passthrough agent dir at .demo-agents/presentation_agent.
-# Regenerated fresh on every invocation so edits to the real module are picked up.
+# Stage both real (non-symlink) passthrough agent dirs under .demo-agents/.
+# Regenerated fresh on every invocation so edits to the real modules are picked up.
 .demo-agents-stage:
 	@rm -rf $(ROOT)/.demo-agents
 	@mkdir -p $(ROOT)/.demo-agents/presentation_agent
+	@mkdir -p $(ROOT)/.demo-agents/presentation_agent_orchestrated
 	@printf '' > $(ROOT)/.demo-agents/presentation_agent/__init__.py
 	@printf '%s\n' \
 		'"""Passthrough so adk web can run presentation_agent under .demo-agents/.' \
@@ -168,11 +175,42 @@ FRONTEND_PORT ?= 5173
 		'root_agent = _mod.root_agent' \
 		'app = _mod.app' \
 		> $(ROOT)/.demo-agents/presentation_agent/agent.py
+	@printf '' > $(ROOT)/.demo-agents/presentation_agent_orchestrated/__init__.py
+	@printf '%s\n' \
+		'"""Passthrough so adk web can run presentation_agent_orchestrated under .demo-agents/.' \
+		'' \
+		'Orchestration-mode sibling of the observation-mode passthrough above.' \
+		'Loads the real module by absolute file path under a private name so' \
+		'ADK resolves agent_dir inside .demo-agents while the code lives in' \
+		'tests/reference_agents/presentation_agent_orchestrated/.' \
+		'"""' \
+		'from __future__ import annotations' \
+		'' \
+		'import importlib.util' \
+		'from pathlib import Path' \
+		'' \
+		'_real = Path(__file__).resolve().parents[2] / "tests" / "reference_agents" / "presentation_agent_orchestrated" / "agent.py"' \
+		'_spec = importlib.util.spec_from_file_location("_real_presentation_agent_orchestrated", _real)' \
+		'_mod = importlib.util.module_from_spec(_spec)' \
+		'assert _spec.loader is not None' \
+		'_spec.loader.exec_module(_mod)' \
+		'' \
+		'root_agent = _mod.root_agent' \
+		'app = _mod.app' \
+		> $(ROOT)/.demo-agents/presentation_agent_orchestrated/agent.py
 
+# Boot adk web alone (both reference-agent variants appear in the picker).
+# `adk web` lists every subdir of .demo-agents/ — observation and
+# orchestrated both show up after .demo-agents-stage runs.
 demo-presentation: .demo-agents-stage
 	@cd $(ROOT) && HARMONOGRAF_SERVER=$(HARMONOGRAF_SERVER) \
 		OPENAI_API_KEY="$${OPENAI_API_KEY:-dummy}" \
 		uv run --extra demo adk web --host 127.0.0.1 --port $(ADK_WEB_PORT) .demo-agents
+
+# Convenience alias. The picker behaviour is identical to demo-presentation
+# because both packages stage together; this target just makes it easy to
+# remember there is an orchestrated variant.
+demo-presentation-orchestrated: demo-presentation
 
 # Boot the full Harmonograf demo stack: backend server + Vite frontend +
 # adk web presentation_agent. Prints both URLs on startup and kills all
@@ -193,7 +231,7 @@ demo: .demo-agents-stage
 			--port $(SERVER_PORT) ) & SERVER_PID=$$!; \
 		echo "[demo] starting frontend Vite dev server on :$(FRONTEND_PORT) ..."; \
 		( cd $(ROOT)/frontend && pnpm dev --port $(FRONTEND_PORT) --strictPort ) & FRONTEND_PID=$$!; \
-		echo "[demo] starting adk web presentation_agent on :$(ADK_WEB_PORT) ..."; \
+		echo "[demo] starting adk web presentation_agent + presentation_agent_orchestrated on :$(ADK_WEB_PORT) ..."; \
 		( cd $(ROOT) && HARMONOGRAF_SERVER=127.0.0.1:$(SERVER_PORT) \
 			OPENAI_API_KEY="$${OPENAI_API_KEY:-dummy}" \
 			uv run --extra demo adk web --host 127.0.0.1 --port $(ADK_WEB_PORT) .demo-agents ) & ADK_PID=$$!; \

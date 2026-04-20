@@ -208,13 +208,22 @@ composes cleanly with goldfive's own ADK adapter.
 wired to goldfive + harmonograf. Boot the stack with:
 
 ```bash
-make demo                       # server + frontend + adk web presentation_agent
+make demo                       # server + frontend + adk web (both variants in picker)
 make demo-presentation          # just adk web; point at an existing server via HARMONOGRAF_SERVER
 ```
 
-`presentation_agent.agent.build_goldfive_runner(mock=True)` also exposes an
-offline runnable Runner (no LLM, canned plan) that exercises the same event
-stream — useful for integration smoke tests.
+`adk web` lists two agents in the picker:
+
+* `presentation_agent` — observation mode: plain ADK tree, coordinator
+  routes via instruction text, harmonograf attaches a telemetry plugin.
+* `presentation_agent_orchestrated` — orchestration mode: same tree
+  wrapped with `goldfive.wrap(...)`, so goldfive plans the specialists,
+  dispatches them, and fires drift when the adapter return doesn't
+  match. This is the path that exercises the full goldfive event stream.
+
+`presentation_agent_orchestrated.agent.build_goldfive_runner(mock=True)`
+also exposes an offline runnable Runner (no LLM, canned plan) that
+exercises the same event stream — useful for integration smoke tests.
 
 ## Further reading
 

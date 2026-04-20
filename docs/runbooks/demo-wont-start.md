@@ -33,7 +33,7 @@ flowchart TD
 - **Terminal**: `make demo` prints one of:
   - `[demo] starting harmonograf-server on :7531 ...`
   - `[demo] starting frontend Vite dev server on :5173 ...`
-  - `[demo] starting adk web presentation_agent on :8080 ...`
+  - `[demo] starting adk web presentation_agent + presentation_agent_orchestrated on :8080 ...`
   - `[demo] shutting down...` (unexpectedly soon)
 - **Processes**: `ps axf | grep -E 'harmonograf|adk web|vite'` shows
   one or more missing.
@@ -77,11 +77,13 @@ curl -s $OPENAI_API_BASE/models 2>/dev/null || echo "unreachable"
    to a dead port. See `Makefile:110`.
 4. **`uv` / Python environment broken** — `uv run --extra demo`
    fails because the extras aren't installed, or the venv got wiped.
-5. **`.demo-agents/` staging broken** — the Makefile stages a real
-   (non-symlink) `presentation_agent` directory under `.demo-agents/`
-   before boot (`Makefile:117` target `.demo-agents-stage`). If a
-   previous run crashed partway through, the directory may be in a
-   bad state.
+5. **`.demo-agents/` staging broken** — the Makefile stages two real
+   (non-symlink) sibling directories under `.demo-agents/`:
+   `presentation_agent` (observation mode) and
+   `presentation_agent_orchestrated` (orchestration mode). Both are
+   regenerated on every `make demo` invocation (`Makefile` target
+   `.demo-agents-stage`). If either is missing, ADK's picker may not
+   list the corresponding variant.
 6. **pnpm / Node mismatch** — the frontend's Vite dev server refuses
    to start because `node_modules` is stale or Node version is wrong.
 7. **CORS blocking in the browser** — processes are up, but the
@@ -128,9 +130,10 @@ Either import failing → run `uv sync --extra demo`.
 ### 5. .demo-agents staging
 
 ```bash
-ls -la .demo-agents/presentation_agent/
+ls -la .demo-agents/presentation_agent/ .demo-agents/presentation_agent_orchestrated/
 cat .demo-agents/presentation_agent/__init__.py
 head .demo-agents/presentation_agent/agent.py
+head .demo-agents/presentation_agent_orchestrated/agent.py
 ```
 
 If the staging looks wrong, blow it away and rerun:

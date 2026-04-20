@@ -1,28 +1,25 @@
 """End-to-end: presentation_agent sample on goldfive + harmonograf.
 
-Post-migration (issue #4) the presentation_agent module no longer owns
-orchestration. The smoke test here verifies the new wiring:
+Split across the two reference-agent packages:
 
-* ``presentation_agent.agent`` imports cleanly.
-* ``app`` exports a live :class:`google.adk.apps.app.App` with the
-  :class:`HarmonografTelemetryPlugin` installed when a Client is built.
-* ``build_goldfive_runner(mock=True)`` assembles a runnable
-  :class:`goldfive.Runner` with ``ADKAdapter`` + ``HarmonografSink`` +
-  a mocked ADK model + a canned LLMPlanner / LLMGoalDeriver.
-* Driving that runner emits the full goldfive event stream
-  (``RunStarted`` → ``PlanSubmitted`` → per-task ``TaskStarted`` /
-  ``TaskCompleted`` → ``RunCompleted``) into ``InMemorySink``.
-* When wired to a real in-process harmonograf server fixture, the
-  events land as ``TelemetryUp(goldfive_event=...)`` frames that the
-  server's ingest pipeline translates into storage + bus deltas.
+* **Observation mode** — ``tests.reference_agents.presentation_agent`` —
+  plain ADK tree with ``HarmonografTelemetryPlugin``. No
+  ``goldfive.wrap``. The smoke tests here verify the tree + lazy ``app``
+  still assemble now that the tree is sourced from goldfive's
+  ``examples/presentation_agent/agent.py``.
+* **Orchestration mode** — ``tests.reference_agents.presentation_agent_orchestrated`` —
+  the same tree wrapped with ``goldfive.wrap(...)`` before ``App()``
+  sees it, plus a programmatic ``build_goldfive_runner`` helper for
+  headless runs. The runner tests exercise the full goldfive event
+  stream end-to-end.
 
 The legacy scenario suites (scripted multi-turn ADK runs, concurrent
 sessions, awaiting-human steering) were tightly coupled to
 ``attach_adk`` and the old ``HarmonografAgent`` orchestration and were
-deleted in this Phase C cut. Restoring a scripted-model e2e against the
+deleted in the Phase C cut. Restoring a scripted-model e2e against the
 new stack is Phase D cleanup work — goldfive's own
-``examples/adk_presentation`` covers the same shape with a non-scripted
-mock.
+``examples/presentation_agent`` covers the same shape with a
+non-scripted mock.
 """
 
 from __future__ import annotations
@@ -50,7 +47,7 @@ _PRES_DIR = Path(__file__).resolve().parent.parent / "reference_agents"
 
 @pytest.fixture
 def presentation_agent_module() -> Any:
-    """Import ``presentation_agent.agent`` as a top-level module.
+    """Import observation-mode ``presentation_agent.agent`` as a top-level module.
 
     The module is normally consumed by ``adk web presentation_agent``
     which puts the containing directory on ``sys.path``; here we do the
@@ -74,8 +71,31 @@ def presentation_agent_module() -> Any:
         pass
 
 
+@pytest.fixture
+def presentation_agent_orchestrated_module() -> Any:
+    """Import orchestration-mode ``presentation_agent_orchestrated.agent``."""
+    if str(_PRES_DIR) not in sys.path:
+        sys.path.insert(0, str(_PRES_DIR))
+    for stale in (
+        "presentation_agent_orchestrated",
+        "presentation_agent_orchestrated.agent",
+    ):
+        sys.modules.pop(stale, None)
+    import presentation_agent_orchestrated.agent as agent_mod  # type: ignore
+
+    try:
+        agent_mod._reset_for_testing()
+    except Exception:
+        pass
+    yield agent_mod
+    try:
+        agent_mod._reset_for_testing()
+    except Exception:
+        pass
+
+
 class TestPresentationAppExport:
-    """Verify ``presentation_agent.agent.app`` builds without a server."""
+    """Verify observation-mode ``presentation_agent.agent.app`` still builds."""
 
     def test_module_exports_root_agent(self, presentation_agent_module: Any) -> None:
         root = presentation_agent_module.root_agent
@@ -109,16 +129,54 @@ class TestPresentationAppExport:
         assert "harmonograf-telemetry" in plugin_names
 
 
+class TestOrchestratedAppExport:
+    """Verify orchestration-mode ``presentation_agent_orchestrated.agent.app`` wraps the tree."""
+
+    def test_orchestrated_app_builds(
+        self,
+        presentation_agent_orchestrated_module: Any,
+        harmonograf_server: dict,
+    ) -> None:
+        from goldfive.adapters.adk_wrap import GoldfiveADKAgent
+        from google.adk.agents.base_agent import BaseAgent
+
+        # Force mock-mode (no OPENAI_API_KEY) so the lazy ``app`` build
+        # stays offline. The fixture still exercises live-mode indirectly
+        # via other tests.
+        prev = os.environ.pop("OPENAI_API_KEY", None)
+        os.environ["HARMONOGRAF_SERVER"] = harmonograf_server["addr"]
+        try:
+            app = presentation_agent_orchestrated_module.app
+        finally:
+            os.environ.pop("HARMONOGRAF_SERVER", None)
+            if prev is not None:
+                os.environ["OPENAI_API_KEY"] = prev
+
+        assert app is not None
+        assert app.name == "presentation_agent_orchestrated"
+        # ``goldfive.wrap`` of an ADK BaseAgent returns a GoldfiveADKAgent
+        # (itself a BaseAgent subclass); confirm both invariants.
+        assert isinstance(app.root_agent, BaseAgent)
+        assert isinstance(app.root_agent, GoldfiveADKAgent)
+        plugin_names = {getattr(p, "name", "") for p in (app.plugins or [])}
+        assert "harmonograf-telemetry" in plugin_names
+
+
 class TestPresentationGoldfiveRunner:
-    """End-to-end: goldfive Runner + HarmonografSink via build_goldfive_runner."""
+    """End-to-end: goldfive Runner + HarmonografSink via build_goldfive_runner.
+
+    The helper lives on the orchestration-mode sibling now — that's the
+    only module that knows how to drive a goldfive Runner around the
+    tree. Observation mode never had a runner.
+    """
 
     @pytest.mark.asyncio
-    async def test_mock_run_emits_goldfive_event_stream(
+    async def test_orchestrated_mock_run_emits_goldfive_events(
         self,
-        presentation_agent_module: Any,
+        presentation_agent_orchestrated_module: Any,
     ) -> None:
         runner, memory_sink, client, _sink = (
-            presentation_agent_module.build_goldfive_runner(
+            presentation_agent_orchestrated_module.build_goldfive_runner(
                 topic="espresso machines",
                 mock=True,
                 client=None,  # no harmonograf server wiring in this variant
@@ -145,10 +203,21 @@ class TestPresentationGoldfiveRunner:
         assert any(k == "task_started" for k in payload_kinds)
         assert any(k == "task_completed" for k in payload_kinds)
 
+        # One TaskStarted + TaskCompleted per specialist.
+        completed_task_ids = {
+            evt.task_completed.task_id
+            for evt in memory_sink.events
+            if hasattr(evt, "WhichOneof")
+            and evt.WhichOneof("payload") == "task_completed"
+        }
+        assert completed_task_ids == {"research", "build", "review", "debug"}, (
+            f"expected TaskCompleted for each specialist, got {completed_task_ids}"
+        )
+
     @pytest.mark.asyncio
     async def test_mock_run_ships_events_to_harmonograf_server(
         self,
-        presentation_agent_module: Any,
+        presentation_agent_orchestrated_module: Any,
         harmonograf_server: dict,
     ) -> None:
         from harmonograf_client import Client, HarmonografSink
@@ -160,7 +229,7 @@ class TestPresentationGoldfiveRunner:
         )
         try:
             runner, memory_sink, bound_client, harmonograf_sink = (
-                presentation_agent_module.build_goldfive_runner(
+                presentation_agent_orchestrated_module.build_goldfive_runner(
                     topic="espresso machines",
                     mock=True,
                     client=client,
@@ -187,7 +256,7 @@ class TestPresentationGoldfiveRunner:
     @pytest.mark.asyncio
     async def test_all_task_status_events_persist(
         self,
-        presentation_agent_module: Any,
+        presentation_agent_orchestrated_module: Any,
         harmonograf_server: dict,
     ) -> None:
         """Regression for issue #18: every task_completed event the sink
@@ -212,7 +281,7 @@ class TestPresentationGoldfiveRunner:
         )
         try:
             runner, memory_sink, _, _ = (
-                presentation_agent_module.build_goldfive_runner(
+                presentation_agent_orchestrated_module.build_goldfive_runner(
                     topic="waffles",
                     mock=True,
                     client=client,
