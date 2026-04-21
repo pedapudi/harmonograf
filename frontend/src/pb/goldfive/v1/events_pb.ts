@@ -18,7 +18,7 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
-import type { DriftKind, DriftSeverity, Goal, Plan } from "./types_pb.js";
+import type { DriftKind, DriftSeverity, Goal, Plan, TaskEdge } from "./types_pb.js";
 import { file_goldfive_v1_types } from "./types_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -26,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file goldfive/v1/events.proto.
  */
 export const file_goldfive_v1_events: GenFile = /*@__PURE__*/
-  fileDesc("Chhnb2xkZml2ZS92MS9ldmVudHMucHJvdG8SC2dvbGRmaXZlLnYxIsIICgVFdmVudBIQCghldmVudF9pZBgBIAEoCRIOCgZydW5faWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAQSLgoKZW1pdHRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoLcnVuX3N0YXJ0ZWQYCiABKAsyFy5nb2xkZml2ZS52MS5SdW5TdGFydGVkSAASMAoMZ29hbF9kZXJpdmVkGAsgASgLMhguZ29sZGZpdmUudjEuR29hbERlcml2ZWRIABI0Cg5wbGFuX3N1Ym1pdHRlZBgMIAEoCzIaLmdvbGRmaXZlLnYxLlBsYW5TdWJtaXR0ZWRIABIwCgxwbGFuX3JldmlzZWQYDSABKAsyGC5nb2xkZml2ZS52MS5QbGFuUmV2aXNlZEgAEjAKDHRhc2tfc3RhcnRlZBgOIAEoCzIYLmdvbGRmaXZlLnYxLlRhc2tTdGFydGVkSAASMgoNdGFza19wcm9ncmVzcxgPIAEoCzIZLmdvbGRmaXZlLnYxLlRhc2tQcm9ncmVzc0gAEjQKDnRhc2tfY29tcGxldGVkGBAgASgLMhouZ29sZGZpdmUudjEuVGFza0NvbXBsZXRlZEgAEi4KC3Rhc2tfZmFpbGVkGBEgASgLMhcuZ29sZGZpdmUudjEuVGFza0ZhaWxlZEgAEjAKDHRhc2tfYmxvY2tlZBgSIAEoCzIYLmdvbGRmaXZlLnYxLlRhc2tCbG9ja2VkSAASNAoOdGFza19jYW5jZWxsZWQYEyABKAsyGi5nb2xkZml2ZS52MS5UYXNrQ2FuY2VsbGVkSAASNAoOZHJpZnRfZGV0ZWN0ZWQYFCABKAsyGi5nb2xkZml2ZS52MS5EcmlmdERldGVjdGVkSAASMgoNcnVuX2NvbXBsZXRlZBgVIAEoCzIZLmdvbGRmaXZlLnYxLlJ1bkNvbXBsZXRlZEgAEi4KC3J1bl9hYm9ydGVkGBYgASgLMhcuZ29sZGZpdmUudjEuUnVuQWJvcnRlZEgAEkAKFGNvbnZlcnNhdGlvbl9zdGFydGVkGBcgASgLMiAuZ29sZGZpdmUudjEuQ29udmVyc2F0aW9uU3RhcnRlZEgAEjwKEmNvbnZlcnNhdGlvbl9lbmRlZBgYIAEoCzIeLmdvbGRmaXZlLnYxLkNvbnZlcnNhdGlvbkVuZGVkSAASPAoSYXBwcm92YWxfcmVxdWVzdGVkGBkgASgLMh4uZ29sZGZpdmUudjEuQXBwcm92YWxSZXF1ZXN0ZWRIABI4ChBhcHByb3ZhbF9ncmFudGVkGBogASgLMhwuZ29sZGZpdmUudjEuQXBwcm92YWxHcmFudGVkSAASOgoRYXBwcm92YWxfcmVqZWN0ZWQYGyABKAsyHS5nb2xkZml2ZS52MS5BcHByb3ZhbFJlamVjdGVkSABCCQoHcGF5bG9hZCJiCgpSdW5TdGFydGVkEg4KBnJ1bl9pZBgBIAEoCRIUCgxnb2FsX3N1bW1hcnkYAiABKAkSLgoKc3RhcnRlZF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiLwoLR29hbERlcml2ZWQSIAoFZ29hbHMYASADKAsyES5nb2xkZml2ZS52MS5Hb2FsIjAKDVBsYW5TdWJtaXR0ZWQSHwoEcGxhbhgBIAEoCzIRLmdvbGRmaXZlLnYxLlBsYW4isAEKC1BsYW5SZXZpc2VkEh8KBHBsYW4YASABKAsyES5nb2xkZml2ZS52MS5QbGFuEioKCmRyaWZ0X2tpbmQYAiABKA4yFi5nb2xkZml2ZS52MS5EcmlmdEtpbmQSLAoIc2V2ZXJpdHkYAyABKA4yGi5nb2xkZml2ZS52MS5EcmlmdFNldmVyaXR5Eg4KBnJlYXNvbhgEIAEoCRIWCg5yZXZpc2lvbl9pbmRleBgFIAEoDSIuCgtUYXNrU3RhcnRlZBIPCgd0YXNrX2lkGAEgASgJEg4KBmRldGFpbBgCIAEoCSJBCgxUYXNrUHJvZ3Jlc3MSDwoHdGFza19pZBgBIAEoCRIQCghmcmFjdGlvbhgCIAEoAhIOCgZkZXRhaWwYAyABKAkioQEKDVRhc2tDb21wbGV0ZWQSDwoHdGFza19pZBgBIAEoCRIPCgdzdW1tYXJ5GAIgASgJEjwKCWFydGlmYWN0cxgDIAMoCzIpLmdvbGRmaXZlLnYxLlRhc2tDb21wbGV0ZWQuQXJ0aWZhY3RzRW50cnkaMAoOQXJ0aWZhY3RzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASJCCgpUYXNrRmFpbGVkEg8KB3Rhc2tfaWQYASABKAkSDgoGcmVhc29uGAIgASgJEhMKC3JlY292ZXJhYmxlGAMgASgIIj8KC1Rhc2tCbG9ja2VkEg8KB3Rhc2tfaWQYASABKAkSDwoHYmxvY2tlchgCIAEoCRIOCgZuZWVkZWQYAyABKAkiMAoNVGFza0NhbmNlbGxlZBIPCgd0YXNrX2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCSKmAQoNRHJpZnREZXRlY3RlZBIkCgRraW5kGAEgASgOMhYuZ29sZGZpdmUudjEuRHJpZnRLaW5kEiwKCHNldmVyaXR5GAIgASgOMhouZ29sZGZpdmUudjEuRHJpZnRTZXZlcml0eRIOCgZkZXRhaWwYAyABKAkSFwoPY3VycmVudF90YXNrX2lkGAQgASgJEhgKEGN1cnJlbnRfYWdlbnRfaWQYBSABKAkiJwoMUnVuQ29tcGxldGVkEhcKD291dGNvbWVfc3VtbWFyeRgBIAEoCSIcCgpSdW5BYm9ydGVkEg4KBnJlYXNvbhgBIAEoCSJeChNDb252ZXJzYXRpb25TdGFydGVkEhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCRIuCgpzdGFydGVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJQChFDb252ZXJzYXRpb25FbmRlZBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSEgoKdHVybl9jb3VudBgCIAEoDRIOCgZyZWFzb24YAyABKAkixgEKEUFwcHJvdmFsUmVxdWVzdGVkEhEKCXRhcmdldF9pZBgBIAEoCRIMCgRraW5kGAIgASgJEg4KBnByb21wdBgDIAEoCRIPCgd0YXNrX2lkGAQgASgJEj4KCG1ldGFkYXRhGAUgAygLMiwuZ29sZGZpdmUudjEuQXBwcm92YWxSZXF1ZXN0ZWQuTWV0YWRhdGFFbnRyeRovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiNAoPQXBwcm92YWxHcmFudGVkEhEKCXRhcmdldF9pZBgBIAEoCRIOCgZkZXRhaWwYAiABKAkiNQoQQXBwcm92YWxSZWplY3RlZBIRCgl0YXJnZXRfaWQYASABKAkSDgoGZGV0YWlsGAIgASgJQjlaN2dpdGh1Yi5jb20vcGVkYXB1ZGkvZ29sZGZpdmUvZ2VuL2dvbGRmaXZlL3YxO2dvbGRmaXZldjFiBnByb3RvMw", [file_google_protobuf_timestamp, file_goldfive_v1_types]);
+  fileDesc("Chhnb2xkZml2ZS92MS9ldmVudHMucHJvdG8SC2dvbGRmaXZlLnYxIpgKCgVFdmVudBIQCghldmVudF9pZBgBIAEoCRIOCgZydW5faWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAQSLgoKZW1pdHRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoLcnVuX3N0YXJ0ZWQYCiABKAsyFy5nb2xkZml2ZS52MS5SdW5TdGFydGVkSAASMAoMZ29hbF9kZXJpdmVkGAsgASgLMhguZ29sZGZpdmUudjEuR29hbERlcml2ZWRIABI0Cg5wbGFuX3N1Ym1pdHRlZBgMIAEoCzIaLmdvbGRmaXZlLnYxLlBsYW5TdWJtaXR0ZWRIABIwCgxwbGFuX3JldmlzZWQYDSABKAsyGC5nb2xkZml2ZS52MS5QbGFuUmV2aXNlZEgAEjAKDHRhc2tfc3RhcnRlZBgOIAEoCzIYLmdvbGRmaXZlLnYxLlRhc2tTdGFydGVkSAASMgoNdGFza19wcm9ncmVzcxgPIAEoCzIZLmdvbGRmaXZlLnYxLlRhc2tQcm9ncmVzc0gAEjQKDnRhc2tfY29tcGxldGVkGBAgASgLMhouZ29sZGZpdmUudjEuVGFza0NvbXBsZXRlZEgAEi4KC3Rhc2tfZmFpbGVkGBEgASgLMhcuZ29sZGZpdmUudjEuVGFza0ZhaWxlZEgAEjAKDHRhc2tfYmxvY2tlZBgSIAEoCzIYLmdvbGRmaXZlLnYxLlRhc2tCbG9ja2VkSAASNAoOdGFza19jYW5jZWxsZWQYEyABKAsyGi5nb2xkZml2ZS52MS5UYXNrQ2FuY2VsbGVkSAASNAoOZHJpZnRfZGV0ZWN0ZWQYFCABKAsyGi5nb2xkZml2ZS52MS5EcmlmdERldGVjdGVkSAASMgoNcnVuX2NvbXBsZXRlZBgVIAEoCzIZLmdvbGRmaXZlLnYxLlJ1bkNvbXBsZXRlZEgAEi4KC3J1bl9hYm9ydGVkGBYgASgLMhcuZ29sZGZpdmUudjEuUnVuQWJvcnRlZEgAEkAKFGNvbnZlcnNhdGlvbl9zdGFydGVkGBcgASgLMiAuZ29sZGZpdmUudjEuQ29udmVyc2F0aW9uU3RhcnRlZEgAEjwKEmNvbnZlcnNhdGlvbl9lbmRlZBgYIAEoCzIeLmdvbGRmaXZlLnYxLkNvbnZlcnNhdGlvbkVuZGVkSAASPAoSYXBwcm92YWxfcmVxdWVzdGVkGBkgASgLMh4uZ29sZGZpdmUudjEuQXBwcm92YWxSZXF1ZXN0ZWRIABI4ChBhcHByb3ZhbF9ncmFudGVkGBogASgLMhwuZ29sZGZpdmUudjEuQXBwcm92YWxHcmFudGVkSAASOgoRYXBwcm92YWxfcmVqZWN0ZWQYGyABKAsyHS5nb2xkZml2ZS52MS5BcHByb3ZhbFJlamVjdGVkSAASRwoYYWdlbnRfaW52b2NhdGlvbl9zdGFydGVkGBwgASgLMiMuZ29sZGZpdmUudjEuQWdlbnRJbnZvY2F0aW9uU3RhcnRlZEgAEksKGmFnZW50X2ludm9jYXRpb25fY29tcGxldGVkGB0gASgLMiUuZ29sZGZpdmUudjEuQWdlbnRJbnZvY2F0aW9uQ29tcGxldGVkSAASPgoTZGVsZWdhdGlvbl9vYnNlcnZlZBgeIAEoCzIfLmdvbGRmaXZlLnYxLkRlbGVnYXRpb25PYnNlcnZlZEgAQgkKB3BheWxvYWQiYgoKUnVuU3RhcnRlZBIOCgZydW5faWQYASABKAkSFAoMZ29hbF9zdW1tYXJ5GAIgASgJEi4KCnN0YXJ0ZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIi8KC0dvYWxEZXJpdmVkEiAKBWdvYWxzGAEgAygLMhEuZ29sZGZpdmUudjEuR29hbCIwCg1QbGFuU3VibWl0dGVkEh8KBHBsYW4YASABKAsyES5nb2xkZml2ZS52MS5QbGFuIrkBChBQbGFuUmV2aXNpb25EaWZmEhYKDmFkZGVkX3Rhc2tfaWRzGAEgAygJEhgKEHJlbW92ZWRfdGFza19pZHMYAiADKAkSGQoRbW9kaWZpZWRfdGFza19pZHMYAyADKAkSKgoLYWRkZWRfZWRnZXMYBCADKAsyFS5nb2xkZml2ZS52MS5UYXNrRWRnZRIsCg1yZW1vdmVkX2VkZ2VzGAUgAygLMhUuZ29sZGZpdmUudjEuVGFza0VkZ2Ui3QEKC1BsYW5SZXZpc2VkEh8KBHBsYW4YASABKAsyES5nb2xkZml2ZS52MS5QbGFuEioKCmRyaWZ0X2tpbmQYAiABKA4yFi5nb2xkZml2ZS52MS5EcmlmdEtpbmQSLAoIc2V2ZXJpdHkYAyABKA4yGi5nb2xkZml2ZS52MS5EcmlmdFNldmVyaXR5Eg4KBnJlYXNvbhgEIAEoCRIWCg5yZXZpc2lvbl9pbmRleBgFIAEoDRIrCgRkaWZmGAYgASgLMh0uZ29sZGZpdmUudjEuUGxhblJldmlzaW9uRGlmZiIuCgtUYXNrU3RhcnRlZBIPCgd0YXNrX2lkGAEgASgJEg4KBmRldGFpbBgCIAEoCSJBCgxUYXNrUHJvZ3Jlc3MSDwoHdGFza19pZBgBIAEoCRIQCghmcmFjdGlvbhgCIAEoAhIOCgZkZXRhaWwYAyABKAkioQEKDVRhc2tDb21wbGV0ZWQSDwoHdGFza19pZBgBIAEoCRIPCgdzdW1tYXJ5GAIgASgJEjwKCWFydGlmYWN0cxgDIAMoCzIpLmdvbGRmaXZlLnYxLlRhc2tDb21wbGV0ZWQuQXJ0aWZhY3RzRW50cnkaMAoOQXJ0aWZhY3RzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASJCCgpUYXNrRmFpbGVkEg8KB3Rhc2tfaWQYASABKAkSDgoGcmVhc29uGAIgASgJEhMKC3JlY292ZXJhYmxlGAMgASgIIj8KC1Rhc2tCbG9ja2VkEg8KB3Rhc2tfaWQYASABKAkSDwoHYmxvY2tlchgCIAEoCRIOCgZuZWVkZWQYAyABKAkiMAoNVGFza0NhbmNlbGxlZBIPCgd0YXNrX2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCSKmAQoNRHJpZnREZXRlY3RlZBIkCgRraW5kGAEgASgOMhYuZ29sZGZpdmUudjEuRHJpZnRLaW5kEiwKCHNldmVyaXR5GAIgASgOMhouZ29sZGZpdmUudjEuRHJpZnRTZXZlcml0eRIOCgZkZXRhaWwYAyABKAkSFwoPY3VycmVudF90YXNrX2lkGAQgASgJEhgKEGN1cnJlbnRfYWdlbnRfaWQYBSABKAkiJwoMUnVuQ29tcGxldGVkEhcKD291dGNvbWVfc3VtbWFyeRgBIAEoCSIcCgpSdW5BYm9ydGVkEg4KBnJlYXNvbhgBIAEoCSJeChNDb252ZXJzYXRpb25TdGFydGVkEhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCRIuCgpzdGFydGVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJQChFDb252ZXJzYXRpb25FbmRlZBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSEgoKdHVybl9jb3VudBgCIAEoDRIOCgZyZWFzb24YAyABKAkixgEKEUFwcHJvdmFsUmVxdWVzdGVkEhEKCXRhcmdldF9pZBgBIAEoCRIMCgRraW5kGAIgASgJEg4KBnByb21wdBgDIAEoCRIPCgd0YXNrX2lkGAQgASgJEj4KCG1ldGFkYXRhGAUgAygLMiwuZ29sZGZpdmUudjEuQXBwcm92YWxSZXF1ZXN0ZWQuTWV0YWRhdGFFbnRyeRovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiNAoPQXBwcm92YWxHcmFudGVkEhEKCXRhcmdldF9pZBgBIAEoCRIOCgZkZXRhaWwYAiABKAkiNQoQQXBwcm92YWxSZWplY3RlZBIRCgl0YXJnZXRfaWQYASABKAkSDgoGZGV0YWlsGAIgASgJIqIBChZBZ2VudEludm9jYXRpb25TdGFydGVkEhIKCmFnZW50X25hbWUYASABKAkSDwoHdGFza19pZBgCIAEoCRIVCg1pbnZvY2F0aW9uX2lkGAMgASgJEhwKFHBhcmVudF9pbnZvY2F0aW9uX2lkGAQgASgJEi4KCnN0YXJ0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIpkBChhBZ2VudEludm9jYXRpb25Db21wbGV0ZWQSEgoKYWdlbnRfbmFtZRgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEhUKDWludm9jYXRpb25faWQYAyABKAkSDwoHc3VtbWFyeRgEIAEoCRIwCgxjb21wbGV0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIpMBChJEZWxlZ2F0aW9uT2JzZXJ2ZWQSEgoKZnJvbV9hZ2VudBgBIAEoCRIQCgh0b19hZ2VudBgCIAEoCRIPCgd0YXNrX2lkGAMgASgJEhUKDWludm9jYXRpb25faWQYBCABKAkSLwoLb2JzZXJ2ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQjlaN2dpdGh1Yi5jb20vcGVkYXB1ZGkvZ29sZGZpdmUvZ2VuL2dvbGRmaXZlL3YxO2dvbGRmaXZldjFiBnByb3RvMw", [file_google_protobuf_timestamp, file_goldfive_v1_types]);
 
 /**
  * Event is the uniform envelope wrapping every goldfive event. Sinks
@@ -178,6 +178,24 @@ export type Event = Message<"goldfive.v1.Event"> & {
      */
     value: ApprovalRejected;
     case: "approvalRejected";
+  } | {
+    /**
+     * @generated from field: goldfive.v1.AgentInvocationStarted agent_invocation_started = 28;
+     */
+    value: AgentInvocationStarted;
+    case: "agentInvocationStarted";
+  } | {
+    /**
+     * @generated from field: goldfive.v1.AgentInvocationCompleted agent_invocation_completed = 29;
+     */
+    value: AgentInvocationCompleted;
+    case: "agentInvocationCompleted";
+  } | {
+    /**
+     * @generated from field: goldfive.v1.DelegationObserved delegation_observed = 30;
+     */
+    value: DelegationObserved;
+    case: "delegationObserved";
   } | { case: undefined; value?: undefined };
 };
 
@@ -262,6 +280,68 @@ export const PlanSubmittedSchema: GenMessage<PlanSubmitted> = /*@__PURE__*/
   messageDesc(file_goldfive_v1_events, 3);
 
 /**
+ * Minimal cross-revision diff payload attached to `PlanRevised` so
+ * sinks that render "what changed" can do so without re-fetching and
+ * diff'ing the two plans client-side. Closes PLAN-LIFECYCLE.md §8
+ * gap #4.
+ *
+ * Identity rules mirror PLAN-LIFECYCLE.md §3.0: a task/edge is identified
+ * by its id (tasks) or its (from_task_id, to_task_id) pair (edges). The
+ * diff is advisory — the authoritative plan lives in the enclosing
+ * `PlanRevised.plan` field; `diff` just saves consumers the work of
+ * computing the delta themselves.
+ *
+ * @generated from message goldfive.v1.PlanRevisionDiff
+ */
+export type PlanRevisionDiff = Message<"goldfive.v1.PlanRevisionDiff"> & {
+  /**
+   * Task ids present in the new plan but not in the old plan.
+   *
+   * @generated from field: repeated string added_task_ids = 1;
+   */
+  addedTaskIds: string[];
+
+  /**
+   * Task ids present in the old plan but not in the new plan.
+   *
+   * @generated from field: repeated string removed_task_ids = 2;
+   */
+  removedTaskIds: string[];
+
+  /**
+   * Task ids present in both plans where at least one tracked
+   * metadata field changed (title, description, assignee, status).
+   * Pure status-only transitions that are already covered by the
+   * Task* events are still listed here so sinks have a single
+   * authoritative "modified" set keyed by task id.
+   *
+   * @generated from field: repeated string modified_task_ids = 3;
+   */
+  modifiedTaskIds: string[];
+
+  /**
+   * Edges present in the new plan but not in the old plan.
+   *
+   * @generated from field: repeated goldfive.v1.TaskEdge added_edges = 4;
+   */
+  addedEdges: TaskEdge[];
+
+  /**
+   * Edges present in the old plan but not in the new plan.
+   *
+   * @generated from field: repeated goldfive.v1.TaskEdge removed_edges = 5;
+   */
+  removedEdges: TaskEdge[];
+};
+
+/**
+ * Describes the message goldfive.v1.PlanRevisionDiff.
+ * Use `create(PlanRevisionDiffSchema)` to create a new message.
+ */
+export const PlanRevisionDiffSchema: GenMessage<PlanRevisionDiff> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 4);
+
+/**
  * A revised plan, emitted by the observer in response to drift. The
  * plan's `revision_index` is monotonically greater than the previous
  * plan on this run. `drift_kind`, `severity`, and `reason` duplicate
@@ -295,6 +375,16 @@ export type PlanRevised = Message<"goldfive.v1.PlanRevised"> & {
    * @generated from field: uint32 revision_index = 5;
    */
   revisionIndex: number;
+
+  /**
+   * Minimal diff between the previous plan and `plan`. Optional for
+   * back-compat with older producers; sinks that don't need the diff
+   * can ignore it. Consumers that want a no-fetch "what changed" view
+   * should read this field. See :class:`PlanRevisionDiff` above.
+   *
+   * @generated from field: goldfive.v1.PlanRevisionDiff diff = 6;
+   */
+  diff?: PlanRevisionDiff;
 };
 
 /**
@@ -302,7 +392,7 @@ export type PlanRevised = Message<"goldfive.v1.PlanRevised"> & {
  * Use `create(PlanRevisedSchema)` to create a new message.
  */
 export const PlanRevisedSchema: GenMessage<PlanRevised> = /*@__PURE__*/
-  messageDesc(file_goldfive_v1_events, 4);
+  messageDesc(file_goldfive_v1_events, 5);
 
 /**
  * Task transitioned PENDING -> RUNNING.
@@ -328,7 +418,7 @@ export type TaskStarted = Message<"goldfive.v1.TaskStarted"> & {
  * Use `create(TaskStartedSchema)` to create a new message.
  */
 export const TaskStartedSchema: GenMessage<TaskStarted> = /*@__PURE__*/
-  messageDesc(file_goldfive_v1_events, 5);
+  messageDesc(file_goldfive_v1_events, 6);
 
 /**
  * Progress update for a running task. `fraction` is [0.0, 1.0] if the
@@ -359,7 +449,7 @@ export type TaskProgress = Message<"goldfive.v1.TaskProgress"> & {
  * Use `create(TaskProgressSchema)` to create a new message.
  */
 export const TaskProgressSchema: GenMessage<TaskProgress> = /*@__PURE__*/
-  messageDesc(file_goldfive_v1_events, 6);
+  messageDesc(file_goldfive_v1_events, 7);
 
 /**
  * Task transitioned RUNNING -> COMPLETED. `artifacts` is a free-form
@@ -390,7 +480,7 @@ export type TaskCompleted = Message<"goldfive.v1.TaskCompleted"> & {
  * Use `create(TaskCompletedSchema)` to create a new message.
  */
 export const TaskCompletedSchema: GenMessage<TaskCompleted> = /*@__PURE__*/
-  messageDesc(file_goldfive_v1_events, 7);
+  messageDesc(file_goldfive_v1_events, 8);
 
 /**
  * Task transitioned to FAILED. `recoverable` signals whether the
@@ -421,7 +511,7 @@ export type TaskFailed = Message<"goldfive.v1.TaskFailed"> & {
  * Use `create(TaskFailedSchema)` to create a new message.
  */
 export const TaskFailedSchema: GenMessage<TaskFailed> = /*@__PURE__*/
-  messageDesc(file_goldfive_v1_events, 8);
+  messageDesc(file_goldfive_v1_events, 9);
 
 /**
  * Task transitioned to BLOCKED. The framework typically follows this
@@ -455,7 +545,7 @@ export type TaskBlocked = Message<"goldfive.v1.TaskBlocked"> & {
  * Use `create(TaskBlockedSchema)` to create a new message.
  */
 export const TaskBlockedSchema: GenMessage<TaskBlocked> = /*@__PURE__*/
-  messageDesc(file_goldfive_v1_events, 9);
+  messageDesc(file_goldfive_v1_events, 10);
 
 /**
  * Task transitioned to CANCELLED, usually in response to user steering
@@ -480,7 +570,7 @@ export type TaskCancelled = Message<"goldfive.v1.TaskCancelled"> & {
  * Use `create(TaskCancelledSchema)` to create a new message.
  */
 export const TaskCancelledSchema: GenMessage<TaskCancelled> = /*@__PURE__*/
-  messageDesc(file_goldfive_v1_events, 10);
+  messageDesc(file_goldfive_v1_events, 11);
 
 /**
  * Observer-detected drift. Sinks surface this as a timeline marker and
@@ -526,7 +616,7 @@ export type DriftDetected = Message<"goldfive.v1.DriftDetected"> & {
  * Use `create(DriftDetectedSchema)` to create a new message.
  */
 export const DriftDetectedSchema: GenMessage<DriftDetected> = /*@__PURE__*/
-  messageDesc(file_goldfive_v1_events, 11);
+  messageDesc(file_goldfive_v1_events, 12);
 
 /**
  * Terminal event on a successful run.
@@ -545,7 +635,7 @@ export type RunCompleted = Message<"goldfive.v1.RunCompleted"> & {
  * Use `create(RunCompletedSchema)` to create a new message.
  */
 export const RunCompletedSchema: GenMessage<RunCompleted> = /*@__PURE__*/
-  messageDesc(file_goldfive_v1_events, 12);
+  messageDesc(file_goldfive_v1_events, 13);
 
 /**
  * Terminal event on an aborted run (framework-level failure, user
@@ -565,7 +655,7 @@ export type RunAborted = Message<"goldfive.v1.RunAborted"> & {
  * Use `create(RunAbortedSchema)` to create a new message.
  */
 export const RunAbortedSchema: GenMessage<RunAborted> = /*@__PURE__*/
-  messageDesc(file_goldfive_v1_events, 13);
+  messageDesc(file_goldfive_v1_events, 14);
 
 /**
  * Emitted once per Conversation on the first turn that uses it. Sinks
@@ -593,7 +683,7 @@ export type ConversationStarted = Message<"goldfive.v1.ConversationStarted"> & {
  * Use `create(ConversationStartedSchema)` to create a new message.
  */
 export const ConversationStartedSchema: GenMessage<ConversationStarted> = /*@__PURE__*/
-  messageDesc(file_goldfive_v1_events, 14);
+  messageDesc(file_goldfive_v1_events, 15);
 
 /**
  * Emitted when a caller invokes `Runner.new_conversation()` or closes
@@ -625,7 +715,7 @@ export type ConversationEnded = Message<"goldfive.v1.ConversationEnded"> & {
  * Use `create(ConversationEndedSchema)` to create a new message.
  */
 export const ConversationEndedSchema: GenMessage<ConversationEnded> = /*@__PURE__*/
-  messageDesc(file_goldfive_v1_events, 15);
+  messageDesc(file_goldfive_v1_events, 16);
 
 /**
  * A human yes/no is required before the run can proceed. Surfaced by:
@@ -685,7 +775,7 @@ export type ApprovalRequested = Message<"goldfive.v1.ApprovalRequested"> & {
  * Use `create(ApprovalRequestedSchema)` to create a new message.
  */
 export const ApprovalRequestedSchema: GenMessage<ApprovalRequested> = /*@__PURE__*/
-  messageDesc(file_goldfive_v1_events, 16);
+  messageDesc(file_goldfive_v1_events, 17);
 
 /**
  * APPROVE resolution for an ApprovalRequested. Emitted after the control
@@ -710,7 +800,7 @@ export type ApprovalGranted = Message<"goldfive.v1.ApprovalGranted"> & {
  * Use `create(ApprovalGrantedSchema)` to create a new message.
  */
 export const ApprovalGrantedSchema: GenMessage<ApprovalGranted> = /*@__PURE__*/
-  messageDesc(file_goldfive_v1_events, 17);
+  messageDesc(file_goldfive_v1_events, 18);
 
 /**
  * REJECT resolution for an ApprovalRequested. The agent (Flow A) decides
@@ -736,5 +826,131 @@ export type ApprovalRejected = Message<"goldfive.v1.ApprovalRejected"> & {
  * Use `create(ApprovalRejectedSchema)` to create a new message.
  */
 export const ApprovalRejectedSchema: GenMessage<ApprovalRejected> = /*@__PURE__*/
-  messageDesc(file_goldfive_v1_events, 18);
+  messageDesc(file_goldfive_v1_events, 19);
+
+/**
+ * Goldfive's executor dispatched a task to an agent, or a sub-Runner was
+ * spawned inside an AgentTool invocation and its top-level `before_run`
+ * callback fired. `parent_invocation_id` is empty on top-level dispatch
+ * and populated for nested AgentTool-spawned invocations so sinks can
+ * reconstruct the delegation tree.
+ *
+ * @generated from message goldfive.v1.AgentInvocationStarted
+ */
+export type AgentInvocationStarted = Message<"goldfive.v1.AgentInvocationStarted"> & {
+  /**
+   * @generated from field: string agent_name = 1;
+   */
+  agentName: string;
+
+  /**
+   * @generated from field: string task_id = 2;
+   */
+  taskId: string;
+
+  /**
+   * @generated from field: string invocation_id = 3;
+   */
+  invocationId: string;
+
+  /**
+   * @generated from field: string parent_invocation_id = 4;
+   */
+  parentInvocationId: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp started_at = 5;
+   */
+  startedAt?: Timestamp;
+};
+
+/**
+ * Describes the message goldfive.v1.AgentInvocationStarted.
+ * Use `create(AgentInvocationStartedSchema)` to create a new message.
+ */
+export const AgentInvocationStartedSchema: GenMessage<AgentInvocationStarted> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 20);
+
+/**
+ * Paired with AgentInvocationStarted — emitted from `after_run_callback`
+ * when the runner finishes. `summary` is an optional short description
+ * of the outcome (e.g. the final assistant text) for sinks that render
+ * a timeline.
+ *
+ * @generated from message goldfive.v1.AgentInvocationCompleted
+ */
+export type AgentInvocationCompleted = Message<"goldfive.v1.AgentInvocationCompleted"> & {
+  /**
+   * @generated from field: string agent_name = 1;
+   */
+  agentName: string;
+
+  /**
+   * @generated from field: string task_id = 2;
+   */
+  taskId: string;
+
+  /**
+   * @generated from field: string invocation_id = 3;
+   */
+  invocationId: string;
+
+  /**
+   * @generated from field: string summary = 4;
+   */
+  summary: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp completed_at = 5;
+   */
+  completedAt?: Timestamp;
+};
+
+/**
+ * Describes the message goldfive.v1.AgentInvocationCompleted.
+ * Use `create(AgentInvocationCompletedSchema)` to create a new message.
+ */
+export const AgentInvocationCompletedSchema: GenMessage<AgentInvocationCompleted> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 21);
+
+/**
+ * A tool invocation about to run is an AgentTool — the host agent is
+ * delegating to `to_agent`. Sinks render this as an edge from
+ * `from_agent` to `to_agent` in the delegation graph.
+ *
+ * @generated from message goldfive.v1.DelegationObserved
+ */
+export type DelegationObserved = Message<"goldfive.v1.DelegationObserved"> & {
+  /**
+   * @generated from field: string from_agent = 1;
+   */
+  fromAgent: string;
+
+  /**
+   * @generated from field: string to_agent = 2;
+   */
+  toAgent: string;
+
+  /**
+   * @generated from field: string task_id = 3;
+   */
+  taskId: string;
+
+  /**
+   * @generated from field: string invocation_id = 4;
+   */
+  invocationId: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp observed_at = 5;
+   */
+  observedAt?: Timestamp;
+};
+
+/**
+ * Describes the message goldfive.v1.DelegationObserved.
+ * Use `create(DelegationObservedSchema)` to create a new message.
+ */
+export const DelegationObservedSchema: GenMessage<DelegationObserved> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 22);
 

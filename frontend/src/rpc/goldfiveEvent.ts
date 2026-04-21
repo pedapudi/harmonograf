@@ -295,5 +295,15 @@ export function applyGoldfiveEvent(
     case 'conversationStarted':
     case 'conversationEnded':
       return;
+    // goldfive 2986775+ registry-dispatch events. Deliberately no-op for
+    // now: the existing HarmonografTelemetryPlugin already emits per-agent
+    // invocation spans, so the Gantt / Trajectory don't need these.
+    // A follow-up can wire agentInvocationStarted/Completed → span
+    // enrichment and delegationObserved → Gantt edges if the observability
+    // plugin path turns out to miss something.
+    case 'agentInvocationStarted':
+    case 'agentInvocationCompleted':
+    case 'delegationObserved':
+      return;
   }
 }
