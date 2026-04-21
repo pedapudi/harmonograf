@@ -416,6 +416,196 @@ async def test_unknown_payload_is_ignored(pipeline):
     assert sub.queue.empty()
 
 
+# ---- per-event session_id routing (goldfive#155 / harmonograf#63) -------
+#
+# ``goldfive.v1.Event`` gained a ``session_id`` field in goldfive#155 / PR
+# #157, and the Runner / Steerer / Executors stamp it on every emitted
+# event so one StreamTelemetry RPC can multiplex events across multiple
+# sessions (e.g. ADK's AgentTool mints a sub-Runner session inside an
+# adk-web run). Harmonograf#63 switches server-side routing from the
+# stream's Hello session to the per-event ``session_id`` with a
+# back-compat fallback to the Hello session when the field is empty.
+
+
+@pytest.mark.asyncio
+async def test_goldfive_event_routes_to_per_event_session_id(pipeline, store):
+    """Event with ``session_id=X`` on a stream Hello'd as ``Y`` lands on
+    session X, not Y. The session row is auto-created on first sighting
+    the same way span ingest auto-creates unseen ``(session, agent)``
+    routes.
+    """
+    pipe, bus, _ = pipeline
+    hello_sid = "sess_home"
+    per_event_sid = "sess_per_event"
+    ctx = _stream_ctx(session_id=hello_sid)
+
+    # Subscribe to both sessions so we can tell which one the fan-out
+    # lands on without relying on storage side-effects.
+    sub_home = await bus.subscribe(hello_sid)
+    sub_target = await bus.subscribe(per_event_sid)
+
+    evt = _make_event()
+    evt.session_id = per_event_sid
+    evt.run_started.run_id = "run-1"
+    evt.run_started.goal_summary = "check routing"
+    await pipe.handle_message(ctx, _wrap(evt))
+
+    # The per-event session got a run_started delta (alongside the
+    # auto-register agent_upsert / session-create deltas that fire on
+    # first sighting of an unseen route).
+    deltas = await _drain(sub_target)
+    run_started = [d for d in deltas if d.kind == DELTA_RUN_STARTED]
+    assert len(run_started) == 1
+    assert run_started[0].payload["run_id"] == "run-1"
+
+    # ...and the Hello session did NOT see a run_started delta.
+    home_deltas = await _drain(sub_home)
+    assert not [d for d in home_deltas if d.kind == DELTA_RUN_STARTED]
+
+    # Session row was auto-created so downstream RPCs can find it.
+    assert await store.get_session(per_event_sid) is not None
+
+
+@pytest.mark.asyncio
+async def test_goldfive_event_empty_session_id_falls_back_to_hello(
+    pipeline, store
+):
+    """Empty ``session_id`` preserves pre-goldfive#155 behavior: events
+    route to the stream's Hello session. Back-compat guard for older
+    goldfive clients and for events emitted before stamping was
+    threaded through every executor path.
+    """
+    pipe, bus, _ = pipeline
+    hello_sid = "sess_home"
+    ctx = _stream_ctx(session_id=hello_sid)
+
+    sub = await bus.subscribe(hello_sid)
+
+    evt = _make_event()
+    # session_id left empty (the pre-#155 shape).
+    assert evt.session_id == ""
+    evt.run_started.run_id = "run-1"
+    evt.run_started.goal_summary = "fallback check"
+    await pipe.handle_message(ctx, _wrap(evt))
+
+    delta = sub.queue.get_nowait()
+    assert delta.kind == DELTA_RUN_STARTED
+    assert delta.payload["run_id"] == "run-1"
+
+
+@pytest.mark.asyncio
+async def test_goldfive_plan_persisted_under_per_event_session(pipeline, store):
+    """Storage writes also follow the per-event ``session_id``. A plan
+    emitted with ``session_id=X`` on a stream Hello'd as ``Y`` is
+    persisted as a child of X (via ``session_id`` on :class:`TaskPlan`),
+    so cross-session lookups resolve the plan through the correct
+    session aggregate.
+    """
+    pipe, _, _ = pipeline
+    hello_sid = "sess_home"
+    per_event_sid = "sess_per_event"
+    ctx = _stream_ctx(session_id=hello_sid)
+
+    evt = _make_event()
+    evt.session_id = per_event_sid
+    evt.plan_submitted.plan.CopyFrom(_plan_pb(plan_id="p-routed"))
+    await pipe.handle_message(ctx, _wrap(evt))
+
+    # Plan lists under the per-event session.
+    plans_target = await store.list_task_plans_for_session(per_event_sid)
+    assert [p.id for p in plans_target] == ["p-routed"]
+    assert plans_target[0].session_id == per_event_sid
+
+    # Hello session stays empty — nothing leaked onto it.
+    plans_home = await store.list_task_plans_for_session(hello_sid)
+    assert plans_home == []
+
+    # Task index keyed by per-event session (the hot-path index used by
+    # span-to-task binding lookups).
+    assert pipe._task_index.get(per_event_sid, {}).get("t1") == "p-routed"
+    assert pipe._task_index.get(hello_sid, {}).get("t1") is None
+
+
+@pytest.mark.asyncio
+async def test_span_and_goldfive_event_co_locate_on_adk_session(pipeline, store):
+    """End-to-end: a client emits a span with ``session_id=X`` and a
+    goldfive ``plan_submitted`` event with ``session_id=X`` over the
+    same stream Hello'd as ``Y``. Both MUST land on session X so the
+    frontend's one-session-per-adk-web-run rollup has everything.
+    Regression guard against a future change that routes spans and
+    goldfive events via different codepaths.
+    """
+    from harmonograf_server.pb import types_pb2
+
+    pipe, bus, _ = pipeline
+    hello_sid = "sess_home"
+    adk_sid = "sess_adk_run"
+    ctx = _stream_ctx(session_id=hello_sid)
+
+    # 1. Span with per-span session_id=X (the telemetry_plugin's
+    #    ``_stamp_session_id`` path after harmonograf#63).
+    span_msg = telemetry_pb2.SpanStart(
+        span=types_pb2.Span(
+            id="span-1",
+            session_id=adk_sid,
+            agent_id=ctx.agent_id,
+            kind=types_pb2.SPAN_KIND_INVOCATION,
+            status=types_pb2.SPAN_STATUS_RUNNING,
+            name="invocation",
+        )
+    )
+    span_msg.span.start_time.seconds = 100
+    await pipe.handle_message(ctx, telemetry_pb2.TelemetryUp(span_start=span_msg))
+
+    # 2. Goldfive event with per-event session_id=X (goldfive#155 wire
+    #    stamping from Runner / Steerer / Executors).
+    gf_evt = _make_event()
+    gf_evt.session_id = adk_sid
+    gf_evt.plan_submitted.plan.CopyFrom(_plan_pb(plan_id="p-shared"))
+    await pipe.handle_message(ctx, _wrap(gf_evt))
+
+    # Span lands on the ADK session.
+    spans = await store.get_spans(adk_sid)
+    assert [s.id for s in spans] == ["span-1"]
+
+    # Plan lands on the ADK session.
+    plans = await store.list_task_plans_for_session(adk_sid)
+    assert [p.id for p in plans] == ["p-shared"]
+    assert plans[0].session_id == adk_sid
+
+    # Nothing leaked onto the Hello session.
+    assert await store.get_spans(hello_sid) == []
+    assert await store.list_task_plans_for_session(hello_sid) == []
+
+
+@pytest.mark.asyncio
+async def test_goldfive_event_same_session_as_hello_uses_hello_ctx(
+    pipeline, store
+):
+    """``session_id`` equal to the Hello session is a no-op on the routing
+    path — we must not spuriously auto-create or duplicate state. Regression
+    guard against a future edit that always spawns a _SessionView even when
+    it would add no value.
+    """
+    pipe, bus, _ = pipeline
+    hello_sid = "sess_home"
+    ctx = _stream_ctx(session_id=hello_sid)
+    await _ensure_session(store, session_id=hello_sid)
+
+    sub = await bus.subscribe(hello_sid)
+
+    evt = _make_event()
+    evt.session_id = hello_sid  # stamped to the same session the stream is on
+    evt.plan_submitted.plan.CopyFrom(_plan_pb(plan_id="p-same"))
+    await pipe.handle_message(ctx, _wrap(evt))
+
+    # Plan landed on the Hello session exactly as if session_id had been empty.
+    plans = await store.list_task_plans_for_session(hello_sid)
+    assert [p.id for p in plans] == ["p-same"]
+    delta = sub.queue.get_nowait()
+    assert delta.kind == DELTA_TASK_PLAN
+
+
 @pytest.mark.asyncio
 async def test_task_index_repopulates_from_store_after_restart(pipeline, store):
     """A pipeline restart drops ``_task_index``; a subsequent task event

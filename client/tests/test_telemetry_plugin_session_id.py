@@ -1,23 +1,24 @@
 """Regression tests for per-span ``session_id`` stamping.
 
-After harmonograf#61, :class:`HarmonografTelemetryPlugin` stamps the
-**Client's home / Hello session** on every span instead of the per-ctx
-ADK session id. Under ADK's ``AgentTool`` delegation, each sub-Runner
-has its own ``InMemorySessionService`` and mints a fresh ADK
-session_id per invocation — stamping those directly scatters spans
-across N sessions per adk-web run. Rolling onto the home session
-produces one coherent harmonograf session per process.
+After goldfive#155 / PR #157 added ``Event.session_id`` and
+harmonograf#63 switched server ingest to route goldfive events by
+that per-event id, :class:`HarmonografTelemetryPlugin` stamps the
+per-ctx **ADK session id** on every span rather than rolling every
+span onto the Client's home (Hello) session. Goldfive events now
+carry their own session_id on the wire, so the server lands spans
+and goldfive events on the same ADK session without the plugin
+having to collapse everything onto the home stream.
 
-The ADK session is preserved as a span attribute (``adk.session_id``)
-on INVOCATION spans so debug tooling can still correlate a span back
-to its sub-Runner ADK session.
+These tests replace the harmonograf#61 home-session-rollup assertions
+with the restored pre-#61 contract:
 
-These tests exercise each of the three span-emitting callbacks and
-assert:
-1. The wire-level ``session_id`` field on the Span is the Client's
-   home session (not the per-ctx ADK session_id).
-2. The ADK session_id survives as the ``adk.session_id`` attribute
-   on INVOCATION spans so routing-forensics stays possible.
+1. The wire-level ``session_id`` field on the Span is the per-ctx ADK
+   session id (``ctx.session.id``), NOT the Client's home session.
+2. The ADK session id also rides as the ``adk.session_id`` attribute
+   on INVOCATION spans so routing-forensics stays possible — this is
+   the forensic hook from harmonograf#62 and is preserved verbatim.
+3. Degraded ctx (no session) falls back to the Client's home session
+   so the plugin never crashes pre-connect / in offline replays.
 """
 
 from __future__ import annotations
@@ -130,50 +131,51 @@ def _span_session_ids(client: Client) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Tests — home-session rollup
+# Tests — per-ctx ADK session stamping (the restored pre-#61 contract)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_before_run_stamps_home_session_on_span(
+async def test_before_run_stamps_adk_session_on_span(
     plugin: HarmonografTelemetryPlugin, client: Client
 ) -> None:
-    """INVOCATION span's wire session_id is the Client's home session —
-    not the per-ctx ADK session — so adk-web runs roll up to one
-    harmonograf session even when ADK sub-Runners mint their own ADK
-    session_ids.
+    """INVOCATION span's wire ``session_id`` is the per-ctx ADK session,
+    not the Client's home session. After goldfive#155, goldfive events
+    also carry their own per-event ``session_id``, so the server will
+    land both kinds on the same ADK session without the plugin having
+    to collapse to a process-global home id.
     """
     ctx = _InvocationContext(invocation_id="inv-1", session_id=ADK_SESSION)
     await plugin.before_run_callback(invocation_context=ctx)
-    assert _span_session_ids(client) == [HOME_SESSION]
+    assert _span_session_ids(client) == [ADK_SESSION]
 
 
 @pytest.mark.asyncio
-async def test_before_model_stamps_home_session_on_span(
+async def test_before_model_stamps_adk_session_on_span(
     plugin: HarmonografTelemetryPlugin, client: Client
 ) -> None:
     cb = _CallbackContext(invocation_id="inv-1", session_id=ADK_SESSION)
     await plugin.before_model_callback(callback_context=cb, llm_request=_LlmRequest())
-    assert _span_session_ids(client) == [HOME_SESSION]
+    assert _span_session_ids(client) == [ADK_SESSION]
 
 
 @pytest.mark.asyncio
-async def test_before_tool_stamps_home_session_on_span(
+async def test_before_tool_stamps_adk_session_on_span(
     plugin: HarmonografTelemetryPlugin, client: Client
 ) -> None:
     tc = _CallbackContext(invocation_id="inv-1", session_id=ADK_SESSION)
     await plugin.before_tool_callback(
         tool=_Tool("search"), tool_args={"q": "hi"}, tool_context=tc
     )
-    assert _span_session_ids(client) == [HOME_SESSION]
+    assert _span_session_ids(client) == [ADK_SESSION]
 
 
 @pytest.mark.asyncio
-async def test_full_invocation_spans_all_carry_home_session(
+async def test_full_invocation_spans_all_carry_ctx_session(
     plugin: HarmonografTelemetryPlugin, client: Client
 ) -> None:
     """Three callbacks fire across one ADK invocation; all three spans
-    land on the Client's home session (the rollup contract)."""
+    land on the ctx's ADK session (not the Client home session)."""
     ic = _InvocationContext(invocation_id="inv-1", session_id=ADK_SESSION)
     cb = _CallbackContext(invocation_id="inv-1", session_id=ADK_SESSION)
     tc = _CallbackContext(invocation_id="inv-1", session_id=ADK_SESSION)
@@ -186,19 +188,18 @@ async def test_full_invocation_spans_all_carry_home_session(
 
     sids = _span_session_ids(client)
     assert len(sids) == 3
-    assert all(sid == HOME_SESSION for sid in sids)
+    assert all(sid == ADK_SESSION for sid in sids)
 
 
 @pytest.mark.asyncio
-async def test_two_adk_sessions_roll_up_to_one_home_session(
+async def test_two_adk_sessions_keep_separate_span_session_ids(
     plugin: HarmonografTelemetryPlugin, client: Client
 ) -> None:
-    """Two distinct ADK session_ids from a process-shared Client both
-    land on the home session — the intended rollup after #61. ADK's
-    AgentTool delegation produces this pattern naturally (each
-    sub-Runner has its own InMemorySessionService and mints its own
-    session_id); before this fix, that scattered spans across N
-    harmonograf sessions per adk-web run.
+    """Two distinct ADK sessions (e.g. an AgentTool spawning a fresh
+    sub-Runner) keep their spans on their own session_ids. This is the
+    inverse of the harmonograf#61 rollup assertion — harmonograf#63
+    server-side routing for goldfive events makes the rollup
+    unnecessary at the plugin layer.
     """
     await plugin.before_run_callback(
         invocation_context=_InvocationContext("inv-A", ADK_SESSION)
@@ -206,7 +207,7 @@ async def test_two_adk_sessions_roll_up_to_one_home_session(
     await plugin.before_run_callback(
         invocation_context=_InvocationContext("inv-B", OTHER_SESSION)
     )
-    assert _span_session_ids(client) == [HOME_SESSION, HOME_SESSION]
+    assert _span_session_ids(client) == [ADK_SESSION, OTHER_SESSION]
 
 
 # ---------------------------------------------------------------------------
@@ -219,8 +220,12 @@ async def test_before_run_preserves_adk_session_id_as_attribute(
     plugin: HarmonografTelemetryPlugin, client: Client
 ) -> None:
     """INVOCATION span's ``adk.session_id`` attribute carries the
-    per-ctx ADK session_id so debug tooling can still correlate a
-    span back to the exact sub-Runner ADK session that produced it.
+    per-ctx ADK session id so debug tooling can correlate a span back
+    to the exact sub-Runner ADK session that produced it. Preserved
+    from harmonograf#62 — the forensic hook is still useful even now
+    that ``span.session_id`` also holds the ADK session id, because
+    the attribute survives future routing changes that might repoint
+    ``session_id`` elsewhere.
     """
     ctx = _InvocationContext(invocation_id="inv-1", session_id=ADK_SESSION)
     await plugin.before_run_callback(invocation_context=ctx)
@@ -231,13 +236,15 @@ async def test_before_run_preserves_adk_session_id_as_attribute(
 
 
 @pytest.mark.asyncio
-async def test_missing_adk_session_omits_adk_session_id_attribute(
+async def test_missing_adk_session_falls_back_to_home_session(
     plugin: HarmonografTelemetryPlugin, client: Client
 ) -> None:
     """If ADK runs without a session service (unit-test harnesses,
-    offline replays), ``_adk_session_id`` returns ``""`` and we omit
-    the attribute rather than stamp an empty string. Span session_id
-    still rolls up to the home session.
+    offline replays, or a bare ctx whose ``session`` is ``None``),
+    ``_adk_session_id`` returns ``""`` and the plugin falls back to
+    the Client's home session rather than stamping an empty string.
+    The ``adk.session_id`` attribute is omitted (there's nothing to
+    stamp).
     """
 
     class _Bare:
@@ -253,16 +260,14 @@ async def test_missing_adk_session_omits_adk_session_id_attribute(
 
 
 @pytest.mark.asyncio
-async def test_missing_home_session_falls_back_to_empty(
+async def test_missing_everything_falls_back_to_empty(
     made: list[FakeTransport],
 ) -> None:
-    """When the Client has no Hello session assigned yet and no explicit
-    session_id was passed, the plugin stamps ``""`` — emit_span_start
-    resolves that to the Client's default (which itself is empty). This
-    is a degraded state (the transport hasn't connected) and we don't
-    want to raise; the downstream server falls back to an auto-created
-    home session on first span. The important thing is we don't crash
-    the plugin when the Client is pre-connect.
+    """Fully degraded state: the Client has no Hello session assigned
+    and the ctx has no session either. The plugin stamps ``""`` rather
+    than crashing — ``emit_span_start`` resolves that to the Client's
+    default (also empty in this harness) and the server auto-creates a
+    home session on first span. The important thing is we don't raise.
     """
     client = Client(
         name="no-home-session",
@@ -272,9 +277,14 @@ async def test_missing_home_session_falls_back_to_empty(
         _transport_factory=make_factory(made),
     )
     plugin = HarmonografTelemetryPlugin(client)
-    ctx = _InvocationContext(invocation_id="inv-1", session_id=ADK_SESSION)
-    await plugin.before_run_callback(invocation_context=ctx)
+
+    class _Bare:
+        invocation_id = "inv-1"
+        agent = _Agent("root")
+        session = None
+
+    await plugin.before_run_callback(invocation_context=_Bare())
     [span] = _span_starts(client)
-    # Home session is empty pre-connect; span session_id is whatever the
-    # emit_span_start default resolves to (also empty in this harness).
+    # Neither the ctx nor the client carry a session; span.session_id
+    # is whatever emit_span_start's default resolves to (also empty).
     assert span.session_id == ""
