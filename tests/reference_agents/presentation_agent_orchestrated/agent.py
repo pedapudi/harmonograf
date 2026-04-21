@@ -180,8 +180,6 @@ def _build_app() -> Any:
     planner = LLMPlanner(call_llm=call_llm, model=planner_model)
     goal_deriver = LLMGoalDeriver(call_llm=call_llm, model=planner_model)
 
-    wrapped = goldfive.wrap(tree, planner=planner, goal_deriver=goal_deriver)
-
     plugins: list[Any] = []
     client = _get_or_create_client()
     if client is not None:
@@ -194,6 +192,13 @@ def _build_app() -> Any:
             )
         else:
             plugins.append(HarmonografTelemetryPlugin(client))
+
+    wrapped = goldfive.wrap(
+        tree,
+        planner=planner,
+        goal_deriver=goal_deriver,
+        plugins=plugins,
+    )
 
     return App(
         name="presentation_agent_orchestrated",
