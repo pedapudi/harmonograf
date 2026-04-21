@@ -205,6 +205,23 @@ class TestOrchestratedAppExport:
             "path will not reach the goldfive steerer"
         )
 
+        # Regression guard for harmonograf#57: a ``HarmonografSink``
+        # must appear among the runner's sinks so goldfive's
+        # ``plan_submitted`` / ``plan_revised`` / ``drift_detected`` /
+        # ``task_*`` events reach harmonograf. Before the fix the demo
+        # only wired the telemetry plugin + control channel; the
+        # goldfive event bus ran through ``LoggingSink`` only and the
+        # UI's Trajectory view stayed at "no plan yet" for the whole
+        # run even while goldfive fired the full event stream.
+        from harmonograf_client import HarmonografSink
+
+        sinks = list(getattr(runner, "sinks", None) or [])
+        assert any(isinstance(s, HarmonografSink) for s in sinks), (
+            "no HarmonografSink on runner.sinks — goldfive plan / task "
+            "events will not reach harmonograf (harmonograf#57). "
+            f"sinks={[type(s).__name__ for s in sinks]}"
+        )
+
 
 class TestPresentationGoldfiveRunner:
     """End-to-end: goldfive Runner + HarmonografSink via build_goldfive_runner.
