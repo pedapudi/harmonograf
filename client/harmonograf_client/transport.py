@@ -89,6 +89,24 @@ class ControlAckSpec:
     detail: str = ""
 
 
+@dataclasses.dataclass
+class _SessionSubscription:
+    """Bookkeeping for one per-ADK-session control subscription.
+
+    ``task`` is the asyncio task that owns the ``SubscribeControl`` RPC
+    for this session. ``stream_id`` is a freshly-minted id used on the
+    SubscribeControl request so the server can attribute this secondary
+    sub independently of the home subscription. ``cancelled`` is set
+    when :meth:`Transport.close_session_subscription` removes the entry
+    so the loop can skip restart on the next reconnect.
+    """
+
+    session_id: str
+    stream_id: str
+    task: Optional[asyncio.Task] = None
+    cancelled: bool = False
+
+
 class Transport:
     def __init__(
         self,
@@ -160,6 +178,21 @@ class Transport:
 
         self._assigned_session_id: str = session_id
         self._assigned_stream_id: str = ""
+
+        # Per-ADK-session secondary control subscriptions. Keyed by the ADK
+        # ``session.id`` — NOT the harmonograf-assigned home session. The
+        # home subscription (opened from ``_control_loop``) is always the
+        # baseline identity of this Client to the server; these additional
+        # subscriptions are additive and let STEER targets carrying an
+        # ADK ``session_id`` land on a sub whose ``session_id`` matches,
+        # which the router prefers over the home sub (see server-side
+        # ``ControlRouter.deliver``).
+        self._session_subs: dict[str, _SessionSubscription] = {}
+        self._session_subs_lock = threading.Lock()
+        # Snapshot of the currently-live stub so newly-registered
+        # subscriptions can bind without waiting for the next connect.
+        # Cleared on every ``_serve`` teardown; replayed after reconnect.
+        self._live_stub: Any = None
 
         # Reconnect hardening state.
         # _healthy is set when the current connection has produced at
@@ -459,6 +492,7 @@ class Transport:
         hello = self._build_hello(telemetry_pb2)
         send_queue: asyncio.Queue = asyncio.Queue()
         self._send_queue = send_queue
+        self._live_stub = stub
         await send_queue.put(telemetry_pb2.TelemetryUp(hello=hello))
 
         async def request_iter():
@@ -502,46 +536,67 @@ class Transport:
             recv_task.cancel()
             raise RuntimeError("no welcome from server")
 
-        control_task = asyncio.create_task(self._control_loop(stub, send_queue))
+        control_task = asyncio.create_task(
+            self._control_loop(
+                stub,
+                send_queue,
+                session_id=self._assigned_session_id,
+                stream_id=self._assigned_stream_id,
+            )
+        )
         send_task = asyncio.create_task(self._send_loop(send_queue))
 
-        done, pending = await asyncio.wait(
-            {recv_task, control_task, send_task},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        # On clean shutdown — send_task exited because ``_stop`` was set —
-        # the send_loop has already drained the ring buffer and put Goodbye
-        # + EOF on the queue. gRPC is still yielding those items to the
-        # server; cancelling recv_task now would abort the bidi call and
-        # drop pending events in transit. Wait for the server to close
-        # its side (recv_task returns naturally) before tearing down.
-        if (
-            self._stop.is_set()
-            and send_task in done
-            and not send_task.cancelled()
-            and recv_task not in done
-        ):
-            try:
-                await asyncio.wait_for(
-                    asyncio.shield(recv_task), timeout=_SHUTDOWN_DRAIN_TIMEOUT_S
-                )
-            except (asyncio.TimeoutError, Exception):
-                pass
-        for t in pending:
-            t.cancel()
-        for t in pending:
-            try:
-                await t
-            except Exception:
-                pass
-        for t in done:
-            exc = t.exception()
-            if exc is not None and not isinstance(exc, asyncio.CancelledError):
-                # Clear send_queue so late bridge acks are not posted
-                # onto a stream that is already dead.
-                self._send_queue = None
-                raise exc
-        self._send_queue = None
+        # Replay any per-ADK-session subscriptions registered before or
+        # between connects so STEER targets carrying an ADK session id
+        # land on a sub whose session_id matches, which the server
+        # prefers over the home sub.
+        self._start_registered_session_subs(stub, send_queue)
+
+        try:
+            done, pending = await asyncio.wait(
+                {recv_task, control_task, send_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            # On clean shutdown — send_task exited because ``_stop`` was set —
+            # the send_loop has already drained the ring buffer and put Goodbye
+            # + EOF on the queue. gRPC is still yielding those items to the
+            # server; cancelling recv_task now would abort the bidi call and
+            # drop pending events in transit. Wait for the server to close
+            # its side (recv_task returns naturally) before tearing down.
+            if (
+                self._stop.is_set()
+                and send_task in done
+                and not send_task.cancelled()
+                and recv_task not in done
+            ):
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(recv_task), timeout=_SHUTDOWN_DRAIN_TIMEOUT_S
+                    )
+                except (asyncio.TimeoutError, Exception):
+                    pass
+            for t in pending:
+                t.cancel()
+            for t in pending:
+                try:
+                    await t
+                except Exception:
+                    pass
+            for t in done:
+                exc = t.exception()
+                if exc is not None and not isinstance(exc, asyncio.CancelledError):
+                    raise exc
+        finally:
+            # Always tear down per-session subscription tasks tied to this
+            # stub, even on exception — otherwise the task wraps a stale
+            # gRPC call and leaks across reconnect. The registered subs
+            # themselves stay in ``_session_subs`` so the next ``_serve``
+            # can re-bind them.
+            await self._cancel_session_sub_tasks()
+            # Clear send_queue so late bridge acks are not posted onto a
+            # stream that is already dead.
+            self._send_queue = None
+            self._live_stub = None
 
     # ------------------------------------------------------------------
     # Send loop
@@ -720,15 +775,32 @@ class Transport:
     # Control subscribe loop
     # ------------------------------------------------------------------
 
-    async def _control_loop(self, stub: Any, send_queue: asyncio.Queue) -> None:
+    async def _control_loop(
+        self,
+        stub: Any,
+        send_queue: asyncio.Queue,
+        *,
+        session_id: str,
+        stream_id: str,
+    ) -> None:
+        """Open one ``SubscribeControl`` stream and route its events.
+
+        Used for both the home subscription (called once from
+        :meth:`_serve`) and for each per-ADK-session subscription
+        registered via :meth:`open_session_subscription`. All subs share
+        the same ``_control_forward`` / ``_dispatch_control`` path so a
+        goldfive bridge receives events from any sub indistinguishably —
+        session scoping is achieved by the server's router preferring
+        session-matching subs over the home fallback.
+        """
         from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
 
         from .pb import control_pb2, telemetry_pb2
 
         req = control_pb2.SubscribeControlRequest(
-            session_id=self._assigned_session_id,
+            session_id=session_id,
             agent_id=self._agent_id,
-            stream_id=self._assigned_stream_id,
+            stream_id=stream_id,
         )
         sub_kwargs = {}
         if self._auth_token:
@@ -752,7 +824,124 @@ class Transport:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            log.warning("control subscription ended: %s", e)
+            log.warning(
+                "control subscription ended session_id=%s: %s", session_id, e
+            )
+
+    # ------------------------------------------------------------------
+    # Per-ADK-session control subscriptions
+    # ------------------------------------------------------------------
+
+    def open_session_subscription(self, adk_session_id: str) -> None:
+        """Open an additional ``SubscribeControl`` stream keyed on ``adk_session_id``.
+
+        Thread-safe. Idempotent: calling twice with the same session_id
+        is a no-op. Safe to call before the transport has connected —
+        the subscription is recorded and opened automatically once the
+        loop reaches the control-loop phase of the next ``_serve`` call.
+        """
+        if not adk_session_id:
+            return
+        with self._session_subs_lock:
+            if adk_session_id in self._session_subs:
+                return
+            stream_id = f"{self._assigned_stream_id or 'str'}.{adk_session_id}"
+            sub = _SessionSubscription(
+                session_id=adk_session_id, stream_id=stream_id
+            )
+            self._session_subs[adk_session_id] = sub
+        loop = self._loop
+        stub = self._live_stub
+        sq = self._send_queue
+        if loop is None or stub is None or sq is None:
+            # Not currently connected. The sub is registered; it will be
+            # started on the next successful ``_serve``.
+            return
+        try:
+            loop.call_soon_threadsafe(
+                self._spawn_session_sub_task, stub, sq, sub
+            )
+        except RuntimeError:
+            # Loop is shutting down — next reconnect (if any) replays.
+            pass
+
+    def close_session_subscription(self, adk_session_id: str) -> None:
+        """Cancel and remove a previously-registered per-ADK-session sub.
+
+        Safe to call from any thread. A no-op if no matching sub exists.
+        """
+        if not adk_session_id:
+            return
+        with self._session_subs_lock:
+            sub = self._session_subs.pop(adk_session_id, None)
+        if sub is None:
+            return
+        sub.cancelled = True
+        task = sub.task
+        loop = self._loop
+        if task is not None and loop is not None:
+            try:
+                loop.call_soon_threadsafe(task.cancel)
+            except RuntimeError:
+                pass
+
+    @property
+    def registered_session_ids(self) -> tuple[str, ...]:
+        """Snapshot of currently-registered per-ADK-session ids.
+
+        Exposed for tests and observability; not part of the daily API.
+        """
+        with self._session_subs_lock:
+            return tuple(self._session_subs.keys())
+
+    def _start_registered_session_subs(
+        self, stub: Any, send_queue: asyncio.Queue
+    ) -> None:
+        """Called from :meth:`_serve` after the home control task is live.
+
+        Launches one ``_control_loop`` task per already-registered
+        per-ADK-session subscription so they are re-bound to the fresh
+        stub after every reconnect.
+        """
+        with self._session_subs_lock:
+            snapshot = list(self._session_subs.values())
+        for sub in snapshot:
+            if sub.cancelled:
+                continue
+            self._spawn_session_sub_task(stub, send_queue, sub)
+
+    def _spawn_session_sub_task(
+        self, stub: Any, send_queue: asyncio.Queue, sub: _SessionSubscription
+    ) -> None:
+        # Runs on the transport loop.
+        if sub.cancelled:
+            return
+        if sub.task is not None and not sub.task.done():
+            return
+        sub.task = asyncio.create_task(
+            self._control_loop(
+                stub,
+                send_queue,
+                session_id=sub.session_id,
+                stream_id=sub.stream_id,
+            )
+        )
+
+    async def _cancel_session_sub_tasks(self) -> None:
+        with self._session_subs_lock:
+            tasks = [
+                s.task for s in self._session_subs.values() if s.task is not None
+            ]
+            for s in self._session_subs.values():
+                s.task = None
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        for t in tasks:
+            try:
+                await t
+            except Exception:
+                pass
 
     def _dispatch_control(self, event: Any, gf_control_pb2: Any) -> Any:
         kind_name = _control_kind_name(event.kind, gf_control_pb2)

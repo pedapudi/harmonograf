@@ -311,6 +311,34 @@ class Client:
     def on_control(self, kind: str, callback: ControlCallback) -> None:
         self._transport.register_control_handler(kind.upper(), callback)
 
+    def register_session(self, adk_session_id: str) -> None:
+        """Open a per-ADK-session ``SubscribeControl`` stream.
+
+        The Client's home subscription (opened once at start, keyed on
+        the harmonograf-assigned session) is the baseline identity to
+        the server. ``register_session`` opens an *additional* control
+        stream whose ``session_id`` matches the ADK ``session.id`` you
+        pass in. The server's router prefers session-matching
+        subscriptions when routing STEER / INJECT_MESSAGE events
+        targeting ``(session_id, agent_id)``, so frontend steer
+        actions fired against the ADK session reach this Client's
+        bound steerer instead of returning ``delivery=FAILURE``.
+
+        Thread-safe and idempotent: re-registering the same session is
+        a no-op. Safe to call before the transport has connected — the
+        sub is recorded and opened on the next successful connect.
+        """
+        self._transport.open_session_subscription(adk_session_id)
+
+    def unregister_session(self, adk_session_id: str) -> None:
+        """Cancel a previously-registered per-ADK-session control stream."""
+        self._transport.close_session_subscription(adk_session_id)
+
+    @property
+    def registered_session_ids(self) -> tuple[str, ...]:
+        """ADK session ids currently subscribed. For tests and diagnostics."""
+        return self._transport.registered_session_ids
+
     def set_control_forward(self, fn: Optional[Callable[[Any], None]]) -> None:
         """Install a raw ``ControlEvent`` forwarder. ``None`` uninstalls.
 
