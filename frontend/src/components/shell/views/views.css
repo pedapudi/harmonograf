@@ -472,12 +472,18 @@ a.hg-settings__value:hover {
 
 /* Delegation annotation: faint cyan line under the task card. Driven by
  * goldfive DelegationObserved events — see frontend/src/gantt/index.ts
- * DelegationRegistry. */
+ * DelegationRegistry. The inner <title> element gives the text a native
+ * browser tooltip on hover; we re-enable pointer-events just for that. */
 .hg-traj__node-delegation {
   fill: #80deea;
   font-size: 10px;
   opacity: 0.7;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: help;
+  transition: opacity 120ms ease-out;
+}
+.hg-traj__node-delegation:hover {
+  opacity: 1;
 }
 
 .hg-traj__removed {

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { GanttRenderer, type HoverState } from './renderer';
+import { GanttRenderer, type DelegationHoverState, type HoverState } from './renderer';
 import type { SessionStore } from './index';
 import type { ContextWindowSample } from './types';
 import { formatTokens } from './contextOverlay';
@@ -7,6 +7,8 @@ import { useThemeStore } from '../theme/store';
 import { useUiStore } from '../state/uiStore';
 import { SpanContextMenu, type ContextMenuState } from '../components/Interaction/SpanContextMenu';
 import { usePopoverStore } from '../state/popoverStore';
+import { DelegationTooltip } from '../components/DelegationTooltip/DelegationTooltip';
+import { actorDisplayLabel } from '../theme/agentColors';
 
 interface ContextHover {
   agentId: string;
@@ -46,6 +48,7 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
 
   const [hover, setHover] = useState<HoverState | null>(null);
+  const [delegHover, setDelegHover] = useState<DelegationHoverState | null>(null);
   const [ctxHover, setCtxHover] = useState<ContextHover | null>(null);
   const [liveBroken, setLiveBroken] = useState(false);
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
@@ -98,6 +101,31 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
           if (prev?.spanId === h?.spanId) return prev;
           return h;
         }),
+        onDelegationHoverChange: (h) =>
+          setDelegHover((prev) => {
+            // Fast path: same edge + negligible pointer motion → bail to
+            // avoid a React re-render per mouse event.
+            if (!prev && !h) return prev;
+            if (prev && h && prev.record.seq === h.record.seq) {
+              if (Math.abs(prev.x - h.x) < 2 && Math.abs(prev.y - h.y) < 2) {
+                return prev;
+              }
+            }
+            return h;
+          }),
+        onDelegationClick: (rec) => {
+          // Focus the to-agent row so the reader's eye snaps to where the
+          // delegated work lands. setFocusedAgent drives row expansion in
+          // the renderer via setActiveRenderer; no manual scroll needed
+          // because focused rows are tall enough to stand out within the
+          // existing viewport.
+          const ui = useUiStore.getState();
+          ui.setFocusedAgent(rec.toAgentId);
+          // Push through the active renderer so the canvas immediately
+          // reflects the focus (the renderer subscribes to nothing in
+          // uiStore; setFocusedAgent on renderer is an imperative call).
+          ui.activeRenderer?.focusAgent(rec.toAgentId);
+        },
         onGutterAgentClick: (agentId) => {
           useUiStore.getState().toggleAgentHidden(agentId);
         },
@@ -209,6 +237,15 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
     const px = e.clientX - r.left;
     const py = e.clientY - r.top;
     renderer.handlePointerMove(px, py);
+    // Cursor: pointer when over anything clickable (span or delegation
+    // edge). Matches the implicit behavior spans already got through the
+    // overlay hover stroke.
+    const el = e.currentTarget;
+    if (renderer.spanAt(px, py) || renderer.delegationAt(px, py)) {
+      if (el.style.cursor !== 'pointer') el.style.cursor = 'pointer';
+    } else if (el.style.cursor === 'pointer') {
+      el.style.cursor = '';
+    }
     // Only resolve the context-window hover when the pointer is NOT over a
     // span rect — spans own the foreground tooltip, the band is background.
     if (contextOverlayVisible && !renderer.spanAt(px, py)) {
@@ -228,10 +265,12 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
       setCtxHover(null);
     }
   };
-  const onLeave = () => {
+  const onLeave = (e: React.MouseEvent<HTMLDivElement>) => {
     renderer.handlePointerLeave();
     setHover(null);
+    setDelegHover(null);
     setCtxHover(null);
+    e.currentTarget.style.cursor = '';
   };
   const onContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -245,6 +284,12 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
   };
 
   const span = hover ? store.spans.get(hover.spanId) : undefined;
+
+  const resolveDelegationAgentLabel = (agentId: string): string => {
+    const synthetic = actorDisplayLabel(agentId);
+    if (synthetic) return synthetic;
+    return store.agents.get(agentId)?.name ?? agentId;
+  };
 
   return (
     <div
@@ -323,6 +368,12 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
             )}
           </div>
         </div>
+      )}
+      {delegHover && !hover && (
+        <DelegationTooltip
+          hover={delegHover}
+          resolveAgentLabel={resolveDelegationAgentLabel}
+        />
       )}
       {liveBroken && !store.nowMs ? null : liveBroken && (
         <button
