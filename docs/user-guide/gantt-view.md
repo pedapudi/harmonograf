@@ -106,6 +106,22 @@ the trailing edge, one per `streaming_tick` the client reported.
 TRANSFER and its invoked child on another agent row. Arrowhead at the target.
 These edges are the visual signature of a delegation.
 
+### Delegation edges
+
+When a coordinator agent calls `AgentTool(sub_agent)`, goldfive observes
+the tool call on its registry-dispatch side and emits a
+`DelegationObserved` event. Harmonograf paints an extra edge for each
+such event — dashed, 30% opacity, colored with the goldfive actor cyan
+(`#80deea`) — running from the coordinator's row to the sub-agent's row
+at the moment of delegation. A small `↪↪` glyph sits at the midpoint.
+
+These edges sit alongside the regular TRANSFER arrows above: a TRANSFER
+arrow means "the framework recorded a handoff span"; a delegation edge
+means "goldfive's registry saw a registered agent call another
+registered agent as a tool." The generic TOOL_CALL span the telemetry
+plugin emits on the coordinator's row is not enough to reconstruct this
+cross-row relationship, so goldfive fills it in.
+
 ## Navigating — pan, zoom, and selection
 
 ### Mouse
