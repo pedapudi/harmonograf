@@ -162,28 +162,38 @@ class TestOrchestratedAppExport:
         assert "harmonograf-telemetry" in plugin_names
 
     @pytest.mark.asyncio
-    async def test_orchestrated_app_wires_control_channel(
+    async def test_orchestrated_app_wires_full_observability(
         self,
         presentation_agent_orchestrated_module: Any,
         harmonograf_server: dict,
     ) -> None:
-        """``_build_app`` must wire a live ControlChannel into the Runner.
+        """``_build_app`` must wire plugin + sink + control onto the Runner.
 
-        Regression guard for harmonograf#55: the old orchestrated-mode
-        build installed only ``HarmonografTelemetryPlugin`` so STEER /
-        PAUSE / CANCEL events from the UI returned ``delivery=FAILURE``
-        — spans flowed out but nothing flowed back in. This test
-        exercises the exact construction path (inside an event loop,
-        the same shape ``adk web`` uses) and asserts that the wrapped
-        runner's ``.control`` is the bridge-backed channel.
+        Under single-Runner-per-wrap (goldfive#130), all three harmonograf
+        hookups attach to the one runner that backs the wrapped tree:
+
+        * :class:`HarmonografTelemetryPlugin` on the ADK app / wrap
+          plugins (so lifecycle spans flow out — harmonograf#48 shape).
+        * :class:`HarmonografSink` on ``runner.sinks`` (so goldfive's
+          ``plan_submitted`` / ``plan_revised`` / ``drift_detected`` /
+          ``task_*`` events reach harmonograf — the hookup that
+          harmonograf#57 was bug-tracking under N-runners).
+        * A live :class:`ControlBridge`-backed :class:`ControlChannel`
+          on ``runner.control`` so STEER / PAUSE / CANCEL events from
+          the UI route back into the goldfive steerer. Without it,
+          PostAnnotation returns ``delivery=FAILURE``.
+
+        The test runs inside a loop — the same shape ``adk web`` uses —
+        so the ControlBridge is reachable (it needs a running loop).
         """
+        from harmonograf_client import HarmonografSink
         from harmonograf_client._control_bridge import ControlBridge
 
         prev = os.environ.pop("OPENAI_API_KEY", None)
         os.environ["HARMONOGRAF_SERVER"] = harmonograf_server["addr"]
         try:
-            # First-access is lazy — run on this asyncio loop so
-            # ``control_channel(client)`` finds it.
+            # First-access is lazy — run on this asyncio loop so the
+            # ControlBridge construction in ``_build_app`` finds it.
             app = presentation_agent_orchestrated_module.app
         finally:
             os.environ.pop("HARMONOGRAF_SERVER", None)
@@ -191,13 +201,15 @@ class TestOrchestratedAppExport:
                 os.environ["OPENAI_API_KEY"] = prev
 
         root = app.root_agent
-        # Dig for the Runner the wrap built. GoldfiveADKAgent keeps the
-        # Runner under ``_runner`` post-wrap; we just need its control.
+        # ``goldfive.wrap`` returns a ``GoldfiveADKAgent`` that keeps the
+        # backing Runner under ``_runner``.
         runner = getattr(root, "_runner", None) or getattr(root, "runner", None)
         assert runner is not None, f"no runner on {type(root).__name__}"
+
+        # Control: live, bridge-backed channel.
         assert runner.control is not None, (
-            "runner.control is None — ``control_channel`` did not wire; "
-            "steers will return delivery=FAILURE (harmonograf#55)"
+            "runner.control is None — ControlBridge did not wire; "
+            "steers will return delivery=FAILURE"
         )
         bridge = getattr(runner.control, "_harmonograf_control_bridge", None)
         assert isinstance(bridge, ControlBridge), (
@@ -205,21 +217,20 @@ class TestOrchestratedAppExport:
             "path will not reach the goldfive steerer"
         )
 
-        # Regression guard for harmonograf#57: a ``HarmonografSink``
-        # must appear among the runner's sinks so goldfive's
-        # ``plan_submitted`` / ``plan_revised`` / ``drift_detected`` /
-        # ``task_*`` events reach harmonograf. Before the fix the demo
-        # only wired the telemetry plugin + control channel; the
-        # goldfive event bus ran through ``LoggingSink`` only and the
-        # UI's Trajectory view stayed at "no plan yet" for the whole
-        # run even while goldfive fired the full event stream.
-        from harmonograf_client import HarmonografSink
-
+        # Sink: HarmonografSink on runner.sinks so goldfive plan / task
+        # events reach harmonograf.
         sinks = list(getattr(runner, "sinks", None) or [])
         assert any(isinstance(s, HarmonografSink) for s in sinks), (
             "no HarmonografSink on runner.sinks — goldfive plan / task "
-            "events will not reach harmonograf (harmonograf#57). "
+            "events will not reach harmonograf. "
             f"sinks={[type(s).__name__ for s in sinks]}"
+        )
+
+        # Plugin: HarmonografTelemetryPlugin on the ADK App plugins so
+        # ADK lifecycle callbacks turn into harmonograf spans.
+        plugin_names = {getattr(p, "name", "") for p in (app.plugins or [])}
+        assert "harmonograf-telemetry" in plugin_names, (
+            f"HarmonografTelemetryPlugin not on app.plugins: {plugin_names}"
         )
 
 

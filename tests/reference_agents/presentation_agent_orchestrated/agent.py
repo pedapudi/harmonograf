@@ -154,9 +154,20 @@ def _build_app() -> Any:
     Mirrors goldfive's own ``examples/presentation_agent`` planner /
     goal-deriver selection: live when ``OPENAI_API_KEY`` is set, mock
     otherwise so ``adk web`` can load offline.
+
+    Under single-Runner-per-wrap (goldfive#130), one ``goldfive.Runner``
+    backs the whole wrapped tree and it shares one ADK session with
+    ``adk web``. The three harmonograf hookups the UI needs — span
+    plugin, goldfive event sink, control bridge — wire onto the same
+    :class:`Client` and the same Runner, so the full observability
+    surface is a few lines of explicit composition. No bundle helper
+    is needed.
     """
+    import asyncio
+
     import goldfive
     from goldfive import LLMGoalDeriver, LLMPlanner
+    from goldfive.control import ControlChannel
     from google.adk.apps.app import App
 
     live = bool(os.environ.get("OPENAI_API_KEY"))
@@ -182,33 +193,45 @@ def _build_app() -> Any:
 
     plugins: list[Any] = []
     sinks: list[Any] = []
-    control = None
+    control: Any = None
+    bridge: Any = None
     client = _get_or_create_client()
     if client is not None:
         try:
-            from harmonograf_client import adk_web_observability
+            from harmonograf_client import HarmonografSink, HarmonografTelemetryPlugin
+            from harmonograf_client._control_bridge import ControlBridge
         except Exception as e:  # noqa: BLE001
             log.warning(
-                "harmonograf_client.adk_web_observability unavailable (%s); "
-                "running without spans / plan sink / control",
+                "harmonograf_client unavailable (%s); running without spans / "
+                "plan sink / control",
                 e,
             )
         else:
-            # ``adk_web_observability`` bundles the three hook-ups the
-            # ``adk web`` path needs: telemetry plugin (spans), plan
-            # sink (goldfive plan / task / drift events — the missing
-            # piece from harmonograf#57), and control channel (STEER /
-            # PAUSE / CANCEL from the UI — harmonograf#55).
-            #
-            # ``control`` is ``None`` when ``_build_app`` runs outside
-            # an asyncio loop (synchronous test setup); adk web always
-            # builds the app inside its loop so the production path is
-            # covered. A warning is logged inside the helper in that
-            # case.
-            bundle = adk_web_observability(client)
-            plugins.append(bundle.plugin)
-            sinks.append(bundle.sink)
-            control = bundle.control
+            plugins.append(HarmonografTelemetryPlugin(client))
+            sinks.append(HarmonografSink(client))
+            # Build a ControlChannel bound to a live bridge. The bridge
+            # needs a running asyncio loop to consume events; adk web
+            # always builds the app inside its loop so the production
+            # path is covered. When ``_build_app`` is called outside a
+            # loop (synchronous test setup), fall through to
+            # ``control=None`` — plugin + sink still flow, but STEER /
+            # PAUSE / CANCEL from the UI will return delivery=FAILURE
+            # until the caller rebuilds inside a loop.
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                log.warning(
+                    "presentation_agent_orchestrated: _build_app called "
+                    "outside a running loop; ControlBridge skipped"
+                )
+            else:
+                channel = ControlChannel()
+                bridge = ControlBridge(client, channel, loop)
+                bridge.start()
+                # Stash for test/teardown introspection — same pattern
+                # observe() uses on runner._harmonograf_control_bridge.
+                channel._harmonograf_control_bridge = bridge  # type: ignore[attr-defined]
+                control = channel
 
     wrapped = goldfive.wrap(
         tree,
