@@ -13,7 +13,7 @@
 // canvases to a Renderer instance; the instance subscribes to the SessionStore
 // and schedules redraws via requestAnimationFrame.
 
-import { colorForAgent } from '../theme/agentColors';
+import { colorForAgent, GOLDFIVE_ACTOR_ID } from '../theme/agentColors';
 import type { TaskPlanMode } from '../state/uiStore';
 import { bucketKey, cssVar, refreshThemeCache, resolveStyle } from './colors';
 import {
@@ -207,6 +207,10 @@ export class GanttRenderer {
       this.store.contextSeries.subscribe(() => {
         // A new context-window sample always redraws blocks (band geometry
         // + header chip both live in the blocks pass).
+        this.blocksDirty = true;
+      }),
+      this.store.delegations.subscribe(() => {
+        // Delegation edges are painted inside the blocks pass.
         this.blocksDirty = true;
       }),
     );
@@ -924,6 +928,12 @@ export class GanttRenderer {
     // data area so curves never bleed into the gutter or axis.
     this.drawLinks(ctx);
 
+    // Delegation edges: coordinator→sub_agent curves fed by goldfive
+    // DelegationObserved events (see SessionStore.delegations). Distinct
+    // style from LINK_INVOKED — goldfive is the observer, so color + glyph
+    // borrow from the synthetic goldfive actor.
+    this.drawDelegations(ctx);
+
     ctx.restore();
     // Expose last-draw count for stress tooling.
     this.lastDrawnCount = visibleCount;
@@ -1025,6 +1035,97 @@ export class GanttRenderer {
       drawEdgePath(ctx, e.x1, e.y1, e.x2, e.y2);
       ctx.stroke();
       drawArrowhead(ctx, e.x2, e.y2, e.x1, e.y1, e.color);
+    }
+    ctx.restore();
+  }
+
+  // --- Delegation edges -------------------------------------------------
+  //
+  // One curve per goldfive DelegationRecord — from the fromAgentId row to
+  // the toAgentId row at the observed time. Unlike LINK_INVOKED edges,
+  // both anchors share the same t (delegation is instantaneous from the
+  // observer's POV), so the renderer lands them at each row's center
+  // rather than on a specific span bar. Dashed stroke + distinctive
+  // midpoint glyph keep them readable against the denser TRANSFER edges
+  // the plugin span path produces.
+  private drawDelegations(ctx: CanvasRenderingContext2D): void {
+    const delegations = this.store.delegations.list();
+    if (delegations.length === 0) return;
+    const vs = viewportStart(this.viewport);
+    const ve = this.viewport.endMs;
+    const w = this.widthCss;
+    const agents = this.store.agents.list;
+    if (agents.length === 0) return;
+
+    // Row-center lookup — delegation anchors are row-centered rather than
+    // lane-specific because there's no originating span bar to point at.
+    const rowCenterY = new Map<string, number>();
+    let y = TOP_MARGIN_PX;
+    for (const agent of agents) {
+      const rowH = this.rowHeight(agent.id);
+      rowCenterY.set(agent.id, y + rowH / 2);
+      y += rowH;
+    }
+
+    const dataLeft = GUTTER_WIDTH_PX + 10;
+    const dataRight = w;
+    // goldfive observed the delegation — color matches the synthetic
+    // goldfive actor row so the attribution reads the same everywhere.
+    const color = colorForAgent(GOLDFIVE_ACTOR_ID);
+
+    ctx.save();
+    ctx.lineWidth = 1.25;
+    ctx.globalAlpha = 0.3;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = color;
+    let drew = 0;
+    for (const d of delegations) {
+      // Cull to the visible time window (with a small pad for endpoints
+      // sitting just off-edge). Consistent with drawLinks' margin approach.
+      const margin = this.viewport.windowMs * 0.5;
+      if (d.observedAtMs < vs - margin || d.observedAtMs > ve + margin) {
+        continue;
+      }
+      const srcY = rowCenterY.get(d.fromAgentId);
+      const tgtY = rowCenterY.get(d.toAgentId);
+      if (srcY === undefined || tgtY === undefined) continue;
+      const x = msToPx(this.viewport, w, d.observedAtMs);
+      if (x < dataLeft || x > dataRight) continue;
+      // Same-time, different-row edge: draw a shallow curve so the path
+      // doesn't collapse into a zero-width vertical line. Offset the
+      // control points horizontally by a fixed nudge.
+      const curveOffset = 24;
+      ctx.beginPath();
+      ctx.moveTo(x, srcY);
+      ctx.bezierCurveTo(
+        x + curveOffset, srcY,
+        x + curveOffset, tgtY,
+        x, tgtY,
+      );
+      ctx.stroke();
+      drew++;
+    }
+
+    // Midpoint glyph pass — unsharp without lineDash so the symbol reads
+    // as a single solid mark instead of picking up the dash pattern.
+    if (drew > 0) {
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 0.6;
+      ctx.fillStyle = color;
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      for (const d of delegations) {
+        const srcY = rowCenterY.get(d.fromAgentId);
+        const tgtY = rowCenterY.get(d.toAgentId);
+        if (srcY === undefined || tgtY === undefined) continue;
+        const x = msToPx(this.viewport, w, d.observedAtMs);
+        if (x < dataLeft || x > dataRight) continue;
+        // Midpoint of a bezier with equal-x endpoints and offset control
+        // points collapses to (x + 3/4 * offset, (srcY+tgtY)/2). Hand-fit
+        // so the glyph clears the curve's crest.
+        ctx.fillText('↪↪', x + 4, (srcY + tgtY) / 2);
+      }
     }
     ctx.restore();
   }

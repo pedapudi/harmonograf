@@ -3,7 +3,11 @@ import { useEffect, useState } from 'react';
 import { useUiStore } from '../../../state/uiStore';
 import { useSessionWatch } from '../../../rpc/hooks';
 import type { Task, TaskEdge, TaskPlan, TaskStatus } from '../../../gantt/types';
-import type { DriftRecord, SessionStore } from '../../../gantt/index';
+import type {
+  DelegationRecord,
+  DriftRecord,
+  SessionStore,
+} from '../../../gantt/index';
 
 // ── Palette ────────────────────────────────────────────────────────────────
 // Aligned with GanttView's status palette so a task's status reads the same
@@ -39,6 +43,7 @@ interface TrajectoryViewModel {
   revs: TaskPlan[];
   driftsByRev: DriftRecord[][];
   allDrifts: DriftRecord[];
+  allDelegations: DelegationRecord[];
 }
 
 function buildViewModel(store: SessionStore | null): TrajectoryViewModel {
@@ -47,6 +52,7 @@ function buildViewModel(store: SessionStore | null): TrajectoryViewModel {
     revs: [],
     driftsByRev: [],
     allDrifts: [],
+    allDelegations: [],
   };
   if (!store) return empty;
   const plans = store.tasks.listPlans();
@@ -81,7 +87,14 @@ function buildViewModel(store: SessionStore | null): TrajectoryViewModel {
     }
     driftsByRev[idx].push(d);
   }
-  return { planId: primaryId, revs: combined, driftsByRev, allDrifts: drifts };
+  const delegations = [...store.delegations.list()];
+  return {
+    planId: primaryId,
+    revs: combined,
+    driftsByRev,
+    allDrifts: drifts,
+    allDelegations: delegations,
+  };
 }
 
 // ── DAG layout ─────────────────────────────────────────────────────────────
@@ -253,10 +266,12 @@ export function TrajectoryView() {
     const un1 = store.tasks.subscribe(() => setTick((n) => n + 1));
     const un2 = store.drifts.subscribe(() => setTick((n) => n + 1));
     const un3 = store.spans.subscribe(() => setTick((n) => n + 1));
+    const un4 = store.delegations.subscribe(() => setTick((n) => n + 1));
     return () => {
       un1();
       un2();
       un3();
+      un4();
     };
   }, [store]);
 
@@ -373,6 +388,7 @@ export function TrajectoryView() {
                 marks={marks}
                 compareRev={compareRev}
                 driftsOnRev={vm.driftsByRev[revIdx] ?? []}
+                delegations={vm.allDelegations}
                 selection={selection}
                 onSelectTask={(taskId) => {
                   if (!currentRev) return;
@@ -479,6 +495,7 @@ interface DagProps {
   marks: DiffMarks | null;
   compareRev: TaskPlan | null;
   driftsOnRev: DriftRecord[];
+  delegations: DelegationRecord[];
   selection: Selection;
   onSelectTask: (taskId: string) => void;
 }
@@ -496,10 +513,36 @@ function buildDriftsByTaskId(
   return m;
 }
 
+// Bucket delegations by the taskId the coordinator was bound to at the
+// moment of delegation. The DAG renders a faint "delegated to: X" line
+// under each task card that had at least one delegation observed during
+// its execution.
+function buildDelegationsByTaskId(
+  delegations: DelegationRecord[],
+): Map<string, DelegationRecord[]> {
+  const m = new Map<string, DelegationRecord[]>();
+  for (const d of delegations) {
+    if (!d.taskId) continue;
+    const arr = m.get(d.taskId) ?? [];
+    arr.push(d);
+    m.set(d.taskId, arr);
+  }
+  return m;
+}
+
 function DagPane(props: DagProps) {
-  const { plan, marks, compareRev, driftsOnRev, selection, onSelectTask } = props;
+  const {
+    plan,
+    marks,
+    compareRev,
+    driftsOnRev,
+    delegations,
+    selection,
+    onSelectTask,
+  } = props;
   const layout = plan ? layoutDag(plan) : null;
   const driftsByTaskId = buildDriftsByTaskId(driftsOnRev);
+  const delegationsByTaskId = buildDelegationsByTaskId(delegations);
 
   if (!plan || !layout) {
     return <div className="hg-traj__dag hg-traj__dag--empty">No plan to render.</div>;
@@ -569,6 +612,7 @@ function DagPane(props: DagProps) {
             const isAdded = marks?.added.has(t.id) ?? false;
             const isMod = marks?.modified.has(t.id) ?? false;
             const drifts = driftsByTaskId.get(t.id) ?? [];
+            const taskDelegations = delegationsByTaskId.get(t.id) ?? [];
             // Highest-severity drift drives the pill color (critical > warn > info).
             let worst = '';
             for (const d of drifts) {
@@ -632,6 +676,20 @@ function DagPane(props: DagProps) {
                       {drifts.length}
                     </text>
                   </g>
+                )}
+                {taskDelegations.length > 0 && (
+                  <text
+                    className="hg-traj__node-delegation"
+                    x={16}
+                    y={n.h - 6}
+                    fontSize={10}
+                    data-testid={`task-delegation-${t.id}`}
+                  >
+                    {`↪↪ delegated to: ${truncate(
+                      taskDelegations[0].toAgentId,
+                      14,
+                    )}${taskDelegations.length > 1 ? ` +${taskDelegations.length - 1}` : ''}`}
+                  </text>
                 )}
               </g>
             );

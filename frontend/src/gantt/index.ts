@@ -557,6 +557,56 @@ export class DriftRegistry {
   }
 }
 
+// A captured goldfive DelegationObserved event. Emitted when a coordinator
+// agent invokes `AgentTool(sub_agent)` — goldfive observes the tool call on
+// its registry-dispatch side and fans out a DelegationObserved event so
+// sinks can render an explicit from→to edge that the telemetry plugin's
+// generic TOOL_CALL span on the coordinator row would otherwise leave
+// implicit.
+export interface DelegationRecord {
+  seq: number;             // monotonic across the session, assigned on arrival
+  fromAgentId: string;     // coordinator (the observer-side "from")
+  toAgentId: string;       // sub-agent the coordinator delegated to
+  taskId: string;          // empty when the host agent has no bound task
+  invocationId: string;    // ADK invocation id for the delegation
+  observedAtMs: number;    // session-relative
+}
+
+// Delegation registry — in-memory list of DelegationObserved events received
+// during the session. Shape mirrors DriftRegistry so consumers can subscribe
+// without special-casing and the Gantt's delegation-edge render pass can
+// walk a single array per frame.
+export class DelegationRegistry {
+  private delegations: DelegationRecord[] = [];
+  private listeners = new Set<() => void>();
+  private nextSeq = 0;
+
+  list(): readonly DelegationRecord[] {
+    return this.delegations;
+  }
+
+  append(d: Omit<DelegationRecord, 'seq'>): void {
+    this.delegations.push({ ...d, seq: this.nextSeq++ });
+    this.emit();
+  }
+
+  clear(): void {
+    if (this.delegations.length === 0) return;
+    this.delegations = [];
+    this.nextSeq = 0;
+    this.emit();
+  }
+
+  subscribe(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  private emit(): void {
+    for (const fn of this.listeners) fn();
+  }
+}
+
 // A Session couples an AgentRegistry, a SpanIndex, and a TaskRegistry. The
 // renderer and chrome read directly from all three.
 export class SessionStore {
@@ -564,6 +614,7 @@ export class SessionStore {
   readonly spans = new SpanIndex();
   readonly tasks = new TaskRegistry();
   readonly drifts = new DriftRegistry();
+  readonly delegations = new DelegationRegistry();
   readonly contextSeries = new ContextSeriesRegistry();
 
   // Scan the span index for TOOL_CALL spans whose name is one of the
@@ -696,6 +747,7 @@ export class SessionStore {
     this.spans.clear();
     this.tasks.clear();
     this.drifts.clear();
+    this.delegations.clear();
     this.contextSeries.clear();
     this.nowMs = 0;
   }

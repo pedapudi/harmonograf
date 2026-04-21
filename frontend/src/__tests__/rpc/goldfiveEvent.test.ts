@@ -16,7 +16,11 @@ import {
   ApprovalRequestedSchema,
   ApprovalGrantedSchema,
   ApprovalRejectedSchema,
+  AgentInvocationStartedSchema,
+  AgentInvocationCompletedSchema,
+  DelegationObservedSchema,
 } from '../../pb/goldfive/v1/events_pb';
+import { TimestampSchema } from '@bufbuild/protobuf/wkt';
 import {
   PlanSchema,
   TaskSchema,
@@ -389,6 +393,127 @@ describe('applyGoldfiveEvent', () => {
       const [entry] = useApprovalsStore.getState().list('sess-x');
       // makePbTask sets assigneeAgentId = 'agent-a'.
       expect(entry.agentId).toBe('agent-a');
+    });
+  });
+
+  describe('registry-dispatch events (goldfive 2986775+)', () => {
+    it('delegationObserved appends a DelegationRecord with wire fields mapped through', () => {
+      const store = new SessionStore();
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev-del',
+          runId: 'run-1',
+          sequence: 1n,
+          // emittedAt = 5000ms wall-clock. With sessionStartMs=2000, the
+          // recorded observedAtMs should land at 3000.
+          emittedAt: create(TimestampSchema, {
+            seconds: 5n,
+            nanos: 0,
+          }),
+          payload: {
+            case: 'delegationObserved',
+            value: create(DelegationObservedSchema, {
+              fromAgent: 'coordinator',
+              toAgent: 'researcher',
+              taskId: 't-42',
+              invocationId: 'inv-7',
+            }),
+          },
+        }),
+        store,
+        2000,
+      );
+
+      const list = store.delegations.list();
+      expect(list).toHaveLength(1);
+      expect(list[0]).toMatchObject({
+        seq: 0,
+        fromAgentId: 'coordinator',
+        toAgentId: 'researcher',
+        taskId: 't-42',
+        invocationId: 'inv-7',
+        observedAtMs: 3000,
+      });
+    });
+
+    it('delegationObserved without emittedAt records observedAtMs=0', () => {
+      const store = new SessionStore();
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev-del2',
+          runId: 'run-1',
+          sequence: 0n,
+          payload: {
+            case: 'delegationObserved',
+            value: create(DelegationObservedSchema, {
+              fromAgent: 'a',
+              toAgent: 'b',
+              taskId: '',
+              invocationId: 'inv',
+            }),
+          },
+        }),
+        store,
+        0,
+      );
+      expect(store.delegations.list()[0].observedAtMs).toBe(0);
+    });
+
+    it('agentInvocationStarted is a no-op (telemetry plugin already emits INVOCATION spans)', () => {
+      const store = new SessionStore();
+      expect(() =>
+        applyGoldfiveEvent(
+          create(EventSchema, {
+            eventId: 'ev-ais',
+            runId: 'run-1',
+            sequence: 0n,
+            payload: {
+              case: 'agentInvocationStarted',
+              value: create(AgentInvocationStartedSchema, {
+                agentName: 'coordinator',
+                taskId: 't-1',
+                invocationId: 'inv-1',
+                parentInvocationId: '',
+              }),
+            },
+          }),
+          store,
+          0,
+        ),
+      ).not.toThrow();
+      // Should not have leaked into any store.
+      expect(store.delegations.list()).toHaveLength(0);
+      expect(store.spans.size).toBe(0);
+      expect(store.agents.size).toBe(0);
+      expect(store.tasks.size).toBe(0);
+    });
+
+    it('agentInvocationCompleted is a no-op', () => {
+      const store = new SessionStore();
+      expect(() =>
+        applyGoldfiveEvent(
+          create(EventSchema, {
+            eventId: 'ev-aic',
+            runId: 'run-1',
+            sequence: 0n,
+            payload: {
+              case: 'agentInvocationCompleted',
+              value: create(AgentInvocationCompletedSchema, {
+                agentName: 'coordinator',
+                taskId: 't-1',
+                invocationId: 'inv-1',
+                summary: 'ok',
+              }),
+            },
+          }),
+          store,
+          0,
+        ),
+      ).not.toThrow();
+      expect(store.delegations.list()).toHaveLength(0);
+      expect(store.spans.size).toBe(0);
+      expect(store.agents.size).toBe(0);
+      expect(store.tasks.size).toBe(0);
     });
   });
 

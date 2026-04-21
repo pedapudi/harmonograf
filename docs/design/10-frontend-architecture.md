@@ -176,7 +176,19 @@ The net effect is that actor rows require no special-casing in the views. The Ga
 
 **Trajectory view.** [`components/shell/views/TrajectoryView.tsx`](file:///home/sunil/git/harmonograf/frontend/src/components/shell/views/TrajectoryView.tsx) is the primary plan-review surface and consumes the same drift records. Its `buildViewModel()` merges all plans for the session by `createdAtMs` (not by plan id — goldfive planners often mint fresh ids on each refine) and bins drifts into the rev that was live when each drift was observed. The ribbon then renders pivots (severity-colored `↻`) at rev boundaries and drift markers (stars for user-authored, circles for goldfive-authored) on each segment.
 
-## 8. Conclusions
+## 8. Delegation Edges
+
+goldfive `2986775+` emits a `DelegationObserved` event every time a
+coordinator agent calls `AgentTool(sub_agent)` — i.e. the registry
+dispatcher sees a registered-agent-to-registered-agent tool invocation
+and fans out an explicit cross-agent edge. The telemetry plugin's
+generic `TOOL_CALL` span on the coordinator row is insufficient to
+reconstruct this relationship (it does not name the sub-agent as a
+recognizable row), so harmonograf consumes the event directly.
+
+The [`goldfiveEvent.ts`](file:///home/sunil/git/harmonograf/frontend/src/rpc/goldfiveEvent.ts) dispatcher appends each payload to a new `SessionStore.delegations` registry ([`DelegationRegistry` in `gantt/index.ts`](file:///home/sunil/git/harmonograf/frontend/src/gantt/index.ts)) whose shape intentionally mirrors `DriftRegistry` — `append()` / `list()` / `clear()` / `subscribe()`. The Gantt renderer's `drawDelegations()` pass walks the registry per blocks-redraw and paints a dashed 30%-opacity bezier (goldfive-cyan) from the `fromAgent` row-center to the `toAgent` row-center at the observed time. The Trajectory DAG surfaces a faint "↪↪ delegated to: X" annotation under the task card. The companion `agentInvocationStarted` / `agentInvocationCompleted` events remain no-ops because `HarmonografTelemetryPlugin` already materializes them as per-agent `INVOCATION` spans.
+
+## 9. Conclusions
 
 The Harmonograf frontend minimizes React render cycles, adopting an ECS-like game-engine loop for data rendering via HTML5 Canvas. By securely interleaving DOM elements exclusively for native text/form inputs, the topology maintains flawless 60 FPS frame rates processing potentially millions of unstructured telemetry events visually correctly.
 

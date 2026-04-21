@@ -295,15 +295,32 @@ export function applyGoldfiveEvent(
     case 'conversationStarted':
     case 'conversationEnded':
       return;
-    // goldfive 2986775+ registry-dispatch events. Deliberately no-op for
-    // now: the existing HarmonografTelemetryPlugin already emits per-agent
-    // invocation spans, so the Gantt / Trajectory don't need these.
-    // A follow-up can wire agentInvocationStarted/Completed → span
-    // enrichment and delegationObserved → Gantt edges if the observability
-    // plugin path turns out to miss something.
+    // goldfive 2986775+ registry-dispatch events. agentInvocationStarted /
+    // agentInvocationCompleted remain deliberate no-ops: the existing
+    // HarmonografTelemetryPlugin already emits per-agent INVOCATION spans,
+    // so Gantt / Trajectory see those invocations without duplication.
     case 'agentInvocationStarted':
     case 'agentInvocationCompleted':
-    case 'delegationObserved':
       return;
+    case 'delegationObserved': {
+      // DelegationObserved carries the coordinator→sub_agent edge that the
+      // telemetry plugin only records as a generic TOOL_CALL span on the
+      // coordinator row. Feed the registry; the Gantt renderer's delegation
+      // edge pass synthesizes a cross-agent curve from each record.
+      const d = payload.value;
+      const observedMs = event.emittedAt
+        ? Number(event.emittedAt.seconds) * 1000 +
+          Math.floor(event.emittedAt.nanos / 1_000_000) -
+          sessionStartMs
+        : 0;
+      store.delegations.append({
+        fromAgentId: d.fromAgent,
+        toAgentId: d.toAgent,
+        taskId: d.taskId,
+        invocationId: d.invocationId,
+        observedAtMs: observedMs,
+      });
+      return;
+    }
   }
 }
