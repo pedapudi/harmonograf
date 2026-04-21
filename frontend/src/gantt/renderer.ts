@@ -21,7 +21,7 @@ import {
   contextColorForRatio,
   contextRatio,
 } from './contextOverlay';
-import type { SessionStore } from './index';
+import type { DelegationRecord, SessionStore } from './index';
 import type { SpanIndex, DirtyRect } from './spatialIndex';
 import type { Agent, ContextWindowSample, Span, SpanKind, Task, TaskStatus } from './types';
 import {
@@ -52,6 +52,19 @@ export interface RendererCallbacks {
   // Fired when the user clicks inside the agent gutter on a specific agent
   // row. Used by the DOM layer to toggle agent row visibility.
   onGutterAgentClick?: (agentId: string) => void;
+  // Fired when the hovered delegation edge changes (null when the pointer
+  // moves off every edge). The DOM layer renders a tooltip from this state.
+  onDelegationHoverChange?: (hover: DelegationHoverState | null) => void;
+  // Fired when the user clicks a delegation edge (no span under the pointer).
+  // The DOM layer focuses the to-agent row and can emit a toast.
+  onDelegationClick?: (record: DelegationRecord) => void;
+}
+
+export interface DelegationHoverState {
+  record: DelegationRecord;
+  // Tooltip anchor in CSS pixels, relative to the canvas container.
+  x: number;
+  y: number;
 }
 
 // Collapsed height used for hidden agents — tall enough to stay clickable and
@@ -77,6 +90,22 @@ interface EdgeLayout {
   x2: number;
   y2: number;
   color: string;
+}
+
+// Cached layout for a single DelegationRecord edge, rebuilt each blocks
+// redraw. Persisted so the hit-test pass and the overlay pulse highlight
+// share one source of truth with the primary draw call and the bezier is
+// never sampled against stale control points.
+interface DelegationEdgeLayout {
+  seq: number;
+  record: DelegationRecord;
+  // Both endpoints sit at the same x (delegation is instantaneous), so we
+  // only store one x value and the two y anchors + the horizontal curve
+  // offset — the bezier is fully determined by these.
+  x: number;
+  srcY: number;
+  tgtY: number;
+  curveOffset: number;
 }
 
 interface FrameMetrics {
@@ -125,6 +154,19 @@ export class GanttRenderer {
   private hoveredSpanId: string | null = null;
   private edges: EdgeLayout[] = [];
   private hoveredEdgeIdx: number | null = null;
+
+  // Delegation-edge layouts cached by drawDelegations. Lookup keyed by seq
+  // so the hit-test can return the DelegationRecord directly and the overlay
+  // pulse pass can find the bezier geometry for the currently-pulsing edge
+  // without recomputing row positions.
+  private delegationEdges: DelegationEdgeLayout[] = [];
+  private hoveredDelegationSeq: number | null = null;
+  // When a delegation is clicked, its seq goes here and `pulseUntilMs`
+  // holds the wall-clock deadline; the overlay pass draws a bright stroke
+  // while inside the window and schedules another frame so the stroke
+  // fades on its own.
+  private pulsingDelegationSeq: number | null = null;
+  private pulseUntilMs = 0;
 
   // Dirty flags per layer.
   private bgDirty = true;
@@ -292,9 +334,27 @@ export class GanttRenderer {
       return;
     }
     const hit = this.hitTest(x, y);
-    this.selectedSpanId = hit;
+    if (hit) {
+      this.selectedSpanId = hit;
+      this.overlayDirty = true;
+      this.cb.onSelect?.(hit, x, y);
+      return;
+    }
+    // Spans win over delegation edges; only test the latter when no span
+    // sits under the pointer. This mirrors the hover precedence below.
+    const deleg = this.hitTestDelegation(x, y);
+    if (deleg) {
+      // Brief highlight on the clicked edge — pulse for ~500ms.
+      this.pulsingDelegationSeq = deleg.seq;
+      this.pulseUntilMs = performance.now() + 500;
+      this.overlayDirty = true;
+      this.cb.onDelegationClick?.(deleg);
+      return;
+    }
+    // Nothing under the pointer: clear span selection.
+    this.selectedSpanId = null;
     this.overlayDirty = true;
-    this.cb.onSelect?.(hit, x, y);
+    this.cb.onSelect?.(null, x, y);
   }
 
   private agentAtY(py: number): string | null {
@@ -333,6 +393,25 @@ export class GanttRenderer {
       this.hoveredEdgeIdx = edgeIdx;
       this.overlayDirty = true;
     }
+    // Delegation-edge hover: only when neither a span nor a LINK_INVOKED
+    // edge is under the cursor. The delegation hit-test is cheap (16
+    // samples × ≤ N delegations) so we can run it every move without
+    // throttling.
+    const delegHit =
+      hit || edgeIdx !== null ? null : this.hitTestDelegation(x, y);
+    const nextSeq = delegHit?.seq ?? null;
+    if (nextSeq !== this.hoveredDelegationSeq) {
+      this.hoveredDelegationSeq = nextSeq;
+      this.overlayDirty = true;
+      this.cb.onDelegationHoverChange?.(
+        delegHit ? { record: delegHit, x, y } : null,
+      );
+    } else if (delegHit) {
+      // Seq unchanged but pointer moved — update anchor so the DOM tooltip
+      // tracks the cursor. Omit the overlay-dirty flag; anchor-only updates
+      // don't change the canvas.
+      this.cb.onDelegationHoverChange?.({ record: delegHit, x, y });
+    }
   }
 
   handlePointerLeave(): void {
@@ -345,6 +424,22 @@ export class GanttRenderer {
       this.hoveredEdgeIdx = null;
       this.overlayDirty = true;
     }
+    if (this.hoveredDelegationSeq !== null) {
+      this.hoveredDelegationSeq = null;
+      this.overlayDirty = true;
+      this.cb.onDelegationHoverChange?.(null);
+    }
+  }
+
+  // DOM layer asks whether a pointer coordinate sits on a delegation edge so
+  // it can drive the cursor: the canvas CSS cursor swaps to pointer when
+  // over a delegation, same as for span rects.
+  delegationAt(x: number, y: number): DelegationRecord | null {
+    // Respect the same precedence as the hover path — spans and
+    // LINK_INVOKED edges win.
+    if (this.hitTest(x, y)) return null;
+    if (this.edgeHitTest(x, y) !== null) return null;
+    return this.hitTestDelegation(x, y);
   }
 
   panBy(fraction: number): void {
@@ -1049,6 +1144,9 @@ export class GanttRenderer {
   // midpoint glyph keep them readable against the denser TRANSFER edges
   // the plugin span path produces.
   private drawDelegations(ctx: CanvasRenderingContext2D): void {
+    // Rebuild the layout cache each pass — viewport changes, row-focus
+    // toggles, and agent-hide state all move delegation anchors around.
+    this.delegationEdges = [];
     const delegations = this.store.delegations.list();
     if (delegations.length === 0) return;
     const vs = viewportStart(this.viewport);
@@ -1072,13 +1170,8 @@ export class GanttRenderer {
     // goldfive observed the delegation — color matches the synthetic
     // goldfive actor row so the attribution reads the same everywhere.
     const color = colorForAgent(GOLDFIVE_ACTOR_ID);
+    const curveOffset = 24;
 
-    ctx.save();
-    ctx.lineWidth = 1.25;
-    ctx.globalAlpha = 0.3;
-    ctx.setLineDash([4, 3]);
-    ctx.strokeStyle = color;
-    let drew = 0;
     for (const d of delegations) {
       // Cull to the visible time window (with a small pad for endpoints
       // sitting just off-edge). Consistent with drawLinks' margin approach.
@@ -1091,43 +1184,129 @@ export class GanttRenderer {
       if (srcY === undefined || tgtY === undefined) continue;
       const x = msToPx(this.viewport, w, d.observedAtMs);
       if (x < dataLeft || x > dataRight) continue;
+      this.delegationEdges.push({
+        seq: d.seq,
+        record: d,
+        x,
+        srcY,
+        tgtY,
+        curveOffset,
+      });
+    }
+
+    if (this.delegationEdges.length === 0) return;
+
+    ctx.save();
+    ctx.lineWidth = 1.25;
+    ctx.globalAlpha = 0.3;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = color;
+    for (const e of this.delegationEdges) {
       // Same-time, different-row edge: draw a shallow curve so the path
       // doesn't collapse into a zero-width vertical line. Offset the
       // control points horizontally by a fixed nudge.
-      const curveOffset = 24;
       ctx.beginPath();
-      ctx.moveTo(x, srcY);
+      ctx.moveTo(e.x, e.srcY);
       ctx.bezierCurveTo(
-        x + curveOffset, srcY,
-        x + curveOffset, tgtY,
-        x, tgtY,
+        e.x + e.curveOffset, e.srcY,
+        e.x + e.curveOffset, e.tgtY,
+        e.x, e.tgtY,
       );
       ctx.stroke();
-      drew++;
     }
 
     // Midpoint glyph pass — unsharp without lineDash so the symbol reads
     // as a single solid mark instead of picking up the dash pattern.
-    if (drew > 0) {
-      ctx.setLineDash([]);
-      ctx.globalAlpha = 0.6;
-      ctx.fillStyle = color;
-      ctx.font = '10px system-ui, sans-serif';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      for (const d of delegations) {
-        const srcY = rowCenterY.get(d.fromAgentId);
-        const tgtY = rowCenterY.get(d.toAgentId);
-        if (srcY === undefined || tgtY === undefined) continue;
-        const x = msToPx(this.viewport, w, d.observedAtMs);
-        if (x < dataLeft || x > dataRight) continue;
-        // Midpoint of a bezier with equal-x endpoints and offset control
-        // points collapses to (x + 3/4 * offset, (srcY+tgtY)/2). Hand-fit
-        // so the glyph clears the curve's crest.
-        ctx.fillText('↪↪', x + 4, (srcY + tgtY) / 2);
-      }
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.6;
+    ctx.fillStyle = color;
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    for (const e of this.delegationEdges) {
+      // Midpoint of a bezier with equal-x endpoints and offset control
+      // points collapses to (x + 3/4 * offset, (srcY+tgtY)/2). Hand-fit
+      // so the glyph clears the curve's crest.
+      ctx.fillText('↪↪', e.x + 4, (e.srcY + e.tgtY) / 2);
     }
     ctx.restore();
+  }
+
+  // --- Delegation edge hit-testing / hover / click ---------------------
+  //
+  // Public for the __tests__ suite — the DOM path uses
+  // handlePointerMove / handleClick, which route to this internally.
+  //
+  // Samples the bezier at a coarse step and does a per-segment point-to-line
+  // distance check. The curve geometry is fully captured by the cached
+  // DelegationEdgeLayout entries so this never touches the SessionStore.
+  hitTestDelegation(px: number, py: number): DelegationRecord | null {
+    const edges = this.delegationEdges;
+    if (edges.length === 0) return null;
+    const tol = 6; // CSS px — slightly looser than LINK_INVOKED (5) since
+    //              the delegation curve is thinner (lineWidth 1.25 and
+    //              30% alpha) and harder to target precisely.
+    const samples = 16;
+    // Walk back-to-front so the latest delegation wins when curves overlap.
+    for (let i = edges.length - 1; i >= 0; i--) {
+      const e = edges[i];
+      // Quick bbox reject. The curve hugs x..x+curveOffset in the x-axis;
+      // y is bounded by the two anchors, padded for rounding.
+      const minX = e.x - tol;
+      const maxX = e.x + e.curveOffset + tol;
+      const minY = Math.min(e.srcY, e.tgtY) - tol;
+      const maxY = Math.max(e.srcY, e.tgtY) + tol;
+      if (px < minX || px > maxX || py < minY || py > maxY) continue;
+      // Bezier coefficients for the curve drawn in drawDelegations:
+      //   P0 = (x, srcY)
+      //   P1 = (x + off, srcY)
+      //   P2 = (x + off, tgtY)
+      //   P3 = (x, tgtY)
+      const x0 = e.x;
+      const y0 = e.srcY;
+      const x1 = e.x + e.curveOffset;
+      const y1 = e.srcY;
+      const x2 = e.x + e.curveOffset;
+      const y2 = e.tgtY;
+      const x3 = e.x;
+      const y3 = e.tgtY;
+      let prevX = x0;
+      let prevY = y0;
+      for (let j = 1; j <= samples; j++) {
+        const t = j / samples;
+        const mt = 1 - t;
+        const sx =
+          mt * mt * mt * x0 +
+          3 * mt * mt * t * x1 +
+          3 * mt * t * t * x2 +
+          t * t * t * x3;
+        const sy =
+          mt * mt * mt * y0 +
+          3 * mt * mt * t * y1 +
+          3 * mt * t * t * y2 +
+          t * t * t * y3;
+        if (pointSegmentDist(px, py, prevX, prevY, sx, sy) <= tol) {
+          return e.record;
+        }
+        prevX = sx;
+        prevY = sy;
+      }
+    }
+    return null;
+  }
+
+  // Test-only accessor so unit tests can assert the cached layout without
+  // poking into private state. The array is rebuilt each blocks redraw.
+  _delegationLayoutsForTesting(): readonly DelegationEdgeLayout[] {
+    return this.delegationEdges;
+  }
+
+  // Test-only seed path. drawBlocks populates delegationEdges as a side
+  // effect of drawing — and drawing can't run under jsdom since the
+  // canvas 2D context is a stub. Tests inject known geometry directly
+  // through this shim so hitTestDelegation can be exercised in isolation.
+  _seedDelegationLayoutsForTesting(edges: DelegationEdgeLayout[]): void {
+    this.delegationEdges = edges;
   }
 
   // --- Context-window overlay -------------------------------------------
@@ -1607,6 +1786,73 @@ export class GanttRenderer {
         ctx.lineWidth = 2;
         ctx.strokeRect(rect.x - 1, rect.y - 1, rect.w + 2, rect.h + 2);
       }
+    }
+
+    // Delegation-edge hover / pulse highlight. Two states:
+    //   - hover: bright dashed stroke matching the canonical delegation
+    //     color so the cursor can rest on the edge and read clearly.
+    //   - pulse: 500ms solid stroke after a click; fades to 0 at deadline.
+    // The pulse is self-scheduling — as long as `performance.now() <
+    // pulseUntilMs` we keep the overlay dirty so the frame loop repaints.
+    const nowMs = performance.now();
+    const pulseActive =
+      this.pulsingDelegationSeq !== null && nowMs < this.pulseUntilMs;
+    if (pulseActive || this.hoveredDelegationSeq !== null) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(GUTTER_WIDTH_PX, TOP_MARGIN_PX, w - GUTTER_WIDTH_PX, h - TOP_MARGIN_PX);
+      ctx.clip();
+      const color = cssVar('--md-sys-color-primary') || '#a8c8ff';
+      // Hover first, so a pulse on the currently-hovered edge overwrites
+      // it with the brighter solid stroke.
+      if (this.hoveredDelegationSeq !== null) {
+        const e = this.delegationEdges.find(
+          (d) => d.seq === this.hoveredDelegationSeq,
+        );
+        if (e) {
+          ctx.strokeStyle = color;
+          ctx.globalAlpha = 0.85;
+          ctx.lineWidth = 2;
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath();
+          ctx.moveTo(e.x, e.srcY);
+          ctx.bezierCurveTo(
+            e.x + e.curveOffset, e.srcY,
+            e.x + e.curveOffset, e.tgtY,
+            e.x, e.tgtY,
+          );
+          ctx.stroke();
+        }
+      }
+      if (pulseActive) {
+        const e = this.delegationEdges.find(
+          (d) => d.seq === this.pulsingDelegationSeq,
+        );
+        if (e) {
+          const remaining = Math.max(0, this.pulseUntilMs - nowMs);
+          const fade = remaining / 500; // 1 → 0 across 500ms.
+          ctx.strokeStyle = color;
+          ctx.globalAlpha = 0.3 + 0.7 * fade;
+          ctx.lineWidth = 2.5 + 2 * fade;
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          ctx.moveTo(e.x, e.srcY);
+          ctx.bezierCurveTo(
+            e.x + e.curveOffset, e.srcY,
+            e.x + e.curveOffset, e.tgtY,
+            e.x, e.tgtY,
+          );
+          ctx.stroke();
+        }
+        // Keep asking for more frames until the deadline passes so the
+        // pulse runs to completion regardless of user interaction.
+        this.overlayDirty = true;
+      } else if (this.pulsingDelegationSeq !== null) {
+        // Expired — drop state so the overlay doesn't keep marking itself
+        // dirty forever.
+        this.pulsingDelegationSeq = null;
+      }
+      ctx.restore();
     }
 
     // Edge hover highlight: brighten the curve + both endpoint rectangles so

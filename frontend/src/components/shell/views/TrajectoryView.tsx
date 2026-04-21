@@ -685,6 +685,24 @@ function DagPane(props: DagProps) {
                     fontSize={10}
                     data-testid={`task-delegation-${t.id}`}
                   >
+                    {/* Native SVG tooltip — mirrors the Gantt delegation
+                     * tooltip's fields. Trajectory has no existing nav
+                     * pattern into the Gantt so we deliberately don't
+                     * synthesize one here; hover + readable summary is
+                     * the lightweight equivalent. */}
+                    <title>
+                      {`Delegation observed\nFrom: ${
+                        taskDelegations[0].fromAgentId
+                      } → ${taskDelegations[0].toAgentId}\nTask: ${
+                        taskDelegations[0].taskId || '(none)'
+                      }\nInvocation: ${
+                        taskDelegations[0].invocationId || '(none)'
+                      }${
+                        taskDelegations.length > 1
+                          ? `\n+${taskDelegations.length - 1} more`
+                          : ''
+                      }`}
+                    </title>
                     {`↪↪ delegated to: ${truncate(
                       taskDelegations[0].toAgentId,
                       14,
