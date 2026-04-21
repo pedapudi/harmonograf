@@ -69,13 +69,6 @@ class FakeTransport:
         self.control_forward: Optional[Callable[[Any], None]] = None
         # (control_id, result, detail) tuples pushed via send_control_ack.
         self.sent_acks: list[tuple[str, str, str]] = []
-        # ADK session ids passed to open_session_subscription, in order,
-        # with duplicates suppressed by open_session_subscription itself.
-        # Tests assert against this to prove the client wires
-        # register_session through to the transport exactly once per
-        # distinct ADK session.
-        self.opened_sessions: list[str] = []
-        self.closed_sessions: list[str] = []
 
     # --- public surface Client depends on -----------------------------
 
@@ -102,22 +95,6 @@ class FakeTransport:
         self, control_id: str, result: str, detail: str = ""
     ) -> None:
         self.sent_acks.append((control_id, result, detail))
-
-    def open_session_subscription(self, adk_session_id: str) -> None:
-        # Mirror the real transport's idempotence contract so tests that
-        # drive the plugin through multiple spans see exactly one call
-        # per distinct session id.
-        if not adk_session_id or adk_session_id in self.opened_sessions:
-            return
-        self.opened_sessions.append(adk_session_id)
-
-    def close_session_subscription(self, adk_session_id: str) -> None:
-        if adk_session_id:
-            self.closed_sessions.append(adk_session_id)
-
-    @property
-    def registered_session_ids(self) -> tuple[str, ...]:
-        return tuple(self.opened_sessions)
 
     # Bridge tests simulate a ControlEvent arriving on the control stream
     # by calling this directly. Matches the real transport's call path —

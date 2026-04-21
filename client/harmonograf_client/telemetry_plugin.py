@@ -220,13 +220,6 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
             # is never actually invoked in that case.
             pass
         self._client = client
-        # ADK session ids we've already asked the client to subscribe a
-        # per-session control stream for. Without this, a STEER fired
-        # against the ADK session from the frontend cannot find a
-        # matching subscription (the Client's home sub is keyed on a
-        # harmonograf-assigned session id, not the ADK one) and the
-        # PostAnnotation returns delivery=FAILURE. See issue #53.
-        self._registered_adk_sessions: set[str] = set()
         self._invocation_spans: dict[str, str] = {}
         # Model-call spans are keyed by ``invocation_id`` and tracked as
         # FIFO queues: ADK rebuilds the ``CallbackContext`` between
@@ -248,25 +241,17 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
     def client(self) -> Client:
         return self._client
 
-    def _ensure_session_subscription(self, ctx: Any) -> str:
-        """Open a per-ADK-session control stream the first time we see ``ctx``.
+    def _stamp_session_id(self, ctx: Any) -> str:
+        """Return the ADK session id on ``ctx`` for span stamping.
 
-        Returns the ADK session id so the caller can pass it to
-        ``emit_span_start`` in the same expression. Returns ``""`` when
-        the context is running without a session service — matching the
-        pre-fix behaviour of :func:`_adk_session_id`.
+        Harmonograf stamps ``ctx.session.id`` on every emitted span so
+        sub-agent spans rolled into one ADK invocation show up grouped
+        in the server's UI. Returns ``""`` when the context is running
+        without a session service, which causes :class:`Client` to fall
+        back to its default ``session_id`` — matching the legacy
+        pre-issue behaviour.
         """
-        sid = _adk_session_id(ctx)
-        if not sid:
-            return ""
-        if sid in self._registered_adk_sessions:
-            return sid
-        self._registered_adk_sessions.add(sid)
-        try:
-            self._client.register_session(sid)
-        except Exception:  # noqa: BLE001 -- observability must never crash ADK
-            log.exception("register_session failed for adk_session_id=%s", sid)
-        return sid
+        return _adk_session_id(ctx)
 
     # ------------------------------------------------------------------
     # Invocation lifecycle
@@ -280,7 +265,7 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
             kind=SpanKind.INVOCATION,
             name=name,
             attributes={"adk.invocation_id": inv_id} if inv_id else None,
-            session_id=self._ensure_session_subscription(invocation_context),
+            session_id=self._stamp_session_id(invocation_context),
         )
         if inv_id:
             self._invocation_spans[inv_id] = sid
@@ -347,7 +332,7 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
             kind=SpanKind.LLM_CALL,
             name=model or "llm_call",
             attributes={"llm.model": model} if model else None,
-            session_id=self._ensure_session_subscription(callback_context),
+            session_id=self._stamp_session_id(callback_context),
         )
         key = self._model_span_key(callback_context)
         self._model_spans.setdefault(key, deque()).append(_ModelSpanSlot(span_id=sid))
@@ -433,7 +418,7 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
             name=tool_name,
             payload=payload,
             payload_role="input",
-            session_id=self._ensure_session_subscription(tool_context),
+            session_id=self._stamp_session_id(tool_context),
         )
         self._tool_spans[id(tool_context)] = sid
 
