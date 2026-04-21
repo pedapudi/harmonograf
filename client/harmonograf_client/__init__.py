@@ -36,6 +36,7 @@ Public surface (stable):
 from __future__ import annotations
 
 from .client import Client
+from .control_channel import control_channel
 from .enums import Capability, SpanKind, SpanStatus
 from .observe import observe
 from .sink import HarmonografSink
@@ -50,6 +51,7 @@ __all__ = [
     "HarmonografTelemetryPlugin",
     "SpanKind",
     "SpanStatus",
+    "control_channel",
     "observe",
 ]
 

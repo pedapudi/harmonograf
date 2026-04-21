@@ -14,21 +14,32 @@ transport:
 1. Intercept every raw ``goldfive.v1.ControlEvent`` from the client (via
    :meth:`Client.set_control_forward`), convert it to a goldfive
    :class:`ControlMessage` with :func:`goldfive.conv.from_pb_control_event`,
-   and hand it off to the runner's ``control`` channel. The proto's
-   ``id`` becomes the message ``id`` so acks correlate end-to-end.
+   and hand it off to the bound goldfive :class:`ControlChannel`. The
+   proto's ``id`` becomes the message ``id`` so acks correlate
+   end-to-end.
 2. Mirror goldfive :class:`ControlAck` objects back out as harmonograf
    ``ControlAck`` frames via :meth:`Client.send_control_ack`. The ack
    wire type is also goldfive's now, but the bridge still hops across
    transport+loop boundaries so callers on either side can stay naive.
-3. Tear down cleanly when :meth:`Runner.close` is called (via the close
-   hook :func:`observe` registers) — forward hook uninstalled, both
-   forwarding tasks cancelled, and the goldfive channel closed so any
-   in-flight ``runner.control.acks()`` consumer exits its iterator.
+3. Tear down cleanly when :meth:`stop` is called — forward hook
+   uninstalled, both forwarding tasks cancelled, and the goldfive
+   channel closed so any in-flight ``channel.acks()`` consumer exits
+   its iterator.
 
-The bridge does NOT attach a control channel to the runner — that is
-:func:`observe`'s responsibility, done before :meth:`start` is called.
-This keeps wiring in one place and lets the bridge assume
-``runner.control`` is non-None for its entire lifetime.
+The bridge operates directly on a :class:`ControlChannel` — it is the
+caller's responsibility to attach that channel to the runner (via
+:attr:`Runner.control`, or by passing ``control=`` to
+:func:`goldfive.wrap`). Two helpers wire this up:
+
+* :func:`harmonograf_client.observe` — for code paths that own a
+  :class:`goldfive.Runner` directly. ``observe`` attaches a channel to
+  ``runner.control``, builds a bridge, and registers ``bridge.stop`` as
+  a runner close hook.
+* :func:`harmonograf_client.control_channel` — for code paths that hand
+  a wrapped ADK agent to ``App(root_agent=...)`` and therefore never see
+  the underlying :class:`Runner`. ``control_channel`` returns a bare
+  :class:`ControlChannel` backed by a live bridge; pass it to
+  :func:`goldfive.wrap` via ``control=``. See harmonograf#55.
 """
 
 from __future__ import annotations
@@ -39,6 +50,8 @@ import logging
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
+    from goldfive.control import ControlChannel
+
     from .client import Client
 
 log = logging.getLogger("harmonograf_client._control_bridge")
@@ -49,20 +62,32 @@ class ControlBridge:
 
     The bridge is single-use: :meth:`start` installs the forward hook
     and spawns two asyncio tasks (one for incoming events, one for
-    outgoing acks); :meth:`stop` tears everything down. The caller
-    (:func:`observe`) is responsible for attaching a ``ControlChannel``
-    to the runner BEFORE calling :meth:`start`, and for registering
-    :meth:`stop` as a runner close hook.
+    outgoing acks); :meth:`stop` tears everything down.
+
+    Parameters
+    ----------
+    client:
+        The :class:`Client` whose ``SubscribeControl`` stream feeds
+        events in and whose ``ControlAck`` stream carries acks back out.
+    channel:
+        The goldfive :class:`ControlChannel` the bridge forwards events
+        onto (and drains acks from). The caller is responsible for
+        keeping this channel attached to a runner (either via
+        ``runner.control = channel`` or ``goldfive.wrap(control=channel,
+        ...)``) for the bridge's lifetime.
+    loop:
+        The asyncio loop the forwarding tasks run on. Must be the loop
+        the runner is driven by.
     """
 
     def __init__(
         self,
         client: "Client",
-        runner: Any,
+        channel: "ControlChannel",
         loop: asyncio.AbstractEventLoop,
     ) -> None:
         self._client = client
-        self._runner = runner
+        self._channel = channel
         self._loop = loop
         self._inbox: asyncio.Queue = asyncio.Queue()
         self._events_task: Optional[asyncio.Task] = None
@@ -70,12 +95,15 @@ class ControlBridge:
         self._started = False
         self._closed = False
 
+    @property
+    def channel(self) -> "ControlChannel":
+        """The goldfive :class:`ControlChannel` this bridge forwards onto."""
+        return self._channel
+
     def start(self) -> None:
         """Install the forward hook and spin up forwarding tasks.
 
-        Idempotent — calling ``start`` twice is a no-op. The runner must
-        already have a ``ControlChannel`` attached via
-        ``runner.control`` when this is called.
+        Idempotent — calling ``start`` twice is a no-op.
         """
         if self._started:
             return
@@ -124,24 +152,15 @@ class ControlBridge:
                 )
                 continue
 
-            chan = self._runner.control
-            if chan is None:
-                self._client.send_control_ack(
-                    msg.id, "failure", "runner has no control channel"
-                )
-                continue
             try:
-                await chan.send(msg)
+                await self._channel.send(msg)
             except Exception as exc:  # noqa: BLE001
-                log.warning("failed to forward control to runner: %s", exc)
+                log.warning("failed to forward control to channel: %s", exc)
                 self._client.send_control_ack(msg.id, "failure", repr(exc))
 
     async def _acks_loop(self) -> None:
-        chan = self._runner.control
-        if chan is None:
-            return
         try:
-            async for ack in chan.acks():
+            async for ack in self._channel.acks():
                 result_name = _ack_result_name(ack.result)
                 self._client.send_control_ack(
                     ack.control_id, result_name, getattr(ack, "detail", "") or ""
@@ -160,7 +179,9 @@ class ControlBridge:
 
         Idempotent. Safe to call from any coroutine running on the same
         loop the bridge was started on. Intended to be registered as a
-        :meth:`Runner.add_close_hook` by :func:`observe`.
+        :meth:`Runner.add_close_hook` by :func:`observe`, or driven
+        explicitly by the caller when the bridge backs a standalone
+        channel (:func:`control_channel`).
         """
         if self._closed:
             return
@@ -174,12 +195,10 @@ class ControlBridge:
             with contextlib.suppress(BaseException):
                 await t
 
-        chan = self._runner.control
-        if chan is not None:
-            try:
-                chan.close()
-            except Exception:  # noqa: BLE001
-                pass
+        try:
+            self._channel.close()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 # ----------------------------------------------------------------------

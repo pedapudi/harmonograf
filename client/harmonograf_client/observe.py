@@ -134,7 +134,7 @@ def observe(
     from ._control_bridge import ControlBridge
 
     loop = asyncio.get_running_loop()
-    bridge = ControlBridge(client, runner, loop)
+    bridge = ControlBridge(client, runner.control, loop)
     bridge.start()
     runner.add_close_hook(bridge.stop)
 

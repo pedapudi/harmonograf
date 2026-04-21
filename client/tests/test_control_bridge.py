@@ -155,7 +155,7 @@ async def test_goldfive_event_forwards_to_channel(
 ) -> None:
     runner = _runner_with_channel()
     loop = asyncio.get_running_loop()
-    bridge = ControlBridge(client, runner, loop)
+    bridge = ControlBridge(client, runner.control, loop)
     bridge.start()
 
     transport = made[0]
@@ -176,7 +176,7 @@ async def test_steer_payload_lands_under_note(
     client: Client, made: list[FakeTransport]
 ) -> None:
     runner = _runner_with_channel()
-    bridge = ControlBridge(client, runner, asyncio.get_running_loop())
+    bridge = ControlBridge(client, runner.control, asyncio.get_running_loop())
     bridge.start()
 
     made[0].deliver_control_event(
@@ -195,7 +195,7 @@ async def test_rewind_to_payload_lands_under_task_id(
     client: Client, made: list[FakeTransport]
 ) -> None:
     runner = _runner_with_channel()
-    bridge = ControlBridge(client, runner, asyncio.get_running_loop())
+    bridge = ControlBridge(client, runner.control, asyncio.get_running_loop())
     bridge.start()
 
     made[0].deliver_control_event(
@@ -230,7 +230,7 @@ async def test_goldfive_ack_flows_back_to_server(
     expected_name: str,
 ) -> None:
     runner = _runner_with_channel()
-    bridge = ControlBridge(client, runner, asyncio.get_running_loop())
+    bridge = ControlBridge(client, runner.control, asyncio.get_running_loop())
     bridge.start()
 
     assert runner.control is not None
@@ -267,7 +267,7 @@ async def test_runner_close_tears_down_bridge_via_close_hook(
     guaranteed; only the wiring changed.
     """
     runner = _runner_with_channel()
-    bridge = ControlBridge(client, runner, asyncio.get_running_loop())
+    bridge = ControlBridge(client, runner.control, asyncio.get_running_loop())
     bridge.start()
     runner.add_close_hook(bridge.stop)
 

@@ -161,6 +161,50 @@ class TestOrchestratedAppExport:
         plugin_names = {getattr(p, "name", "") for p in (app.plugins or [])}
         assert "harmonograf-telemetry" in plugin_names
 
+    @pytest.mark.asyncio
+    async def test_orchestrated_app_wires_control_channel(
+        self,
+        presentation_agent_orchestrated_module: Any,
+        harmonograf_server: dict,
+    ) -> None:
+        """``_build_app`` must wire a live ControlChannel into the Runner.
+
+        Regression guard for harmonograf#55: the old orchestrated-mode
+        build installed only ``HarmonografTelemetryPlugin`` so STEER /
+        PAUSE / CANCEL events from the UI returned ``delivery=FAILURE``
+        — spans flowed out but nothing flowed back in. This test
+        exercises the exact construction path (inside an event loop,
+        the same shape ``adk web`` uses) and asserts that the wrapped
+        runner's ``.control`` is the bridge-backed channel.
+        """
+        from harmonograf_client._control_bridge import ControlBridge
+
+        prev = os.environ.pop("OPENAI_API_KEY", None)
+        os.environ["HARMONOGRAF_SERVER"] = harmonograf_server["addr"]
+        try:
+            # First-access is lazy — run on this asyncio loop so
+            # ``control_channel(client)`` finds it.
+            app = presentation_agent_orchestrated_module.app
+        finally:
+            os.environ.pop("HARMONOGRAF_SERVER", None)
+            if prev is not None:
+                os.environ["OPENAI_API_KEY"] = prev
+
+        root = app.root_agent
+        # Dig for the Runner the wrap built. GoldfiveADKAgent keeps the
+        # Runner under ``_runner`` post-wrap; we just need its control.
+        runner = getattr(root, "_runner", None) or getattr(root, "runner", None)
+        assert runner is not None, f"no runner on {type(root).__name__}"
+        assert runner.control is not None, (
+            "runner.control is None — ``control_channel`` did not wire; "
+            "steers will return delivery=FAILURE (harmonograf#55)"
+        )
+        bridge = getattr(runner.control, "_harmonograf_control_bridge", None)
+        assert isinstance(bridge, ControlBridge), (
+            "runner.control is not a bridge-backed channel; the UI control "
+            "path will not reach the goldfive steerer"
+        )
+
 
 class TestPresentationGoldfiveRunner:
     """End-to-end: goldfive Runner + HarmonografSink via build_goldfive_runner.
