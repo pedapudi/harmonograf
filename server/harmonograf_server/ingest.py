@@ -686,6 +686,16 @@ class IngestPipeline:
             self._on_run_completed(ctx, event.run_completed, run_id)
         elif kind == "run_aborted":
             self._on_run_aborted(ctx, event.run_aborted, run_id)
+        elif kind == "agent_invocation_started":
+            self._on_agent_invocation_started(
+                ctx, event.agent_invocation_started, run_id
+            )
+        elif kind == "agent_invocation_completed":
+            self._on_agent_invocation_completed(
+                ctx, event.agent_invocation_completed, run_id
+            )
+        elif kind == "delegation_observed":
+            self._on_delegation_observed(ctx, event.delegation_observed, run_id)
         else:
             logger.debug(
                 "ignoring unknown goldfive event payload kind=%s on session_id=%s",
@@ -931,6 +941,58 @@ class IngestPipeline:
     ) -> None:
         self._bus.publish_run_aborted(
             ctx.session_id, run_id, reason=payload.reason
+        )
+
+    # Registry-dispatch observability events (goldfive 2986775+). These are
+    # forward-only: no state machine side effects, just fan out on the bus
+    # so the frontend can render delegation edges / per-invocation rows
+    # that the telemetry-plugin INVOCATION spans alone don't capture.
+    def _on_agent_invocation_started(
+        self, ctx: StreamContext, payload: Any, run_id: str
+    ) -> None:
+        started_at: Optional[float] = None
+        if payload.HasField("started_at"):
+            started_at = ts_to_float(payload.started_at)
+        self._bus.publish_agent_invocation_started(
+            ctx.session_id,
+            run_id,
+            agent_name=payload.agent_name,
+            task_id=payload.task_id,
+            invocation_id=payload.invocation_id,
+            parent_invocation_id=payload.parent_invocation_id,
+            started_at=started_at,
+        )
+
+    def _on_agent_invocation_completed(
+        self, ctx: StreamContext, payload: Any, run_id: str
+    ) -> None:
+        completed_at: Optional[float] = None
+        if payload.HasField("completed_at"):
+            completed_at = ts_to_float(payload.completed_at)
+        self._bus.publish_agent_invocation_completed(
+            ctx.session_id,
+            run_id,
+            agent_name=payload.agent_name,
+            task_id=payload.task_id,
+            invocation_id=payload.invocation_id,
+            summary=payload.summary,
+            completed_at=completed_at,
+        )
+
+    def _on_delegation_observed(
+        self, ctx: StreamContext, payload: Any, run_id: str
+    ) -> None:
+        observed_at: Optional[float] = None
+        if payload.HasField("observed_at"):
+            observed_at = ts_to_float(payload.observed_at)
+        self._bus.publish_delegation_observed(
+            ctx.session_id,
+            run_id,
+            from_agent=payload.from_agent,
+            to_agent=payload.to_agent,
+            task_id=payload.task_id,
+            invocation_id=payload.invocation_id,
+            observed_at=observed_at,
         )
 
     async def _bind_task_to_span(
