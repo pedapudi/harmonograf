@@ -181,10 +181,14 @@ def _build_app() -> Any:
     goal_deriver = LLMGoalDeriver(call_llm=call_llm, model=planner_model)
 
     plugins: list[Any] = []
+    control = None
     client = _get_or_create_client()
     if client is not None:
         try:
-            from harmonograf_client import HarmonografTelemetryPlugin
+            from harmonograf_client import (
+                HarmonografTelemetryPlugin,
+                control_channel,
+            )
         except Exception as e:  # noqa: BLE001
             log.warning(
                 "HarmonografTelemetryPlugin unavailable (%s); running without spans",
@@ -192,12 +196,31 @@ def _build_app() -> Any:
             )
         else:
             plugins.append(HarmonografTelemetryPlugin(client))
+            # Wire harmonograf UI → goldfive steerer. Without this
+            # ``control=`` hook, STEER / PAUSE / CANCEL / APPROVE /
+            # REJECT events from the frontend return
+            # ``delivery=FAILURE`` — the plugin wires spans out, not
+            # control back in. See harmonograf#55.
+            try:
+                control = control_channel(client)
+            except RuntimeError as e:
+                # ``control_channel`` needs a running event loop. When
+                # ``_build_app`` is called from a non-async context
+                # (e.g. synchronous test setup) we skip the bridge and
+                # log; adk web always builds the app inside its loop so
+                # the production path is covered.
+                log.warning(
+                    "control_channel skipped (no running loop): %s; steers "
+                    "will return delivery=FAILURE for this App",
+                    e,
+                )
 
     wrapped = goldfive.wrap(
         tree,
         planner=planner,
         goal_deriver=goal_deriver,
         plugins=plugins,
+        control=control,
     )
 
     return App(
