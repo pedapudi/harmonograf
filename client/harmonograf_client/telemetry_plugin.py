@@ -62,6 +62,31 @@ def _safe_attr(obj: Any, name: str, default: Any = None) -> Any:
         return default
 
 
+def _adk_session_id(ctx: Any) -> str:
+    """Extract the ADK session id from any ADK callback context.
+
+    ADK's ``InvocationContext``, ``CallbackContext``, and ``ToolContext``
+    all expose a ``session`` attribute that resolves to the
+    ``sessions.Session`` row carrying a stable per-ADK-session ``id``.
+    Without stamping this on every harmonograf span, a long-lived
+    module-level :class:`Client` (the usual presentation_agent pattern)
+    collapses every ADK session from the same Python process into
+    whatever ``sess_<date>_<nnnn>`` the server generated on first
+    Hello — see the issue description for the full pathology.
+
+    Returns the session id as a ``str``, or ``""`` when the context is
+    malformed or ADK is running without a session service. Empty
+    strings cause :class:`Client` to fall back to its default
+    ``session_id`` — the legacy pre-fix behaviour — which is the right
+    failure mode when the context shape is unexpected.
+    """
+    session = _safe_attr(ctx, "session", None)
+    if session is None:
+        return ""
+    sid = _safe_attr(session, "id", "") or ""
+    return str(sid)
+
+
 def _serialize_args(args: Any) -> bytes | None:
     if args is None:
         return None
@@ -228,6 +253,7 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
             kind=SpanKind.INVOCATION,
             name=name,
             attributes={"adk.invocation_id": inv_id} if inv_id else None,
+            session_id=_adk_session_id(invocation_context),
         )
         if inv_id:
             self._invocation_spans[inv_id] = sid
@@ -294,6 +320,7 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
             kind=SpanKind.LLM_CALL,
             name=model or "llm_call",
             attributes={"llm.model": model} if model else None,
+            session_id=_adk_session_id(callback_context),
         )
         key = self._model_span_key(callback_context)
         self._model_spans.setdefault(key, deque()).append(_ModelSpanSlot(span_id=sid))
@@ -379,6 +406,7 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
             name=tool_name,
             payload=payload,
             payload_role="input",
+            session_id=_adk_session_id(tool_context),
         )
         self._tool_spans[id(tool_context)] = sid
 
