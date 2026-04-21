@@ -21,10 +21,13 @@ from google.protobuf.timestamp_pb2 import Timestamp
 from google.protobuf import timestamp_pb2
 
 from harmonograf_server.bus import (
+    DELTA_AGENT_INVOCATION_COMPLETED,
+    DELTA_AGENT_INVOCATION_STARTED,
     DELTA_AGENT_STATUS,
     DELTA_AGENT_UPSERT,
     DELTA_ANNOTATION,
     DELTA_BACKPRESSURE,
+    DELTA_DELEGATION_OBSERVED,
     DELTA_DRIFT,
     DELTA_GOAL_DERIVED,
     DELTA_HEARTBEAT,
@@ -827,6 +830,55 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
         ev.task_progress.task_id = p.get("task_id", "") or ""
         ev.task_progress.fraction = float(p.get("fraction", 0.0) or 0.0)
         ev.task_progress.detail = p.get("detail", "") or ""
+        return frontend_pb2.SessionUpdate(goldfive_event=ev)
+    if delta.kind == DELTA_AGENT_INVOCATION_STARTED:
+        p = delta.payload
+        ev = goldfive_events_pb2.Event(run_id=p.get("run_id", ""))
+        ev.agent_invocation_started.agent_name = p.get("agent_name", "") or ""
+        ev.agent_invocation_started.task_id = p.get("task_id", "") or ""
+        ev.agent_invocation_started.invocation_id = p.get("invocation_id", "") or ""
+        ev.agent_invocation_started.parent_invocation_id = (
+            p.get("parent_invocation_id", "") or ""
+        )
+        started_at = p.get("started_at")
+        if started_at is not None:
+            ts = float_to_ts(float(started_at))
+            if ts is not None:
+                ev.agent_invocation_started.started_at.CopyFrom(ts)
+                ev.emitted_at.CopyFrom(ts)
+        return frontend_pb2.SessionUpdate(goldfive_event=ev)
+    if delta.kind == DELTA_AGENT_INVOCATION_COMPLETED:
+        p = delta.payload
+        ev = goldfive_events_pb2.Event(run_id=p.get("run_id", ""))
+        ev.agent_invocation_completed.agent_name = p.get("agent_name", "") or ""
+        ev.agent_invocation_completed.task_id = p.get("task_id", "") or ""
+        ev.agent_invocation_completed.invocation_id = (
+            p.get("invocation_id", "") or ""
+        )
+        ev.agent_invocation_completed.summary = p.get("summary", "") or ""
+        completed_at = p.get("completed_at")
+        if completed_at is not None:
+            ts = float_to_ts(float(completed_at))
+            if ts is not None:
+                ev.agent_invocation_completed.completed_at.CopyFrom(ts)
+                ev.emitted_at.CopyFrom(ts)
+        return frontend_pb2.SessionUpdate(goldfive_event=ev)
+    if delta.kind == DELTA_DELEGATION_OBSERVED:
+        p = delta.payload
+        ev = goldfive_events_pb2.Event(run_id=p.get("run_id", ""))
+        ev.delegation_observed.from_agent = p.get("from_agent", "") or ""
+        ev.delegation_observed.to_agent = p.get("to_agent", "") or ""
+        ev.delegation_observed.task_id = p.get("task_id", "") or ""
+        ev.delegation_observed.invocation_id = p.get("invocation_id", "") or ""
+        observed_at = p.get("observed_at")
+        if observed_at is not None:
+            ts = float_to_ts(float(observed_at))
+            if ts is not None:
+                ev.delegation_observed.observed_at.CopyFrom(ts)
+                # Frontend uses Event.emitted_at to compute observedAtMs for
+                # delegation records — stamp it here so the edge lines up
+                # with the Gantt timeline.
+                ev.emitted_at.CopyFrom(ts)
         return frontend_pb2.SessionUpdate(goldfive_event=ev)
     if delta.kind == DELTA_CONTEXT_WINDOW_SAMPLE:
         p = delta.payload

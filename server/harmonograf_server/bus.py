@@ -41,6 +41,12 @@ DELTA_RUN_ABORTED = "run_aborted"
 DELTA_GOAL_DERIVED = "goal_derived"
 DELTA_DRIFT = "drift"
 DELTA_TASK_PROGRESS = "task_progress"
+# Registry-dispatch observability events (goldfive 2986775+). Observability
+# only: the server doesn't mutate state for these, just forwards them so
+# the frontend can render delegation edges and per-invocation rows.
+DELTA_AGENT_INVOCATION_STARTED = "agent_invocation_started"
+DELTA_AGENT_INVOCATION_COMPLETED = "agent_invocation_completed"
+DELTA_DELEGATION_OBSERVED = "delegation_observed"
 
 
 @dataclass
@@ -334,6 +340,84 @@ class SessionBus:
                     "task_id": task_id,
                     "fraction": fraction,
                     "detail": detail,
+                },
+            )
+        )
+
+    def publish_agent_invocation_started(
+        self,
+        session_id: str,
+        run_id: str,
+        *,
+        agent_name: str,
+        task_id: str = "",
+        invocation_id: str = "",
+        parent_invocation_id: str = "",
+        started_at: Optional[float] = None,
+    ) -> None:
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_AGENT_INVOCATION_STARTED,
+                {
+                    "run_id": run_id,
+                    "agent_name": agent_name,
+                    "task_id": task_id,
+                    "invocation_id": invocation_id,
+                    "parent_invocation_id": parent_invocation_id,
+                    "started_at": started_at,
+                },
+            )
+        )
+
+    def publish_agent_invocation_completed(
+        self,
+        session_id: str,
+        run_id: str,
+        *,
+        agent_name: str,
+        task_id: str = "",
+        invocation_id: str = "",
+        summary: str = "",
+        completed_at: Optional[float] = None,
+    ) -> None:
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_AGENT_INVOCATION_COMPLETED,
+                {
+                    "run_id": run_id,
+                    "agent_name": agent_name,
+                    "task_id": task_id,
+                    "invocation_id": invocation_id,
+                    "summary": summary,
+                    "completed_at": completed_at,
+                },
+            )
+        )
+
+    def publish_delegation_observed(
+        self,
+        session_id: str,
+        run_id: str,
+        *,
+        from_agent: str,
+        to_agent: str,
+        task_id: str = "",
+        invocation_id: str = "",
+        observed_at: Optional[float] = None,
+    ) -> None:
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_DELEGATION_OBSERVED,
+                {
+                    "run_id": run_id,
+                    "from_agent": from_agent,
+                    "to_agent": to_agent,
+                    "task_id": task_id,
+                    "invocation_id": invocation_id,
+                    "observed_at": observed_at,
                 },
             )
         )

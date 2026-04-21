@@ -15,6 +15,9 @@ from goldfive.pb.goldfive.v1 import events_pb2 as ge
 from goldfive.pb.goldfive.v1 import types_pb2 as gt
 
 from harmonograf_server.bus import (
+    DELTA_AGENT_INVOCATION_COMPLETED,
+    DELTA_AGENT_INVOCATION_STARTED,
+    DELTA_DELEGATION_OBSERVED,
     DELTA_DRIFT,
     DELTA_GOAL_DERIVED,
     DELTA_RUN_ABORTED,
@@ -437,3 +440,108 @@ async def test_task_index_repopulates_from_store_after_restart(pipeline, store):
     assert t1.status == TaskStatus.RUNNING
     # And the index got rebuilt from the store scan.
     assert pipe._task_index["sess_gf"]["t1"] == "p-restart"
+
+
+# ---- registry-dispatch observability events (goldfive 2986775+) ----------
+#
+# These three events are pure observability: the server forwards them to
+# subscribed frontends and does NOT mutate persisted state. The frontend
+# uses delegation_observed to render cross-agent edges on the Gantt and
+# the agent_invocation_* pair as an optional per-invocation timeline.
+# A prior gap caused the server to drop them as "unknown payload"; the
+# tests below lock in that the dispatch wires them through to the bus.
+
+
+@pytest.mark.asyncio
+async def test_agent_invocation_started_forwards_to_bus(pipeline):
+    pipe, bus, _ = pipeline
+    sub = await bus.subscribe("sess_gf")
+    evt = _make_event()
+    evt.agent_invocation_started.agent_name = "researcher"
+    evt.agent_invocation_started.task_id = "t1"
+    evt.agent_invocation_started.invocation_id = "inv-1"
+    evt.agent_invocation_started.parent_invocation_id = ""
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
+    delta = sub.queue.get_nowait()
+    assert delta.kind == DELTA_AGENT_INVOCATION_STARTED
+    assert delta.payload["agent_name"] == "researcher"
+    assert delta.payload["task_id"] == "t1"
+    assert delta.payload["invocation_id"] == "inv-1"
+    assert delta.payload["parent_invocation_id"] == ""
+
+
+@pytest.mark.asyncio
+async def test_agent_invocation_completed_forwards_to_bus(pipeline):
+    pipe, bus, _ = pipeline
+    sub = await bus.subscribe("sess_gf")
+    evt = _make_event(sequence=1)
+    evt.agent_invocation_completed.agent_name = "researcher"
+    evt.agent_invocation_completed.task_id = "t1"
+    evt.agent_invocation_completed.invocation_id = "inv-1"
+    evt.agent_invocation_completed.summary = "found 3 reports"
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
+    delta = sub.queue.get_nowait()
+    assert delta.kind == DELTA_AGENT_INVOCATION_COMPLETED
+    assert delta.payload["agent_name"] == "researcher"
+    assert delta.payload["invocation_id"] == "inv-1"
+    assert delta.payload["summary"] == "found 3 reports"
+
+
+@pytest.mark.asyncio
+async def test_delegation_observed_forwards_to_bus(pipeline):
+    pipe, bus, _ = pipeline
+    sub = await bus.subscribe("sess_gf")
+    evt = _make_event()
+    evt.delegation_observed.from_agent = "coordinator"
+    evt.delegation_observed.to_agent = "researcher"
+    evt.delegation_observed.task_id = "t1"
+    evt.delegation_observed.invocation_id = "inv-1"
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
+    delta = sub.queue.get_nowait()
+    assert delta.kind == DELTA_DELEGATION_OBSERVED
+    assert delta.payload["from_agent"] == "coordinator"
+    assert delta.payload["to_agent"] == "researcher"
+    assert delta.payload["task_id"] == "t1"
+    assert delta.payload["invocation_id"] == "inv-1"
+
+
+@pytest.mark.asyncio
+async def test_registry_events_do_not_mutate_storage(pipeline, store):
+    """The three observability events must not touch persisted plan/task
+    state — they're forward-only. Regression guard against a future edit
+    that accidentally binds them to _apply_goldfive_task_status or similar.
+    """
+    pipe, bus, _ = pipeline
+    await _ensure_session(store)
+    plan_evt = _make_event()
+    plan_evt.plan_submitted.plan.CopyFrom(_plan_pb(plan_id="p-obs"))
+    await pipe.handle_message(_stream_ctx(), _wrap(plan_evt))
+
+    # Baseline plan row.
+    before = await store.get_task_plan("p-obs")
+    assert before is not None
+    status_before = [(t.id, t.status) for t in before.tasks]
+
+    # Fire all three observability events.
+    started = _make_event(sequence=1)
+    started.agent_invocation_started.agent_name = "agent_gf"
+    started.agent_invocation_started.task_id = "t1"
+    started.agent_invocation_started.invocation_id = "inv-x"
+    await pipe.handle_message(_stream_ctx(), _wrap(started))
+
+    completed = _make_event(sequence=2)
+    completed.agent_invocation_completed.agent_name = "agent_gf"
+    completed.agent_invocation_completed.task_id = "t1"
+    completed.agent_invocation_completed.invocation_id = "inv-x"
+    await pipe.handle_message(_stream_ctx(), _wrap(completed))
+
+    delegation = _make_event(sequence=3)
+    delegation.delegation_observed.from_agent = "agent_gf"
+    delegation.delegation_observed.to_agent = "sub_agent"
+    delegation.delegation_observed.task_id = "t1"
+    await pipe.handle_message(_stream_ctx(), _wrap(delegation))
+
+    after = await store.get_task_plan("p-obs")
+    assert after is not None
+    status_after = [(t.id, t.status) for t in after.tasks]
+    assert status_before == status_after
