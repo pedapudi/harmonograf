@@ -244,22 +244,46 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
     def _stamp_session_id(self, ctx: Any) -> str:
         """Return the harmonograf session id to stamp on a span.
 
-        Returns the Client's home session (``self._client.session_id`` —
-        the Hello session assigned at connect) rather than the per-ctx
-        ADK session id. Under ADK's ``AgentTool`` delegation, each
-        sub-Runner has its own ``InMemorySessionService`` and mints its
-        own ADK session_id per invocation — stamping those directly
-        scatters spans across N sessions per adk-web run while goldfive
-        events (riding the Hello stream) land on the home session. By
-        rolling spans onto the home session too, every adk-web run
-        produces one coherent harmonograf session. The specific
-        sub-Runner ADK session is preserved as a span attribute by
-        callers for debugging.
+        Prefers the per-callback ADK session id (``ctx.session.id``) so
+        each span lands on the session its invocation actually belongs
+        to. Falls back to the Client's home / Hello session when ADK
+        runs without a session service (unit-test harnesses, offline
+        replays, or a ctx whose ``session`` is ``None``).
 
-        Returns ``""`` when the client has no session assigned yet,
-        which causes :class:`Client` to fall back to its default
-        ``session_id`` — matching the legacy pre-issue behaviour.
+        History: harmonograf#61 previously returned
+        ``self._client.session_id`` unconditionally to work around a
+        fan-out problem — goldfive events (which ride the transport's
+        Hello stream) landed on the home session while spans landed on
+        per-ctx ADK sessions, so the UI saw "N+1 sessions per adk-web
+        run". goldfive#155 / PR #157 added ``Event.session_id`` to the
+        wire envelope and harmonograf#63 flipped server-side routing to
+        honor it, which puts goldfive events back on the ADK session
+        where their spans live. With that plumbing in place the simpler
+        ``ctx.session.id`` contract is correct again — and the ADK
+        session id already surfaces as a span attribute
+        (``adk.session_id``) from harmonograf#62 for forensic lookups.
+
+        AgentTool sub-Runner caveat: ADK's :class:`AgentTool` spawns
+        sub-Runners that mint their own ``InMemorySessionService`` and
+        per-invocation session_id, so spans emitted inside a sub-Runner
+        land on the sub-Runner's session rather than the outer adk-web
+        session. ADK's :class:`InvocationContext` exposes no parent /
+        root traversal, so there is no clean way for the plugin to walk
+        to the outer session from inside an AgentTool callback.
+        goldfive#155 stamps the sub-Runner session on its own events
+        (same session the spans target), so each sub-Runner-worth of
+        telemetry remains internally coherent. Cross-sub-Runner rollup
+        is now a UI concern (group by ``adk.root_session_id`` or
+        similar) rather than something the client papers over by
+        collapsing every session onto one Hello id.
+
+        Returns ``""`` only when neither the ctx nor the client carry a
+        session id — the plugin's pre-connect degraded path — matching
+        the pre-#61 behaviour.
         """
+        adk_sid = _adk_session_id(ctx)
+        if adk_sid:
+            return adk_sid
         return str(self._client.session_id or "")
 
     # ------------------------------------------------------------------

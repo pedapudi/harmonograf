@@ -111,6 +111,43 @@ class _PayloadAssembler:
         return b"".join(self.chunks)
 
 
+class _SessionView:
+    """Read-only StreamContext overlay that pins ``session_id`` to a new
+    value while proxying every other attribute back to the underlying
+    :class:`StreamContext`.
+
+    Created when a goldfive event carries a ``session_id`` different
+    from the stream's Hello session — downstream handlers read
+    ``ctx.session_id`` for bus fan-out and storage writes, so rather
+    than thread the target session through every handler signature we
+    hand them a ctx-shaped view with the correct session pinned. All
+    mutable state (``seen_span_ids``, ``seen_routes``, payload
+    assemblers, heartbeat counters) remains on the real StreamContext
+    so cross-session bookkeeping still works.
+    """
+
+    __slots__ = ("_inner", "session_id")
+
+    def __init__(self, inner: "StreamContext", session_id: str) -> None:
+        # session_id is stored on self so ``ctx.session_id`` reads
+        # return the overridden value; everything else falls through.
+        object.__setattr__(self, "_inner", inner)
+        object.__setattr__(self, "session_id", session_id)
+
+    def __getattr__(self, name: str) -> Any:
+        # Only reached when the attribute isn't on the view itself.
+        return getattr(self._inner, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # Writes pass through to the underlying StreamContext so state
+        # shared across sessions (seen_span_ids, heartbeat counters,
+        # etc.) stays consistent. ``session_id`` is the only name we
+        # deliberately shadow and it's frozen for the view's lifetime.
+        if name == "session_id":
+            raise AttributeError("_SessionView.session_id is read-only")
+        setattr(self._inner, name, value)
+
+
 @dataclass
 class StreamContext:
     """Per-stream state. One StreamTelemetry RPC == one StreamContext."""
@@ -647,60 +684,85 @@ class IngestPipeline:
         Gantt stays live. Unknown payload variants are logged and
         ignored so adding a new event kind in goldfive is
         forward-compatible with an older harmonograf server.
+
+        Routing: goldfive#155 / PR #157 added ``Event.session_id`` and
+        the Runner/Steerer/Executors stamp it on every emitted event so
+        one transport stream can multiplex events across sessions
+        (e.g. ADK's AgentTool mints sub-Runner sessions inside a single
+        adk-web run). When the event carries a session_id we route to
+        it, auto-creating the session+agent row if unseen. An empty
+        ``session_id`` falls back to the stream's Hello session — the
+        pre-#155 behavior — for back-compat with older goldfive clients.
         """
         if event is None:
             return
         kind = event.WhichOneof("payload")
         run_id = event.run_id
         sequence = event.sequence
+
+        event_sid = getattr(event, "session_id", "") or ""
+        if event_sid and event_sid != ctx.session_id:
+            # Route this event onto its declared session. Use a shallow
+            # per-session StreamContext proxy so downstream handlers
+            # (which read ctx.session_id / ctx.agent_id for bus fan-out
+            # and storage writes) see the right session id without
+            # having to thread session_id through every handler
+            # signature. Auto-register the (session, agent) route the
+            # same way span ingest does so the session row exists
+            # before any task-plan / drift fan-out references it.
+            await self._ensure_route(ctx, event_sid, ctx.agent_id)
+            target_ctx = _SessionView(ctx, event_sid)
+        else:
+            target_ctx = ctx
+
         logger.debug(
             "goldfive event session_id=%s run_id=%s sequence=%s kind=%s",
-            ctx.session_id,
+            target_ctx.session_id,
             run_id,
             sequence,
             kind,
         )
         if kind == "run_started":
-            await self._on_run_started(ctx, event.run_started, run_id)
+            await self._on_run_started(target_ctx, event.run_started, run_id)
         elif kind == "goal_derived":
-            await self._on_goal_derived(ctx, event.goal_derived, run_id)
+            await self._on_goal_derived(target_ctx, event.goal_derived, run_id)
         elif kind == "plan_submitted":
-            await self._on_plan_submitted(ctx, event.plan_submitted, run_id)
+            await self._on_plan_submitted(target_ctx, event.plan_submitted, run_id)
         elif kind == "plan_revised":
-            await self._on_plan_revised(ctx, event.plan_revised, run_id)
+            await self._on_plan_revised(target_ctx, event.plan_revised, run_id)
         elif kind == "task_started":
-            await self._on_task_started(ctx, event.task_started, run_id)
+            await self._on_task_started(target_ctx, event.task_started, run_id)
         elif kind == "task_progress":
-            self._on_task_progress(ctx, event.task_progress, run_id)
+            self._on_task_progress(target_ctx, event.task_progress, run_id)
         elif kind == "task_completed":
-            await self._on_task_completed(ctx, event.task_completed, run_id)
+            await self._on_task_completed(target_ctx, event.task_completed, run_id)
         elif kind == "task_failed":
-            await self._on_task_failed(ctx, event.task_failed, run_id)
+            await self._on_task_failed(target_ctx, event.task_failed, run_id)
         elif kind == "task_blocked":
-            await self._on_task_blocked(ctx, event.task_blocked, run_id)
+            await self._on_task_blocked(target_ctx, event.task_blocked, run_id)
         elif kind == "task_cancelled":
-            await self._on_task_cancelled(ctx, event.task_cancelled, run_id)
+            await self._on_task_cancelled(target_ctx, event.task_cancelled, run_id)
         elif kind == "drift_detected":
-            self._on_drift_detected(ctx, event.drift_detected, run_id)
+            self._on_drift_detected(target_ctx, event.drift_detected, run_id)
         elif kind == "run_completed":
-            self._on_run_completed(ctx, event.run_completed, run_id)
+            self._on_run_completed(target_ctx, event.run_completed, run_id)
         elif kind == "run_aborted":
-            self._on_run_aborted(ctx, event.run_aborted, run_id)
+            self._on_run_aborted(target_ctx, event.run_aborted, run_id)
         elif kind == "agent_invocation_started":
             self._on_agent_invocation_started(
-                ctx, event.agent_invocation_started, run_id
+                target_ctx, event.agent_invocation_started, run_id
             )
         elif kind == "agent_invocation_completed":
             self._on_agent_invocation_completed(
-                ctx, event.agent_invocation_completed, run_id
+                target_ctx, event.agent_invocation_completed, run_id
             )
         elif kind == "delegation_observed":
-            self._on_delegation_observed(ctx, event.delegation_observed, run_id)
+            self._on_delegation_observed(target_ctx, event.delegation_observed, run_id)
         else:
             logger.debug(
                 "ignoring unknown goldfive event payload kind=%s on session_id=%s",
                 kind,
-                ctx.session_id,
+                target_ctx.session_id,
             )
 
     # ---- goldfive event handlers -------------------------------------
