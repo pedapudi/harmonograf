@@ -35,6 +35,7 @@ Public surface (stable):
 
 from __future__ import annotations
 
+from .adk_web import AdkWebObservability, adk_web_observability
 from .client import Client
 from .control_channel import control_channel
 from .enums import Capability, SpanKind, SpanStatus
@@ -44,6 +45,7 @@ from .telemetry_plugin import HarmonografTelemetryPlugin
 from .transport import ControlAckSpec
 
 __all__ = [
+    "AdkWebObservability",
     "Capability",
     "Client",
     "ControlAckSpec",
@@ -51,6 +53,7 @@ __all__ = [
     "HarmonografTelemetryPlugin",
     "SpanKind",
     "SpanStatus",
+    "adk_web_observability",
     "control_channel",
     "observe",
 ]

@@ -181,45 +181,41 @@ def _build_app() -> Any:
     goal_deriver = LLMGoalDeriver(call_llm=call_llm, model=planner_model)
 
     plugins: list[Any] = []
+    sinks: list[Any] = []
     control = None
     client = _get_or_create_client()
     if client is not None:
         try:
-            from harmonograf_client import (
-                HarmonografTelemetryPlugin,
-                control_channel,
-            )
+            from harmonograf_client import adk_web_observability
         except Exception as e:  # noqa: BLE001
             log.warning(
-                "HarmonografTelemetryPlugin unavailable (%s); running without spans",
+                "harmonograf_client.adk_web_observability unavailable (%s); "
+                "running without spans / plan sink / control",
                 e,
             )
         else:
-            plugins.append(HarmonografTelemetryPlugin(client))
-            # Wire harmonograf UI → goldfive steerer. Without this
-            # ``control=`` hook, STEER / PAUSE / CANCEL / APPROVE /
-            # REJECT events from the frontend return
-            # ``delivery=FAILURE`` — the plugin wires spans out, not
-            # control back in. See harmonograf#55.
-            try:
-                control = control_channel(client)
-            except RuntimeError as e:
-                # ``control_channel`` needs a running event loop. When
-                # ``_build_app`` is called from a non-async context
-                # (e.g. synchronous test setup) we skip the bridge and
-                # log; adk web always builds the app inside its loop so
-                # the production path is covered.
-                log.warning(
-                    "control_channel skipped (no running loop): %s; steers "
-                    "will return delivery=FAILURE for this App",
-                    e,
-                )
+            # ``adk_web_observability`` bundles the three hook-ups the
+            # ``adk web`` path needs: telemetry plugin (spans), plan
+            # sink (goldfive plan / task / drift events — the missing
+            # piece from harmonograf#57), and control channel (STEER /
+            # PAUSE / CANCEL from the UI — harmonograf#55).
+            #
+            # ``control`` is ``None`` when ``_build_app`` runs outside
+            # an asyncio loop (synchronous test setup); adk web always
+            # builds the app inside its loop so the production path is
+            # covered. A warning is logged inside the helper in that
+            # case.
+            bundle = adk_web_observability(client)
+            plugins.append(bundle.plugin)
+            sinks.append(bundle.sink)
+            control = bundle.control
 
     wrapped = goldfive.wrap(
         tree,
         planner=planner,
         goal_deriver=goal_deriver,
         plugins=plugins,
+        sinks=sinks or None,
         control=control,
     )
 
