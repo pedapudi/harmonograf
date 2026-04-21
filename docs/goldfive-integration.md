@@ -225,6 +225,21 @@ make demo-presentation          # just adk web; point at an existing server via 
 also exposes an offline runnable Runner (no LLM, canned plan) that
 exercises the same event stream — useful for integration smoke tests.
 
+Under the hood, goldfive's `ADKAdapter` builds a registry of reachable
+agents from the wrapped tree and dispatches each task to the per-agent
+`InMemoryRunner` for its assignee — not to the tree root. This is what
+makes coordinator+AgentTool trees work correctly under `adk web`
+without the outer coordinator Runner blocking on its own sub-invocation.
+See `third_party/goldfive/docs/design/ARCHITECTURE.md` and
+`third_party/goldfive/docs/guides/adk-web-integration.md` in the
+submodule for the full rationale.
+
+Three new sink events (`AgentInvocationStarted`,
+`AgentInvocationCompleted`, `DelegationObserved`) fire as part of this
+dispatch. Harmonograf ingests them via protobuf unknown-field handling
+— no bespoke handling yet; see TODO in `frontend/src/rpc/goldfiveEvent.ts`
+for optional future enrichment of the Gantt / Trajectory views.
+
 ## Further reading
 
 - [goldfive-migration-plan.md](goldfive-migration-plan.md) — design record of the migration.

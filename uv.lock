@@ -707,8 +707,9 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "rich", marker = "extra == 'examples'", specifier = ">=13.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
+    { name = "sentence-transformers", marker = "extra == 'embedding'", specifier = ">=3.0" },
 ]
-provides-extras = ["adk", "claude", "dev", "examples", "proto"]
+provides-extras = ["adk", "claude", "dev", "embedding", "examples", "proto"]
 
 [[package]]
 name = "google-adk"
