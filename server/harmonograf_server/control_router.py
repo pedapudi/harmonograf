@@ -221,7 +221,26 @@ class ControlRouter:
             if aliased_id:
                 async with self._lock:
                     bucket = dict(self._subs.get(aliased_id, {}))
-        live_ids = [sid for sid, sub in bucket.items() if not sub.closed]
+        # Prefer subscriptions whose session_id matches the target when any
+        # such sub exists. A single Client process may open multiple
+        # SubscribeControl streams for the same agent_id — a home sub keyed
+        # on the harmonograf-assigned session plus one per live ADK session
+        # (see harmonograf #53). Fanning out to every sub would cause a
+        # goldfive bridge to see the same STEER twice; filtering to
+        # session-matching subs preserves the baseline while letting
+        # per-ADK-session steering land precisely on the ADK session that
+        # originated the request. Falls back to every live sub when no
+        # session-matching sub is present — that is the legacy path the
+        # home-only topology always took.
+        session_matched_ids = [
+            sid
+            for sid, sub in bucket.items()
+            if not sub.closed and session_id and sub.session_id == session_id
+        ]
+        if session_matched_ids:
+            live_ids = session_matched_ids
+        else:
+            live_ids = [sid for sid, sub in bucket.items() if not sub.closed]
         if not live_ids:
             return DeliveryOutcome(control_id=control_id, result=DeliveryResult.UNAVAILABLE)
 
@@ -289,14 +308,22 @@ class ControlRouter:
             if ack.HasField("acked_at")
             else time.time(),
         )
-        # If stream_id unknown, attribute it to any still-expected stream.
-        if not record.stream_id:
+        # If stream_id unknown or not in the expected set, attribute it
+        # to any still-expected stream. The ingest layer stamps acks with
+        # the telemetry stream_id (that's where ControlAck rides), which
+        # may differ from the SubscribeControl stream_id when the client
+        # opens multiple control subs on the same telemetry stream (the
+        # per-ADK-session case introduced by harmonograf #53). In that
+        # topology the ack is unambiguously for the one pending
+        # control_id we already filtered on, so picking the single
+        # expected stream is correct. When the agent actually has
+        # multiple concurrent telemetry streams we get one ack per
+        # stream and the caller-supplied stream_id still matches.
+        if not record.stream_id or record.stream_id not in pending.expected_stream_ids:
             if pending.expected_stream_ids:
                 record.stream_id = next(iter(pending.expected_stream_ids))
             else:
                 return
-        if record.stream_id not in pending.expected_stream_ids:
-            return
         pending.expected_stream_ids.discard(record.stream_id)
         pending.acks.append(record)
         self._maybe_resolve(pending)
