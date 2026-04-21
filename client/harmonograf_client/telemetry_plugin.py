@@ -242,16 +242,25 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         return self._client
 
     def _stamp_session_id(self, ctx: Any) -> str:
-        """Return the ADK session id on ``ctx`` for span stamping.
+        """Return the harmonograf session id to stamp on a span.
 
-        Harmonograf stamps ``ctx.session.id`` on every emitted span so
-        sub-agent spans rolled into one ADK invocation show up grouped
-        in the server's UI. Returns ``""`` when the context is running
-        without a session service, which causes :class:`Client` to fall
-        back to its default ``session_id`` — matching the legacy
-        pre-issue behaviour.
+        Returns the Client's home session (``self._client.session_id`` —
+        the Hello session assigned at connect) rather than the per-ctx
+        ADK session id. Under ADK's ``AgentTool`` delegation, each
+        sub-Runner has its own ``InMemorySessionService`` and mints its
+        own ADK session_id per invocation — stamping those directly
+        scatters spans across N sessions per adk-web run while goldfive
+        events (riding the Hello stream) land on the home session. By
+        rolling spans onto the home session too, every adk-web run
+        produces one coherent harmonograf session. The specific
+        sub-Runner ADK session is preserved as a span attribute by
+        callers for debugging.
+
+        Returns ``""`` when the client has no session assigned yet,
+        which causes :class:`Client` to fall back to its default
+        ``session_id`` — matching the legacy pre-issue behaviour.
         """
-        return _adk_session_id(ctx)
+        return str(self._client.session_id or "")
 
     # ------------------------------------------------------------------
     # Invocation lifecycle
@@ -261,10 +270,16 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         inv_id = str(_safe_attr(invocation_context, "invocation_id", "") or "")
         agent = _safe_attr(invocation_context, "agent")
         name = str(_safe_attr(agent, "name", "") or "invocation")
+        adk_sid = _adk_session_id(invocation_context)
+        attrs: dict[str, Any] = {}
+        if inv_id:
+            attrs["adk.invocation_id"] = inv_id
+        if adk_sid:
+            attrs["adk.session_id"] = adk_sid
         sid = self._client.emit_span_start(
             kind=SpanKind.INVOCATION,
             name=name,
-            attributes={"adk.invocation_id": inv_id} if inv_id else None,
+            attributes=attrs or None,
             session_id=self._stamp_session_id(invocation_context),
         )
         if inv_id:
