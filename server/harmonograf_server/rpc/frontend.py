@@ -313,6 +313,11 @@ class FrontendServicerMixin:
                 ev.drift_detected.detail = dr.get("detail", "") or ""
                 ev.drift_detected.current_task_id = dr.get("current_task_id", "") or ""
                 ev.drift_detected.current_agent_id = dr.get("current_agent_id", "") or ""
+                # Propagate annotation_id so reconnecting clients can dedup
+                # the drift row against the source user annotation on the
+                # initial burst just like they do for live arrivals
+                # (harmonograf#75).
+                ev.drift_detected.annotation_id = dr.get("annotation_id", "") or ""
                 ra = dr.get("recorded_at")
                 if isinstance(ra, (int, float)):
                     ts = float_to_ts(float(ra))
@@ -853,6 +858,20 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
         ev.drift_detected.detail = p.get("detail", "") or ""
         ev.drift_detected.current_task_id = p.get("current_task_id", "") or ""
         ev.drift_detected.current_agent_id = p.get("current_agent_id", "") or ""
+        # Propagate the source annotation_id so the frontend can dedup the
+        # drift row against the source user annotation (harmonograf#75).
+        ev.drift_detected.annotation_id = p.get("annotation_id", "") or ""
+        # Stamp ``emitted_at`` so the frontend renders a correct
+        # session-relative timestamp. Previously this was omitted on the
+        # live DELTA_DRIFT path, which caused the deriver to fall back to
+        # an emittedMs of 0 (rendering as "0:00") or — when sessionStartMs
+        # was not yet set — to an absolute wall-clock ms that showed as
+        # "29613707:05". Closes #73.
+        recorded_at = p.get("recorded_at")
+        if isinstance(recorded_at, (int, float)):
+            ts = float_to_ts(float(recorded_at))
+            if ts is not None:
+                ev.emitted_at.CopyFrom(ts)
         return frontend_pb2.SessionUpdate(goldfive_event=ev)
     if delta.kind == DELTA_TASK_PROGRESS:
         p = delta.payload

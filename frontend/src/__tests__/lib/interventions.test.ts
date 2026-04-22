@@ -39,6 +39,7 @@ function mkDrift(over: Partial<DriftRecord> = {}): DriftRecord {
     taskId: 't1',
     agentId: 'a',
     recordedAtMs: 200,
+    annotationId: '',
     ...over,
   };
 }
@@ -212,6 +213,106 @@ describe('deriveInterventions', () => {
   it('returns an empty list for an empty session', () => {
     const rows = deriveInterventions({ annotations: [], drifts: [], plans: [] });
     expect(rows).toEqual([]);
+  });
+
+  // harmonograf#75 — dedup by annotation_id across annotation / drift / plan
+  // sources so a single user STEER renders as one card, not three.
+
+  it('collapses annotation + USER_STEER drift + plan revision into one card', () => {
+    const rows = deriveInterventions({
+      annotations: [
+        mkAnnotation({
+          id: 'ann_s1',
+          createdAtMs: 100,
+          author: 'alice',
+          body: 'focus on intro',
+        }),
+      ],
+      drifts: [
+        mkDrift({
+          seq: 0,
+          kind: 'user_steer',
+          severity: 'warning',
+          detail: 'by alice: focus on intro',
+          recordedAtMs: 120,
+          annotationId: 'ann_s1',
+        }),
+      ],
+      plans: [
+        mkPlan({
+          id: 'p',
+          createdAtMs: 180,
+          revisionKind: 'user_steer',
+          revisionSeverity: 'warning',
+          revisionIndex: 1,
+        }),
+      ],
+    });
+
+    // Exactly one card, not three.
+    expect(rows).toHaveLength(1);
+    const card = rows[0];
+    expect(card.source).toBe('user');
+    expect(card.kind).toBe('STEER');
+    expect(card.annotationId).toBe('ann_s1');
+    expect(card.author).toBe('alice');
+    expect(card.bodyOrReason).toBe('focus on intro');
+    // Drift + plan outcomes folded in.
+    expect(card.severity).toBe('warning');
+    expect(card.outcome).toBe('plan_revised:r1');
+    expect(card.planRevisionIndex).toBe(1);
+  });
+
+  it('autonomous drift keeps its own card alongside a user annotation', () => {
+    const rows = deriveInterventions({
+      annotations: [
+        mkAnnotation({ id: 'ann_u', createdAtMs: 100, author: 'alice', body: 'pivot' }),
+      ],
+      drifts: [
+        // Autonomous drift — no annotation_id, own card.
+        mkDrift({
+          seq: 1,
+          kind: 'looping_reasoning',
+          severity: 'warning',
+          recordedAtMs: 500,
+          annotationId: '',
+        }),
+        // User-control drift carrying the annotation id — must merge.
+        mkDrift({
+          seq: 2,
+          kind: 'user_steer',
+          severity: 'warning',
+          recordedAtMs: 110,
+          annotationId: 'ann_u',
+        }),
+      ],
+      plans: [],
+    });
+    expect(rows).toHaveLength(2);
+    const user = rows.find((r) => r.source === 'user');
+    const drift = rows.find((r) => r.source === 'drift');
+    expect(user?.annotationId).toBe('ann_u');
+    expect(drift?.kind).toBe('LOOPING_REASONING');
+    expect(drift?.annotationId).toBe('');
+  });
+
+  it('user_steer drift without annotation_id keeps a separate card (back-compat)', () => {
+    // Pre-goldfive#176 emissions had no annotation_id; the deduper has
+    // nothing to join on, so the drift rides through as its own card.
+    const rows = deriveInterventions({
+      annotations: [mkAnnotation({ id: 'ann_x', createdAtMs: 100 })],
+      drifts: [
+        mkDrift({
+          seq: 0,
+          kind: 'user_steer',
+          severity: 'warning',
+          recordedAtMs: 140,
+          annotationId: '',
+        }),
+      ],
+      plans: [],
+    });
+    expect(rows).toHaveLength(2);
   });
 });
 

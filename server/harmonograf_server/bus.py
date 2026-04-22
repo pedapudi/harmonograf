@@ -306,7 +306,20 @@ class SessionBus:
         detail: str = "",
         current_task_id: str = "",
         current_agent_id: str = "",
+        annotation_id: str = "",
+        recorded_at: float | None = None,
     ) -> None:
+        # ``annotation_id`` is non-empty for user-control drifts (USER_STEER,
+        # USER_CANCEL) minted from a ControlMessage with an annotation id in
+        # its payload (goldfive#176). The frontend dedup path (harmonograf#75)
+        # uses it to collapse the drift row into the source annotation row
+        # so a single user STEER renders as one intervention card, not three.
+        #
+        # ``recorded_at`` is the wall-clock moment the drift was ingested
+        # (seconds since epoch). Forwarded to the delta payload so the
+        # frontend.py DELTA_DRIFT translator can stamp ``emitted_at`` on
+        # the outgoing SessionUpdate — without this the frontend falls
+        # back to a session-relative-ms of 0 for live drifts (closes #73).
         self.publish(
             Delta(
                 session_id,
@@ -318,6 +331,8 @@ class SessionBus:
                     "detail": detail,
                     "current_task_id": current_task_id,
                     "current_agent_id": current_agent_id,
+                    "annotation_id": annotation_id,
+                    "recorded_at": recorded_at,
                 },
             )
         )

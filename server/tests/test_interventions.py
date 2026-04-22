@@ -361,6 +361,182 @@ async def test_plan_revision_with_matching_drift_is_not_double_counted(store):
     assert records[0].plan_revision_index == 2
 
 
+async def test_user_steer_annotation_plus_drift_plus_plan_collapse_to_one_card(store):
+    """harmonograf#75: one annotation + one USER_STEER drift + one refine → 1 card.
+
+    Before the dedup work, a single user STEER surfaced as three cards
+    in the Trajectory view — the annotation row, the USER_STEER drift
+    row (tagged with the same annotation_id by goldfive#176), and the
+    plan_revised row. All three trace back to the same user event; the
+    aggregator must collapse them into one intervention card whose base
+    row is the user's annotation (keeping author + body) with the
+    drift's severity and the plan_revised outcome folded in.
+    """
+
+    sid = "sess_dedup_user"
+    await _seed_session(store, sid)
+
+    # 1. User STEER annotation at t=100.
+    await store.put_annotation(
+        Annotation(
+            id="ann_steer_42",
+            session_id=sid,
+            target=AnnotationTarget(agent_id="a", time_start=100.0),
+            author="alice",
+            created_at=100.0,
+            kind=AnnotationKind.STEERING,
+            body="focus on the intro",
+        )
+    )
+
+    # 2. USER_STEER drift minted by goldfive from the ControlMessage, carrying
+    #    the bridge-supplied annotation_id (goldfive#176). Drift time is
+    #    after the annotation because the steerer adds a bit of processing
+    #    latency before emitting.
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "run_id": "r1",
+                    "kind": "user_steer",
+                    "severity": "warning",
+                    "detail": "by alice: focus on the intro",
+                    "annotation_id": "ann_steer_42",
+                    "recorded_at": 100.2,
+                }
+            ]
+        }
+    )
+
+    # 3. Plan revision produced by the refine path, revision_kind=user_steer,
+    #    landing inside the 5s attribution window.
+    await store.put_task_plan(
+        TaskPlan(
+            id="p_rev",
+            session_id=sid,
+            created_at=100.8,
+            summary="revised after steer",
+            tasks=[],
+            edges=[],
+            revision_reason="by alice: focus on the intro",
+            revision_kind="user_steer",
+            revision_severity="warning",
+            revision_index=1,
+        )
+    )
+
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+
+    # Exactly one card — not three.
+    assert len(records) == 1, f"expected 1 card, got {len(records)}: {records}"
+    card = records[0]
+    # Base row is the user's annotation.
+    assert card.source == "user"
+    assert card.kind == "STEER"
+    assert card.annotation_id == "ann_steer_42"
+    assert card.author == "alice"
+    assert card.body_or_reason == "focus on the intro"
+    # Drift + plan outcomes were folded in.
+    assert card.severity == "warning"
+    assert card.outcome == "plan_revised:r1"
+    assert card.plan_revision_index == 1
+
+
+async def test_autonomous_drift_keeps_own_card_alongside_user_annotation(store):
+    """Dedup key is annotation_id — autonomous drifts must NOT merge.
+
+    Per the user directive ("steering due to drift IS a steering"),
+    drifts goldfive auto-detected (LOOPING_REASONING, etc.) keep their
+    own cards even when the session also contains user annotations.
+    The deduper only collapses rows that share an annotation_id.
+    """
+
+    sid = "sess_mixed"
+    await _seed_session(store, sid)
+    # User STEER annotation at t=100.
+    await store.put_annotation(
+        Annotation(
+            id="ann_user_1",
+            session_id=sid,
+            target=AnnotationTarget(agent_id="a", time_start=100.0),
+            author="alice",
+            created_at=100.0,
+            kind=AnnotationKind.STEERING,
+            body="pivot",
+        )
+    )
+    # Autonomous drift at t=200 (no annotation_id).
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "kind": "looping_reasoning",
+                    "severity": "warning",
+                    "detail": "loop",
+                    "recorded_at": 200.0,
+                },
+                # User-control drift with annotation_id — MUST merge into the
+                # annotation row above.
+                {
+                    "kind": "user_steer",
+                    "severity": "warning",
+                    "detail": "by alice: pivot",
+                    "annotation_id": "ann_user_1",
+                    "recorded_at": 100.1,
+                },
+            ]
+        }
+    )
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+
+    # 2 cards: the merged user STEER + the autonomous looping_reasoning drift.
+    assert len(records) == 2
+    user_card = next(r for r in records if r.source == "user")
+    drift_card = next(r for r in records if r.source == "drift")
+    assert user_card.annotation_id == "ann_user_1"
+    assert drift_card.kind == "LOOPING_REASONING"
+    assert drift_card.annotation_id == ""  # autonomous — owns its card
+
+
+async def test_user_steer_drift_without_annotation_id_keeps_separate_card(store):
+    """Back-compat: goldfive pre-#176 emits drifts without annotation_id.
+
+    In that case the deduper can't join, so the drift surfaces as its
+    own card. Existing behavior — verified to keep the fallback working
+    even after the dedup pass is added.
+    """
+
+    sid = "sess_nojoin"
+    await _seed_session(store, sid)
+    await store.put_annotation(
+        Annotation(
+            id="ann_x",
+            session_id=sid,
+            target=AnnotationTarget(agent_id="a", time_start=100.0),
+            author="alice",
+            created_at=100.0,
+            kind=AnnotationKind.STEERING,
+            body="x",
+        )
+    )
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "kind": "user_steer",
+                    "severity": "warning",
+                    "detail": "x",
+                    "recorded_at": 101.0,
+                    # No annotation_id — pre-#176 goldfive.
+                }
+            ]
+        }
+    )
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    assert len(records) == 2  # annotation + orphan drift
+    assert all(r.source == "user" for r in records)
+
+
 async def test_empty_session_returns_empty_list(store):
     sid = "sess_empty"
     await _seed_session(store, sid)
