@@ -8,6 +8,12 @@
   flex-direction: column;
   gap: 4px;
   padding: 0;
+  /* Cap the strip's rendered width so sparse markers don't get smeared
+     across an over-wide Gantt pane. Matches the default viewBox width the
+     component uses to lay out markers (#107). Parents that need a wider
+     strip can pass an explicit `width` prop; that overrides max-width
+     via the inline style on the wrapper. */
+  max-width: 480px;
   font:
     11px/1.3 var(--md-sys-typescale-body-small-font, system-ui, sans-serif);
   color: var(--md-sys-color-on-surface-variant, #9da3b4);

@@ -382,7 +382,13 @@ export function InterventionsTimeline({
       ref={rootRef}
       className="hg-interventions-strip"
       data-testid="interventions-timeline"
-      style={{ width: width ? `${width}px` : '100%' }}
+      style={
+        width
+          ? // Explicit width overrides the CSS max-width cap so callers that
+            // know the Gantt pane width can still size the strip to match.
+            { width: `${width}px`, maxWidth: `${width}px` }
+          : { width: '100%' }
+      }
     >
       <svg
         className="hg-interventions-strip__svg"
