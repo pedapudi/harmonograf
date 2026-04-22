@@ -24,6 +24,7 @@ import { TimestampSchema } from '@bufbuild/protobuf/wkt';
 import {
   PlanSchema,
   TaskSchema,
+  TaskEdgeSchema,
   TaskStatus,
   DriftKind,
   DriftSeverity,
@@ -78,6 +79,50 @@ describe('applyGoldfiveEvent', () => {
     expect(plans[0].id).toBe('p1');
     expect(plans[0].tasks.map((t) => t.id)).toEqual(['t1', 't2', 't3', 't4']);
     expect(plans[0].tasks.every((t) => t.status === 'PENDING')).toBe(true);
+  });
+
+  // harmonograf#107 — edges must survive the proto→UI conversion. Without
+  // this guard a regression in convertGoldfivePlan (e.g. a proto field
+  // rename from `edges` to something else) silently empties the dependency
+  // DAG so Gantt / TaskStagesGraph render with zero arrows.
+  it('planSubmitted carries edges intact through convertGoldfivePlan', () => {
+    const store = new SessionStore();
+    const plan = create(PlanSchema, {
+      id: 'p-edges',
+      runId: 'run-1',
+      summary: '7-stage',
+      tasks: ['t1', 't2', 't3', 't4', 't5', 't6', 't7'].map((id) =>
+        makePbTask(id),
+      ),
+      edges: [
+        create(TaskEdgeSchema, { fromTaskId: 't1', toTaskId: 't2' }),
+        create(TaskEdgeSchema, { fromTaskId: 't2', toTaskId: 't3' }),
+        create(TaskEdgeSchema, { fromTaskId: 't2', toTaskId: 't4' }),
+        create(TaskEdgeSchema, { fromTaskId: 't3', toTaskId: 't5' }),
+        create(TaskEdgeSchema, { fromTaskId: 't4', toTaskId: 't5' }),
+        create(TaskEdgeSchema, { fromTaskId: 't5', toTaskId: 't6' }),
+        create(TaskEdgeSchema, { fromTaskId: 't6', toTaskId: 't7' }),
+      ],
+      revisionReason: '',
+      revisionKind: DriftKind.UNSPECIFIED,
+      revisionSeverity: DriftSeverity.UNSPECIFIED,
+      revisionIndex: 0,
+    });
+    applyGoldfiveEvent(
+      create(EventSchema, {
+        eventId: 'ev-edges',
+        runId: 'run-1',
+        sequence: 0n,
+        payload: { case: 'planSubmitted', value: create(PlanSubmittedSchema, { plan }) },
+      }),
+      store,
+      0,
+    );
+    const stored = store.tasks.getPlan('p-edges');
+    expect(stored).toBeDefined();
+    expect(stored!.edges).toHaveLength(7);
+    expect(stored!.edges[0]).toEqual({ fromTaskId: 't1', toTaskId: 't2' });
+    expect(stored!.edges[6]).toEqual({ fromTaskId: 't6', toTaskId: 't7' });
   });
 
   it('task_started / task_completed / task_failed / task_blocked / task_cancelled mutate status by task_id', () => {

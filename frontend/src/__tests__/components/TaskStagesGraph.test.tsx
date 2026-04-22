@@ -109,4 +109,29 @@ describe('<TaskStagesGraph />', () => {
     const cardRects = container.querySelectorAll('rect.hg-stages__card-rect');
     expect(cardRects).toHaveLength(4);
   });
+
+  // harmonograf#107 — regression guard. The reported bug ("7-stage plan
+  // with NO arrows between stages") can only happen if `plan.edges` arrives
+  // empty. With a seeded 7-edge plan the SVG MUST produce 7 <path> nodes.
+  it('renders one path element per edge on a 7-stage DAG', () => {
+    const plan = mkPlan(
+      ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id) => mkTask(id)),
+      [
+        ['a', 'b'],
+        ['b', 'c'],
+        ['b', 'd'],
+        ['c', 'e'],
+        ['d', 'e'],
+        ['e', 'f'],
+        ['f', 'g'],
+      ],
+    );
+    const { container } = render(<TaskStagesGraph plan={plan} />);
+    const paths = container.querySelectorAll('path.hg-stages__edge');
+    expect(paths).toHaveLength(7);
+    // Every path carries a marker-end so the arrowhead renders.
+    paths.forEach((p) =>
+      expect(p.getAttribute('marker-end')).toBe('url(#hg-stages-arrow)'),
+    );
+  });
 });
