@@ -119,6 +119,102 @@ class TestLazyHelloAgainstRealServer:
         assert sessions[0].id.startswith("sess_"), sessions[0].id
 
     @pytest.mark.asyncio
+    async def test_goldfive_runner_produces_exactly_one_session(
+        self,
+        harmonograf_server: dict,
+    ) -> None:
+        """Full orchestrated stack: goldfive ``Runner`` + ``HarmonografSink``
+        drive a three-task plan. With lazy Hello, the first envelope the
+        sink pushes carries a ``session_id`` that goldfive mints for the
+        run, and Hello inherits that. Exactly one ``sessions`` row
+        lands on the server — no ghost.
+        """
+        pytest.importorskip("goldfive")
+        from goldfive import (
+            InMemorySink,
+            LiteralGoalDeriver,
+            Runner,
+            SequentialExecutor,
+            StaticPlanner,
+        )
+        from goldfive.types import Plan, Task, TaskEdge
+
+        from harmonograf_client import Client, HarmonografSink
+
+        plan = Plan(
+            id="plan-lazy-hello",
+            run_id="",
+            goal_ids=[],
+            summary="two sequential echoes",
+            tasks=[
+                Task(
+                    id="t1",
+                    title="first",
+                    description="first",
+                    assignee_agent_id="alpha",
+                ),
+                Task(
+                    id="t2",
+                    title="second",
+                    description="second",
+                    assignee_agent_id="beta",
+                ),
+            ],
+            edges=[TaskEdge(from_task_id="t1", to_task_id="t2")],
+        )
+
+        class _EchoAdapter:
+            """Minimal goldfive AgentAdapter — returns a completion for
+            every task so the runner reaches RunCompleted.
+            """
+
+            @property
+            def available_agents(self):
+                return ["alpha", "beta"]
+
+            async def register_reporting_tools(self, tools):
+                return None
+
+            def bind_steerer(self, steerer):
+                return None
+
+            async def invoke(self, task, session):
+                from goldfive.results import InvocationResult
+
+                return InvocationResult(
+                    task_id=str(getattr(task, "id", "") or ""),
+                    text="ok",
+                    stop_reason="end_turn",
+                )
+
+        client = Client(
+            name="lazy-hello-orchestrated",
+            server_addr=harmonograf_server["addr"],
+        )
+        try:
+            sink = HarmonografSink(client)
+            runner = Runner(
+                agent=_EchoAdapter(),
+                planner=StaticPlanner(plan=plan),
+                executor=SequentialExecutor(),
+                goal_deriver=LiteralGoalDeriver(),
+                sinks=[InMemorySink(), sink],
+            )
+            outcome = await runner.run("echo twice")
+            await runner.close()
+            assert outcome.success is True, outcome.reason
+        finally:
+            client.shutdown(flush_timeout=2.0)
+
+        sessions = await _wait_for_sessions(
+            harmonograf_server["store"], expected=1, timeout=5.0
+        )
+        assert len(sessions) == 1, (
+            f"expected exactly one session under the orchestrated "
+            f"stack, got {[s.id for s in sessions]!r}"
+        )
+
+    @pytest.mark.asyncio
     async def test_idle_client_shutdown_creates_no_session(
         self,
         harmonograf_server: dict,
