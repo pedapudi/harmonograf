@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useUiStore } from '../../state/uiStore';
-import { useSessionWatch } from '../../rpc/hooks';
+import { useSessionWatch, sessionIsInactive } from '../../rpc/hooks';
 import { colorForAgent } from '../../theme/agentColors';
 import { formatDuration } from '../../lib/format';
 import type { Span, AttributeValue } from '../../gantt/types';
@@ -76,11 +76,32 @@ export function LiveActivityPanel() {
   const store = watch.store;
   const items: ActiveItem[] = [];
 
-  // Find all running INVOCATION spans across agents.
-  const allSpans = store.spans.queryRange(
-    -Number.MAX_SAFE_INTEGER,
-    Number.MAX_SAFE_INTEGER,
+  // Suppress the "LIVE ACTIVITY · N RUNNING" header entirely once the
+  // session is done. INVOCATION spans that never got an explicit end event
+  // (the server runs out before the ADK runner cleanly closes them) would
+  // otherwise keep the header stuck on agents that haven't actually been
+  // doing anything for minutes. Once the session is COMPLETED/ABORTED or
+  // the stream has been quiet long enough, nothing is "running".
+  //
+  // nowWallMs starts at 0 on first render (Date.now is impure so it's only
+  // sampled inside the setInterval callback). When we don't have a wall
+  // clock yet we still honor the explicit COMPLETED/ABORTED status; the
+  // staleness-based fallback needs a real reference time, so we pass
+  // lastEventAtMs - this guarantees the fallback branch's (nowWallMs -
+  // lastEventAtMs) comparison evaluates to 0 and the helper returns false,
+  // exactly what we want until the tick populates nowWallMs.
+  const inactive = sessionIsInactive(
+    watch,
+    nowWallMs > 0 ? nowWallMs : watch.lastEventAtMs,
   );
+
+  // Find all running INVOCATION spans across agents.
+  const allSpans = inactive
+    ? []
+    : store.spans.queryRange(
+        -Number.MAX_SAFE_INTEGER,
+        Number.MAX_SAFE_INTEGER,
+      );
   const runningByAgent = new Map<string, Span>();
   for (const s of allSpans) {
     if (s.kind !== 'INVOCATION' || s.endMs !== null) continue;
