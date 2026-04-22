@@ -65,6 +65,21 @@ const GOLDFIVE_REVISION_KINDS = new Set([
 // because every timeline in the UI is already session-relative ms.
 const OUTCOME_WINDOW_MS = 5000;
 
+// Extended window for user-control drifts (user_steer / user_cancel).
+// Mirrors the server's _USER_OUTCOME_WINDOW_S. A user STEER routes
+// through the planner's LLM which can take tens of seconds on a long
+// prompt (issue #86 saw a 70s drift→plan gap on a local Qwen3.5-35B).
+// The 5s default stranded the drift row and leaked a second card;
+// the extended window is still bounded so two separate user STEERs
+// in a session aren't claim-stolen by each other's plan revisions.
+const USER_OUTCOME_WINDOW_MS = 300_000;
+
+function outcomeWindowFor(driftKind: string): number {
+  return USER_DRIFT_KINDS.has((driftKind || '').toLowerCase())
+    ? USER_OUTCOME_WINDOW_MS
+    : OUTCOME_WINDOW_MS;
+}
+
 // Pretty labels for drift kinds emitted from the user. Uppercase so the
 // renderer can splash them next to other kinds without special-casing.
 function normalizeDriftKind(raw: string): string {
@@ -134,18 +149,22 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
   // Plans projected as interventions only when they are (a) a revision
   // (revisionIndex > 0 and a revisionKind is set) AND (b) not already
   // covered by a drift in the window. The second condition prevents the
-  // common path (drift → plan_revised within 5s) from emitting two rows
-  // for one logical intervention.
+  // common path (drift → plan_revised) from emitting two rows for one
+  // logical intervention. The window is kind-dependent: user-control
+  // kinds use the extended USER_OUTCOME_WINDOW_MS since the refine LLM
+  // may take tens of seconds (issue #86), while autonomous kinds keep
+  // the tight default so unrelated revisions aren't claim-stolen.
   const driftList = input.drifts;
   for (const plan of input.plans) {
     const revKind = (plan.revisionKind || '').toLowerCase();
     const revIdx = plan.revisionIndex ?? 0;
     if (!revKind || revIdx <= 0) continue;
+    const window = outcomeWindowFor(revKind);
     const hasPrecedingDrift = driftList.some(
       (dr) =>
         (dr.kind || '').toLowerCase() === revKind &&
         plan.createdAtMs - dr.recordedAtMs >= 0 &&
-        plan.createdAtMs - dr.recordedAtMs <= OUTCOME_WINDOW_MS,
+        plan.createdAtMs - dr.recordedAtMs <= window,
     );
     if (hasPrecedingDrift) continue;
     let source: InterventionSource;
@@ -189,12 +208,15 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
     if (row.outcome) continue;
     if (row.source === 'goldfive') continue;
 
-    // Prefer a revision that matches this row's driftKind within the window.
+    // Prefer a revision that matches this row's driftKind within the
+    // kind-dependent window. User-control drifts (issue #86) use the
+    // extended USER_OUTCOME_WINDOW_MS to tolerate long refine latencies.
+    const window = outcomeWindowFor(row.driftKind);
     let bestPlan: TaskPlan | null = null;
     let bestDelta = Infinity;
     for (const plan of revisionPlans) {
       const delta = plan.createdAtMs - row.atMs;
-      if (delta < 0 || delta > OUTCOME_WINDOW_MS) continue;
+      if (delta < 0 || delta > window) continue;
       const revKind = (plan.revisionKind || '').toLowerCase();
       if (row.driftKind && revKind === row.driftKind) {
         if (delta < bestDelta) {
@@ -274,7 +296,19 @@ function mergeByAnnotationId(rows: InterventionRow[]): InterventionRow[] {
       others.splice(0, others.length, ...group.slice(1));
     }
     for (const other of others) {
-      if (other.outcome && !survivor.outcome) survivor.outcome = other.outcome;
+      // Prefer the other row's outcome when the survivor either has no
+      // outcome yet OR has only the fallback 'recorded' label — the
+      // drift path is usually the one that attributed a real
+      // ``plan_revised:rN`` (especially for slow refines beyond the
+      // default attribution window; issue #86). Never downgrade a real
+      // outcome back to 'recorded'.
+      if (other.outcome && other.outcome !== 'recorded') {
+        if (!survivor.outcome || survivor.outcome === 'recorded') {
+          survivor.outcome = other.outcome;
+        }
+      } else if (other.outcome && !survivor.outcome) {
+        survivor.outcome = other.outcome;
+      }
       if (other.planRevisionIndex && !survivor.planRevisionIndex) {
         survivor.planRevisionIndex = other.planRevisionIndex;
       }
@@ -286,13 +320,15 @@ function mergeByAnnotationId(rows: InterventionRow[]): InterventionRow[] {
 
   // Fold in plan-sourced rows (no annotation_id, driftKind = user_*,
   // outcome starts with plan_revised:) whose driftKind matches a merged
-  // annotation row inside the attribution window.
+  // annotation row inside the kind-dependent attribution window. The
+  // extended user window catches slow refines (issue #86).
   const findMergeTarget = (planRow: InterventionRow): InterventionRow | null => {
+    const window = outcomeWindowFor(planRow.driftKind);
     for (const row of merged) {
       if (!row.annotationId || !row.driftKind) continue;
       if (row.driftKind !== planRow.driftKind) continue;
       const delta = planRow.atMs - row.atMs;
-      if (delta >= 0 && delta <= OUTCOME_WINDOW_MS) return row;
+      if (delta >= 0 && delta <= window) return row;
     }
     return null;
   };
@@ -305,7 +341,13 @@ function mergeByAnnotationId(rows: InterventionRow[]): InterventionRow[] {
     ) {
       const target = findMergeTarget(row);
       if (target) {
-        if (!target.outcome) target.outcome = row.outcome;
+        // Prefer the plan's real outcome (plan_revised:rN) over a
+        // fallback 'recorded' that the annotation row may have picked
+        // up during attribution when the drift was stranded outside
+        // the default window (issue #86).
+        if (!target.outcome || target.outcome === 'recorded') {
+          target.outcome = row.outcome;
+        }
         if (!target.planRevisionIndex) target.planRevisionIndex = row.planRevisionIndex;
         continue;
       }

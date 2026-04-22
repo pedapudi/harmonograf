@@ -70,6 +70,31 @@ _GOLDFIVE_REVISION_KINDS: frozenset[str] = frozenset(
 # that a drift and a much later unrelated revision are not conflated.
 _OUTCOME_WINDOW_S: float = 5.0
 
+# Extended window applied only to user-control drifts (USER_STEER /
+# USER_CANCEL). A user STEER flows through the planner's LLM which can
+# take tens of seconds on a long prompt (issue #86 saw a 70s gap on a
+# local Qwen3.5-35B), so the narrow 5s window used for autonomous
+# drifts would strand the drift row and leak a second card. The
+# extended window is still bounded so two separate user STEERs in a
+# single session aren't claim-stolen by each other's plan revisions.
+_USER_OUTCOME_WINDOW_S: float = 300.0
+
+
+def _outcome_window_for(drift_kind: str) -> float:
+    """Per-kind window used by ``_project_plans`` and ``_attribute_outcomes``.
+
+    User-control kinds get :data:`_USER_OUTCOME_WINDOW_S` — the planner's
+    refine latency routinely exceeds the default 5s on larger models.
+    Every other kind keeps the tight default because autonomous drift
+    causes are fast-path heuristics: a looping-reasoning detection has
+    no LLM round-trip to wait for.
+    """
+    return (
+        _USER_OUTCOME_WINDOW_S
+        if (drift_kind or "").lower() in _USER_DRIFT_KINDS
+        else _OUTCOME_WINDOW_S
+    )
+
 
 # ---------------------------------------------------------------------------
 # Intermediate record — the merge shape before outcome attribution.
@@ -264,6 +289,15 @@ def _project_plans(
         # plan here. Otherwise this is an autonomous goldfive revision
         # (cascade_cancel, refine_retry) or a drift we never ingested,
         # and we record it directly.
+        #
+        # The window is kind-dependent (:func:`_outcome_window_for`):
+        # user-control kinds allow a long refine latency (goldfive has
+        # to run the planner LLM before emitting plan_revised); every
+        # other kind keeps the tight 5s default. Issue #86 triggered a
+        # 70s drift-to-plan gap on a local Qwen3.5-35B that the 5s
+        # default strand-suppressed, leaving both drift and plan rows
+        # as separate cards.
+        window = _outcome_window_for(rev_kind)
         preceding_drift: dict[str, Any] | None = None
         for dr in drift_list:
             if (dr.get("kind") or "").lower() != rev_kind:
@@ -272,7 +306,7 @@ def _project_plans(
             if not isinstance(ra, (int, float)):
                 continue
             delta = float(plan.created_at) - float(ra)
-            if 0.0 <= delta <= _OUTCOME_WINDOW_S:
+            if 0.0 <= delta <= window:
                 preceding_drift = dr
                 break
         if preceding_drift is not None:
@@ -356,11 +390,15 @@ def _attribute_outcomes(
 def _find_matching_revision(
     rec: InterventionRecord, plans: list[TaskPlan]
 ) -> Optional[TaskPlan]:
+    # Use the extended window for user-control drifts (see
+    # :func:`_outcome_window_for`) so a slow refine still attributes its
+    # plan_revised outcome back to the drift row that caused it.
+    window = _outcome_window_for(rec.drift_kind)
     best: Optional[TaskPlan] = None
-    best_delta: float = _OUTCOME_WINDOW_S + 1.0
+    best_delta: float = window + 1.0
     for plan in plans:
         delta = float(plan.created_at) - rec.at
-        if delta < 0 or delta > _OUTCOME_WINDOW_S:
+        if delta < 0 or delta > window:
             continue
         rev_kind = (plan.revision_kind or "").lower()
         # Require the revision to carry a revision_kind (i.e. it is
@@ -449,8 +487,21 @@ def _merge_by_annotation_id(
             annotation_row = group[0]
             others = group[1:]
         # Promote non-empty fields from ``others`` onto the survivor.
+        # For ``outcome``: prefer a real attribution (``plan_revised:rN``,
+        # ``cascade_cancel:N_tasks``) over the fallback ``recorded``. The
+        # drift path is the one that actually knows which revision fired,
+        # so if the annotation row had to fall back to ``recorded``
+        # (e.g. because the user_steer drift was stranded outside the
+        # default attribution window) we still get the right label on
+        # the surviving card (issue #86).
         for other in others:
-            if other.outcome and not annotation_row.outcome:
+            if other.outcome and other.outcome != "recorded":
+                if (
+                    not annotation_row.outcome
+                    or annotation_row.outcome == "recorded"
+                ):
+                    annotation_row.outcome = other.outcome
+            elif other.outcome and not annotation_row.outcome:
                 annotation_row.outcome = other.outcome
             if (
                 other.plan_revision_index
@@ -467,15 +518,18 @@ def _merge_by_annotation_id(
     # annotation row's promoted drift_kind and whose ``at`` lands inside
     # the attribution window — covers the case where _project_plans
     # emitted a row because its matching drift was deduped at the
-    # suppress step, leaving no carrier for annotation_id.
+    # suppress step, leaving no carrier for annotation_id. Uses the
+    # kind-dependent window (:func:`_outcome_window_for`) so a slow
+    # user-STEER refine can still fold — issue #86.
     def _find_merge_target(plan_row: InterventionRecord) -> InterventionRecord | None:
+        window = _outcome_window_for(plan_row.drift_kind)
         for rec in merged:
             if not rec.annotation_id or not rec.drift_kind:
                 continue
             if rec.drift_kind != plan_row.drift_kind:
                 continue
             delta = plan_row.at - rec.at
-            if 0.0 <= delta <= _OUTCOME_WINDOW_S:
+            if 0.0 <= delta <= window:
                 return rec
         return None
 
@@ -490,7 +544,11 @@ def _merge_by_annotation_id(
         ):
             target = _find_merge_target(rec)
             if target is not None:
-                if not target.outcome:
+                # Prefer the plan's real outcome (``plan_revised:rN``)
+                # over a fallback ``recorded`` that the annotation row
+                # may have picked up during attribution when the drift
+                # was stranded outside the default window (issue #86).
+                if not target.outcome or target.outcome == "recorded":
                     target.outcome = rec.outcome
                 if not target.plan_revision_index:
                     target.plan_revision_index = rec.plan_revision_index
