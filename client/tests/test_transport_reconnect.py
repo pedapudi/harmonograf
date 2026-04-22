@@ -179,10 +179,11 @@ class TestIntegrationHealthyResetsBreaker:
             server_addr=f"127.0.0.1:{server.port}",
         )
         try:
-            # Wait for Welcome.
-            assert _wait(lambda: server.servicer.welcome_sent.is_set())
+            # Lazy Hello (harmonograf#83): nothing hits the wire until
+            # the first real emit. Emit before waiting for Welcome.
             sid = client.emit_span_start(kind="LLM_CALL", name="m")
             client.emit_span_end(sid, status="COMPLETED")
+            assert _wait(lambda: server.servicer.welcome_sent.is_set())
             assert _wait(lambda: server.servicer.first_span_seen.is_set())
             # Give the send loop a tick to call _mark_healthy.
             assert _wait(lambda: client._transport._healthy is True, timeout=2.0)

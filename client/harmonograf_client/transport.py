@@ -180,6 +180,26 @@ class Transport:
         self._assigned_session_id: str = session_id
         self._assigned_stream_id: str = ""
 
+        # Lazy Hello (harmonograf#83). The Hello RPC is deferred from
+        # stream open to first real emit. By then, an ADK flow has
+        # already pinned the outer adk-web session_id onto the envelope,
+        # so Hello stamps that id and the server never auto-creates a
+        # ghost ``sess_YYYY-MM-DD_NNNN`` row. Non-ADK flows that emit a
+        # span without any ``session_id`` override still auto-create a
+        # home session on first emit — the behaviour is deferred, not
+        # changed. A client that shuts down before any emit sends no
+        # Hello at all. Heartbeats alone do not trigger Hello; they are
+        # suppressed until the first real emit has opened the stream.
+        #
+        # Reset on every ``_serve`` so reconnects re-send Hello on the
+        # next emit (carrying the resume token + the most-recent
+        # plugin-stamped session id).
+        self._hello_sent: bool = False
+        # Event set by the recv loop when Welcome is received. Awaited
+        # before starting the home control subscription. Re-created on
+        # every ``_serve``.
+        self._welcome_received: Optional[asyncio.Event] = None
+
         # Per-ADK-session secondary control subscriptions
         # (harmonograf#65 / goldfive#162). Keyed by the outer adk-web
         # ``ctx.session.id`` cached by
@@ -494,14 +514,15 @@ class Transport:
     async def _serve(self, stub: Any) -> None:
         from .pb import control_pb2, telemetry_pb2
 
-        hello = self._build_hello(telemetry_pb2)
         send_queue: asyncio.Queue = asyncio.Queue()
         self._send_queue = send_queue
         # Expose the live stub so session subs registered mid-connect
         # (e.g. plugin caches root session id after welcome) can bind
         # without waiting for the next reconnect.
         self._live_stub = stub
-        await send_queue.put(telemetry_pb2.TelemetryUp(hello=hello))
+        # Reset lazy-Hello state for this connect. The send loop will
+        # queue Hello on the first real emit — not here at stream open.
+        self._hello_sent = False
 
         async def request_iter():
             while True:
@@ -518,6 +539,7 @@ class Transport:
         call = stub.StreamTelemetry(request_iter(), **call_kwargs)
 
         welcome_received = asyncio.Event()
+        self._welcome_received = welcome_received
 
         async def recv_loop():
             async for msg in call:
@@ -536,29 +558,24 @@ class Transport:
 
         recv_task = asyncio.create_task(recv_loop())
 
-        # Wait briefly for welcome so session/stream ids are set before
-        # the control subscriber opens.
-        try:
-            await asyncio.wait_for(welcome_received.wait(), timeout=10.0)
-        except asyncio.TimeoutError:
-            recv_task.cancel()
-            raise RuntimeError("no welcome from server")
-
-        control_task = asyncio.create_task(
-            self._control_loop(
-                stub,
-                send_queue,
-                session_id=self._assigned_session_id,
-                stream_id=self._assigned_stream_id,
-            )
-        )
+        # Lazy Hello (harmonograf#83): the send loop now drives Hello
+        # on the first real emit. The home control subscription must
+        # still wait for Welcome, but Welcome now arrives after the
+        # send loop has queued Hello — not at stream open. Start the
+        # control subscription in a separate task that awaits Welcome
+        # on its own, so the send loop and recv loop can make progress
+        # together.
         send_task = asyncio.create_task(self._send_loop(send_queue))
+        control_task = asyncio.create_task(
+            self._deferred_control_loop(stub, send_queue, welcome_received)
+        )
 
         # Replay any per-session subs registered before this connect
         # (e.g. plugin called open_additional_control_subscription
-        # during a previous connect that has since dropped). New subs
-        # registered after this point also land on this stub via
-        # open_session_subscription's live-stub fast path.
+        # during a previous connect that has since dropped). These
+        # session subs are additive — they subscribe on the outer
+        # adk-web session id rather than the assigned session id — so
+        # they do not need to wait for Welcome.
         self._start_registered_session_subs(stub, send_queue)
 
         try:
@@ -606,6 +623,7 @@ class Transport:
             # stream that is already dead.
             self._send_queue = None
             self._live_stub = None
+            self._welcome_received = None
 
     # ------------------------------------------------------------------
     # Send loop
@@ -629,6 +647,18 @@ class Transport:
                 for env in batch:
                     up = self._envelope_to_up(env, telemetry_pb2)
                     if up is not None:
+                        # Lazy Hello (harmonograf#83): if this is the
+                        # first real emit since the stream opened, send
+                        # Hello first with the session_id inferred from
+                        # this envelope. That way an ADK flow — whose
+                        # plugin has already stamped the outer adk-web
+                        # session_id onto the envelope — produces a
+                        # Hello carrying the ADK session id, and the
+                        # server skips the ghost ``sess_YYYY-MM-DD_NNNN``
+                        # row entirely.
+                        await self._maybe_send_hello(
+                            send_queue, telemetry_pb2, env=env
+                        )
                         # Track resume token: server will ack via normal
                         # downstream, but we also keep the last span id we
                         # sent so reconnect can resume from there.
@@ -646,13 +676,17 @@ class Transport:
                     if not pushed:
                         break
 
-                # Heartbeat tick.
+                # Heartbeat tick. Suppressed until the first real emit
+                # has already opened the stream via lazy Hello; an idle
+                # client with nothing to emit should leave no trace on
+                # the server — no Hello, no ghost session, no stream.
                 now = time.monotonic()
                 if now - last_hb >= self._config.heartbeat_interval_s:
                     last_hb = now
-                    hb = self._build_heartbeat(telemetry_pb2)
-                    await send_queue.put(telemetry_pb2.TelemetryUp(heartbeat=hb))
-                    self._mark_healthy()
+                    if self._hello_sent:
+                        hb = self._build_heartbeat(telemetry_pb2)
+                        await send_queue.put(telemetry_pb2.TelemetryUp(heartbeat=hb))
+                        self._mark_healthy()
         finally:
             # Shutdown path. Drain any envelopes still in the ring buffer —
             # Client.shutdown spins until the buffer is empty, but a race
@@ -661,19 +695,33 @@ class Transport:
             # Without this flush, events the caller *successfully emitted*
             # get silently dropped. Then send Goodbye + EOF so gRPC closes
             # the request side cleanly after yielding every queued item.
+            #
+            # If the client is shutting down before anything has ever been
+            # emitted (``_hello_sent`` still False and no envelopes in the
+            # ring), skip Hello entirely: the lazy-Hello guarantee is that
+            # an idle client leaves no trace server-side — no Hello, no
+            # ghost session, no upstream traffic. Just close the request
+            # side and let the server tear its half down.
             try:
                 remaining = self._events.pop_batch(self._events.capacity)
                 for env in remaining:
                     up = self._envelope_to_up(env, telemetry_pb2)
                     if up is not None:
+                        await self._maybe_send_hello(
+                            send_queue, telemetry_pb2, env=env
+                        )
                         self._resume_token = env.span_id or self._resume_token
                         await send_queue.put(up)
                 try:
-                    await send_queue.put(
-                        telemetry_pb2.TelemetryUp(
-                            goodbye=telemetry_pb2.Goodbye(reason="shutdown")
+                    # Only send a Goodbye if we actually opened the
+                    # stream — otherwise the server never saw Hello and
+                    # an out-of-band Goodbye would be an ingest error.
+                    if self._hello_sent:
+                        await send_queue.put(
+                            telemetry_pb2.TelemetryUp(
+                                goodbye=telemetry_pb2.Goodbye(reason="shutdown")
+                            )
                         )
-                    )
                 except Exception:
                     pass
                 await send_queue.put(None)
@@ -736,7 +784,9 @@ class Transport:
             return telemetry_pb2.TelemetryUp(goldfive_event=payload)
         return None
 
-    def _build_hello(self, telemetry_pb2: Any) -> Any:
+    def _build_hello(
+        self, telemetry_pb2: Any, *, session_id: Optional[str] = None
+    ) -> Any:
         from .pb import types_pb2
 
         framework_enum = getattr(
@@ -749,7 +799,9 @@ class Transport:
                 caps.append(val)
         return telemetry_pb2.Hello(
             agent_id=self._agent_id,
-            session_id=self._session_id,
+            session_id=(
+                session_id if session_id is not None else self._session_id
+            ),
             name=self._name,
             framework=framework_enum,
             framework_version=self._framework_version,
@@ -758,6 +810,43 @@ class Transport:
             resume_token=self._resume_token,
             session_title=self._session_title,
         )
+
+    async def _maybe_send_hello(
+        self,
+        send_queue: asyncio.Queue,
+        telemetry_pb2: Any,
+        *,
+        env: Optional[SpanEnvelope] = None,
+    ) -> None:
+        """Queue Hello as the first frame on the stream (lazy Hello).
+
+        No-op after the first call per ``_serve``. The ``session_id``
+        stamped onto Hello is inferred in order:
+
+        1. the session_id the first-emit envelope carries — this is
+           what the ADK telemetry plugin set via ``emit_span_start(
+           session_id=...)``;
+        2. ``self._session_id`` — the client's construction-time default;
+        3. empty — the server will auto-create a home session
+           (harmonograf#62 rollup contract).
+
+        Hello is a stream-opening ceremony, not per-event attribution:
+        later envelopes that carry a *different* ``session_id`` still
+        route correctly via the per-envelope routing built in
+        harmonograf#64 / #66. The task of "one adk-web run = one
+        harmonograf session" is upheld by the plugin stamping the outer
+        adk-web session id on every envelope, not by Hello.
+        """
+        if self._hello_sent:
+            return
+        sid = ""
+        if env is not None:
+            sid = _session_id_of_envelope(env)
+        if not sid:
+            sid = self._session_id or ""
+        hello = self._build_hello(telemetry_pb2, session_id=sid)
+        await send_queue.put(telemetry_pb2.TelemetryUp(hello=hello))
+        self._hello_sent = True
 
     def _build_heartbeat(self, telemetry_pb2: Any) -> Any:
         stats: BufferStats = self._events.stats_snapshot()
@@ -832,6 +921,37 @@ class Transport:
             log.warning(
                 "control subscription ended session_id=%s: %s", session_id, e
             )
+
+    async def _deferred_control_loop(
+        self,
+        stub: Any,
+        send_queue: asyncio.Queue,
+        welcome_received: asyncio.Event,
+    ) -> None:
+        """Wait for Welcome (now deferred until after lazy Hello fires),
+        then drive the home control subscription.
+
+        Under lazy Hello (harmonograf#83) the Hello RPC is not sent at
+        stream open — it piggy-backs on the first real emit. So Welcome
+        is only produced by the server after the first emit. This helper
+        shields the rest of ``_serve`` from that latency: callers can
+        proceed to ``asyncio.wait`` on the three tasks immediately, and
+        the control sub starts only when the server has assigned us a
+        session. If the stream tears down before any emit happens
+        (e.g. an idle client is shut down cleanly), this task exits
+        without opening a subscription — matching the "no ghost, no
+        orphan stream" guarantee.
+        """
+        try:
+            await welcome_received.wait()
+        except asyncio.CancelledError:
+            raise
+        await self._control_loop(
+            stub,
+            send_queue,
+            session_id=self._assigned_session_id,
+            stream_id=self._assigned_stream_id,
+        )
 
     # ------------------------------------------------------------------
     # Per-session (outer adk-web) additional control subscriptions.
@@ -990,6 +1110,33 @@ class Transport:
                 last = i == chunks - 1
                 self._chunk_queue.append((digest, "application/octet-stream", total, offset, last))
         self.notify()
+
+
+def _session_id_of_envelope(env: SpanEnvelope) -> str:
+    """Extract the session_id carried by an envelope, if any.
+
+    Used by lazy Hello (harmonograf#83) to stamp the first envelope's
+    session id onto the Hello frame — so the server never needs to
+    auto-create a ghost home session for ADK flows.
+
+    ``SpanStart`` envelopes carry a full ``Span`` whose ``session_id``
+    was set by the ADK telemetry plugin. ``GoldfiveEvent`` envelopes
+    carry a ``goldfive.v1.Event`` with a ``session_id`` field (goldfive
+    #155 / harmonograf#64). ``SpanUpdate`` / ``SpanEnd`` do NOT carry a
+    session_id — they reference a span by id and the server looks the
+    span's session up — so they fall back to the transport's default.
+    """
+    payload = env.payload
+    if payload is None:
+        return ""
+    if env.kind is EnvelopeKind.SPAN_START:
+        span = getattr(payload, "span", None)
+        if span is None:
+            return ""
+        return getattr(span, "session_id", "") or ""
+    if env.kind is EnvelopeKind.GOLDFIVE_EVENT:
+        return getattr(payload, "session_id", "") or ""
+    return ""
 
 
 def _control_kind_name(kind_value: int, gf_control_pb2: Any) -> str:
