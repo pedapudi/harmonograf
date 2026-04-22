@@ -778,6 +778,91 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
             invocation_id, status=SpanStatus.CANCELLED
         )
 
+    def on_run_end(self) -> None:
+        """Public hook invoked by ``GoldfiveADKAgent._run_async_impl``'s
+        ``finally`` block when an outer run exits (normal completion,
+        cancellation, or early generator-close).
+
+        Closes EVERY INVOCATION span this plugin opened during the run
+        that is still in the open map (``_invocation_spans``). This is
+        the broader sweep that complements :meth:`on_cancellation`
+        (which is scoped to a single invocation_id): sub-Runner
+        invocations spawned by ``AgentTool`` have their OWN
+        ``invocation_id`` so the outer cancel path doesn't reach them,
+        and ADK places ``after_run_callback`` outside a ``finally`` in
+        :meth:`Runner._exec_with_plugin` — so a cancelled or
+        early-closed sub-Runner leaks its INVOCATION span forever.
+
+        Cleanup covers:
+          * open INVOCATION spans (keyed by invocation_id)
+          * any leftover model spans
+          * any leftover tool spans
+
+        Status is ``COMPLETED`` — the goldfive adapter also runs the
+        targeted ``on_cancellation(invocation_id)`` with
+        ``status=CANCELLED`` on the specific cancel path, so by the
+        time we sweep here the "was this cancelled?" signal has
+        already been applied to the spans that belong to that path.
+        What remains are orphans whose after-callbacks ADK simply
+        never fired — ``COMPLETED`` matches the "clean exit after the
+        outer run is done" semantics for those.
+
+        Safe to call from any context — never raises. Idempotent: a
+        second call after a full close is a no-op because the open
+        maps are empty.
+        """
+        # Close every open INVOCATION span. We don't want to filter to
+        # "just the root" — sub-Runner invocations keyed by their own
+        # ids are exactly the spans that leak through ADK's callback gap.
+        stale_inv_ids = list(self._invocation_spans.keys())
+        for inv_key in stale_inv_ids:
+            sid = self._invocation_spans.pop(inv_key, None)
+            if sid is None:
+                continue
+            try:
+                self._client.emit_span_end(sid, status=SpanStatus.COMPLETED)
+            except Exception:  # noqa: BLE001 — defensive: telemetry must not raise
+                log.debug(
+                    "telemetry_plugin: on_run_end emit_span_end for "
+                    "invocation span %s raised",
+                    sid,
+                    exc_info=True,
+                )
+
+        # Sweep any leftover model spans still open. Keyed by invocation_id.
+        stale_model_keys = list(self._model_spans.keys())
+        for inv_id in stale_model_keys:
+            slots = self._model_spans.pop(inv_id, None) or []
+            for slot in slots:
+                try:
+                    self._client.emit_span_end(
+                        slot.span_id, status=SpanStatus.COMPLETED
+                    )
+                except Exception:  # noqa: BLE001 — defensive
+                    log.debug(
+                        "telemetry_plugin: on_run_end emit_span_end for "
+                        "model span %s raised",
+                        slot.span_id,
+                        exc_info=True,
+                    )
+
+        # Sweep any leftover tool spans still open.
+        stale_tool_keys = list(self._tool_spans.keys())
+        for key in stale_tool_keys:
+            sid = self._tool_spans.pop(key, None)
+            self._tool_span_invocations.pop(key, None)
+            if sid is None:
+                continue
+            try:
+                self._client.emit_span_end(sid, status=SpanStatus.COMPLETED)
+            except Exception:  # noqa: BLE001 — defensive
+                log.debug(
+                    "telemetry_plugin: on_run_end emit_span_end for "
+                    "tool span %s raised",
+                    sid,
+                    exc_info=True,
+                )
+
     # ------------------------------------------------------------------
     # Invocation lifecycle
     # ------------------------------------------------------------------

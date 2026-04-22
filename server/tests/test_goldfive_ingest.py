@@ -23,6 +23,8 @@ from harmonograf_server.bus import (
     DELTA_RUN_ABORTED,
     DELTA_RUN_COMPLETED,
     DELTA_RUN_STARTED,
+    DELTA_SESSION_ENDED,
+    DELTA_SPAN_END,
     DELTA_TASK_PLAN,
     DELTA_TASK_PROGRESS,
     DELTA_TASK_STATUS,
@@ -151,8 +153,12 @@ async def test_run_started_publishes_delta(pipeline):
 
 
 @pytest.mark.asyncio
-async def test_run_completed_and_aborted_publish_deltas(pipeline):
+async def test_run_completed_and_aborted_publish_deltas(pipeline, store):
     pipe, bus, _ = pipeline
+    # Session must exist so the finalize path's ``update_session`` flips
+    # it terminal — harmonograf#96 asserts the session row drives the
+    # frontend's ``sessionIsInactive`` header-gate.
+    await _ensure_session(store)
     sub = await bus.subscribe("sess_gf")
     completed = _make_event(event_id="e-c")
     completed.run_completed.outcome_summary = "done"
@@ -160,11 +166,201 @@ async def test_run_completed_and_aborted_publish_deltas(pipeline):
     aborted.run_aborted.reason = "user cancel"
     await pipe.handle_message(_stream_ctx(), _wrap(completed))
     await pipe.handle_message(_stream_ctx(), _wrap(aborted))
-    deltas = [sub.queue.get_nowait(), sub.queue.get_nowait()]
+    deltas = await _drain(sub)
     kinds = [d.kind for d in deltas]
     assert DELTA_RUN_COMPLETED in kinds and DELTA_RUN_ABORTED in kinds
-    assert deltas[0].payload["outcome_summary"] == "done"
-    assert deltas[1].payload["reason"] == "user cancel"
+    # harmonograf#96: both terminal events now trigger a SessionEnded
+    # broadcast so the frontend's LIVE ACTIVITY header clears.
+    session_ended_deltas = [d for d in deltas if d.kind == DELTA_SESSION_ENDED]
+    assert len(session_ended_deltas) == 2
+    assert session_ended_deltas[0].payload["final_status"] == SessionStatus.COMPLETED
+    assert session_ended_deltas[1].payload["final_status"] == SessionStatus.ABORTED
+
+
+@pytest.mark.asyncio
+async def test_run_completed_flips_session_status_and_ended_at(pipeline, store):
+    """harmonograf#96: a goldfive ``run_completed`` must drive
+    ``sessions.status`` LIVE → COMPLETED and stamp ``ended_at``.
+
+    Previously the ingest pipeline fanned out a bus delta for trajectory
+    listeners but never mutated the session row, so the frontend's
+    ``sessionIsInactive`` check stayed false forever and the LIVE
+    ACTIVITY "N RUNNING" header never cleared.
+    """
+    pipe, _bus, _ = pipeline
+    await _ensure_session(store)
+    before = await store.get_session("sess_gf")
+    assert before.status is SessionStatus.LIVE
+    assert before.ended_at is None
+
+    completed = _make_event(event_id="e-c")
+    completed.run_completed.outcome_summary = "done"
+    await pipe.handle_message(_stream_ctx(), _wrap(completed))
+
+    after = await store.get_session("sess_gf")
+    assert after.status is SessionStatus.COMPLETED
+    assert after.ended_at is not None
+    assert after.ended_at > 0
+
+
+@pytest.mark.asyncio
+async def test_run_aborted_flips_session_status_to_aborted(pipeline, store):
+    """harmonograf#96: ``run_aborted`` flips session to ABORTED (not COMPLETED)."""
+    pipe, _bus, _ = pipeline
+    await _ensure_session(store)
+    aborted = _make_event(event_id="e-a")
+    aborted.run_aborted.reason = "user cancel"
+    await pipe.handle_message(_stream_ctx(), _wrap(aborted))
+    after = await store.get_session("sess_gf")
+    assert after.status is SessionStatus.ABORTED
+    assert after.ended_at is not None
+
+
+@pytest.mark.asyncio
+async def test_run_completed_closes_orphan_invocation_spans(pipeline, store):
+    """harmonograf#96 belt-and-suspenders: orphan INVOCATION spans whose
+    ``after_run_callback`` never fired (ADK cancel race on AgentTool
+    sub-Runners) must be swept closed on ``run_completed`` so the Gantt
+    reflects truth. Non-INVOCATION leaks (LLM_CALL / TOOL_CALL) are left
+    alone because they have their own ADK cleanup paths and could race
+    with a late-arriving legitimate end_span.
+    """
+    from harmonograf_server.storage import Agent, AgentStatus, Framework, Span, SpanKind, SpanStatus
+
+    pipe, bus, _ = pipeline
+    await _ensure_session(store)
+    await store.register_agent(
+        Agent(
+            id="agent_gf",
+            session_id="sess_gf",
+            name="coordinator",
+            framework=Framework.UNKNOWN,
+            status=AgentStatus.CONNECTED,
+            connected_at=1.0,
+            last_heartbeat=1.0,
+        )
+    )
+    # Two INVOCATION spans left open (simulates a sub-Runner whose
+    # after_run_callback never fired) plus one LLM_CALL that should be
+    # left alone (covered by model-after cleanup).
+    await store.append_span(
+        Span(
+            id="inv_open_1",
+            session_id="sess_gf",
+            agent_id="agent_gf",
+            name="web_developer_agent",
+            kind=SpanKind.INVOCATION,
+            status=SpanStatus.RUNNING,
+            start_time=100.0,
+            end_time=None,
+        )
+    )
+    await store.append_span(
+        Span(
+            id="inv_open_2",
+            session_id="sess_gf",
+            agent_id="agent_gf",
+            name="coordinator_agent",
+            kind=SpanKind.INVOCATION,
+            status=SpanStatus.RUNNING,
+            start_time=101.0,
+            end_time=None,
+        )
+    )
+    await store.append_span(
+        Span(
+            id="llm_open",
+            session_id="sess_gf",
+            agent_id="agent_gf",
+            name="openai/Qwen",
+            kind=SpanKind.LLM_CALL,
+            status=SpanStatus.RUNNING,
+            start_time=102.0,
+            end_time=None,
+        )
+    )
+
+    completed = _make_event(event_id="e-c")
+    completed.run_completed.outcome_summary = "done"
+    await pipe.handle_message(_stream_ctx(), _wrap(completed))
+
+    # INVOCATION spans must now be closed with end_time set. Sqlite
+    # storage doesn't expose an "open only" filter so we re-fetch.
+    inv1 = await store.get_span("inv_open_1")
+    inv2 = await store.get_span("inv_open_2")
+    llm = await store.get_span("llm_open")
+    assert inv1.end_time is not None
+    assert inv1.status is SpanStatus.COMPLETED
+    assert inv2.end_time is not None
+    assert inv2.status is SpanStatus.COMPLETED
+    # LLM_CALL left alone — not the ingest path's responsibility.
+    assert llm.end_time is None
+
+
+@pytest.mark.asyncio
+async def test_run_aborted_closes_orphan_invocations_with_cancelled(pipeline, store):
+    """A run that aborts should close orphan INVOCATION spans with
+    ``status=CANCELLED`` (not COMPLETED) so the Gantt renders the
+    terminal state correctly.
+    """
+    from harmonograf_server.storage import Agent, AgentStatus, Framework, Span, SpanKind, SpanStatus
+
+    pipe, _bus, _ = pipeline
+    await _ensure_session(store)
+    await store.register_agent(
+        Agent(
+            id="agent_gf",
+            session_id="sess_gf",
+            name="coordinator",
+            framework=Framework.UNKNOWN,
+            status=AgentStatus.CONNECTED,
+            connected_at=1.0,
+            last_heartbeat=1.0,
+        )
+    )
+    await store.append_span(
+        Span(
+            id="inv_open",
+            session_id="sess_gf",
+            agent_id="agent_gf",
+            name="web_developer_agent",
+            kind=SpanKind.INVOCATION,
+            status=SpanStatus.RUNNING,
+            start_time=100.0,
+            end_time=None,
+        )
+    )
+
+    aborted = _make_event(event_id="e-a")
+    aborted.run_aborted.reason = "user cancel"
+    await pipe.handle_message(_stream_ctx(), _wrap(aborted))
+
+    inv = await store.get_span("inv_open")
+    assert inv.end_time is not None
+    assert inv.status is SpanStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_run_completed_session_unknown_is_noop_but_still_broadcasts(pipeline):
+    """When goldfive sends ``run_completed`` for a session the server
+    has never seen (e.g. event arrives before the Hello established the
+    row), the finalize path must NOT raise. The broadcast still fires
+    so a subscriber that later joins and lists the session sees the
+    terminal state via its initial burst.
+    """
+    pipe, bus, _ = pipeline
+    sub = await bus.subscribe("sess_never_created")
+    completed = _make_event(event_id="e-c")
+    completed.run_completed.outcome_summary = "orphaned"
+    # NOTE: different session_id in ctx so the finalize path tries the
+    # update against an unknown row.
+    await pipe.handle_message(
+        _stream_ctx(session_id="sess_never_created"), _wrap(completed)
+    )
+    deltas = await _drain(sub)
+    kinds = [d.kind for d in deltas]
+    assert DELTA_RUN_COMPLETED in kinds
+    assert DELTA_SESSION_ENDED in kinds
 
 
 # ---- goal derivation -----------------------------------------------------

@@ -16,6 +16,7 @@ from harmonograf_server.storage import (
     Agent,
     AgentStatus,
     Annotation,
+    SessionStatus,
     Span,
     Task,
     TaskPlan,
@@ -47,6 +48,12 @@ DELTA_TASK_PROGRESS = "task_progress"
 DELTA_AGENT_INVOCATION_STARTED = "agent_invocation_started"
 DELTA_AGENT_INVOCATION_COMPLETED = "agent_invocation_completed"
 DELTA_DELEGATION_OBSERVED = "delegation_observed"
+# Session lifecycle terminal signal (harmonograf#96). Fires when a goldfive
+# run_completed / run_aborted event arrives and the session flips out of
+# LIVE. The frontend's ``sessionIsInactive`` check reads this to clear the
+# LIVE ACTIVITY panel even when INVOCATION spans are still stuck RUNNING
+# in the DB (orphan-span cleanup is a belt-and-suspenders layer on top).
+DELTA_SESSION_ENDED = "session_ended"
 
 
 @dataclass
@@ -282,6 +289,33 @@ class SessionBus:
                 session_id,
                 DELTA_RUN_ABORTED,
                 {"run_id": run_id, "reason": reason},
+            )
+        )
+
+    def publish_session_ended(
+        self,
+        session_id: str,
+        *,
+        ended_at: float,
+        final_status: SessionStatus,
+    ) -> None:
+        """Announce that ``session_id`` has terminally left the LIVE state.
+
+        Fired by the ingest pipeline when a goldfive ``run_completed`` or
+        ``run_aborted`` event arrives. The frontend's ``useSessionWatch``
+        listens for the matching :class:`SessionUpdate.session_ended`
+        variant and flips ``sessionStatus`` to ``COMPLETED`` / ``ABORTED``
+        so :func:`sessionIsInactive` returns ``true`` and the LIVE
+        ACTIVITY panel's "N RUNNING" header clears — even when the
+        underlying INVOCATION spans are still ``status=RUNNING`` in the
+        DB (harmonograf#96). Orphan INVOCATION spans are also swept by
+        the same handler as a belt-and-suspenders cleanup.
+        """
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_SESSION_ENDED,
+                {"ended_at": ended_at, "final_status": final_status},
             )
         )
 

@@ -34,6 +34,7 @@ from harmonograf_server.bus import (
     DELTA_RUN_ABORTED,
     DELTA_RUN_COMPLETED,
     DELTA_RUN_STARTED,
+    DELTA_SESSION_ENDED,
     DELTA_SPAN_END,
     DELTA_SPAN_START,
     DELTA_SPAN_UPDATE,
@@ -835,6 +836,26 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
         ev = goldfive_events_pb2.Event(run_id=p.get("run_id", ""))
         ev.run_aborted.reason = p.get("reason", "") or ""
         return frontend_pb2.SessionUpdate(goldfive_event=ev)
+    if delta.kind == DELTA_SESSION_ENDED:
+        # Session terminal transition (harmonograf#96). Stamped by the
+        # ingest pipeline when a goldfive run_completed / run_aborted
+        # arrives and the session flips out of LIVE. Frontend consumes
+        # the ``session_ended`` variant and updates ``sessionStatus`` so
+        # ``sessionIsInactive`` returns true, clearing the LIVE ACTIVITY
+        # "N RUNNING" header even when stuck INVOCATION spans remain in
+        # the DB. The same payload also carries ended_at so the session
+        # header can render the terminal timestamp.
+        p = delta.payload
+        ended_at = p.get("ended_at")
+        final_status = p.get("final_status", SessionStatus.COMPLETED)
+        ended_pb = frontend_pb2.SessionEnded(
+            final_status=_session_status_to_pb(final_status),
+        )
+        if isinstance(ended_at, (int, float)):
+            ts = float_to_ts(float(ended_at))
+            if ts is not None:
+                ended_pb.ended_at.CopyFrom(ts)
+        return frontend_pb2.SessionUpdate(session_ended=ended_pb)
     if delta.kind == DELTA_GOAL_DERIVED:
         p = delta.payload
         ev = goldfive_events_pb2.Event(run_id=p.get("run_id", ""))
