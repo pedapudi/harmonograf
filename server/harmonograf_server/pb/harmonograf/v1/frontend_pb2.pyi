@@ -353,6 +353,18 @@ class DeleteSessionResponse(_message.Message):
     payload_bytes_freed: int
     def __init__(self, deleted: bool = ..., reason_if_not: _Optional[str] = ..., spans_removed: _Optional[int] = ..., annotations_removed: _Optional[int] = ..., payload_bytes_freed: _Optional[int] = ...) -> None: ...
 
+class ListInterventionsRequest(_message.Message):
+    __slots__ = ("session_id",)
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    def __init__(self, session_id: _Optional[str] = ...) -> None: ...
+
+class ListInterventionsResponse(_message.Message):
+    __slots__ = ("interventions",)
+    INTERVENTIONS_FIELD_NUMBER: _ClassVar[int]
+    interventions: _containers.RepeatedCompositeFieldContainer[_types_pb2.Intervention]
+    def __init__(self, interventions: _Optional[_Iterable[_Union[_types_pb2.Intervention, _Mapping]]] = ...) -> None: ...
+
 class GetStatsRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...

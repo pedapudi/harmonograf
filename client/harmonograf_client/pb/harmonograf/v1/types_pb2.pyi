@@ -312,3 +312,27 @@ class Annotation(_message.Message):
     body: str
     delivered_at: _timestamp_pb2.Timestamp
     def __init__(self, id: _Optional[str] = ..., session_id: _Optional[str] = ..., target: _Optional[_Union[AnnotationTarget, _Mapping]] = ..., author: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., kind: _Optional[_Union[AnnotationKind, str]] = ..., body: _Optional[str] = ..., delivered_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class Intervention(_message.Message):
+    __slots__ = ("at", "source", "kind", "body_or_reason", "author", "outcome", "plan_revision_index", "severity", "annotation_id", "drift_kind")
+    AT_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    BODY_OR_REASON_FIELD_NUMBER: _ClassVar[int]
+    AUTHOR_FIELD_NUMBER: _ClassVar[int]
+    OUTCOME_FIELD_NUMBER: _ClassVar[int]
+    PLAN_REVISION_INDEX_FIELD_NUMBER: _ClassVar[int]
+    SEVERITY_FIELD_NUMBER: _ClassVar[int]
+    ANNOTATION_ID_FIELD_NUMBER: _ClassVar[int]
+    DRIFT_KIND_FIELD_NUMBER: _ClassVar[int]
+    at: _timestamp_pb2.Timestamp
+    source: str
+    kind: str
+    body_or_reason: str
+    author: str
+    outcome: str
+    plan_revision_index: int
+    severity: str
+    annotation_id: str
+    drift_kind: str
+    def __init__(self, at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., source: _Optional[str] = ..., kind: _Optional[str] = ..., body_or_reason: _Optional[str] = ..., author: _Optional[str] = ..., outcome: _Optional[str] = ..., plan_revision_index: _Optional[int] = ..., severity: _Optional[str] = ..., annotation_id: _Optional[str] = ..., drift_kind: _Optional[str] = ...) -> None: ...

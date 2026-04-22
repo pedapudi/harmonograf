@@ -334,6 +334,28 @@ message DeleteSessionResponse {
 }
 
 // ---------------------------------------------------------------------------
+// ListInterventions
+// ---------------------------------------------------------------------------
+//
+// Returns the chronological merge of user-initiated, drift-triggered, and
+// goldfive-autonomous interventions for one session. Derivable from data
+// already on the wire via WatchSession (annotations + goldfive drifts +
+// task_plans revision metadata) — this RPC exists so a late-joining
+// frontend can fetch the full history without replaying the whole session.
+//
+// Live updates: WatchSession still streams the underlying deltas
+// (initial_annotation, new_annotation, goldfive_event.drift_detected,
+// goldfive_event.plan_revised), so the client recomputes the merged list
+// incrementally without a second subscribe.
+message ListInterventionsRequest {
+  string session_id = 1;
+}
+
+message ListInterventionsResponse {
+  repeated Intervention interventions = 1;
+}
+
+// ---------------------------------------------------------------------------
 // GetStats
 // ---------------------------------------------------------------------------
 

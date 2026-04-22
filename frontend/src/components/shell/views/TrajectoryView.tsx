@@ -8,6 +8,12 @@ import type {
   DriftRecord,
   SessionStore,
 } from '../../../gantt/index';
+import { useAnnotationStore } from '../../../state/annotationStore';
+import {
+  deriveInterventionsFromStore,
+  SOURCE_COLOR,
+  type InterventionRow,
+} from '../../../lib/interventions';
 
 // ── Palette ────────────────────────────────────────────────────────────────
 // Aligned with GanttView's status palette so a task's status reads the same
@@ -267,11 +273,16 @@ export function TrajectoryView() {
     const un2 = store.drifts.subscribe(() => setTick((n) => n + 1));
     const un3 = store.spans.subscribe(() => setTick((n) => n + 1));
     const un4 = store.delegations.subscribe(() => setTick((n) => n + 1));
+    // annotation store is external to SessionStore — subscribe so new
+    // user STEERs / HUMAN_RESPONSEs immediately surface as intervention
+    // entries in the trajectory.
+    const un5 = useAnnotationStore.subscribe(() => setTick((n) => n + 1));
     return () => {
       un1();
       un2();
       un3();
       un4();
+      un5();
     };
   }, [store]);
 
@@ -279,6 +290,16 @@ export function TrajectoryView() {
   // store is a stable object reference, so tick-driven re-renders need to
   // recompute to pick up the latest registry contents.
   const vm = buildViewModel(store);
+
+  // Unified intervention history, derived from the same session store the
+  // ribbon walks above. One source of truth for the strip in the planning
+  // view, the chips in the trajectory ribbon, and the entries block below.
+  const annotationsForSession = sessionId
+    ? useAnnotationStore.getState().list(sessionId)
+    : [];
+  const interventions = store
+    ? deriveInterventionsFromStore(store, annotationsForSession)
+    : [];
 
   // Latest rev tracked live; user can pin a specific rev. `null` → live.
   const [pinnedRevIdx, setPinnedRevIdx] = useState<number | null>(null);
@@ -381,6 +402,16 @@ export function TrajectoryView() {
               comparedRevIdx={compareRevIdx}
               onSelectRev={onRevChange}
               onSelectDrift={(seq) => setSelection({ kind: 'drift', seq })}
+            />
+            <InterventionEntries
+              rows={interventions}
+              onJumpToRevision={(revisionIndex) => {
+                // Jump: find the rev chip with that revisionIndex and pin it.
+                const target = vm.revs.findIndex(
+                  (p) => (p.revisionIndex ?? 0) === revisionIndex,
+                );
+                if (target >= 0) onRevChange(target, false);
+              }}
             />
             <div className="hg-traj__split">
               <DagPane
@@ -836,4 +867,110 @@ function DetailPane(props: DetailPaneProps) {
 function truncate(s: string, n: number): string {
   if (s.length <= n) return s;
   return s.slice(0, n - 1) + '…';
+}
+
+// ── InterventionEntries ────────────────────────────────────────────────────
+// Chronological list of intervention cards rendered below the Ribbon. Each
+// card surfaces source, kind, author (if user), body preview, and outcome.
+// Tree-agnostic — never inspects kind vocabularies, so new drift/revision
+// kinds added on the server show up here automatically.
+
+interface InterventionEntriesProps {
+  rows: readonly InterventionRow[];
+  onJumpToRevision: (revisionIndex: number) => void;
+}
+
+function InterventionEntries({ rows, onJumpToRevision }: InterventionEntriesProps) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  if (rows.length === 0) return null;
+  const toggle = (key: string): void => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  return (
+    <section
+      className="hg-traj__interventions"
+      data-testid="trajectory-interventions"
+      aria-label="Intervention history"
+    >
+      <header className="hg-traj__interventions-head">
+        <span className="hg-traj__interventions-title">
+          Interventions · {rows.length}
+        </span>
+      </header>
+      <ol className="hg-traj__interventions-list">
+        {rows.map((row) => {
+          const isOpen = expanded.has(row.key);
+          const preview =
+            row.bodyOrReason.length > 100 && !isOpen
+              ? row.bodyOrReason.slice(0, 100) + '…'
+              : row.bodyOrReason;
+          const headline =
+            row.source === 'user' && row.author
+              ? `${row.kind} by ${row.author}`
+              : row.source === 'drift'
+                ? `${row.kind} drift`
+                : row.kind;
+          return (
+            <li
+              key={row.key}
+              className="hg-traj__intervention"
+              data-source={row.source}
+              data-testid={`intervention-entry-${row.key}`}
+            >
+              <div className="hg-traj__intervention-head">
+                <span
+                  className="hg-traj__intervention-dot"
+                  style={{
+                    background: SOURCE_COLOR[row.source] ?? SOURCE_COLOR.goldfive,
+                  }}
+                />
+                <span className="hg-traj__intervention-headline">{headline}</span>
+                <span className="hg-traj__intervention-at">{fmtTime(row.atMs)}</span>
+                {row.severity && (
+                  <span
+                    className="hg-traj__intervention-sev"
+                    data-severity={row.severity}
+                  >
+                    {row.severity}
+                  </span>
+                )}
+                <span className="hg-traj__intervention-outcome">
+                  {row.outcome || 'pending'}
+                </span>
+                {row.planRevisionIndex > 0 && (
+                  <button
+                    type="button"
+                    className="hg-traj__intervention-jump"
+                    onClick={() => onJumpToRevision(row.planRevisionIndex)}
+                    data-testid={`intervention-jump-${row.key}`}
+                  >
+                    rev {row.planRevisionIndex}
+                  </button>
+                )}
+              </div>
+              {row.bodyOrReason && (
+                <div className="hg-traj__intervention-body">
+                  {preview}
+                  {row.bodyOrReason.length > 100 && (
+                    <button
+                      type="button"
+                      className="hg-traj__intervention-show-full"
+                      onClick={() => toggle(row.key)}
+                    >
+                      {isOpen ? 'show less' : 'show full'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
 }

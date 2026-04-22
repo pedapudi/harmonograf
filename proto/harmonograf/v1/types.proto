@@ -260,6 +260,59 @@ message Annotation {
 }
 
 // ---------------------------------------------------------------------------
+// Interventions
+// ---------------------------------------------------------------------------
+//
+// An Intervention is any point in a run where the plan changed direction,
+// whether driven by a human operator, drift detection, or goldfive's own
+// autonomous escalation. Harmonograf synthesizes the view from three
+// sources that already exist on the wire — no new ingest path is needed:
+//
+//   • user-initiated  → annotations (STEERING / HUMAN_RESPONSE) plus
+//                       user-source drift kinds (user_steer / user_cancel
+//                       emitted by goldfive when the user intervention
+//                       caused a plan revision)
+//   • drift-triggered → drift_detected events, joined forward to a
+//                       plan_revised event or a cascade of cancelled tasks
+//                       for outcome attribution
+//   • goldfive        → plan revisions whose revision_kind is not a drift
+//                       kind (autonomous escalations), cascade-cancel
+//                       follow-ups
+//
+// Fields:
+//   at            — wall-clock time of the intervention
+//   source        — "user" | "drift" | "goldfive"
+//   kind          — source-specific label. User: "STEER" / "CANCEL" /
+//                   "PAUSE" / "RESUME". Drift: upper-case drift kind
+//                   (e.g. "LOOPING_REASONING"). Goldfive: "CASCADE_CANCEL"
+//                   / "REFINE_RETRY" / "HUMAN_INTERVENTION_REQUIRED".
+//   body_or_reason — user text, drift detail, or cascade/goldfive reason
+//   author        — for user-sourced; empty otherwise
+//   outcome       — "plan_revised:rN" when a revision followed within the
+//                   attribution window; "cascade_cancel:N_tasks" when the
+//                   drift triggered a sweep; "paused" / "run_cancelled" /
+//                   "recorded" for terminal outcomes; empty if unknown
+//   plan_revision_index — set when outcome produced a new revision
+//   severity      — for drift-sourced markers, drives timeline size
+//   annotation_id — populated for annotations-backed interventions so the
+//                   frontend can deep-link back to the authoring surface
+//   drift_kind    — raw lowercase drift kind name for drift-sourced rows;
+//                   kept separate from ``kind`` so the tree-agnostic
+//                   renderer does not need to know drift taxonomy
+message Intervention {
+  google.protobuf.Timestamp at = 1;
+  string source = 2;
+  string kind = 3;
+  string body_or_reason = 4;
+  string author = 5;
+  string outcome = 6;
+  int32 plan_revision_index = 7;
+  string severity = 8;
+  string annotation_id = 9;
+  string drift_kind = 10;
+}
+
+// ---------------------------------------------------------------------------
 // Control — MOVED TO GOLDFIVE (issue #37).
 // ---------------------------------------------------------------------------
 //

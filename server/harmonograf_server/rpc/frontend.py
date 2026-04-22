@@ -63,6 +63,7 @@ from goldfive.v1 import events_pb2 as goldfive_events_pb2
 from goldfive.v1 import types_pb2 as goldfive_types_pb2
 from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
 from harmonograf_server.ingest import IngestPipeline
+from harmonograf_server.interventions import list_interventions, record_to_pb
 from harmonograf_server.pb import frontend_pb2, types_pb2
 from harmonograf_server.storage import (
     Agent,
@@ -628,6 +629,30 @@ class FrontendServicerMixin:
             annotations_removed=len(anns),
             payload_bytes_freed=payload_bytes,
         )
+
+    # ---- ListInterventions --------------------------------------------
+
+    async def ListInterventions(
+        self,
+        request: frontend_pb2.ListInterventionsRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> frontend_pb2.ListInterventionsResponse:
+        if not request.session_id:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "session_id required")
+            return frontend_pb2.ListInterventionsResponse()
+        sess = await self._store.get_session(request.session_id)
+        if sess is None:
+            await context.abort(
+                grpc.StatusCode.NOT_FOUND, f"session {request.session_id} not found"
+            )
+            return frontend_pb2.ListInterventionsResponse()
+        records = await list_interventions(
+            request.session_id, store=self._store, drifts_provider=self._ingest
+        )
+        resp = frontend_pb2.ListInterventionsResponse()
+        for rec in records:
+            resp.interventions.append(record_to_pb(rec, types_pb2))
+        return resp
 
     # ---- GetStats -----------------------------------------------------
 

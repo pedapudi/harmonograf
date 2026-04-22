@@ -24,7 +24,7 @@ import type { TelemetryDownSchema, TelemetryUpSchema } from "./telemetry_pb.js";
 import { file_harmonograf_v1_telemetry } from "./telemetry_pb.js";
 import type { SubscribeControlRequestSchema } from "./control_pb.js";
 import { file_harmonograf_v1_control } from "./control_pb.js";
-import type { DeleteSessionRequestSchema, DeleteSessionResponseSchema, GetPayloadRequestSchema, GetSpanTreeRequestSchema, GetSpanTreeResponseSchema, GetStatsRequestSchema, GetStatsResponseSchema, ListSessionsRequestSchema, ListSessionsResponseSchema, PayloadChunkSchema, PostAnnotationRequestSchema, PostAnnotationResponseSchema, SendControlRequestSchema, SendControlResponseSchema, SessionUpdateSchema, WatchSessionRequestSchema } from "./frontend_pb.js";
+import type { DeleteSessionRequestSchema, DeleteSessionResponseSchema, GetPayloadRequestSchema, GetSpanTreeRequestSchema, GetSpanTreeResponseSchema, GetStatsRequestSchema, GetStatsResponseSchema, ListInterventionsRequestSchema, ListInterventionsResponseSchema, ListSessionsRequestSchema, ListSessionsResponseSchema, PayloadChunkSchema, PostAnnotationRequestSchema, PostAnnotationResponseSchema, SendControlRequestSchema, SendControlResponseSchema, SessionUpdateSchema, WatchSessionRequestSchema } from "./frontend_pb.js";
 import { file_harmonograf_v1_frontend } from "./frontend_pb.js";
 import { file_harmonograf_v1_types } from "./types_pb.js";
 import type { ControlEventSchema } from "../../goldfive/v1/control_pb.js";
@@ -34,7 +34,7 @@ import { file_goldfive_v1_control } from "../../goldfive/v1/control_pb.js";
  * Describes the file harmonograf/v1/service.proto.
  */
 export const file_harmonograf_v1_service: GenFile = /*@__PURE__*/
-  fileDesc("ChxoYXJtb25vZ3JhZi92MS9zZXJ2aWNlLnByb3RvEg5oYXJtb25vZ3JhZi52MTL6BgoLSGFybW9ub2dyYWYSUQoPU3RyZWFtVGVsZW1ldHJ5EhsuaGFybW9ub2dyYWYudjEuVGVsZW1ldHJ5VXAaHS5oYXJtb25vZ3JhZi52MS5UZWxlbWV0cnlEb3duKAEwARJYChBTdWJzY3JpYmVDb250cm9sEicuaGFybW9ub2dyYWYudjEuU3Vic2NyaWJlQ29udHJvbFJlcXVlc3QaGS5nb2xkZml2ZS52MS5Db250cm9sRXZlbnQwARJZCgxMaXN0U2Vzc2lvbnMSIy5oYXJtb25vZ3JhZi52MS5MaXN0U2Vzc2lvbnNSZXF1ZXN0GiQuaGFybW9ub2dyYWYudjEuTGlzdFNlc3Npb25zUmVzcG9uc2USVAoMV2F0Y2hTZXNzaW9uEiMuaGFybW9ub2dyYWYudjEuV2F0Y2hTZXNzaW9uUmVxdWVzdBodLmhhcm1vbm9ncmFmLnYxLlNlc3Npb25VcGRhdGUwARJPCgpHZXRQYXlsb2FkEiEuaGFybW9ub2dyYWYudjEuR2V0UGF5bG9hZFJlcXVlc3QaHC5oYXJtb25vZ3JhZi52MS5QYXlsb2FkQ2h1bmswARJWCgtHZXRTcGFuVHJlZRIiLmhhcm1vbm9ncmFmLnYxLkdldFNwYW5UcmVlUmVxdWVzdBojLmhhcm1vbm9ncmFmLnYxLkdldFNwYW5UcmVlUmVzcG9uc2USXwoOUG9zdEFubm90YXRpb24SJS5oYXJtb25vZ3JhZi52MS5Qb3N0QW5ub3RhdGlvblJlcXVlc3QaJi5oYXJtb25vZ3JhZi52MS5Qb3N0QW5ub3RhdGlvblJlc3BvbnNlElYKC1NlbmRDb250cm9sEiIuaGFybW9ub2dyYWYudjEuU2VuZENvbnRyb2xSZXF1ZXN0GiMuaGFybW9ub2dyYWYudjEuU2VuZENvbnRyb2xSZXNwb25zZRJcCg1EZWxldGVTZXNzaW9uEiQuaGFybW9ub2dyYWYudjEuRGVsZXRlU2Vzc2lvblJlcXVlc3QaJS5oYXJtb25vZ3JhZi52MS5EZWxldGVTZXNzaW9uUmVzcG9uc2USTQoIR2V0U3RhdHMSHy5oYXJtb25vZ3JhZi52MS5HZXRTdGF0c1JlcXVlc3QaIC5oYXJtb25vZ3JhZi52MS5HZXRTdGF0c1Jlc3BvbnNlQkJaQGdpdGh1Yi5jb20vcGVkYXB1ZGkvaGFybW9ub2dyYWYvZ2VuL2hhcm1vbm9ncmFmL3YxO2hhcm1vbm9ncmFmdjFiBnByb3RvMw", [file_harmonograf_v1_telemetry, file_harmonograf_v1_control, file_harmonograf_v1_frontend, file_harmonograf_v1_types, file_goldfive_v1_control]);
+  fileDesc("ChxoYXJtb25vZ3JhZi92MS9zZXJ2aWNlLnByb3RvEg5oYXJtb25vZ3JhZi52MTLkBwoLSGFybW9ub2dyYWYSUQoPU3RyZWFtVGVsZW1ldHJ5EhsuaGFybW9ub2dyYWYudjEuVGVsZW1ldHJ5VXAaHS5oYXJtb25vZ3JhZi52MS5UZWxlbWV0cnlEb3duKAEwARJYChBTdWJzY3JpYmVDb250cm9sEicuaGFybW9ub2dyYWYudjEuU3Vic2NyaWJlQ29udHJvbFJlcXVlc3QaGS5nb2xkZml2ZS52MS5Db250cm9sRXZlbnQwARJZCgxMaXN0U2Vzc2lvbnMSIy5oYXJtb25vZ3JhZi52MS5MaXN0U2Vzc2lvbnNSZXF1ZXN0GiQuaGFybW9ub2dyYWYudjEuTGlzdFNlc3Npb25zUmVzcG9uc2USVAoMV2F0Y2hTZXNzaW9uEiMuaGFybW9ub2dyYWYudjEuV2F0Y2hTZXNzaW9uUmVxdWVzdBodLmhhcm1vbm9ncmFmLnYxLlNlc3Npb25VcGRhdGUwARJPCgpHZXRQYXlsb2FkEiEuaGFybW9ub2dyYWYudjEuR2V0UGF5bG9hZFJlcXVlc3QaHC5oYXJtb25vZ3JhZi52MS5QYXlsb2FkQ2h1bmswARJWCgtHZXRTcGFuVHJlZRIiLmhhcm1vbm9ncmFmLnYxLkdldFNwYW5UcmVlUmVxdWVzdBojLmhhcm1vbm9ncmFmLnYxLkdldFNwYW5UcmVlUmVzcG9uc2USXwoOUG9zdEFubm90YXRpb24SJS5oYXJtb25vZ3JhZi52MS5Qb3N0QW5ub3RhdGlvblJlcXVlc3QaJi5oYXJtb25vZ3JhZi52MS5Qb3N0QW5ub3RhdGlvblJlc3BvbnNlElYKC1NlbmRDb250cm9sEiIuaGFybW9ub2dyYWYudjEuU2VuZENvbnRyb2xSZXF1ZXN0GiMuaGFybW9ub2dyYWYudjEuU2VuZENvbnRyb2xSZXNwb25zZRJcCg1EZWxldGVTZXNzaW9uEiQuaGFybW9ub2dyYWYudjEuRGVsZXRlU2Vzc2lvblJlcXVlc3QaJS5oYXJtb25vZ3JhZi52MS5EZWxldGVTZXNzaW9uUmVzcG9uc2USTQoIR2V0U3RhdHMSHy5oYXJtb25vZ3JhZi52MS5HZXRTdGF0c1JlcXVlc3QaIC5oYXJtb25vZ3JhZi52MS5HZXRTdGF0c1Jlc3BvbnNlEmgKEUxpc3RJbnRlcnZlbnRpb25zEiguaGFybW9ub2dyYWYudjEuTGlzdEludGVydmVudGlvbnNSZXF1ZXN0GikuaGFybW9ub2dyYWYudjEuTGlzdEludGVydmVudGlvbnNSZXNwb25zZUJCWkBnaXRodWIuY29tL3BlZGFwdWRpL2hhcm1vbm9ncmFmL2dlbi9oYXJtb25vZ3JhZi92MTtoYXJtb25vZ3JhZnYxYgZwcm90bzM", [file_harmonograf_v1_telemetry, file_harmonograf_v1_control, file_harmonograf_v1_frontend, file_harmonograf_v1_types, file_goldfive_v1_control]);
 
 /**
  * --- Agent → server: high-volume telemetry ---------------------------
@@ -152,6 +152,17 @@ export const Harmonograf: GenService<{
     methodKind: "unary";
     input: typeof GetStatsRequestSchema;
     output: typeof GetStatsResponseSchema;
+  },
+  /**
+   * Merged chronological intervention history for one session. Unary —
+   * the frontend recomputes live updates from WatchSession deltas.
+   *
+   * @generated from rpc harmonograf.v1.Harmonograf.ListInterventions
+   */
+  listInterventions: {
+    methodKind: "unary";
+    input: typeof ListInterventionsRequestSchema;
+    output: typeof ListInterventionsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_harmonograf_v1_service, 0);

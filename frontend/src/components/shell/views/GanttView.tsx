@@ -7,6 +7,9 @@ import { useSessionWatch } from '../../../rpc/hooks';
 import { colorForAgent } from '../../../theme/agentColors';
 import type { Task, TaskPlan, TaskStatus } from '../../../gantt/types';
 import { TaskStagesGraph } from '../../TaskStages/TaskStagesGraph';
+import { InterventionsTimeline } from '../../Interventions/InterventionsTimeline';
+import { deriveInterventionsFromStore } from '../../../lib/interventions';
+import { useAnnotationStore } from '../../../state/annotationStore';
 
 const DEFAULT_PANEL_HEIGHT = 120;
 const MIN_PANEL_HEIGHT = 60;
@@ -71,9 +74,16 @@ export function GanttView() {
 
   useEffect(() => {
     if (!watch?.store) return;
+    // Subscribe to tasks for stage DAG refresh AND drifts/annotations so the
+    // InterventionsTimeline re-renders as new STEERs / drift events arrive
+    // without each marker racing to fetch ListInterventions.
     const un = watch.store.tasks.subscribe(() => setTick((t) => t + 1));
+    const unDrift = watch.store.drifts.subscribe(() => setTick((t) => t + 1));
+    const unAnn = useAnnotationStore.subscribe(() => setTick((t) => t + 1));
     return () => {
       un();
+      unDrift();
+      unAnn();
     };
   }, [watch?.store]);
 
@@ -131,6 +141,15 @@ export function GanttView() {
   const store = watch?.store;
   const plans: readonly TaskPlan[] = store ? store.tasks.listPlans() : [];
   const totalTasks = plans.reduce((n, p) => n + p.tasks.length, 0);
+  // Derive the unified intervention history from the live session store +
+  // any pending/delivered annotations. Derived (not fetched) so live
+  // updates do not require an extra server round-trip.
+  const allAnnotations = sessionId
+    ? useAnnotationStore.getState().list(sessionId)
+    : [];
+  const interventions = store
+    ? deriveInterventionsFromStore(store, allAnnotations)
+    : [];
   const agentNameFor = (id: string): string =>
     store?.agents.get(id)?.name ?? id;
   // Resolve the assignee's canonical color only if the agent is registered on
@@ -326,6 +345,28 @@ export function GanttView() {
                   agentColorFor={agentColorFor}
                   agentNameFor={agentNameFor}
                   onTaskClick={handleTaskClick}
+                />
+                <InterventionsTimeline
+                  rows={interventions.filter(
+                    // Attach each intervention to the plan whose rev it
+                    // produced, or — if it never produced a revision —
+                    // the nearest preceding plan. This keeps every
+                    // plan strip uncluttered while still guaranteeing
+                    // every intervention shows up once.
+                    (row) =>
+                      row.planRevisionIndex > 0
+                        ? (plan.revisionIndex ?? 0) === row.planRevisionIndex
+                        : (plan.revisionIndex ?? 0) === 0,
+                  )}
+                  startMs={plan.createdAtMs}
+                  endMs={Math.max(
+                    plan.createdAtMs + 1,
+                    ...plan.tasks.map(
+                      (t) => plan.createdAtMs + (t.predictedDurationMs || 0),
+                    ),
+                  )}
+                  revs={plans}
+                  onJumpToRevision={undefined}
                 />
               </div>
             ))}
