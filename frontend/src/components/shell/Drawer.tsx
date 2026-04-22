@@ -327,6 +327,28 @@ function TaskSubtabButton({
 }
 
 function TaskOverviewPanel({ span, sessionId }: { span: Span; sessionId: string | null }) {
+  // harmonograf#110 / goldfive#205: resolve the bound task (if any) so the
+  // panel can render a "Cancel reason" section when this span's task
+  // ended CANCELLED / FAILED. Binding happens via the span's
+  // ``hgraf.task_id`` attribute — same linkage the current-task highlight
+  // uses.
+  const store = getSessionStore(sessionId);
+  const [, _bumpCancelReason] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => {
+    if (!store) return;
+    return store.tasks.subscribe(() => _bumpCancelReason());
+  }, [store]);
+  const spanTaskId =
+    span.attributes['hgraf.task_id']?.kind === 'string'
+      ? span.attributes['hgraf.task_id'].value
+      : '';
+  const boundTask = spanTaskId && store
+    ? store.tasks.findPlanForTask(spanTaskId)?.task ?? null
+    : null;
+  const showCancelReason =
+    boundTask &&
+    (boundTask.status === 'CANCELLED' || boundTask.status === 'FAILED') &&
+    Boolean(boundTask.cancelReason);
   const taskReport = (span.attributes['task_report']?.kind === 'string' ? span.attributes['task_report'].value : undefined);
   const isRunning = span.endMs == null;
   const agentDesc = (span.attributes['agent_description']?.kind === 'string' ? span.attributes['agent_description'].value : undefined);
@@ -373,6 +395,35 @@ function TaskOverviewPanel({ span, sessionId }: { span: Span; sessionId: string 
           <div style={{ fontSize: 10, opacity: 0.6, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Current Task</div>
           <div style={{ fontSize: 12, lineHeight: 1.6, background: 'rgba(255,255,255,0.05)', borderRadius: 6, padding: '8px 10px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
             {taskReport}
+          </div>
+        </section>
+      )}
+
+      {/* harmonograf#110 / goldfive#205: Cancel / fail reason section.
+          Shows the structured reason string (upstream_failed:<id>,
+          user_cancel:<annotation_id>, run_aborted:<reason>, ...) when
+          the task this span is bound to ended CANCELLED or FAILED.
+          Answers "why was this task cancelled?" without making the
+          operator cross-reference the Trajectory view. */}
+      {showCancelReason && boundTask && (
+        <section data-testid="drawer-cancel-reason">
+          <div style={{ fontSize: 10, opacity: 0.6, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            {boundTask.status === 'FAILED' ? 'Failure reason' : 'Cancel reason'}
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              lineHeight: 1.5,
+              background: 'rgba(255,200,80,0.08)',
+              borderLeft: '3px solid rgba(255,200,80,0.6)',
+              borderRadius: 4,
+              padding: '8px 10px',
+              fontFamily: 'var(--hg-mono, ui-monospace, Menlo, monospace)',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}
+          >
+            {boundTask.cancelReason}
           </div>
         </section>
       )}

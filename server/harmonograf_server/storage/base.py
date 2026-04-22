@@ -389,6 +389,8 @@ class Store(ABC):
         task_id: str,
         status: TaskStatus,
         bound_span_id: Optional[str] = None,
+        *,
+        cancel_reason: str = "",
     ) -> Optional[Task]: ...
 
     # context window samples ----------------------------------------------

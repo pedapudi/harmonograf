@@ -209,13 +209,26 @@ export function applyGoldfiveEvent(
       store.tasks.updateTaskStatusByTaskId(payload.value.taskId, 'COMPLETED');
       return;
     case 'taskFailed':
-      store.tasks.updateTaskStatusByTaskId(payload.value.taskId, 'FAILED');
+      // harmonograf#110 / goldfive#205: carry the structured cancel
+      // reason onto the task so the pre-strip tooltip, Drawer overview,
+      // and Trajectory task-delta list can render "why?".
+      store.tasks.updateTaskStatusByTaskId(
+        payload.value.taskId,
+        'FAILED',
+        undefined,
+        payload.value.reason || '',
+      );
       return;
     case 'taskBlocked':
       store.tasks.updateTaskStatusByTaskId(payload.value.taskId, 'BLOCKED');
       return;
     case 'taskCancelled':
-      store.tasks.updateTaskStatusByTaskId(payload.value.taskId, 'CANCELLED');
+      store.tasks.updateTaskStatusByTaskId(
+        payload.value.taskId,
+        'CANCELLED',
+        undefined,
+        payload.value.reason || '',
+      );
       return;
     case 'approvalRequested': {
       if (!sessionId) return;

@@ -961,8 +961,17 @@ class IngestPipeline:
     async def _on_task_failed(
         self, ctx: StreamContext, payload: Any, run_id: str
     ) -> None:
+        # harmonograf#110 / goldfive#205: ``TaskFailed.reason`` carries the
+        # structured failure reason (e.g. ``refine_validation_failed``,
+        # ``runaway_delegation``, adapter exception). Persist it so the
+        # Trajectory view can render it on the FAILED task card.
+        cancel_reason = getattr(payload, "reason", "") or ""
         await self._apply_goldfive_task_status(
-            ctx, payload.task_id, TaskStatus.FAILED, run_id=run_id
+            ctx,
+            payload.task_id,
+            TaskStatus.FAILED,
+            run_id=run_id,
+            cancel_reason=cancel_reason,
         )
 
     async def _on_task_blocked(
@@ -975,8 +984,16 @@ class IngestPipeline:
     async def _on_task_cancelled(
         self, ctx: StreamContext, payload: Any, run_id: str
     ) -> None:
+        # harmonograf#110 / goldfive#205: thread the structured cancel
+        # reason through to storage so the Trajectory view can render
+        # "why was this task cancelled?" on the task delta card.
+        cancel_reason = getattr(payload, "reason", "") or ""
         await self._apply_goldfive_task_status(
-            ctx, payload.task_id, TaskStatus.CANCELLED, run_id=run_id
+            ctx,
+            payload.task_id,
+            TaskStatus.CANCELLED,
+            run_id=run_id,
+            cancel_reason=cancel_reason,
         )
 
     async def _apply_goldfive_task_status(
@@ -986,6 +1003,7 @@ class IngestPipeline:
         status: TaskStatus,
         *,
         run_id: str,
+        cancel_reason: str = "",
     ) -> None:
         if not task_id:
             logger.debug(
@@ -1016,7 +1034,9 @@ class IngestPipeline:
                 ctx.session_id,
             )
             return
-        updated = await self._store.update_task_status(plan_id, task_id, status)
+        updated = await self._store.update_task_status(
+            plan_id, task_id, status, cancel_reason=cancel_reason
+        )
         if updated is not None:
             self._bus.publish_task_status(ctx.session_id, plan_id, updated)
 

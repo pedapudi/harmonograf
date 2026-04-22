@@ -537,6 +537,89 @@ async def test_task_terminal_statuses(pipeline, store, field: str, expected_stat
 
 
 @pytest.mark.asyncio
+async def test_task_cancelled_reason_persists_on_task_row(pipeline, store):
+    """harmonograf#110 / goldfive#205.
+
+    The structured cancel reason on ``TaskCancelled.reason`` must round-
+    trip onto the stored task's ``cancel_reason`` column so the
+    Trajectory view task-delta list and the Drawer overview can render
+    it without a second fetch.
+    """
+    pipe, _bus, _ = pipeline
+    await _ensure_session(store)
+    plan_evt = _make_event()
+    plan_evt.plan_submitted.plan.CopyFrom(_plan_pb(plan_id="p-cancel-reason"))
+    await pipe.handle_message(_stream_ctx(), _wrap(plan_evt))
+
+    evt = _make_event(sequence=1)
+    evt.task_cancelled.task_id = "t1"
+    evt.task_cancelled.reason = "upstream_failed:root_task"
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
+
+    plan = await store.get_task_plan("p-cancel-reason")
+    assert plan is not None
+    t1 = next(t for t in plan.tasks if t.id == "t1")
+    assert t1.status == TaskStatus.CANCELLED
+    assert t1.cancel_reason == "upstream_failed:root_task"
+
+
+@pytest.mark.asyncio
+async def test_task_failed_reason_persists_on_task_row(pipeline, store):
+    """harmonograf#110 / goldfive#205: TaskFailed.reason rides through too."""
+    pipe, _bus, _ = pipeline
+    await _ensure_session(store)
+    plan_evt = _make_event()
+    plan_evt.plan_submitted.plan.CopyFrom(_plan_pb(plan_id="p-fail-reason"))
+    await pipe.handle_message(_stream_ctx(), _wrap(plan_evt))
+
+    evt = _make_event(sequence=1)
+    evt.task_failed.task_id = "t1"
+    evt.task_failed.reason = "refine_validation_failed"
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
+
+    plan = await store.get_task_plan("p-fail-reason")
+    assert plan is not None
+    t1 = next(t for t in plan.tasks if t.id == "t1")
+    assert t1.status == TaskStatus.FAILED
+    assert t1.cancel_reason == "refine_validation_failed"
+
+
+@pytest.mark.asyncio
+async def test_cancel_reason_preserved_across_later_non_cancel_transitions(
+    pipeline, store
+):
+    """A later BLOCKED / RUNNING ping must not wipe a stamped reason.
+
+    Regression guard: update_task_status is called for every transition;
+    without preserve semantics a later BLOCKED event with an empty
+    cancel_reason arg would blank the prior CANCELLED / FAILED reason.
+    """
+    pipe, _bus, _ = pipeline
+    await _ensure_session(store)
+    plan_evt = _make_event()
+    plan_evt.plan_submitted.plan.CopyFrom(_plan_pb(plan_id="p-preserve"))
+    await pipe.handle_message(_stream_ctx(), _wrap(plan_evt))
+
+    # Stamp a cancel reason.
+    cancel = _make_event(sequence=1)
+    cancel.task_cancelled.task_id = "t1"
+    cancel.task_cancelled.reason = "user_cancel:ann-abc"
+    await pipe.handle_message(_stream_ctx(), _wrap(cancel))
+
+    # Later transition without a reason (simulates a late BLOCKED ping).
+    later = _make_event(sequence=2)
+    later.task_blocked.task_id = "t1"
+    await pipe.handle_message(_stream_ctx(), _wrap(later))
+
+    plan = await store.get_task_plan("p-preserve")
+    assert plan is not None
+    t1 = next(t for t in plan.tasks if t.id == "t1")
+    # Status rolls forward; reason preserved.
+    assert t1.status == TaskStatus.BLOCKED
+    assert t1.cancel_reason == "user_cancel:ann-abc"
+
+
+@pytest.mark.asyncio
 async def test_task_status_for_unknown_task_is_logged_not_crash(pipeline, store):
     pipe, _bus, _ = pipeline
     # No plan submitted — task_started for an unknown id should be a no-op.

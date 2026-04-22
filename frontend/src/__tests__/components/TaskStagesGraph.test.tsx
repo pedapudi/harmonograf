@@ -110,6 +110,47 @@ describe('<TaskStagesGraph />', () => {
     expect(cardRects).toHaveLength(4);
   });
 
+  // harmonograf#110 / goldfive#205: cancel reason tooltip on CANCELLED /
+  // FAILED cards. Hovering the card's SVG <title> reveals the structured
+  // reason so operators know "why was this task cancelled?" without a
+  // click.
+  it('embeds cancelReason in the tooltip for CANCELLED tasks', () => {
+    const cancelled: Task = {
+      ...mkTask('t1', 'CANCELLED'),
+      cancelReason: 'upstream_failed:root_task',
+    };
+    const plan = mkPlan([cancelled], []);
+    const { container } = render(<TaskStagesGraph plan={plan} />);
+    const titles = container.querySelectorAll('g.hg-stages__card title');
+    expect(titles).toHaveLength(1);
+    expect(titles[0].textContent).toContain('upstream_failed:root_task');
+  });
+
+  it('embeds cancelReason in the tooltip for FAILED tasks', () => {
+    const failed: Task = {
+      ...mkTask('t1', 'FAILED'),
+      cancelReason: 'refine_validation_failed',
+    };
+    const plan = mkPlan([failed], []);
+    const { container } = render(<TaskStagesGraph plan={plan} />);
+    const title = container.querySelector('g.hg-stages__card title');
+    expect(title?.textContent).toContain('refine_validation_failed');
+  });
+
+  it('does not append cancelReason for non-terminal tasks', () => {
+    // Regression guard: a stale cancelReason on a RUNNING task (e.g.
+    // a later revision re-opened the task) must not bleed into the
+    // tooltip.
+    const running: Task = {
+      ...mkTask('t1', 'RUNNING'),
+      cancelReason: 'stale_reason_should_not_show',
+    };
+    const plan = mkPlan([running], []);
+    const { container } = render(<TaskStagesGraph plan={plan} />);
+    const title = container.querySelector('g.hg-stages__card title');
+    expect(title?.textContent).not.toContain('stale_reason_should_not_show');
+  });
+
   // harmonograf#107 — regression guard. The reported bug ("7-stage plan
   // with NO arrows between stages") can only happen if `plan.edges` arrives
   // empty. With a seeded 7-edge plan the SVG MUST produce 7 <path> nodes.

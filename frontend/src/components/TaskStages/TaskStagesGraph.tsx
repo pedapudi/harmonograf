@@ -202,6 +202,13 @@ export function TaskStagesGraph({
           ]
             .filter(Boolean)
             .join(' ');
+          // harmonograf#110 / goldfive#205: tooltip includes the cancel
+          // reason on CANCELLED / FAILED cards so hovering tells the
+          // operator why a task ended the way it did without a click.
+          const reason = task.cancelReason || '';
+          const showReason =
+            reason && (task.status === 'CANCELLED' || task.status === 'FAILED');
+          const tooltipText = showReason ? `${title}\n${reason}` : title;
           return (
             <g
               key={task.id}
@@ -209,7 +216,7 @@ export function TaskStagesGraph({
               transform={`translate(${x}, ${y})`}
               onClick={() => onTaskClick?.(task)}
             >
-              <title>{title}</title>
+              <title>{tooltipText}</title>
               <rect
                 className="hg-stages__card-rect"
                 width={CARD_WIDTH}

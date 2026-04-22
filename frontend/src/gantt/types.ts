@@ -113,6 +113,14 @@ export interface Task {
   predictedStartMs: number;
   predictedDurationMs: number;
   boundSpanId: string;
+  // harmonograf#110 / goldfive#205: structured cancel reason stamped on
+  // the most recent CANCELLED / FAILED transition. Colon-prefixed tag
+  // (upstream_failed / run_aborted / user_cancel / user_steer /
+  // superseded_by_revision) + a provenance id or human tail.
+  // Empty on PENDING / RUNNING / COMPLETED / BLOCKED tasks. Surfaced in
+  // the TaskStagesGraph tooltip, the Drawer Task Overview section, and
+  // the TrajectoryView task-delta list.
+  cancelReason?: string;
 }
 
 export interface TaskEdge {

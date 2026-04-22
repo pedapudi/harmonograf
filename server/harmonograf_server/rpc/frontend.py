@@ -1014,12 +1014,21 @@ def _task_status_to_goldfive_event(task: Task) -> Optional[goldfive_events_pb2.E
         return ev
     if task.status == TaskStatus.FAILED:
         ev.task_failed.task_id = task.id
+        # harmonograf#110 / goldfive#205: thread the structured cancel
+        # reason through so late-joining watchers see the same context
+        # the live stream carried.
+        cr = getattr(task, "cancel_reason", "") or ""
+        if cr:
+            ev.task_failed.reason = cr
         return ev
     if task.status == TaskStatus.BLOCKED:
         ev.task_blocked.task_id = task.id
         return ev
     if task.status == TaskStatus.CANCELLED:
         ev.task_cancelled.task_id = task.id
+        cr = getattr(task, "cancel_reason", "") or ""
+        if cr:
+            ev.task_cancelled.reason = cr
         return ev
     return None
 

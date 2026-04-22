@@ -179,6 +179,72 @@ describe('applyGoldfiveEvent', () => {
     });
   });
 
+  // harmonograf#110 / goldfive#205: structured cancel reason on
+  // TaskCancelled / TaskFailed envelopes rides through goldfiveEvent
+  // onto ``Task.cancelReason`` so the three UI surfaces (TaskStagesGraph
+  // tooltip, Drawer Overview section, TrajectoryView task-delta list)
+  // all render it.
+  it('task_cancelled / task_failed thread reason onto Task.cancelReason', () => {
+    const store = new SessionStore();
+    applyGoldfiveEvent(
+      create(EventSchema, {
+        eventId: 'ev-0',
+        runId: 'run-1',
+        sequence: 0n,
+        payload: {
+          case: 'planSubmitted',
+          value: create(PlanSubmittedSchema, {
+            plan: makePbPlan('p1', ['t-cancel', 't-fail']),
+          }),
+        },
+      }),
+      store,
+      0,
+    );
+
+    applyGoldfiveEvent(
+      create(EventSchema, {
+        eventId: 'ev-cancel',
+        runId: 'run-1',
+        sequence: 1n,
+        payload: {
+          case: 'taskCancelled',
+          value: create(TaskCancelledSchema, {
+            taskId: 't-cancel',
+            reason: 'upstream_failed:parent',
+          }),
+        },
+      }),
+      store,
+      0,
+    );
+
+    applyGoldfiveEvent(
+      create(EventSchema, {
+        eventId: 'ev-fail',
+        runId: 'run-1',
+        sequence: 2n,
+        payload: {
+          case: 'taskFailed',
+          value: create(TaskFailedSchema, {
+            taskId: 't-fail',
+            reason: 'refine_validation_failed',
+          }),
+        },
+      }),
+      store,
+      0,
+    );
+
+    const byId = Object.fromEntries(
+      store.tasks.getPlan('p1')!.tasks.map((t) => [t.id, t]),
+    );
+    expect(byId['t-cancel'].status).toBe('CANCELLED');
+    expect(byId['t-cancel'].cancelReason).toBe('upstream_failed:parent');
+    expect(byId['t-fail'].status).toBe('FAILED');
+    expect(byId['t-fail'].cancelReason).toBe('refine_validation_failed');
+  });
+
   it('planRevised with non-zero revision_index updates the plan and maps drift kind/severity to lowercase', () => {
     const store = new SessionStore();
     applyGoldfiveEvent(
