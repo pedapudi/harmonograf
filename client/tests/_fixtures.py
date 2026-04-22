@@ -69,6 +69,13 @@ class FakeTransport:
         self.control_forward: Optional[Callable[[Any], None]] = None
         # (control_id, result, detail) tuples pushed via send_control_ack.
         self.sent_acks: list[tuple[str, str, str]] = []
+        # Per-session control subscriptions opened via
+        # Client.open_additional_control_subscription (harmonograf#65 /
+        # goldfive#162). The tests inspect ``opened_session_subs`` /
+        # ``closed_session_subs`` to verify the plugin drives the
+        # subscription lifecycle correctly.
+        self.opened_session_subs: list[str] = []
+        self.closed_session_subs: list[str] = []
 
     # --- public surface Client depends on -----------------------------
 
@@ -95,6 +102,23 @@ class FakeTransport:
         self, control_id: str, result: str, detail: str = ""
     ) -> None:
         self.sent_acks.append((control_id, result, detail))
+
+    def open_session_subscription(self, session_id: str) -> None:
+        """Record an additional control subscription. No real RPC here."""
+        if session_id and session_id not in self.opened_session_subs:
+            self.opened_session_subs.append(session_id)
+
+    def close_session_subscription(self, session_id: str) -> None:
+        """Record teardown of a per-session control subscription."""
+        if session_id:
+            self.closed_session_subs.append(session_id)
+
+    @property
+    def registered_session_ids(self) -> tuple[str, ...]:
+        active = [
+            s for s in self.opened_session_subs if s not in self.closed_session_subs
+        ]
+        return tuple(active)
 
     # Bridge tests simulate a ControlEvent arriving on the control stream
     # by calling this directly. Matches the real transport's call path —

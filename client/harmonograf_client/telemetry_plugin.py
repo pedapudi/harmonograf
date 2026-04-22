@@ -220,6 +220,34 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
             # is never actually invoked in that case.
             pass
         self._client = client
+        # Outer adk-web ``ctx.session.id`` cached from the ROOT
+        # ``before_run_callback`` (harmonograf #65 / goldfive #161).
+        # Under overlay + ``AgentTool``, ADK rebuilds ``CallbackContext``
+        # per sub-invocation and the ``AgentTool`` sub-Runners mint
+        # their own ``InMemorySessionService`` session ids. If we stamp
+        # the per-ctx id on every span, a single adk-web run fans out
+        # across N harmonograf sessions — one per sub-Runner — and the
+        # plan view (which carries the goldfive ``Session.id``, itself
+        # pinned to the outer adk-web session via goldfive #161) sits
+        # alone on the outer session with no execution spans.
+        #
+        # Caching the ROOT session id and stamping it on every
+        # subsequent span (root + sub-Runner) collapses everything onto
+        # one session, matching where the goldfive events land. The
+        # ``adk.session_id`` attribute still carries the per-ctx
+        # sub-Runner id for forensic debugging (harmonograf#62).
+        #
+        # ``None`` between runs; populated by the first
+        # ``before_run_callback`` and cleared by the matching
+        # ``after_run_callback`` so the next adk-web invocation picks
+        # up its own root id.
+        self._root_session_id: str | None = None
+        # Invocation id of the root invocation whose ``after_run`` will
+        # clear ``_root_session_id``. Necessary because ADK fires one
+        # ``before_run`` / ``after_run`` pair per ``AgentTool``
+        # sub-Runner invocation too — we must not drop the cache on the
+        # sub-Runner's after_run.
+        self._root_invocation_id: str | None = None
         self._invocation_spans: dict[str, str] = {}
         # Model-call spans are keyed by ``invocation_id`` and tracked as
         # FIFO queues: ADK rebuilds the ``CallbackContext`` between
@@ -244,43 +272,31 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
     def _stamp_session_id(self, ctx: Any) -> str:
         """Return the harmonograf session id to stamp on a span.
 
-        Prefers the per-callback ADK session id (``ctx.session.id``) so
-        each span lands on the session its invocation actually belongs
-        to. Falls back to the Client's home / Hello session when ADK
-        runs without a session service (unit-test harnesses, offline
-        replays, or a ctx whose ``session`` is ``None``).
+        Prefers the ROOT adk-web session id cached by
+        :meth:`before_run_callback` on the first invocation
+        (harmonograf#65 / goldfive#161). This collapses spans from the
+        root + every ``AgentTool`` sub-Runner onto one harmonograf
+        session, matching where the goldfive events land (goldfive's
+        ``Session.id`` is also pinned to the outer adk-web session id
+        per goldfive#161). Without this rollup the span view fans out
+        across N harmonograf sessions while the plan view sits alone
+        on the root.
 
-        History: harmonograf#61 previously returned
-        ``self._client.session_id`` unconditionally to work around a
-        fan-out problem — goldfive events (which ride the transport's
-        Hello stream) landed on the home session while spans landed on
-        per-ctx ADK sessions, so the UI saw "N+1 sessions per adk-web
-        run". goldfive#155 / PR #157 added ``Event.session_id`` to the
-        wire envelope and harmonograf#63 flipped server-side routing to
-        honor it, which puts goldfive events back on the ADK session
-        where their spans live. With that plumbing in place the simpler
-        ``ctx.session.id`` contract is correct again — and the ADK
-        session id already surfaces as a span attribute
-        (``adk.session_id``) from harmonograf#62 for forensic lookups.
+        When no root is cached (pre-connect, offline replay, unit-test
+        harnesses that drive a single callback without a
+        ``before_run_callback``), falls back to the per-ctx ADK session
+        id, then to the Client's home session.
 
-        AgentTool sub-Runner caveat: ADK's :class:`AgentTool` spawns
-        sub-Runners that mint their own ``InMemorySessionService`` and
-        per-invocation session_id, so spans emitted inside a sub-Runner
-        land on the sub-Runner's session rather than the outer adk-web
-        session. ADK's :class:`InvocationContext` exposes no parent /
-        root traversal, so there is no clean way for the plugin to walk
-        to the outer session from inside an AgentTool callback.
-        goldfive#155 stamps the sub-Runner session on its own events
-        (same session the spans target), so each sub-Runner-worth of
-        telemetry remains internally coherent. Cross-sub-Runner rollup
-        is now a UI concern (group by ``adk.root_session_id`` or
-        similar) rather than something the client papers over by
-        collapsing every session onto one Hello id.
+        The ``adk.session_id`` span attribute (stamped in
+        :meth:`before_run_callback`) still carries the per-ctx
+        sub-Runner session id for forensic debugging —
+        harmonograf#62's hook is preserved.
 
-        Returns ``""`` only when neither the ctx nor the client carry a
-        session id — the plugin's pre-connect degraded path — matching
-        the pre-#61 behaviour.
+        Returns ``""`` only when none of (cached root / ctx / home) is
+        populated — matches the plugin's pre-connect degraded path.
         """
+        if self._root_session_id:
+            return self._root_session_id
         adk_sid = _adk_session_id(ctx)
         if adk_sid:
             return adk_sid
@@ -295,6 +311,42 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         agent = _safe_attr(invocation_context, "agent")
         name = str(_safe_attr(agent, "name", "") or "invocation")
         adk_sid = _adk_session_id(invocation_context)
+
+        # Root-invocation detection (harmonograf#65 / goldfive#161).
+        # The first ``before_run_callback`` we see with no cached root
+        # is treated as the adk-web top-level invocation. Cache its
+        # ``ctx.session.id`` and drive every subsequent span stamp
+        # through it so ``AgentTool`` sub-Runners (which rebuild the
+        # CallbackContext and mint their own InMemorySessionService
+        # session id) don't fan out into separate harmonograf sessions.
+        # Also opens an additional control subscription scoped to the
+        # cached session id so STEER targeting the outer adk-web
+        # session finds a matching sub on the server (goldfive#162 /
+        # harmonograf#54's pattern reintroduced for this specific
+        # purpose — exactly ONE extra sub per run, not per sub-Runner).
+        if self._root_session_id is None and adk_sid:
+            self._root_session_id = adk_sid
+            self._root_invocation_id = inv_id or None
+            # Best-effort: open a per-session control subscription. The
+            # Client's home sub is always live; this is additive and
+            # makes the server's router prefer this sub when a STEER
+            # arrives with session_id matching the outer adk-web
+            # session. Shielded with hasattr so older Client builds
+            # without the helper degrade gracefully (spans still stamp
+            # the cached id — control routing falls back to home sub
+            # + all-live-subs fan-out).
+            open_sub = getattr(self._client, "open_additional_control_subscription", None)
+            if callable(open_sub):
+                try:
+                    open_sub(adk_sid)
+                except Exception:  # noqa: BLE001 — defensive: telemetry must not raise
+                    log.debug(
+                        "telemetry_plugin: open_additional_control_subscription "
+                        "raised for %s",
+                        adk_sid,
+                        exc_info=True,
+                    )
+
         attrs: dict[str, Any] = {}
         if inv_id:
             attrs["adk.invocation_id"] = inv_id
@@ -339,6 +391,41 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         sid = self._invocation_spans.pop(key, None)
         if sid is not None:
             self._client.emit_span_end(sid, status=SpanStatus.COMPLETED)
+
+        # Clear the cached root when the ROOT invocation ends so the
+        # next adk-web invocation picks up its own root session id.
+        # Match on ``_root_invocation_id`` to avoid clearing on
+        # ``AgentTool`` sub-Runner ``after_run_callback`` s — those
+        # also fire against this plugin because ADK propagates the
+        # plugin manager into sub-Runners. If we clear on the first
+        # sub-Runner's after_run, the remaining sub-Runners and the
+        # root would re-cache a different id, shattering the rollup.
+        if (
+            self._root_invocation_id is not None
+            and inv_id
+            and inv_id == self._root_invocation_id
+        ):
+            cached = self._root_session_id
+            self._root_session_id = None
+            self._root_invocation_id = None
+            # Tear down the additional control subscription opened on
+            # ``before_run_callback``. Best-effort: the Client may not
+            # expose the helper (older build) or the sub may already
+            # be gone from a reconnect cycle — either way we must not
+            # raise from telemetry.
+            close_sub = getattr(
+                self._client, "close_additional_control_subscription", None
+            )
+            if callable(close_sub) and cached:
+                try:
+                    close_sub(cached)
+                except Exception:  # noqa: BLE001 — defensive
+                    log.debug(
+                        "telemetry_plugin: close_additional_control_subscription "
+                        "raised for %s",
+                        cached,
+                        exc_info=True,
+                    )
 
     # ------------------------------------------------------------------
     # LLM call lifecycle
