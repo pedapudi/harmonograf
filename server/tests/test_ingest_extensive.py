@@ -391,3 +391,144 @@ async def test_task_report_attr_on_span_publishes_task_report(pipeline):
         kinds[d.kind] = d.payload
     assert DELTA_TASK_REPORT in kinds
     assert kinds[DELTA_TASK_REPORT]["report"] == "phase 1 done"
+
+
+# ---------------------------------------------------------------------------
+# Per-ADK-agent attribution (harmonograf#74) — ``hgraf.agent.*`` hints
+# stamped by the telemetry plugin on each per-agent first span get
+# harvested into the auto-registered ``Agent.metadata`` row.
+# ---------------------------------------------------------------------------
+
+
+async def test_agent_hints_harvested_into_new_agent_metadata(pipeline, store):
+    """First span from a new ADK agent registers its row with name + kind + parent."""
+    ctx, _ = await pipeline.handle_hello(
+        _hello(agent_id="client-root", session_id="sess_tree")
+    )
+    msg = _span_msg(
+        "sp-1",
+        agent_id="client-root:research_agent",
+        session_id="sess_tree",
+        attrs={
+            "hgraf.agent.name": "research_agent",
+            "hgraf.agent.kind": "llm",
+            "hgraf.agent.parent_id": "client-root:coordinator",
+            "hgraf.agent.branch": "coordinator.research_agent",
+        },
+    )
+    await pipeline.handle_message(ctx, msg)
+    ag = await store.get_agent("sess_tree", "client-root:research_agent")
+    assert ag is not None
+    assert ag.name == "research_agent"
+    assert ag.metadata["adk.agent.name"] == "research_agent"
+    assert ag.metadata["harmonograf.agent_kind"] == "llm"
+    assert (
+        ag.metadata["harmonograf.parent_agent_id"]
+        == "client-root:coordinator"
+    )
+    assert ag.metadata["adk.agent.branch"] == "coordinator.research_agent"
+
+
+async def test_agent_hints_do_not_overwrite_existing_registration(pipeline, store):
+    """Second span with different hints doesn't mutate the existing row.
+
+    ``_ensure_route`` short-circuits via ``ctx.seen_routes`` after the
+    first per-(session, agent) pair lands, so later spans never
+    re-enter the hint-harvest path. This keeps the auto-register write
+    off the hot path at the cost of ignoring late/conflicting hints —
+    the right tradeoff for observability.
+    """
+    ctx, _ = await pipeline.handle_hello(
+        _hello(agent_id="client-root", session_id="sess_tree2")
+    )
+    msg1 = _span_msg(
+        "sp-1",
+        agent_id="client-root:coord",
+        session_id="sess_tree2",
+        attrs={"hgraf.agent.name": "coord", "hgraf.agent.kind": "llm"},
+    )
+    await pipeline.handle_message(ctx, msg1)
+    msg2 = _span_msg(
+        "sp-2",
+        agent_id="client-root:coord",
+        session_id="sess_tree2",
+        attrs={"hgraf.agent.name": "coord-mutated", "hgraf.agent.kind": "workflow"},
+    )
+    await pipeline.handle_message(ctx, msg2)
+    ag = await store.get_agent("sess_tree2", "client-root:coord")
+    assert ag is not None
+    assert ag.name == "coord"
+    assert ag.metadata["harmonograf.agent_kind"] == "llm"
+
+
+async def test_multiple_distinct_agents_all_register_separately(pipeline, store):
+    """Spans from N ADK agents produce N rows — the core harmonograf#74 fix.
+
+    Regression guard: before this fix, a goldfive-wrapped ADK tree with
+    coordinator + research + web_developer + reviewer + debugger
+    landed one ``Agent`` row (the client root). With
+    ``hgraf.agent.*`` harvest, each sub-agent gets its own row.
+    """
+    ctx, _ = await pipeline.handle_hello(
+        _hello(agent_id="presentation-client", session_id="sess_multi_adk")
+    )
+    agents = [
+        ("coordinator", ""),
+        ("research_agent", "presentation-client:coordinator"),
+        ("web_developer_agent", "presentation-client:coordinator"),
+        ("reviewer_agent", "presentation-client:coordinator"),
+        ("debugger_agent", "presentation-client:coordinator"),
+    ]
+    for idx, (adk_name, parent) in enumerate(agents):
+        attrs = {"hgraf.agent.name": adk_name, "hgraf.agent.kind": "llm"}
+        if parent:
+            attrs["hgraf.agent.parent_id"] = parent
+        msg = _span_msg(
+            f"sp-{idx}",
+            agent_id=f"presentation-client:{adk_name}",
+            session_id="sess_multi_adk",
+            attrs=attrs,
+        )
+        await pipeline.handle_message(ctx, msg)
+
+    rows = await store.list_agents_for_session("sess_multi_adk")
+    row_ids = {r.id for r in rows}
+    # The hello-registered client-root agent row + one per ADK agent.
+    assert "presentation-client" in row_ids
+    assert "presentation-client:coordinator" in row_ids
+    assert "presentation-client:research_agent" in row_ids
+    assert "presentation-client:web_developer_agent" in row_ids
+    assert "presentation-client:reviewer_agent" in row_ids
+    assert "presentation-client:debugger_agent" in row_ids
+
+    # Parent links wired correctly (coordinator has none; specialists
+    # point at coordinator).
+    by_id = {r.id: r for r in rows}
+    coord = by_id["presentation-client:coordinator"]
+    research = by_id["presentation-client:research_agent"]
+    assert "harmonograf.parent_agent_id" not in coord.metadata
+    assert (
+        research.metadata["harmonograf.parent_agent_id"]
+        == "presentation-client:coordinator"
+    )
+
+
+async def test_agent_registered_without_hints_back_compat(pipeline, store):
+    """Observability-mode clients that don't stamp hgraf.agent.* still work.
+
+    Back-compat contract: older clients (no per-agent stamping) just
+    get a row with name=span.name and framework=UNKNOWN. Nothing in
+    the ingest path should assume hints are present.
+    """
+    ctx, _ = await pipeline.handle_hello(
+        _hello(agent_id="root", session_id="sess_back_compat")
+    )
+    msg = _span_msg("sp-1", agent_id="legacy-agent", session_id="sess_back_compat")
+    await pipeline.handle_message(ctx, msg)
+    ag = await store.get_agent("sess_back_compat", "legacy-agent")
+    assert ag is not None
+    # span.name is "span-sp-1" per _span_msg; without hints that's
+    # what the row inherits as its display name.
+    assert ag.name == "span-sp-1"
+    assert "adk.agent.name" not in ag.metadata
+    assert "harmonograf.agent_kind" not in ag.metadata

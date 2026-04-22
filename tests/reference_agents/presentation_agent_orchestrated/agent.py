@@ -308,8 +308,6 @@ def build_goldfive_runner(
             "for a real OpenAI-backed run"
         )
 
-    adapter = ADKAdapter(tree)
-
     sinks: list[Any] = []
     memory_sink = InMemorySink()
     sinks.append(memory_sink)
@@ -318,15 +316,24 @@ def build_goldfive_runner(
     if explicit_client is None:
         explicit_client = _get_or_create_client()
 
+    # Install the telemetry plugin on the single backing Runner so per-
+    # ADK-agent spans flow (harmonograf#74). Without this, the programmatic
+    # runner path drives ADK with no plugins and the per-agent Gantt rows
+    # never get populated — the e2e regression test against this helper
+    # would then report a false negative.
+    plugins: list[Any] = []
     harmonograf_sink = None
     if explicit_client is not None:
         try:
-            from harmonograf_client import HarmonografSink
+            from harmonograf_client import HarmonografSink, HarmonografTelemetryPlugin
 
+            plugins.append(HarmonografTelemetryPlugin(explicit_client))
             harmonograf_sink = HarmonografSink(explicit_client)
             sinks.append(harmonograf_sink)
         except Exception as e:  # noqa: BLE001
-            log.warning("HarmonografSink unavailable (%s)", e)
+            log.warning("HarmonografSink/Plugin unavailable (%s)", e)
+
+    adapter = ADKAdapter(tree, plugins=plugins or None)
 
     try:
         logging_sink = goldfive.sinks.LoggingSink()
