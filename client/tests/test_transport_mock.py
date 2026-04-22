@@ -220,17 +220,93 @@ def _wait(cond, timeout=3.0):
 
 
 class TestTransportHandshake:
-    def test_hello_and_welcome(self, server, isolated_identity):
+    def test_hello_and_welcome_deferred_until_first_emit(
+        self, server, isolated_identity
+    ):
+        """Lazy Hello (harmonograf#83): the Hello RPC does NOT fire at
+        client construction / stream open. It piggy-backs on the first
+        real emit so that by the time the server sees Hello, the
+        envelope's ``session_id`` (which the ADK plugin has already
+        stamped) is available to carry on the Hello frame.
+
+        An idle client — one that constructs and then shuts down
+        without emitting anything — must leave no trace on the server:
+        no Hello, no auto-created home session, no ghost row in the
+        picker.
+        """
         client = Client(
             name="test-agent",
             server_addr=f"127.0.0.1:{server.port}",
         )
         try:
+            # Stream is open but Hello has NOT been sent. Without lazy
+            # Hello, Welcome would already have arrived by the time
+            # ``Client.__init__`` returned.
+            time.sleep(0.2)
+            assert not server.servicer.welcome_sent.is_set()
+            assert len(server.servicer.hellos) == 0
+
+            # The first emit stamps the envelope's session_id onto
+            # Hello — we verify that behaviour more precisely in the
+            # dedicated test below.
+            sid = client.emit_span_start(
+                kind="LLM_CALL", name="gpt-4o", session_id="sess_adk_outer"
+            )
+            client.emit_span_end(sid, status="COMPLETED")
+
             assert _wait(lambda: server.servicer.welcome_sent.is_set())
             assert len(server.servicer.hellos) == 1
             hello = server.servicer.hellos[0]
             assert hello.name == "test-agent"
             assert hello.agent_id == client.agent_id
+            assert hello.session_id == "sess_adk_outer"
+        finally:
+            client.shutdown(flush_timeout=1.0)
+
+    def test_idle_client_shutdown_sends_no_hello(
+        self, server, isolated_identity
+    ):
+        """A client that constructs and shuts down without ever emitting
+        anything must not produce a Hello. The ``sess_YYYY-MM-DD_NNNN``
+        auto-creation on the server is driven by Hello; skipping Hello
+        skips the ghost session entirely (harmonograf#83 contract).
+        """
+        client = Client(
+            name="test-agent",
+            server_addr=f"127.0.0.1:{server.port}",
+        )
+        # No emits. Shut down cleanly.
+        client.shutdown(flush_timeout=0.5)
+        # Give the server thread a moment to drain anything in flight.
+        time.sleep(0.2)
+        assert len(server.servicer.hellos) == 0
+        assert not server.servicer.welcome_sent.is_set()
+
+    def test_non_adk_first_emit_has_no_session_id_override(
+        self, server, isolated_identity
+    ):
+        """Non-ADK flow — the client has no ``session_id`` override on
+        construction and the first emit omits ``session_id``. Hello
+        fires with an empty session id and the server auto-creates a
+        home session, exactly matching the harmonograf#62 rollup
+        contract. The lazy-Hello fix defers the RPC; it does NOT change
+        the non-ADK semantics.
+        """
+        client = Client(
+            name="non-adk-agent",
+            server_addr=f"127.0.0.1:{server.port}",
+        )
+        try:
+            sid = client.emit_span_start(kind="LLM_CALL", name="m")
+            client.emit_span_end(sid, status="COMPLETED")
+
+            assert _wait(lambda: server.servicer.welcome_sent.is_set())
+            assert len(server.servicer.hellos) == 1
+            hello = server.servicer.hellos[0]
+            # The mock server assigns ``sess_test_0001`` to Hellos that
+            # arrive without a session_id, mimicking the real server's
+            # auto-create behaviour.
+            assert hello.session_id == ""
             assert _wait(lambda: client.session_id == "sess_test_0001")
         finally:
             client.shutdown(flush_timeout=1.0)
@@ -241,10 +317,12 @@ class TestTransportHandshake:
             server_addr=f"127.0.0.1:{server.port}",
         )
         try:
-            _wait(lambda: server.servicer.welcome_sent.is_set())
+            # Lazy Hello: the send loop only opens the stream after the
+            # first emit. Emit first, then wait for Welcome.
             sid = client.emit_span_start(kind="LLM_CALL", name="gpt-4o")
             client.emit_span_update(sid, attributes={"tokens_in": 42})
             client.emit_span_end(sid, status="COMPLETED")
+            assert _wait(lambda: server.servicer.welcome_sent.is_set())
             assert _wait(lambda: server.servicer.first_span_seen.is_set())
             # Let the send loop flush.
             assert _wait(
@@ -315,6 +393,12 @@ class TestHeartbeat:
             _transport_factory=factory,
         )
         try:
+            # Lazy Hello (harmonograf#83): heartbeats are suppressed
+            # until the first real emit has opened the stream. Drop one
+            # span so the send loop queues Hello and then starts
+            # ticking heartbeats.
+            sid = client.emit_span_start(kind="LLM_CALL", name="hb-warmup")
+            client.emit_span_end(sid, status="COMPLETED")
             assert _wait(lambda: server.servicer.heartbeat_seen.is_set(), timeout=3.0)
         finally:
             client.shutdown(flush_timeout=1.0)
@@ -335,6 +419,12 @@ class TestControl:
 
         client.on_control("PAUSE", on_pause)
         try:
+            # Lazy Hello (harmonograf#83): the control subscription is
+            # gated on Welcome, and Welcome is gated on the first real
+            # emit. Emit one span to open the stream before we look for
+            # the control sub.
+            sid = client.emit_span_start(kind="LLM_CALL", name="ctl-warmup")
+            client.emit_span_end(sid, status="COMPLETED")
             _wait(lambda: server.servicer.welcome_sent.is_set())
             # Wait for control subscription to be in place.
             assert _wait(lambda: any(
