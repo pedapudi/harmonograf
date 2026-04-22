@@ -73,4 +73,8 @@ service Harmonograf {
 
   // Retention / storage stats for the Settings page. Unary.
   rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
+
+  // Merged chronological intervention history for one session. Unary —
+  // the frontend recomputes live updates from WatchSession deltas.
+  rpc ListInterventions(ListInterventionsRequest) returns (ListInterventionsResponse);
 }

@@ -1,0 +1,411 @@
+"""Intervention history aggregation.
+
+Builds the unified chronological view of a session's intervention events
+— every point where the plan changed direction, whether driven by a
+human operator, drift detection, or goldfive's own autonomous escalation.
+See doc 01 §2 / types.proto ``Intervention`` for the data-model design
+rationale and issue #69 for user-facing motivation.
+
+The aggregator derives the list from primitives that already exist on
+the wire, so no new persistence layer is introduced:
+
+  * ``annotations`` table           — user STEER / HUMAN_RESPONSE rows.
+  * Ingest pipeline drift ring      — ``drift_detected`` events, including
+                                      the ``user_steer`` / ``user_cancel``
+                                      drift kinds which flag user source.
+  * ``task_plans.revision_kind``    — plan revisions that carry the drift
+                                      kind or "cascade_cancel" / other
+                                      goldfive-autonomous kinds.
+
+The join happens in-memory on a per-call basis. Each source is projected
+into a common ``(at, source, kind, body, author, outcome, severity,
+revision_index, annotation_id, drift_kind)`` shape, then a second pass
+attributes outcomes: a drift event immediately followed by a plan
+revision becomes ``plan_revised:rN``; a drift event immediately followed
+by cancelled tasks becomes ``cascade_cancel:N_tasks``. The attribution
+window is deliberately small (configurable; default 5s) so unrelated
+late events do not accidentally claim an outcome.
+
+This module is deliberately tree-agnostic — it never inspects the plan's
+task graph beyond counting cancelled tasks for cascade attribution, so
+bespoke planner vocabularies (presentation agents, research flows, …)
+render the same way without taxonomy hooks.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import Any, Iterable, Optional
+
+from harmonograf_server.storage import (
+    Annotation,
+    AnnotationKind,
+    Store,
+    Task,
+    TaskPlan,
+    TaskStatus,
+)
+
+
+logger = logging.getLogger(__name__)
+
+
+# Drift kinds that indicate the human operator initiated the change.
+# Goldfive emits these when a user STEER / user CANCEL caused a plan
+# revision — in that case the synthesized ``Intervention`` is tagged
+# ``source="user"`` even though the immediate wire event is a drift.
+_USER_DRIFT_KINDS: frozenset[str] = frozenset({"user_steer", "user_cancel"})
+
+# Revision kinds that have no matching drift kind — goldfive minted the
+# revision from its own escalation ladder. Treated as ``source="goldfive"``
+# autonomous actions on the unified timeline.
+_GOLDFIVE_REVISION_KINDS: frozenset[str] = frozenset(
+    {"cascade_cancel", "refine_retry", "human_intervention_required"}
+)
+
+# How far forward we look to attribute an outcome to a drift. Five
+# seconds is wide enough to cover realistic end-to-end latencies (drift
+# detected → planner called → plan_revised emitted) but tight enough
+# that a drift and a much later unrelated revision are not conflated.
+_OUTCOME_WINDOW_S: float = 5.0
+
+
+# ---------------------------------------------------------------------------
+# Intermediate record — the merge shape before outcome attribution.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class InterventionRecord:
+    """In-memory projection used during aggregation.
+
+    One per source row. Converted to ``types_pb2.Intervention`` at the
+    RPC boundary.
+    """
+
+    at: float
+    source: str
+    kind: str
+    body_or_reason: str = ""
+    author: str = ""
+    outcome: str = ""
+    plan_revision_index: int = 0
+    severity: str = ""
+    annotation_id: str = ""
+    drift_kind: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+
+async def list_interventions(
+    session_id: str,
+    *,
+    store: Store,
+    drifts_provider: Any,
+) -> list[InterventionRecord]:
+    """Return chronologically ordered interventions for ``session_id``.
+
+    ``drifts_provider`` is any object with a ``drifts_for_session`` method
+    (the IngestPipeline in prod; a stub in tests). Kept as a duck-type
+    boundary so tests can drive the aggregator without spinning a full
+    ingest stack.
+    """
+
+    annotations = await store.list_annotations(session_id=session_id)
+    try:
+        plans = await store.list_task_plans_for_session(session_id)
+    except Exception as exc:  # noqa: BLE001 — degrade gracefully
+        logger.debug("list_task_plans_for_session failed: %s", exc)
+        plans = []
+    drifts = []
+    try:
+        drifts = drifts_provider.drifts_for_session(session_id) or []
+    except Exception as exc:  # noqa: BLE001 — degrade gracefully
+        logger.debug("drifts_for_session failed: %s", exc)
+        drifts = []
+
+    records: list[InterventionRecord] = []
+    records.extend(_project_annotations(annotations))
+    records.extend(_project_drifts(drifts))
+    records.extend(_project_plans(plans, drifts))
+
+    records.sort(key=lambda r: r.at)
+    _attribute_outcomes(records, plans)
+    return records
+
+
+# ---------------------------------------------------------------------------
+# Per-source projection
+# ---------------------------------------------------------------------------
+
+
+def _project_annotations(annotations: Iterable[Annotation]) -> list[InterventionRecord]:
+    """Map ``AnnotationKind`` rows to user-sourced intervention records.
+
+    Only STEERING and HUMAN_RESPONSE are surfaced. COMMENT annotations are
+    observational ("an operator read this and left a note") and not a
+    plan-direction change, so the unified view omits them.
+    """
+
+    out: list[InterventionRecord] = []
+    for ann in annotations:
+        if ann.kind == AnnotationKind.STEERING:
+            kind = "STEER"
+        elif ann.kind == AnnotationKind.HUMAN_RESPONSE:
+            kind = "HUMAN_RESPONSE"
+        else:
+            continue
+        out.append(
+            InterventionRecord(
+                at=float(ann.created_at),
+                source="user",
+                kind=kind,
+                body_or_reason=ann.body or "",
+                author=ann.author or "user",
+                annotation_id=ann.id,
+            )
+        )
+    return out
+
+
+def _project_drifts(drifts: Iterable[dict[str, Any]]) -> list[InterventionRecord]:
+    """Map drift ring records to intervention records.
+
+    Drift kinds that start with ``user_`` flag the row as ``source="user"``
+    because goldfive emits those kinds when an operator intervention caused
+    the plan revision; every other drift is ``source="drift"`` (model- or
+    runtime-initiated).
+    """
+
+    out: list[InterventionRecord] = []
+    for dr in drifts:
+        drift_kind = (dr.get("kind") or "").lower()
+        if not drift_kind:
+            # DRIFT_KIND_UNSPECIFIED — ignore.
+            continue
+        is_user = drift_kind in _USER_DRIFT_KINDS
+        source = "user" if is_user else "drift"
+        # Normalize the kind label. User drifts get a compact English
+        # label ("STEER" / "CANCEL") so trees render a uniform vocabulary
+        # regardless of which upstream surface emitted the event.
+        if drift_kind == "user_steer":
+            kind_label = "STEER"
+        elif drift_kind == "user_cancel":
+            kind_label = "CANCEL"
+        else:
+            kind_label = drift_kind.upper()
+        at = dr.get("recorded_at")
+        if not isinstance(at, (int, float)):
+            continue
+        out.append(
+            InterventionRecord(
+                at=float(at),
+                source=source,
+                kind=kind_label,
+                body_or_reason=dr.get("detail") or "",
+                severity=dr.get("severity") or "",
+                drift_kind=drift_kind,
+            )
+        )
+    return out
+
+
+def _project_plans(
+    plans: Iterable[TaskPlan], drifts: Iterable[dict[str, Any]]
+) -> list[InterventionRecord]:
+    """Map plan revisions that have no matching drift to intervention rows.
+
+    Autonomous goldfive revisions (cascade_cancel, refine_retry, …) land
+    here. Revisions whose ``revision_kind`` matches a drift that fired
+    within the attribution window are skipped — the drift itself already
+    represents the intervention and will own the ``plan_revised:rN``
+    outcome attribution in the next pass.
+    """
+
+    out: list[InterventionRecord] = []
+    drift_list = list(drifts)
+    for plan in plans:
+        rev_kind = (plan.revision_kind or "").lower()
+        rev_index = int(plan.revision_index or 0)
+        if not rev_kind or rev_index <= 0:
+            # Initial plan submission — not an intervention.
+            continue
+        # If a drift with the same kind fired just before this plan
+        # revision, let the drift row own the intervention and skip the
+        # plan here. Otherwise this is an autonomous goldfive revision
+        # (cascade_cancel, refine_retry) or a drift we never ingested,
+        # and we record it directly.
+        has_preceding_drift = any(
+            (dr.get("kind") or "").lower() == rev_kind
+            and isinstance(dr.get("recorded_at"), (int, float))
+            and 0.0
+            <= float(plan.created_at) - float(dr["recorded_at"])
+            <= _OUTCOME_WINDOW_S
+            for dr in drift_list
+        )
+        if has_preceding_drift:
+            continue
+        if rev_kind in _GOLDFIVE_REVISION_KINDS:
+            source = "goldfive"
+        elif rev_kind in _USER_DRIFT_KINDS:
+            source = "user"
+        else:
+            # A drift kind that never made it through the ingest ring —
+            # record it as drift-sourced so the timeline still shows it.
+            source = "drift"
+        kind_label = rev_kind.upper() if source != "user" else (
+            "STEER" if rev_kind == "user_steer" else "CANCEL"
+        )
+        out.append(
+            InterventionRecord(
+                at=float(plan.created_at),
+                source=source,
+                kind=kind_label,
+                body_or_reason=plan.revision_reason or "",
+                severity=plan.revision_severity or "",
+                plan_revision_index=rev_index,
+                drift_kind=rev_kind if source != "goldfive" else "",
+                outcome=f"plan_revised:r{rev_index}",
+            )
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Outcome attribution
+# ---------------------------------------------------------------------------
+
+
+def _attribute_outcomes(
+    records: list[InterventionRecord], plans: Iterable[TaskPlan]
+) -> None:
+    """Fill in ``outcome`` / ``plan_revision_index`` for drift + user rows.
+
+    Mutates ``records`` in place. Runs after the sort so forward-looking
+    attribution is O(n log n) — one binary-search sweep over ``records``
+    plus an O(plans) scan per drift.
+
+    Rules:
+      • Drift/user row followed by a plan revision whose created_at is
+        within ``_OUTCOME_WINDOW_S`` → ``plan_revised:rN``. The revision
+        must share the row's drift_kind when available, otherwise the
+        nearest revision wins.
+      • Drift row with no matching revision but ≥1 CANCELLED task that
+        transitioned to CANCELLED after the drift → ``cascade_cancel:N``.
+      • Everything else → left as "recorded" (for drift/user) or the
+        value the plan projector already set.
+    """
+
+    plan_list = sorted(plans, key=lambda p: p.created_at)
+
+    for rec in records:
+        if rec.source not in ("drift", "user"):
+            # goldfive rows already carry their outcome.
+            continue
+        if rec.outcome:
+            # Already attributed (e.g. from the plan projector path).
+            continue
+
+        revised = _find_matching_revision(rec, plan_list)
+        if revised is not None:
+            rec.outcome = f"plan_revised:r{revised.revision_index}"
+            rec.plan_revision_index = int(revised.revision_index or 0)
+            continue
+
+        cascade = _count_cascade_cancels(rec, plan_list)
+        if cascade > 0:
+            rec.outcome = f"cascade_cancel:{cascade}_tasks"
+            continue
+
+        # No forward correlation — record the drift/user row as observed.
+        rec.outcome = "recorded"
+
+
+def _find_matching_revision(
+    rec: InterventionRecord, plans: list[TaskPlan]
+) -> Optional[TaskPlan]:
+    best: Optional[TaskPlan] = None
+    best_delta: float = _OUTCOME_WINDOW_S + 1.0
+    for plan in plans:
+        delta = float(plan.created_at) - rec.at
+        if delta < 0 or delta > _OUTCOME_WINDOW_S:
+            continue
+        rev_kind = (plan.revision_kind or "").lower()
+        # Require the revision to carry a revision_kind (i.e. it is
+        # indeed a refine, not the initial plan submission).
+        if not rev_kind or (plan.revision_index or 0) <= 0:
+            continue
+        # Prefer an exact kind match; otherwise fall back to the nearest
+        # revision in the window.
+        if rec.drift_kind and rev_kind == rec.drift_kind:
+            if delta < best_delta:
+                best_delta = delta
+                best = plan
+        elif best is None and not rec.drift_kind:
+            best_delta = delta
+            best = plan
+    return best
+
+
+def _count_cascade_cancels(
+    rec: InterventionRecord, plans: list[TaskPlan]
+) -> int:
+    """Count tasks that transitioned to CANCELLED in the drift's wake.
+
+    We do not have per-task transition timestamps in the store — the
+    closest proxy is the newest plan revision that landed after the drift
+    and contains CANCELLED tasks not present as CANCELLED in the
+    previous revision. Rather than reconstructing that diff, we fall back
+    to a conservative heuristic: count CANCELLED tasks in the latest
+    plan revision whose created_at sits after the drift. The frontend
+    renders this as a rough indicator only ("cascade_cancel:N_tasks").
+    """
+
+    count = 0
+    latest_after: Optional[TaskPlan] = None
+    for plan in plans:
+        if float(plan.created_at) <= rec.at:
+            continue
+        if latest_after is None or plan.created_at > latest_after.created_at:
+            latest_after = plan
+    if latest_after is None:
+        return 0
+    for task in latest_after.tasks:
+        if task.status == TaskStatus.CANCELLED:
+            count += 1
+    return count
+
+
+# ---------------------------------------------------------------------------
+# Proto conversion
+# ---------------------------------------------------------------------------
+
+
+def record_to_pb(rec: InterventionRecord, types_pb2_mod: Any) -> Any:
+    """Translate an ``InterventionRecord`` to the generated proto message.
+
+    ``types_pb2_mod`` is passed in rather than imported at module scope
+    so the aggregator stays importable in contexts where the generated
+    stubs are not on ``sys.path`` (e.g. unit tests that only exercise
+    the pure aggregation logic).
+    """
+
+    pb = types_pb2_mod.Intervention(
+        source=rec.source,
+        kind=rec.kind,
+        body_or_reason=rec.body_or_reason,
+        author=rec.author,
+        outcome=rec.outcome,
+        plan_revision_index=int(rec.plan_revision_index),
+        severity=rec.severity,
+        annotation_id=rec.annotation_id,
+        drift_kind=rec.drift_kind,
+    )
+    if rec.at:
+        pb.at.seconds = int(rec.at)
+        pb.at.nanos = int((rec.at - int(rec.at)) * 1e9)
+    return pb

@@ -88,6 +88,11 @@ class HarmonografStub(object):
                 request_serializer=harmonograf_dot_v1_dot_frontend__pb2.GetStatsRequest.SerializeToString,
                 response_deserializer=harmonograf_dot_v1_dot_frontend__pb2.GetStatsResponse.FromString,
                 _registered_method=True)
+        self.ListInterventions = channel.unary_unary(
+                '/harmonograf.v1.Harmonograf/ListInterventions',
+                request_serializer=harmonograf_dot_v1_dot_frontend__pb2.ListInterventionsRequest.SerializeToString,
+                response_deserializer=harmonograf_dot_v1_dot_frontend__pb2.ListInterventionsResponse.FromString,
+                _registered_method=True)
 
 
 class HarmonografServicer(object):
@@ -179,6 +184,14 @@ class HarmonografServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListInterventions(self, request, context):
+        """Merged chronological intervention history for one session. Unary —
+        the frontend recomputes live updates from WatchSession deltas.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_HarmonografServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -231,6 +244,11 @@ def add_HarmonografServicer_to_server(servicer, server):
                     servicer.GetStats,
                     request_deserializer=harmonograf_dot_v1_dot_frontend__pb2.GetStatsRequest.FromString,
                     response_serializer=harmonograf_dot_v1_dot_frontend__pb2.GetStatsResponse.SerializeToString,
+            ),
+            'ListInterventions': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListInterventions,
+                    request_deserializer=harmonograf_dot_v1_dot_frontend__pb2.ListInterventionsRequest.FromString,
+                    response_serializer=harmonograf_dot_v1_dot_frontend__pb2.ListInterventionsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -504,6 +522,33 @@ class Harmonograf(object):
             '/harmonograf.v1.Harmonograf/GetStats',
             harmonograf_dot_v1_dot_frontend__pb2.GetStatsRequest.SerializeToString,
             harmonograf_dot_v1_dot_frontend__pb2.GetStatsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListInterventions(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/harmonograf.v1.Harmonograf/ListInterventions',
+            harmonograf_dot_v1_dot_frontend__pb2.ListInterventionsRequest.SerializeToString,
+            harmonograf_dot_v1_dot_frontend__pb2.ListInterventionsResponse.FromString,
             options,
             channel_credentials,
             insecure,
