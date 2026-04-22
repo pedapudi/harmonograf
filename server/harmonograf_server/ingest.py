@@ -786,9 +786,9 @@ class IngestPipeline:
         elif kind == "drift_detected":
             self._on_drift_detected(target_ctx, event.drift_detected, run_id)
         elif kind == "run_completed":
-            self._on_run_completed(target_ctx, event.run_completed, run_id)
+            await self._on_run_completed(target_ctx, event.run_completed, run_id)
         elif kind == "run_aborted":
-            self._on_run_aborted(target_ctx, event.run_aborted, run_id)
+            await self._on_run_aborted(target_ctx, event.run_aborted, run_id)
         elif kind == "agent_invocation_started":
             self._on_agent_invocation_started(
                 target_ctx, event.agent_invocation_started, run_id
@@ -1042,18 +1042,128 @@ class IngestPipeline:
         """
         return list(self._drifts_by_session.get(session_id, []))
 
-    def _on_run_completed(
+    async def _on_run_completed(
         self, ctx: StreamContext, payload: Any, run_id: str
     ) -> None:
         self._bus.publish_run_completed(
             ctx.session_id, run_id, outcome_summary=payload.outcome_summary
         )
+        await self._finalize_session(
+            ctx.session_id, final_status=SessionStatus.COMPLETED
+        )
 
-    def _on_run_aborted(
+    async def _on_run_aborted(
         self, ctx: StreamContext, payload: Any, run_id: str
     ) -> None:
         self._bus.publish_run_aborted(
             ctx.session_id, run_id, reason=payload.reason
+        )
+        await self._finalize_session(
+            ctx.session_id, final_status=SessionStatus.ABORTED
+        )
+
+    async def _finalize_session(
+        self, session_id: str, *, final_status: SessionStatus
+    ) -> None:
+        """Flip ``session_id`` terminal and close any orphan INVOCATION spans.
+
+        Previously the ingest pipeline published ``run_completed`` /
+        ``run_aborted`` onto the bus for trajectory fan-out but never
+        mutated the session row itself — ``sessions.status`` stayed LIVE
+        and ``ended_at`` stayed NULL forever. The frontend's
+        ``sessionIsInactive`` check reads ``sessionStatus`` so the LIVE
+        ACTIVITY panel's "N RUNNING" header never cleared after a run
+        completed. See harmonograf#96.
+
+        Belt-and-suspenders: the harmonograf telemetry plugin sometimes
+        leaks INVOCATION spans keyed by sub-Runner invocation_ids (the
+        ADK ``after_run_callback`` is not in a ``finally`` block so a
+        cancelled sub-Runner leaves its span open, and goldfive's
+        ``on_cancellation`` hook is scoped to the outer invocation_id
+        only — see goldfive#196). Close any still-open INVOCATION spans
+        on the finalizing session so the Gantt reflects truth.
+
+        Idempotent: a duplicate ``run_completed`` (out-of-order replay,
+        reconnect) is a no-op because the store's ``update_session``
+        only shifts ``status`` / ``ended_at`` when they change.
+        """
+        now = time.time()
+        try:
+            sess = await self._store.update_session(
+                session_id,
+                status=final_status,
+                ended_at=now,
+            )
+        except Exception as exc:  # noqa: BLE001 — defensive: ingest must not raise
+            logger.debug(
+                "_finalize_session: update_session raised for %s: %s",
+                session_id,
+                exc,
+            )
+            sess = None
+        if sess is None:
+            # Session unknown (e.g. goldfive event arrived before the
+            # Hello established the row). The broadcast below is still
+            # useful: subscribers that later join will see the terminal
+            # transition via the replayed SessionEnded variant on their
+            # initial burst.
+            pass
+        # Close orphan INVOCATION spans. Filters to ``end_time IS NULL``
+        # via storage's span list (we re-check kind and end_time here
+        # because list_spans may not expose a direct "open INVOCATION"
+        # filter across backends).
+        try:
+            open_spans = await self._store.get_spans(
+                session_id, time_start=None, time_end=None, limit=None
+            )
+        except Exception as exc:  # noqa: BLE001 — defensive
+            logger.debug(
+                "_finalize_session: get_spans raised for %s: %s",
+                session_id,
+                exc,
+            )
+            open_spans = []
+        for span in open_spans:
+            if span.end_time is not None:
+                continue
+            if span.kind is not SpanKind.INVOCATION:
+                # Only INVOCATION spans are swept — wrapper spans from
+                # an interrupted run. LLM_CALL / TOOL_CALL leaks have
+                # their own cleanup paths (after_model_callback,
+                # after_tool_callback, on_cancellation) and usually
+                # close correctly. Leaving them to those paths keeps
+                # this sweeper scope-bounded and lowers the risk of
+                # racing with a late-arriving legitimate end_span.
+                continue
+            try:
+                await self._store.end_span(
+                    span.id,
+                    end_time=now,
+                    status=(
+                        SpanStatus.COMPLETED
+                        if final_status is SessionStatus.COMPLETED
+                        else SpanStatus.CANCELLED
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001 — defensive
+                logger.debug(
+                    "_finalize_session: end_span raised for %s: %s",
+                    span.id,
+                    exc,
+                )
+                continue
+            # Publish span-end so the frontend store updates in place
+            # (without this the UI still shows "RUNNING" until refresh).
+            refreshed = await self._store.get_span(span.id)
+            if refreshed is not None:
+                self._bus.publish_span_end(refreshed)
+        # Fan out the session-level terminal signal last so subscribers
+        # that listen for session lifecycle (``sessionIsInactive``, UI
+        # banners) see it only after spans are finalized.
+        self._bus.publish_session_ended(
+            session_id,
+            ended_at=now,
+            final_status=final_status,
         )
 
     # Registry-dispatch observability events (goldfive 2986775+). These are
