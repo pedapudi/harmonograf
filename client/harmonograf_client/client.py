@@ -311,6 +311,52 @@ class Client:
     def on_control(self, kind: str, callback: ControlCallback) -> None:
         self._transport.register_control_handler(kind.upper(), callback)
 
+    def open_additional_control_subscription(self, session_id: str) -> None:
+        """Open an additional ``SubscribeControl`` stream keyed on ``session_id``.
+
+        The Client's home control subscription is opened once at start
+        time against the transport-assigned session id. For adk-web
+        runs that pin goldfive/ADK to the outer ``ctx.session.id``
+        (goldfive#161), STEER annotations arrive with
+        ``session_id=<outer adk-web session>`` — a different id from
+        the home sub. Without a matching sub the server router falls
+        back to every live sub on the agent (home + any others), but
+        under some topologies that path is flaky and the steer
+        ack-times-out (goldfive#162). Opening an additional sub whose
+        ``session_id`` matches the outer session id makes the router
+        prefer this sub exclusively, so the steer lands exactly once
+        and is ack'd promptly.
+
+        Thread-safe and idempotent: calling twice for the same
+        ``session_id`` is a no-op. Safe to call before the transport
+        connects — the sub is recorded and opened on the next
+        successful connect. Empty ``session_id`` is a no-op.
+
+        Primarily invoked by :class:`HarmonografTelemetryPlugin` on
+        the root ``before_run_callback`` so direct callers rarely need
+        this surface. Exposed publicly for tests and for embedders who
+        drive the plugin lifecycle manually.
+        """
+        if not session_id:
+            return
+        open_sub = getattr(self._transport, "open_session_subscription", None)
+        if callable(open_sub):
+            open_sub(session_id)
+
+    def close_additional_control_subscription(self, session_id: str) -> None:
+        """Tear down a subscription previously opened via
+        :meth:`open_additional_control_subscription`.
+
+        No-op when ``session_id`` is empty or the transport lacks the
+        helper. Matches the paired lifecycle the plugin drives on the
+        root ``after_run_callback``.
+        """
+        if not session_id:
+            return
+        close_sub = getattr(self._transport, "close_session_subscription", None)
+        if callable(close_sub):
+            close_sub(session_id)
+
     def set_control_forward(self, fn: Optional[Callable[[Any], None]]) -> None:
         """Install a raw ``ControlEvent`` forwarder. ``None`` uninstalls.
 
