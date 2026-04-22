@@ -314,6 +314,91 @@ describe('deriveInterventions', () => {
     });
     expect(rows).toHaveLength(2);
   });
+
+  // harmonograf#86 — user STEERs involve a planner LLM round-trip that
+  // can take 30-90s on large local models. The pre-#86 deriver used a
+  // flat 5s attribution window and stranded the drift row + emitted a
+  // separate plan-sourced card whose atMs was the plan's createdAtMs
+  // (rendered as 6:33), alongside the annotation row rendered with an
+  // absolute-ms timestamp bug (29613779:31). Both symptoms go away when
+  // the user-control kinds use the extended window AND the annotation's
+  // createdAtMs is session-relative (fixed in convertAnnotation).
+  it('collapses STEER + drift + slow plan revision (70s gap) into one card', () => {
+    const rows = deriveInterventions({
+      annotations: [
+        mkAnnotation({
+          id: 'ann_slow',
+          createdAtMs: 100_200, // session-relative — the #86 convert.ts fix
+          author: 'alice',
+          body: 'pivot to solar flares',
+        }),
+      ],
+      drifts: [
+        mkDrift({
+          seq: 0,
+          kind: 'user_steer',
+          severity: 'warning',
+          detail: 'by alice: pivot to solar flares',
+          recordedAtMs: 100_300,
+          annotationId: 'ann_slow',
+        }),
+      ],
+      plans: [
+        mkPlan({
+          id: 'p_slow',
+          // 70s after the drift — way outside the 5s default window, but
+          // inside the user-control 5-minute extended window.
+          createdAtMs: 170_300,
+          revisionKind: 'user_steer',
+          revisionSeverity: 'warning',
+          revisionIndex: 1,
+        }),
+      ],
+    });
+
+    expect(rows).toHaveLength(1);
+    const card = rows[0];
+    expect(card.source).toBe('user');
+    expect(card.kind).toBe('STEER');
+    expect(card.annotationId).toBe('ann_slow');
+    expect(card.author).toBe('alice');
+    expect(card.bodyOrReason).toBe('pivot to solar flares');
+    expect(card.severity).toBe('warning');
+    expect(card.outcome).toBe('plan_revised:r1');
+    expect(card.planRevisionIndex).toBe(1);
+  });
+
+  it('autonomous slow drift still fires two cards (tight 5s window unchanged)', () => {
+    // Autonomous kinds keep the default 5s window so a slow refine here
+    // doesn't claim-steal an unrelated later revision. Ensures the
+    // widened user-control window does NOT bleed across kinds.
+    const rows = deriveInterventions({
+      annotations: [],
+      drifts: [
+        mkDrift({
+          seq: 0,
+          kind: 'looping_reasoning',
+          severity: 'warning',
+          recordedAtMs: 100_000,
+        }),
+      ],
+      plans: [
+        mkPlan({
+          id: 'p_autonomous',
+          createdAtMs: 160_000, // 60s gap — autonomous window is 5s
+          revisionKind: 'looping_reasoning',
+          revisionIndex: 2,
+        }),
+      ],
+    });
+    expect(rows).toHaveLength(2);
+    const drift = rows.find(
+      (r) => r.source === 'drift' && !r.outcome.startsWith('plan_revised:'),
+    );
+    const plan = rows.find((r) => r.outcome.startsWith('plan_revised:'));
+    expect(drift?.outcome).toBe('recorded');
+    expect(plan?.planRevisionIndex).toBe(2);
+  });
 });
 
 describe('marker sizing / palette', () => {

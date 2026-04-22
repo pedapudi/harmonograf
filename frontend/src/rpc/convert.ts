@@ -185,8 +185,19 @@ export function convertAnnotation(
       atMs = tsToMs(target.value.at) - origin.startMs;
     }
   }
+  // Normalise to session-relative ms, matching ``convertSpan``. The
+  // intervention deriver (lib/interventions.ts) treats annotation rows'
+  // ``createdAtMs`` as session-relative when plotting on the Trajectory
+  // view's interventions list; leaving absolute wall-clock ms here caused
+  // the row to render with a malformed ``29613779:31`` timestamp after
+  // harmonograf#81 (issue #86). ``deliveredAtMs`` gets the same treatment
+  // for consistency — only PinStrip's null-check consumes it today, but
+  // future callers that format the value won't have to special-case this
+  // one field.
   const createdAbs = a.createdAt ? tsToMs(a.createdAt) : 0;
   const deliveredAbs = a.deliveredAt ? tsToMs(a.deliveredAt) : null;
+  const createdAtMs = createdAbs ? createdAbs - origin.startMs : 0;
+  const deliveredAtMs = deliveredAbs !== null ? deliveredAbs - origin.startMs : null;
   return {
     id: a.id,
     sessionId: a.sessionId,
@@ -196,8 +207,8 @@ export function convertAnnotation(
     author: a.author,
     kind,
     body: a.body,
-    createdAtMs: createdAbs,
-    deliveredAtMs: deliveredAbs,
+    createdAtMs,
+    deliveredAtMs,
     pending: false,
     error: null,
   };

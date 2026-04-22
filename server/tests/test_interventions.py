@@ -537,6 +537,135 @@ async def test_user_steer_drift_without_annotation_id_keeps_separate_card(store)
     assert all(r.source == "user" for r in records)
 
 
+async def test_slow_user_steer_refine_still_dedups_to_one_card(store):
+    """harmonograf#86: drift→plan gap > 5s must still collapse for user STEERs.
+
+    The user's STEER routes through the planner's LLM, which on large
+    local models (e.g. Qwen3.5-35B) can take tens of seconds to return
+    a refined plan. The narrow 5s attribution window used for
+    autonomous drifts strand-suppresses the drift row in that case —
+    leaving the annotation merged with the drift AND a separate
+    plan-sourced STEER card. After #86 the user-control kinds use an
+    extended window so both paths still collapse onto the same card.
+    """
+
+    sid = "sess_slow_refine"
+    await _seed_session(store, sid)
+
+    # 1. User STEER annotation at t=100.
+    await store.put_annotation(
+        Annotation(
+            id="ann_steer_slow",
+            session_id=sid,
+            target=AnnotationTarget(agent_id="a", time_start=100.0),
+            author="alice",
+            created_at=100.0,
+            kind=AnnotationKind.STEERING,
+            body="pivot to solar flares",
+        )
+    )
+
+    # 2. USER_STEER drift with annotation_id at t=100.2 (near-immediate
+    #    relay from the bridge).
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "run_id": "r1",
+                    "kind": "user_steer",
+                    "severity": "warning",
+                    "detail": "by alice: pivot to solar flares",
+                    "annotation_id": "ann_steer_slow",
+                    "recorded_at": 100.2,
+                }
+            ]
+        }
+    )
+
+    # 3. Plan revision lands 70s later — the refine LLM took a while.
+    #    Inside _USER_OUTCOME_WINDOW_S but well outside the default 5s.
+    await store.put_task_plan(
+        TaskPlan(
+            id="p_slow",
+            session_id=sid,
+            created_at=170.5,
+            summary="pivoted plan",
+            tasks=[],
+            edges=[],
+            revision_reason="by alice: pivot to solar flares",
+            revision_kind="user_steer",
+            revision_severity="warning",
+            revision_index=1,
+        )
+    )
+
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+
+    # Exactly one card — the slow refine must not leak a second STEER row.
+    assert len(records) == 1, f"expected 1 card, got {len(records)}: {records}"
+    card = records[0]
+    assert card.source == "user"
+    assert card.kind == "STEER"
+    assert card.annotation_id == "ann_steer_slow"
+    assert card.author == "alice"
+    assert card.body_or_reason == "pivot to solar flares"
+    # The plan_revised outcome is attributed even across the wider gap.
+    assert card.outcome == "plan_revised:r1"
+    assert card.plan_revision_index == 1
+    assert card.severity == "warning"
+
+
+async def test_slow_autonomous_refine_is_still_bounded_by_5s(store):
+    """Autonomous (non-user) drifts keep the tight 5s window.
+
+    Widening only the user-control kinds means a slow goldfive refine
+    (which doesn't happen in practice — autonomous plan revisions fire
+    fast) followed by a model-kind drift doesn't claim-steal an
+    unrelated later revision. Covered here so a future relaxation
+    doesn't accidentally apply across the board.
+    """
+
+    sid = "sess_slow_autonomous"
+    await _seed_session(store, sid)
+
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "kind": "looping_reasoning",
+                    "severity": "warning",
+                    "detail": "loop",
+                    "recorded_at": 100.0,
+                }
+            ]
+        }
+    )
+    # Plan revision 60s later — way outside 5s, inside 300s. Autonomous
+    # kinds must still emit a separate card.
+    await store.put_task_plan(
+        TaskPlan(
+            id="p_later",
+            session_id=sid,
+            created_at=160.0,
+            summary="",
+            tasks=[],
+            edges=[],
+            revision_reason="",
+            revision_kind="looping_reasoning",
+            revision_index=2,
+        )
+    )
+
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    # Two cards: the drift (outcome=recorded, since too far to attribute)
+    # and the plan revision as its own entry.
+    assert len(records) == 2
+    drift_row = next(r for r in records if r.source == "drift" and not r.outcome.startswith("plan_revised:"))
+    plan_row = next(r for r in records if r.outcome.startswith("plan_revised:"))
+    assert drift_row.outcome == "recorded"
+    assert plan_row.plan_revision_index == 2
+
+
 async def test_empty_session_returns_empty_list(store):
     sid = "sess_empty"
     await _seed_session(store, sid)

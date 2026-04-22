@@ -627,8 +627,17 @@ export function usePostAnnotation(): (args: PostAnnotationArgs) => Promise<void>
       // caller can retry or the pin can render in a failure state.
       const store = useAnnotationStore.getState();
       const tempId = `pending-${crypto.randomUUID?.() ?? Date.now().toString(36)}`;
-      const span = getSessionStore(sessionId)?.spans.get(spanId);
+      const sessionStore = getSessionStore(sessionId);
+      const span = sessionStore?.spans.get(spanId);
       const atMs = span?.startMs ?? 0;
+      // ``createdAtMs`` is session-relative ms, matching the value the
+      // server ack path produces via ``convertAnnotation`` (issue #86).
+      // Falls back to 0 when the session origin isn't known yet — the
+      // pending row is replaced with the canonical ack row moments later
+      // so the 0 never lands on the Trajectory view under normal
+      // conditions.
+      const sessionStartMs = sessionStore?.wallClockStartMs ?? 0;
+      const createdAtMs = sessionStartMs > 0 ? Date.now() - sessionStartMs : 0;
       store.upsert({
         id: tempId,
         sessionId,
@@ -638,7 +647,7 @@ export function usePostAnnotation(): (args: PostAnnotationArgs) => Promise<void>
         author,
         kind,
         body,
-        createdAtMs: Date.now(),
+        createdAtMs,
         deliveredAtMs: null,
         pending: true,
         error: null,
