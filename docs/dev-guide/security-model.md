@@ -110,9 +110,9 @@ The only thing the server actively validates beyond syntax:
   transport corruption, not against a malicious client. A client
   that *wanted* to inject bad bytes would just supply the digest of
   the bad bytes.
-- **Payload size ceiling** (`ingest.py:65, 99-102`) —
-  `PAYLOAD_MAX_BYTES = 64 * 1024 * 1024` per digest. This is a DoS
-  bound, not authentication.
+- **Payload size ceiling** — `ServerConfig.payload_max_bytes`
+  (default 64 MiB, tunable via `--payload-max-bytes` since
+  harmonograf#102). This is a DoS bound, not authentication.
 - **STEER body validation** (`client/harmonograf_client/_control_bridge.py`) —
   the client-side bridge between harmonograf control delivery and
   goldfive rejects empty bodies and bodies larger than
@@ -333,12 +333,12 @@ flowchart TD
 - **Tampering with stored data at rest.** Anyone with write access
   to the data directory can rewrite sessions. Mitigation:
   filesystem permissions.
-- **DoS from a misbehaving client.** The payload size ceiling at
-  `ingest.py:65` is a bound, not a defense. A client that opens
-  thousands of sessions or emits at 100× the expected rate can
-  still exhaust the server. `HEARTBEAT_TIMEOUT_S` at `ingest.py:62`
-  reaps dead streams but does nothing about live-and-spamming
-  ones.
+- **DoS from a misbehaving client.** The payload size ceiling
+  (`ServerConfig.payload_max_bytes`) is a bound, not a defense. A
+  client that opens thousands of sessions or emits at 100× the
+  expected rate can still exhaust the server.
+  `ServerConfig.heartbeat_timeout_seconds` reaps dead streams but
+  does nothing about live-and-spamming ones.
 
 ### In scope (the things v0 actually defends against)
 

@@ -94,10 +94,11 @@ Client protocol:
 Chunk sizing:
 
 - **Recommended**: up to 256 KiB per chunk.
-- **Hard ceiling**: `PAYLOAD_MAX_BYTES = 64 MiB` total per digest in
-  `server/harmonograf_server/ingest.py`. Exceeding it aborts the
-  assembler and raises a `ValueError` on the stream. The stream does
-  **not** close — subsequent chunks for other digests still land.
+- **Hard ceiling**: 64 MiB per digest by default, configurable via
+  `ServerConfig.payload_max_bytes` / `--payload-max-bytes`
+  (harmonograf#102). Exceeding it aborts the assembler and raises a
+  `ValueError` on the stream. The stream does **not** close —
+  subsequent chunks for other digests still land.
 - Very small payloads may arrive in a single chunk with `last=true`.
 
 Server-side assembly lives in `_PayloadAssembler` in `ingest.py`:

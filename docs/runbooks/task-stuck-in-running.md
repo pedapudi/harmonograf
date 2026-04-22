@@ -7,8 +7,8 @@ arrive; the Gantt shows an open span that doesn't close.
 ## Symptoms
 
 - **Graph view**: agent header shows `⚠ stuck` (the liveness tracker
-  flagged it after `STUCK_THRESHOLD_BEATS=3` consecutive unchanged
-  heartbeats).
+  flagged it after `ServerConfig.stuck_threshold_beats` (default 3)
+  consecutive unchanged heartbeats).
 - **Gantt**: an open RUNNING span that steadily grows but never ends.
 - **Intervention strip**: `LOOPING_REASONING` drift has NOT (yet)
   fired — the tool-loop detector only trips after several repetitions.

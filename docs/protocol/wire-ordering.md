@@ -246,11 +246,12 @@ way — they're just periodic pings. But the server does use them for:
 - **Stuckness detection** — see
   [`telemetry-stream.md#heartbeat`](telemetry-stream.md#heartbeat).
   `progress_counter` must advance across heartbeats or the agent is
-  declared stuck after `STUCK_THRESHOLD_BEATS = 3` (≈15 s) while an
-  INVOCATION is RUNNING.
+  declared stuck after `stuck_threshold_beats` (default 3, ≈15 s)
+  while an INVOCATION is RUNNING.
 - **Last-seen wall-clock** — the `last_heartbeat` field on `Agent`.
-  If no heartbeat arrives for `HEARTBEAT_TIMEOUT_S = 15 s`, the
-  server flips the agent to `DISCONNECTED` and closes its streams.
+  If no heartbeat arrives for `heartbeat_timeout_seconds` (default
+  15 s, CLI `--heartbeat-timeout-seconds`), the server flips the
+  agent to `DISCONNECTED` and closes its streams.
 
 Clients that fall silent on telemetry but keep a heartbeat thread
 alive are treated as connected; clients that emit spans without

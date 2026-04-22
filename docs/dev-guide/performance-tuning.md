@@ -57,31 +57,30 @@ the callback hot path" and "Frontend frame budget" below for how.
 
 The client ships a `Heartbeat` message every `HEARTBEAT_INTERVAL_S`
 seconds (default `5.0`, `client/harmonograf_client/transport.py:50`).
-The server's stuckness detector compares three consecutive heartbeats
-with the same `progress_counter` and, if they match, flips the agent
-to `stuck` — see `STUCK_THRESHOLD_BEATS = 3` at
-`server/harmonograf_server/ingest.py:64` and the timeout window
-`HEARTBEAT_TIMEOUT_S = 15.0` at `ingest.py:62`.
+The server's stuckness detector compares consecutive heartbeats
+with the same `progress_counter` and, once enough match, flips the
+agent to `stuck`. As of harmonograf#102 these knobs live on
+`ServerConfig` (`server/harmonograf_server/config.py`), not as
+module-level constants:
 
-These knobs are coupled and both live in code, not config, for v0:
-
-| Knob | Default | Effect |
-|---|---|---|
-| `HEARTBEAT_INTERVAL_S` (client) | `5.0` s | How often the send loop builds a `Heartbeat` |
-| `HEARTBEAT_TIMEOUT_S` (server) | `15.0` s | How long before the ingest pipeline declares a stream `DISCONNECTED` |
-| `STUCK_THRESHOLD_BEATS` (server) | `3` | Consecutive unchanged `progress_counter` heartbeats before `is_stuck` flips |
-| `HEARTBEAT_CHECK_INTERVAL_S` (server) | `5.0` s | How often the `heartbeat_sweeper` scans for expired streams (`ingest.py:63`) |
+| Knob | Default | Surface | Effect |
+|---|---|---|---|
+| `HEARTBEAT_INTERVAL_S` (client) | `5.0` s | `client/harmonograf_client/transport.py` | How often the send loop builds a `Heartbeat` |
+| `heartbeat_timeout_seconds` (server) | `15.0` s | `ServerConfig` + `--heartbeat-timeout-seconds` | How long before the ingest pipeline declares a stream `DISCONNECTED` |
+| `stuck_threshold_beats` (server) | `3` | `ServerConfig` (constructor-only) | Consecutive unchanged `progress_counter` heartbeats before `is_stuck` flips |
+| `heartbeat_check_interval_seconds` (server) | `5.0` s | `ServerConfig` (constructor-only) | How often the `heartbeat_sweeper` scans for expired streams |
 
 The invariants are:
 
-- `HEARTBEAT_TIMEOUT_S >= 3 × HEARTBEAT_INTERVAL_S`. A single lost
-  heartbeat due to GC pause or a brief TCP stall must not disconnect
-  the agent. The 3× factor is what lets you lose two consecutive
-  heartbeats and still survive.
-- `STUCK_THRESHOLD_BEATS × HEARTBEAT_INTERVAL_S ≈ HEARTBEAT_TIMEOUT_S`.
-  The stuck-detector watches for three unchanged heartbeats; that is
-  ~15 s at the default cadence. If you halve the cadence, also halve
-  the threshold or the UI will lag the real stuck signal by 30 s.
+- `heartbeat_timeout_seconds >= 3 × HEARTBEAT_INTERVAL_S`. A single
+  lost heartbeat due to GC pause or a brief TCP stall must not
+  disconnect the agent. The 3× factor is what lets you lose two
+  consecutive heartbeats and still survive.
+- `stuck_threshold_beats × HEARTBEAT_INTERVAL_S ≈ heartbeat_timeout_seconds`.
+  The stuck-detector watches for N unchanged heartbeats; that is
+  ~15 s at the default cadence (3 repeats × 5 s). If you halve the
+  cadence, also halve the threshold or the UI will lag the real stuck
+  signal by 30 s.
 
 **When to retune.** Lower the interval (to, say, 2 s) if you are
 debugging liveness bugs and want faster feedback in the UI. Raise it
@@ -148,10 +147,12 @@ per ten spans at 256 KiB means a 2.5 MiB burst of payload bytes per
 300 spans. At 1 MiB, the same ratio would mean a 10 MiB burst — enough
 to stall the gRPC send queue for seconds.
 
-The server enforces a hard ceiling of `PAYLOAD_MAX_BYTES = 64 * 1024 * 1024`
-per digest (`ingest.py:65`). That is the cliff; do not touch it without
-also auditing `_PayloadAssembler.add()` (`ingest.py:99`) for memory
-safety.
+The server enforces a per-digest hard ceiling of 64 MiB by default,
+configurable via `ServerConfig.payload_max_bytes` or
+`--payload-max-bytes` (harmonograf#102). That is the cliff; do not
+raise it without also auditing `_PayloadAssembler.add()` in
+`ingest.py` for memory safety — each active upload holds its
+partial chunks in RAM until the final `last=true` frame arrives.
 
 ### Orchestration performance: tune it in goldfive
 
