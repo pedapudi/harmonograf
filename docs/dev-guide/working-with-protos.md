@@ -22,14 +22,34 @@ proto/harmonograf/v1/
 | File | Top-level messages | When to edit |
 |---|---|---|
 | `service.proto` | `service Harmonograf { … }` (RPC definitions) | You are adding, removing, or renaming an RPC. Rare. |
-| `telemetry.proto` | `Hello`, `Welcome`, `SpanStart`, `SpanUpdate`, `SpanEnd`, `PayloadUpload`, `PayloadRequest`, `Heartbeat`, `Goodbye`, `ServerGoodbye`, `ControlAck`, `TaskPlan`, `UpdatedTaskStatus`, `TelemetryUp`, `TelemetryDown`, `FlowControl` | You are changing the agent wire protocol. Touching this affects every agent process. |
-| `control.proto` | `SubscribeControlRequest` | Rare; control event routing layer. |
-| `types.proto` | `Session`, `Agent`, `Span`, `SpanLink`, `AttributeValue`, `PayloadRef`, `ErrorInfo`, `Task`, `TaskEdge`, `TaskPlan`, `Annotation`, `ControlEvent`, `ControlAck`, plus enums (`SessionStatus`, `AgentStatus`, `Framework`, `Capability`, `SpanKind`, `SpanStatus`, `LinkRelation`, `AnnotationKind`, `TaskStatus`) | You are adding a field to a domain type. Most common place to edit. |
-| `frontend.proto` | `ListSessionsRequest/Response`, `WatchSessionRequest`, `SessionUpdate`, `GetPayloadRequest/Response`, `GetSpanTreeRequest/Response`, `PostAnnotationRequest/Response`, `SendControlRequest/Response`, `DeleteSessionRequest/Response`, `GetStatsRequest/Response` | Frontend needs a new RPC or new payload shape. |
+| `telemetry.proto` | `Hello`, `Welcome`, `SpanStart`, `SpanUpdate`, `SpanEnd`, `PayloadUpload`, `PayloadRequest`, `Heartbeat`, `Goodbye`, `ServerGoodbye`, `TelemetryUp` (carries `goldfive.v1.Event` via `goldfive_event = 11`), `TelemetryDown`, `FlowControl` | You are changing the agent wire protocol. Touching this affects every agent process. |
+| `control.proto` | `SubscribeControlRequest` (ControlEvent/Ack live in `goldfive/v1/control.proto`) | Rare; control event routing layer. |
+| `types.proto` | `Session`, `Agent`, `Span`, `SpanLink`, `AttributeValue`, `PayloadRef`, `ErrorInfo`, `Annotation`, `AnnotationTarget`, `AgentTimePoint`, `Intervention`, plus enums (`SessionStatus`, `AgentStatus`, `Framework`, `Capability`, `SpanKind`, `SpanStatus`, `LinkRelation`, `AnnotationKind`). Task/Plan/Drift/Control moved to goldfive per issue #2 / #37. | You are adding a field to a domain type. Most common place to edit. |
+| `frontend.proto` | `ListSessionsRequest/Response`, `WatchSessionRequest`, `SessionUpdate`, `GetPayloadRequest/Response`, `GetSpanTreeRequest/Response`, `PostAnnotationRequest/Response`, `SendControlRequest/Response`, `DeleteSessionRequest/Response`, `GetStatsRequest/Response`, `ListInterventionsRequest/Response`, `TaskReport`, `ContextWindowSample` | Frontend needs a new RPC or new payload shape. |
 
 The cleanest rule of thumb: if the type is shared between agent→server and
 server→frontend, it belongs in `types.proto`. If it's specific to one side
-of the wire, it belongs in `telemetry.proto` or `frontend.proto`.
+of the wire, it belongs in `telemetry.proto` or `frontend.proto`. Orchestration
+types (plans, tasks, drift kinds, control event payloads) live in goldfive
+and are imported with `import "goldfive/v1/…"` wherever needed.
+
+### Recent proto additions to know about
+
+- `SubscribeControlRequest.session_id = 1` — scoped subscription key so
+  multiple `SubscribeControl` calls under one agent can disambiguate by
+  session. Prefers per-session sub in the router.
+- `SteerPayload.author` / `SteerPayload.annotation_id` (goldfive#171) —
+  `PostAnnotation` stamps these onto the synthesised STEER ControlEvent
+  so goldfive can attribute the drift and dedup retries.
+- `DriftDetected.annotation_id` (goldfive#177) — present on user-control
+  drifts (`user_steer` / `user_cancel`) so the intervention aggregator
+  can fold the drift row onto its source annotation.
+- `Intervention` (types.proto) — unified intervention history row used
+  by `ListInterventions` and emitted by the server's aggregator. Fields:
+  `at`, `source`, `kind`, `body_or_reason`, `author`, `outcome`,
+  `plan_revision_index`, `severity`, `annotation_id`, `drift_kind`.
+- `Heartbeat.context_window_tokens` / `context_window_limit_tokens`
+  (fields 10/11) — carry the most recent LLM context-window sample.
 
 ## Codegen
 

@@ -1,177 +1,139 @@
 # Runbook: High-latency callbacks
 
-> **Post-goldfive note.** The heavy callbacks that used to live in
-> `harmonograf_client.adk._AdkState.*` (planner refine, drift
-> detection, context-window accounting) now run in
-> [goldfive](https://github.com/pedapudi/goldfive). Profile goldfive's
-> `DefaultSteerer` / `LLMPlanner.refine` / drift classifiers when
-> chasing hot-path latency; the harmonograf side is span marshal +
-> ring-buffer push only.
-
 The agent's hot path is slow. Spans take a long time to end, the
-client buffer backs up, the UI feels laggy. Py-spy shows most time
-inside `harmonograf_client.adk` callbacks.
+client buffer backs up, the UI feels laggy, STEER acks take
+seconds.
 
-**Triage decision tree** — py-spy first; the dominant frame names the cause.
-
-```mermaid
-flowchart TD
-    Start([Hot path slow,<br/>buffered_events climbing]):::sym --> Q1{py-spy top: dominant<br/>frame?}
-    Q1 -- "tiktoken / tokenizer / encode" --> F1[Tokenizer-heavy: sample less,<br/>cache stable prefix tokens]:::fix
-    Q1 -- "planner.refine" --> F2[Move refine off event loop<br/>or set refine_on_events=False]:::fix
-    Q1 -- "logging / format" --> F3[LOG_LEVEL=DEBUG in prod;<br/>switch to INFO]:::fix
-    Q1 -- "hashlib / sha256" --> F4[Big payload hashing —<br/>stop capturing full bodies]:::fix
-    Q1 -- "before_tool_callback" --> F5[Sync IO in handler;<br/>make async / queue]:::fix
-    Q1 -- "detect_drift" --> F6[O(events) scan: add cursor<br/>events_since_last_scan]:::fix
-    Q1 -- "check_plan_state /<br/>_check_*" --> F7[Invariant checker hot —<br/>only run in dev/CI]:::fix
-    Q1 -- "looks normal but slow" --> F8[Network slow: see<br/>agent-disconnects-repeatedly]:::fix
-
-    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
-    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
-```
+Post-goldfive-migration this is almost always about the LLM itself,
+not harmonograf's callback machinery. The harmonograf side is span
+marshal + ring-buffer push, which is microseconds per envelope.
 
 ## Symptoms
 
-- **Client heartbeat**: `buffered_events` climbs, `cpu_self_pct` high,
-  `current_activity` stays on one step for long periods.
-- **Client log** (with DEBUG): callback entry / exit times far apart.
-  Possibly `harmonograf_client.adk: planner.refine blocked the event
-  loop for <x>s — consider disabling refine_on_events` (`adk.py:2063`).
-- **UI**: spans appear in chunks instead of smoothly; transport bar
-  shows transient back-pressure.
-- **py-spy** top: time spent in
-  `harmonograf_client.adk._AdkState.*`, `detect_drift`, `record_span`,
-  or the tokenizer used for context-window accounting.
+- **Client heartbeat**: `buffered_events` climbs, `cpu_self_pct`
+  high, `current_activity` stays on one step for long periods.
+- **UI**: spans appear in chunks instead of smoothly; the Gantt
+  shows multi-second gaps between span closes on the live edge.
+- **Intervention strip**: STEER cards stay at `pending` outcome
+  for many seconds.
+- **Goldfive log**: `goldfive.llm.duration_ms` values in the
+  tens of thousands.
 
 ## Immediate checks
 
 ```bash
-# py-spy top the running agent:
+# py-spy the running agent to find the dominant frame
 py-spy top --pid $(pgrep -f my_agent)
 
-# Dump a sample:
-py-spy dump --pid $(pgrep -f my_agent)
+# Recent LLM call durations
+grep -E 'goldfive.llm.duration_ms' /path/to/agent.log | tail -20
 
-# Heartbeat trend — buffered_events over time:
-grep buffered_events /path/to/agent.log | tail -40
+# Per-agent context-window usage
+grep -E 'goldfive.llm.request.chars|context_window_tokens' /path/to/agent.log | tail -20
 
-# Slow refines explicitly logged:
-grep 'planner.refine blocked the event loop' /path/to/agent.log
+# Heartbeat trend
+grep -E 'buffered_events|progress_counter' /path/to/agent.log | tail -30
 ```
 
-## Root cause candidates (ranked)
+## Root-cause candidates (ranked)
 
-1. **Tokenizer-heavy context-window accounting** — counting tokens
-   on every LLM call, especially with a pure-python tokenizer, is
-   expensive. If `context_window_tokens` updates every turn, this
-   adds up.
-2. **Blocking planner refine on the event loop** — `planner.refine`
-   is called synchronously on some drift paths and blocks the
-   asyncio loop until it returns. The adapter emits a warning:
-   `planner.refine blocked the event loop for %.1fs — consider
-   disabling refine_on_events` (`adk.py:2063`).
-3. **Excessive DEBUG logging** — running with `LOG_LEVEL=DEBUG` in
-   production will turn the `harmonograf_client.adk` logger into a
-   bottleneck. Every callback emits multiple lines.
-4. **Big payloads on every span** — attaching prompt + response bytes
-   to every LLM_CALL turns the buffer into a blob store. Hashing the
-   blob also costs CPU.
-5. **Synchronous reporting-tool handlers** — each reporting-tool
-   invocation hops through `before_tool_callback`; if the handler
-   does IO (writes to a file, hits a DB), the whole flow blocks.
-6. **Drift detector scanning full event history on every call** —
-   `detect_drift` in `_AdkState` may be O(events); if the session has
-   thousands of events, every scan gets slower. Rare but worth
+1. **Slow LLM provider** — a local Qwen3.5-35B routinely takes
+   20-60 s per call; a planner refine with a long task list can hit
+   90 s on a laptop. This is 99% of "high latency callback"
+   complaints. The fix is upstream, not in harmonograf.
+2. **Runaway context growth post-STEER** — every STEER adds the
+   drift body + task state into the planner's prompt. Over several
+   STEERs the prompt grows linearly. Check
+   `goldfive.llm.request.chars` on consecutive calls; linear growth
+   is the signature.
+3. **Tool loop not yet detected** — an agent calling the same tool
+   N times in a row. Each call takes its normal duration, but the
+   overall wall-clock balloons. Look for repeating TOOL_CALL names
+   in the Gantt; goldfive#181/#186's `ToolLoopTracker` will
+   eventually fire `LOOPING_REASONING` but may take several
+   repetitions.
+4. **Large payload hashing** — spans with multi-MB tool outputs /
+   LLM responses. Harmonograf hashes and chunks them; >50 MB
+   outputs are slow. Check `has_payload` on hot spans.
+5. **Logging pressure** — `LOG_LEVEL=DEBUG` in production with a
+   chatty logger format doing field-formatting on every span.
+6. **Duplicate plugin** (#68) — two `HarmonografTelemetryPlugin`
+   instances on the same PluginManager. One stays silent, but the
+   active one does the work twice on some paths if the user also
+   calls it directly. Not a common cause of latency but worth
    checking.
-7. **Invariant checker in the hot path** — running `check_plan_state`
-   after every transition in a large plan is O(plan size).
 
 ## Diagnostic steps
 
-### 1. Tokenizer
-
-py-spy top → frames containing `tiktoken`, `transformers`,
-`tokenizer`, or `encode`. If they dominate, the tokenizer is the
-cost.
-
-### 2. Blocking refine
+### 1. Confirm it's the LLM
 
 ```bash
-grep 'planner.refine blocked the event loop' /path/to/agent.log
+grep -E 'goldfive.llm.duration_ms' /path/to/agent.log | awk '{print $NF}' | sort -n | tail -20
 ```
 
-If present, the count and the duration tell you how often and how
-bad. The advice in the log line — disable `refine_on_events` — is
-the fix.
+If the tail is dominated by multi-thousand-ms values, the LLM is
+the bottleneck. If values are all < 500, look elsewhere.
 
-### 3. Debug logging
-
-Check `LOG_LEVEL` in the agent env:
+### 2. Check context growth
 
 ```bash
-env | grep -i log
+grep -E 'goldfive.llm.request.chars' /path/to/agent.log | tail -40
 ```
 
-If it's `DEBUG`, switch to `INFO` for production.
+If the numbers climb strictly monotonically across STEERs, you've
+got context accumulation. Possible remedies:
 
-### 4. Big payloads
+- Truncate the STEER body before forwarding.
+- Have goldfive prune completed tasks from the planner prompt
+  (off by default; an opt-in).
+- Move to a larger-context model and accept the growth.
+
+### 3. Loop detection
 
 ```bash
 sqlite3 data/harmonograf.db \
-  "SELECT digest, size FROM payloads ORDER BY size DESC LIMIT 20;"
+  "SELECT name, COUNT(*) FROM spans
+   WHERE agent_id='<AID>' AND kind='TOOL_CALL'
+     AND start_time > (strftime('%s','now')-300)
+   GROUP BY name HAVING COUNT(*) > 3 ORDER BY 2 DESC;"
 ```
 
-If the top sizes are > 1MB, you're storing blobs. Cut capture.
+More than 3 identical tool names in 5 minutes = loop candidate.
+Goldfive's tracker covers exact, name-only, and alternating
+patterns; thresholds are configurable.
 
-### 5. Synchronous tool handlers
+### 4. Payload pressure
 
-Search for `time.sleep`, blocking IO, or long CPU work inside
-reporting-tool bodies or `before_tool_callback` hooks.
+```bash
+sqlite3 data/harmonograf.db \
+  "SELECT digest, size, mime FROM payloads ORDER BY size DESC LIMIT 10;"
+```
 
-### 6. detect_drift hot
-
-py-spy top → `detect_drift` frames dominating. Profile the scan.
-
-### 7. Invariant hot
-
-py-spy top → `check_plan_state` / `_check_*` frames dominating.
-The checker is designed for debugging, not hot-path use.
+If the top entries are 50 MB+, the tool or LLM is producing
+unreasonable outputs.
 
 ## Fixes
 
-1. **Tokenizer**: sample less often (only N turns), or switch to a C
-   tokenizer (`tiktoken`), or cache the token count across turns for
-   stable prompt prefixes.
-2. **Blocking refine**: move `refine` to a background task via
-   `asyncio.create_task`, OR set `refine_on_events=False` and rely
-   only on reporting-tool-driven refines. The adapter's warning
-   documents this choice.
-3. **DEBUG logging**: set `LOG_LEVEL=INFO` in production; keep DEBUG
-   for investigation only.
-4. **Payloads**: stop capturing full payloads by default; capture
-   only the ones a user explicitly requests or that the drawer will
-   need.
-5. **Sync handlers**: make them `async` and `await` IO. Don't do
-   work in `before_tool_callback`; queue to a background task.
-6. **detect_drift**: add an `events_since_last_scan` cursor so each
-   scan is bounded.
-7. **Invariant checker**: don't run it on every transition in
-   production; run it on demand or in tests.
-
-## Prevention
-
-- Keep a latency SLO for `after_model_callback` round-trip (say,
-  100ms) and alert if exceeded.
-- Benchmark the callbacks in CI against a canned event log, assert
-  they finish within the SLO.
-- Treat `buffered_events` growth > 0 in steady state as a red flag
-  — either the transport is slow or the hot path is slow.
+1. **Slow LLM**: use a faster provider or a smaller model for the
+   planner. The planner refine is disproportionately slow because
+   of prompt size; smaller faster models run refine better.
+2. **Context growth**: truncate STEER bodies to ~1 KB at the UI
+   edge; prune completed tasks from the planner prompt in goldfive.
+3. **Tool loop**: tighten `ToolLoopTracker` thresholds; improve the
+   agent's instructions so it doesn't retry the same tool call.
+4. **Large payloads**: stop capturing full bodies on cumulative
+   LLM outputs; use `payload_ref` summaries.
+5. **Log noise**: set `LOG_LEVEL=INFO` in production.
+6. **Duplicate plugin**: deinstall the duplicate. Only the earliest
+   instance on the `PluginManager` is active; subsequent ones log
+   `duplicate HarmonografTelemetryPlugin instance detected` once
+   at INFO.
 
 ## Cross-links
 
-- [`runbooks/agent-disconnects-repeatedly.md`](agent-disconnects-repeatedly.md)
-  — slow hot path → heartbeat miss → disconnect.
-- [`dev-guide/debugging.md`](../dev-guide/debugging.md) §"Turning on
-  debug logging" — log levels per logger.
-- `client/harmonograf_client/adk.py:2062-2063` — the "blocked the
-  event loop" warning.
+- [dev-guide/performance-tuning.md](../dev-guide/performance-tuning.md)
+  — the full map of hot paths and their costs.
+- [runbooks/context-window-exceeded.md](context-window-exceeded.md)
+  — when the LLM is truncating inputs.
+- [runbooks/task-stuck-in-running.md](task-stuck-in-running.md) —
+  when a slow LLM call wedges a task outright.

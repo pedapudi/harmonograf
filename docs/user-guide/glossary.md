@@ -164,10 +164,13 @@ revise the plan. Each drift has a **kind** and a **severity** (`info`,
 
 ### Drift kind
 Structured tag for the reason a plan revision fired. Examples:
-`tool_error`, `context_pressure`, `user_steer`, `new_work_discovered`,
-`llm_refused`, `agent_escalated`. Full table in
-[tasks-and-plans.md → drift kinds](tasks-and-plans.md#drift-kinds) and
-the source of truth is `frontend/src/gantt/driftKinds.ts`.
+`USER_STEER`, `PLAN_DIVERGENCE`, `CONFABULATION_RISK`, `TOOL_ERROR`,
+`LOOPING_REASONING`, `AGENT_REFUSAL`, `HUMAN_INTERVENTION_REQUIRED`,
+`GOAL_DRIFT`. Full table in
+[tasks-and-plans.md → drift kinds](tasks-and-plans.md#drift-kinds).
+Authoritative source is goldfive's `DriftKind` enum; the frontend
+deriver (`frontend/src/lib/interventions.ts`) renders whatever
+goldfive emits.
 
 ### Drift severity
 One of `info`, `warning`, `critical`. Populated on `TaskPlan.revision_severity`.
@@ -189,7 +192,10 @@ not-found. See [drawer.md → payload tab](drawer.md#payload-tab) and
 
 ### `finish_reason`
 LLM finish reason attribute (`MAX_TOKENS`, `LENGTH`, etc.) stamped on
-the relevant span. Used to fire `context_pressure` drift. See
+the relevant span. Used to surface context-pressure conditions —
+goldfive now exposes this via `goldfive.llm.usage.*_tokens` on
+per-LLM-call metrics (goldfive#172) and the frontend's per-agent
+context-window overlay. See
 [data-model → Span.attributes](../protocol/data-model.md#span).
 
 ### Focused agent
@@ -270,6 +276,20 @@ spans by id, fans out to watchers via the bus. Code lives in
 Control kind. Injects a user-turn message into the agent's conversation.
 Protocol-defined but not wired to a frontend control today — see
 [control-actions.md → inject message](control-actions.md#inject-message--intercept-transfer).
+
+### Intervention
+Any point in a run where the plan changed direction: a user STEER /
+CANCEL, a drift the detectors fired, or an autonomous goldfive revision
+(cascade cancel, refine retry, human-intervention-required). Harmonograf
+surfaces these as a merged chronological list via `ListInterventions`
+plus the `InterventionsTimeline` strip above the Gantt. See
+[trajectory-view.md](trajectory-view.md).
+
+### Intervention history
+The chronologically-ordered list of interventions for one session.
+Fetched once on session open via `ListInterventions` and kept live
+from `WatchSession` deltas by the frontend deriver in
+`lib/interventions.ts`.
 
 ### INVOCATION
 Span kind representing one complete agent turn — the outer wrapper

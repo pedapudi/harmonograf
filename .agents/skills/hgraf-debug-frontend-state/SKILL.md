@@ -14,8 +14,9 @@ The server shows one thing in sqlite or on `WatchSession`, but the frontend show
 1. Dev server running: `pnpm -C frontend dev` (usually `http://localhost:5173`). Backend running locally: `uv run harmonograf-server`.
 2. Chrome/Firefox DevTools open on the tab.
 3. Read `frontend/src/gantt/index.ts:1-120` to understand the `SessionStore` shape: `agents`, `spans`, `tasks`, `plans`, `annotations`, each a subscribe-able collection.
-4. Read `frontend/src/state/uiStore.ts` for the zustand store that owns UI-only state (drawer open, selected span, viewport, focused agent).
+4. Read `frontend/src/state/uiStore.ts` for the zustand store that owns UI-only state (drawer open, selected span, viewport, focused agent). Sibling stores: `sessionsStore.ts` (picker state), `annotationStore.ts` (annotations synced from WatchSession), `approvalsStore.ts` (pending approvals), `popoverStore.ts` (popover position).
 5. Read `frontend/src/rpc/hooks.ts` — `getSessionStore`, `useSessionWatch`, `useHarmonografClient` are the top-level access points.
+6. For the InterventionsTimeline: `frontend/src/lib/interventions.ts` derives the merged intervention list from `annotationStore` + `store.drifts` + `store.tasks` (plans). Mirrors `server/harmonograf_server/interventions.py`. Debug by dumping each input slice.
 
 ## Step-by-step
 

@@ -1,9 +1,13 @@
 # Scenario: parallel map-reduce over a task plan
 
-An orchestrator agent in **parallel** mode drives eight map tasks across
-two worker sub-agents, then a single reduce task. The walker pins each
-map task to a specific sub-agent via `forced_task_id` and fans them out
-respecting the DAG edges.
+An orchestrator agent drives eight map tasks across two worker
+sub-agents, then a single reduce task. The run uses goldfive's
+parallel executor on a fan-out DAG.
+
+With per-agent Gantt rows (#80), the orchestrator, `worker-a`, and
+`worker-b` each render on their own row — even though all three are
+instantiated inside one `goldfive.wrap` run from one harmonograf
+client.
 
 The DAG is the classic fan-out / fan-in: eight map tasks pinned to two workers, then one reduce on the orchestrator.
 

@@ -47,7 +47,11 @@ grep -rn "CAPABILITY_\|capabilities=" client/harmonograf_client/
 
 Typical path: `client/harmonograf_client/identity.py` or the `HarmonografClient` constructor in `client/harmonograf_client/client.py` takes a `capabilities=[...]` arg and forwards it into `Hello.capabilities` via `client/harmonograf_client/transport.py :: _build_hello`.
 
-For the ADK plugin, `client/harmonograf_client/adk.py :: make_adk_plugin` decides the default capabilities list. Add the new capability there only if every ADK-backed agent supports the matching control kind; otherwise leave it opt-in.
+With `HarmonografTelemetryPlugin` installed on an ADK `App`, the
+plugin does not touch capabilities directly — the embedding code
+decides what to advertise. If you want every ADK-backed client to
+advertise a new capability by default, that's a downstream pattern
+(e.g. wrap `Client()` in a helper), not a harmonograf change.
 
 ### 4. Server ingest → storage
 

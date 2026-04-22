@@ -201,6 +201,54 @@ into the agent's task report line on the header box. See
   in `shortcuts.ts` but their handlers are still stubs. Use the popover
   or drawer until they get wired.
 
+#### Idempotency by `annotation_id` (goldfive#171, harmonograf#72)
+
+Every STEER control event carries the `annotation_id` of the stored
+annotation that authored it. Goldfive's steerer uses this id to
+**dedupe retries**: if the same annotation lands on the control path
+twice (network retry, operator-double-click, a stale `SubscribeControl`
+re-subscribing), it will not be applied twice. The first arrival wins
+and subsequent identical events ack `SUCCESS` without side effects.
+
+The `author` field propagates alongside so the drift surfaced in the
+intervention history carries the operator identity.
+
+#### Validation
+
+STEER bodies are rejected or sanitised before they reach the LLM:
+
+- Empty or whitespace-only bodies → rejected.
+- Bodies larger than 8 KiB → rejected (`STEER_BODY_MAX_BYTES`).
+- ASCII control characters → stripped (tabs and newlines preserved).
+
+See [annotations.md](annotations.md#body-constraints-72) for the
+details.
+
+#### Why STEER sometimes takes 30-70 seconds to apply
+
+The intervention ladder that follows a STEER runs through
+goldfive's planner LLM (typically Qwen3.5-35B via kikuchi for local
+demos). The planner has to:
+
+1. Observe the STEER drift on its next turn (couple of seconds).
+2. Call the refine LLM with the full task state + the STEER body.
+   On a local 35B model this is the slow path — 20-60 seconds per
+   refine call is normal; long contexts push that to 70+ seconds
+   (issue #86 caught one).
+3. Emit the refined plan via `PlanRevised`.
+
+Only *then* does the intervention card's outcome chip flip from
+`pending` to `→ rev N`. The intervention history aggregator uses a
+5-minute attribution window for user-control drifts so the STEER
+card and the resulting plan revision always merge cleanly, even on
+slow models.
+
+If the chip stays `pending` for more than a few minutes, the planner
+likely wedged; inspect the Gantt for a still-running LLM_CALL span on
+the planner row. The runbook at
+[runbooks/high-latency-callbacks.md](../../runbooks/high-latency-callbacks.md)
+walks through diagnosis.
+
 ### Approve / Reject
 
 - Scope: per-span. Only meaningful when the span status is

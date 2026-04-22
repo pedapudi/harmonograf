@@ -12,23 +12,39 @@ If you want the protocol-level view of how plan execution is tracked, read
 
 A **task** is a single unit of planned work: title, description, assignee,
 status, optional `predictedStartMs` / `predictedDurationMs`, optional
-`boundSpanId`. Tasks have `PENDING` / `RUNNING` / `COMPLETED` / `FAILED` /
-`CANCELLED` status.
+`boundSpanId`. Tasks have six legal statuses:
+
+| Status | Meaning |
+|---|---|
+| `PENDING` | In the plan, not yet picked up by an agent. |
+| `RUNNING` | An agent has claimed the task and is working on it. |
+| `COMPLETED` | Finished successfully. |
+| `FAILED` | Finished with an error. |
+| `CANCELLED` | Explicitly cancelled by the user (`CANCEL` control) or by goldfive (`cascade_cancel`). |
+| `NOT_NEEDED` | Overlay-era terminal state (goldfive#141-144). The invocation ended without this task being needed — it was part of the original plan but the agent's work didn't require it. |
 
 Task state is monotonic — it only moves forward. The diagram below shows the legal transitions; you'll never see a task move backwards on the task panel.
 
 ```mermaid
 stateDiagram-v2
     [*] --> PENDING
-    PENDING --> RUNNING : report_task_started
-    RUNNING --> RUNNING : report_task_progress
-    RUNNING --> COMPLETED : report_task_completed
-    RUNNING --> FAILED : report_task_failed
+    PENDING --> RUNNING : agent picks up the task
+    PENDING --> NOT_NEEDED : invocation ends, task unassigned
+    PENDING --> CANCELLED : user CANCEL / cascade_cancel
+    RUNNING --> RUNNING : task progress events
+    RUNNING --> COMPLETED : finished successfully
+    RUNNING --> FAILED : error
     RUNNING --> CANCELLED : user CANCEL control
     COMPLETED --> [*]
     FAILED --> [*]
     CANCELLED --> [*]
+    NOT_NEEDED --> [*]
 ```
+
+`PENDING → NOT_NEEDED` at invocation end is expected under the overlay
+model. If a task stays PENDING indefinitely while agents are still
+actively running, that's a bug; see
+[runbooks/task-stuck-in-pending.md](../../runbooks/task-stuck-in-pending.md).
 
 
 A **plan** is an ordered (and possibly DAG-shaped) collection of tasks
@@ -124,56 +140,73 @@ The banner is transient. To see the full revision history, open the
 
 ## Drift kinds
 
-Every revision reason is tagged with a **drift kind** — the reason the
-planner decided to revise. The full table (`frontend/src/gantt/driftKinds.ts`):
+Every revision reason is tagged with a **drift kind** — the reason
+goldfive decided to revise, or the signal a detector fired. The
+canonical taxonomy lives in
+[`goldfive/v1/types.proto` `DriftKind`](https://github.com/pedapudi/goldfive/blob/main/proto/goldfive/v1/types.proto)
+— harmonograf reflects whatever goldfive emits. The current kinds:
 
-| Kind | Icon | Label | Category |
-|---|---|---|---|
-| `tool_error` | ⚠ | Tool error | error |
-| `tool_returned_error` | 🔻 | Bad result | error |
-| `tool_unexpected_result` | ❓ | Odd result | error |
-| `task_failed` | ✗ | Task failed | error |
-| `task_blocked` | ⛔ | Blocked | error |
-| `task_empty_result` | ○ | Empty result | error |
-| `new_work_discovered` / `task_result_new_work` | ✨ | New work | discovery |
-| `task_result_contradicts_plan` | ⟷ | Contradicts plan | divergence |
-| `plan_divergence` | ⟷ | Divergence | divergence |
-| `agent_reported_divergence` | ⟷ | Agent flagged divergence | divergence |
-| `llm_refused` | 🚫 | Refused | error |
-| `llm_merged_tasks` | ⊕ | Merged tasks | structural |
-| `llm_split_task` | ⊗ | Split task | structural |
-| `llm_reordered_work` | ⇄ | Reordered | structural |
-| `context_pressure` | ⚡ | Context limit | structural |
-| `user_steer` | 👆 | User steered | user |
-| `user_cancel` | ⏹ | User cancelled | user |
-| `unexpected_transfer` | ↪ | Unexpected transfer | divergence |
-| `agent_escalated` | ⚠ | Escalated | divergence |
-| `multiple_stamp_mismatches` | ≠ | Plan drift | divergence |
-| `tool_call_wrong_agent` | ↪ | Wrong agent | structural |
-| `transfer_to_unplanned_agent` | ↪ | Unplanned transfer | divergence |
-| `failed_span` | ✗ | Failed span | error |
-| `task_completion_out_of_order` | ≠ | Out of order | structural |
-| `external_signal` | ⟶ | External | user |
-| `coordinator_early_stop` | ⏸ | Early stop | divergence |
+| Kind | Category | When it fires |
+|---|---|---|
+| `USER_STEER` | user | Operator sent a STEER control / posted a STEERING annotation. |
+| `PLAN_DIVERGENCE` | divergence | Three-stage function_call gate (goldfive#178): an agent called a tool that belongs to another layer of the plan. |
+| `CONFABULATION_RISK` | divergence | Three-stage gate: an agent called a tool that doesn't exist in the registry — model hallucinated the name. |
+| `CONFUSION` | divergence | Planner couldn't reconcile the agent's output with the plan. |
+| `INTENT_DIVERGENCE` | divergence | Agent's output drifted from the original user intent. |
+| `AGENT_REFUSAL` | error | Agent refused a request (safety / policy). |
+| `TOOL_ERROR` | error | A tool call failed. |
+| `LOOPING_REASONING` | error | Tool-loop detector (goldfive#181/#186) fired — same tool+args, same tool-name pattern, or alternating pair repeating beyond threshold. |
+| `RUNAWAY_DELEGATION` | structural | One agent is delegating to sub-agents at a pathological rate. |
+| `REFINE_VALIDATION_FAILED` | structural | Goldfive's planner refine emitted an invalid plan. |
+| `HUMAN_INTERVENTION_REQUIRED` | error | Goldfive's intervention ladder reached the rung where only a human can resolve the situation. |
+| `GOAL_DRIFT` | divergence | Goal-aware refiner noticed the run moved away from the goal. |
+| `OFF_TOPIC` | divergence | Model started discussing something unrelated to the goal. |
 
-The drift taxonomy clusters into five categories, each with its own color in the UI. Use this map when you're triaging a noisy session — start by deciding which category bucket the most-recent pill belongs to, then drill into the specific kind.
+### Severity
+
+Each drift carries a severity (`info` / `warning` / `critical`) that
+drives the timeline ring color and the PlanRevisionBanner pill
+coloring. `CRITICAL` severity includes `CONFABULATION_RISK` (34) —
+hallucinated tool names — and `RUNAWAY_DELEGATION` (35);
+`HUMAN_INTERVENTION_REQUIRED` (37) and `GOAL_DRIFT` (38) ride at
+warning. Refer to goldfive's drift enum for the authoritative severity
+mapping.
+
+### User-control drifts
+
+`USER_STEER` and (where goldfive emits it) a `user_cancel` equivalent
+are special in the aggregator: they fold into the authoring
+annotation's intervention card via `annotation_id` propagation
+(goldfive#176 / harmonograf#75). One card per operator intervention,
+even though the wire emits three events (annotation + drift + plan
+revision).
+
+### Frontend rendering is tree-agnostic
+
+`frontend/src/lib/interventions.ts` and the InterventionsTimeline
+component render whatever kind string the server emits. New kinds
+added to goldfive tomorrow work without a harmonograf change — the
+source trichotomy (`user` / `drift` / `goldfive`) is the only
+taxonomy knowledge baked into the view.
+
+The drift taxonomy clusters by source on the InterventionsTimeline
+(user / drift / goldfive) and by severity for colour. Use this map
+when triaging a noisy session — start by deciding which source
+bucket the marker belongs to, then drill in on the specific kind.
 
 ```mermaid
 flowchart TD
     Drift([drift kind])
-    Drift --> Error[error · red<br/>tool_error · task_failed<br/>llm_refused · failed_span]
-    Drift --> Diverge[divergence · amber<br/>plan_divergence · unexpected_transfer<br/>agent_escalated]
-    Drift --> Discover[discovery · green<br/>new_work_discovered]
-    Drift --> User[user · blue<br/>user_steer · user_cancel<br/>external_signal]
-    Drift --> Struct[structural · grey-blue<br/>llm_merged_tasks · llm_split_task<br/>llm_reordered_work · context_pressure]
+    Drift --> UserSrc[user · purple<br/>USER_STEER · USER_CANCEL]
+    Drift --> DriftSrc[drift · amber<br/>TOOL_ERROR · AGENT_REFUSAL<br/>PLAN_DIVERGENCE · CONFABULATION_RISK<br/>LOOPING_REASONING · INTENT_DIVERGENCE<br/>GOAL_DRIFT · OFF_TOPIC · CONFUSION]
+    Drift --> Gf[goldfive · grey<br/>HUMAN_INTERVENTION_REQUIRED<br/>REFINE_VALIDATION_FAILED<br/>RUNAWAY_DELEGATION<br/>cascade_cancel · refine_retry]
 ```
 
-**Category** groups the kinds by color:
+**Source** groups the kinds for rendering:
 
-- `error` (red) — something went wrong mechanically.
-- `divergence` (amber) — the plan and reality don't agree.
-- `discovery` (green) — the agent found work it didn't expect.
-- `user` (blue/grey) — you (or something external) steered the run.
+- `user` (purple) — operator-initiated (STEER / CANCEL).
+- `drift` (amber) — detectors fired on agent behaviour.
+- `goldfive` (grey) — autonomous orchestrator action (escalation ladder).
 - `structural` (blue / grey) — the plan shape changed for reasons unrelated
   to correctness.
 

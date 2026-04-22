@@ -104,6 +104,20 @@ broken connection should override it; otherwise the default suffices.
 | `list_agents_for_session(session_id)` | All agents for a session, ordered by `connected_at`. |
 | `update_agent_status(session_id, agent_id, status, last_heartbeat=None)` | No-op if the agent doesn't exist (does *not* raise). |
 
+`Agent.metadata` is a free-form `dict[str, str]`. Ingest populates
+harmonograf-specific keys on first-sight auto-registration (#80):
+
+| Metadata key | Source | Meaning |
+|---|---|---|
+| `hgraf.agent.name` | `hgraf.agent.name` span attribute | Raw ADK agent name (`"research"`, `"writer"`). |
+| `hgraf.agent.kind` | `hgraf.agent.kind` span attribute | `llm` / `workflow` / `tool_wrapped` / `unknown`. |
+| `hgraf.agent.parent_id` | `hgraf.agent.parent_id` span attribute | Derived per-agent id of the parent ADK agent. |
+| `hgraf.agent.branch` | `hgraf.agent.branch` span attribute | Dot-delimited ADK ancestry for forensic debugging. |
+
+These are written by the server's ingest pipeline when it
+auto-registers a per-ADK-agent row on span ingest; the client only
+emits them on the FIRST span for each agent per session.
+
 ### Spans
 
 | Method | Semantics |
@@ -142,8 +156,21 @@ just keep the digest as the only stable identifier.
 |---|---|
 | `put_task_plan(plan)` | **Upsert by `plan.id`. Replaces the task list wholesale** so re-emitted plans cleanly drop tasks the planner removed. |
 | `get_task_plan(plan_id)` | `Optional[TaskPlan]`. |
-| `list_task_plans_for_session(session_id)` | Ordered by `created_at`. |
+| `list_task_plans_for_session(session_id)` | Ordered by `created_at`. Used by `ListInterventions` to surface revision history. |
 | `update_task_status(plan_id, task_id, status, bound_span_id=None)` | Returns the updated `Task`, or `None` if the plan/task doesn't exist. |
+
+`TaskPlan` carries four revision columns used by the intervention
+aggregator and the PlanRevisionBanner:
+
+| Column | Purpose |
+|---|---|
+| `revision_index` | `0` for the initial plan submission, `>= 1` for refines. |
+| `revision_kind` | Drift kind (`user_steer`, `looping_reasoning`, …) or autonomous kind (`cascade_cancel`, `refine_retry`, `human_intervention_required`). |
+| `revision_reason` | Human-readable narrative the planner attached. |
+| `revision_severity` | `info` / `warning` / `critical` — drives pivot-glyph color. |
+
+All four are backfilled on pre-existing databases via conditional
+`ALTER TABLE` in `SqliteStore.start()`.
 
 ### Context window samples
 

@@ -1,184 +1,165 @@
 # Runbook: Drift not firing
 
-> **Post-goldfive note.** Drift detection and the refine pipeline live
-> in [goldfive](https://github.com/pedapudi/goldfive) now
-> (`goldfive.DefaultSteerer`, `goldfive.drift`). Line numbers into
-> `adk.py` / `agent.py` are historical; look in goldfive for current
-> fire sites. Check goldfive logs for `drift observed` /
-> `refine: entry` lines rather than harmonograf-client loggers.
+A tool failed, the agent refused, the user sent a steer — and nothing
+happened. No drift marker appeared on the InterventionsTimeline, no
+plan revision fired, the planner looks idle.
 
-A tool failed, the agent refused, or the user sent a steer — and
-nothing happened. No `drift observed` log line, no refine, no plan
-revision.
-
-**Triage decision tree** — drift detection runs from ADK callbacks; if the
-right callback never fires for the event class, the detector is blind.
-
-```mermaid
-flowchart TD
-    Start([Expected drift,<br/>nothing detected]):::sym --> Q1{ADK callback fired<br/>at all? before/after_tool,<br/>on_event}
-    Q1 -- "no" --> F1[ADK version skipped<br/>callback for this event;<br/>upgrade ADK or add hook]:::fix
-    Q1 -- "yes" --> Q2{Tool actually raised<br/>or returned error obj?}
-    Q2 -- "returned obj" --> F2[Tool swallowed exception:<br/>let it propagate so<br/>on_tool_end sees error=]:::fix
-    Q2 -- "raised" --> Q3{detect_drift raised<br/>and was swallowed?<br/>(needs DEBUG log)}
-    Q3 -- "yes" --> F3[Fix detector exception,<br/>add unit test]:::fix
-    Q3 -- "no" --> Q4{task_plans count<br/>for session = 0?}
-    Q4 -- "yes" --> F4[Drift fired before<br/>first plan — submit plan<br/>first]:::fix
-    Q4 -- "no" --> Q5{LOG_LEVEL = DEBUG?}
-    Q5 -- "no" --> F5[severity=debug drifts hide<br/>at INFO; raise log level]:::fix
-    Q5 -- "yes" --> F6[Drift kind not on the<br/>scanner's path —<br/>add detector for it]:::fix
-
-    classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
-    classDef fix fill:#d4edda,stroke:#27ae60,color:#000
-```
+All drift detection is in [goldfive](https://github.com/pedapudi/goldfive)
+now. This runbook is about diagnosing which detector didn't fire and
+why.
 
 ## Symptoms
 
-- **Client log**: absence of
-  - `WARN harmonograf_client.adk: drift observed kind=<k> severity=<s> detail=<d>`
-    (`adk.py:3311` for critical, `adk.py:3313` for info —
-    `sev_msg = "drift observed kind=%s severity=%s detail=%s"`).
-  - `INFO harmonograf_client.adk: refine: entry hsession=... drift_kind=...`
-    (`adk.py:3301`).
-- **Server log**: nothing unusual; the server only sees drift
-  indirectly via revised plans.
-- **UI**: amber pill never appears; drawer plan-revision history is
-  static.
+- **Intervention timeline strip**: empty or missing the event you
+  expected (`TOOL_ERROR`, `AGENT_REFUSAL`, `USER_STEER`,
+  `LOOPING_REASONING`, `PLAN_DIVERGENCE`, `CONFABULATION_RISK`).
+- **Drawer → Task → Plan revisions**: no new revision followed the
+  event.
+- **Goldfive log**: no line of the form
+  `goldfive.drift: DriftDetected kind=<K> severity=<S> detail=<D>`.
+- **Harmonograf server log**: nothing unusual. The server only sees
+  drift indirectly via `goldfive_event.drift_detected` ingested from
+  the agent.
+
+## Detector catalogue
+
+Goldfive runs a handful of detectors, each wired into a specific ADK
+callback. If the callback doesn't fire for the event kind you care
+about, the detector is blind.
+
+| Drift kind | Detector location | Callback hook |
+|---|---|---|
+| `USER_STEER`, `USER_CANCEL` | `goldfive.steerer` | Synthesised from incoming `STEER` / `CANCEL` control events. |
+| `TOOL_ERROR` | `goldfive.adapters.adk.plugin` | `on_tool_error_callback`. |
+| `AGENT_REFUSAL` | `goldfive.adapters.adk.plugin` | `after_model_callback` parses refusal patterns. |
+| `LOOPING_REASONING` | `goldfive.detectors.tool_loop_tracker` (#181/#186) | `after_tool_callback` — exact, name, and alternating modes. |
+| `PLAN_DIVERGENCE` (goldfive#178 stage 2) | `goldfive.detectors.function_call_gate` | `before_tool_callback` gate. |
+| `CONFABULATION_RISK` (goldfive#178 stage 3) | same gate | Hallucinated tool name. |
+| `GOAL_DRIFT` | `goldfive.planner.goal_aware` | Goal-aware refiner observation. |
+| `HUMAN_INTERVENTION_REQUIRED` | `goldfive.steerer` intervention ladder | Escalated when other drifts don't resolve. |
+| `REFINE_VALIDATION_FAILED` | `goldfive.planner` | Planner's own refine result validation. |
 
 ## Immediate checks
 
 ```bash
-# Did any detector scan run?
-grep -E 'detect_drift|drift observed|refine: entry' /path/to/agent.log | tail -30
+# Did any detector run?
+grep -E 'DriftDetected|drift observed' /path/to/agent.log | tail -30
 
-# Did callbacks run at all?
-grep -E 'after_model_callback|on_event_callback|before_tool_callback' /path/to/agent.log | tail -20
+# Did the relevant callback fire?
+grep -E 'after_tool_callback|on_tool_error_callback|after_model_callback|before_tool_callback' /path/to/agent.log | tail -30
 
-# Was a tool error visible?
-grep -E 'tool_error|on_tool_end|error=' /path/to/agent.log | tail -20
+# Did the steerer even see a control?
+grep -E 'STEER received|CANCEL received|control_ack' /path/to/agent.log | tail -20
+
+# Check harmonograf's intervention list via the server RPC:
+uv run --with grpcurl grpcurl -plaintext \
+  -d '{"session_id":"<SID>"}' \
+  localhost:7531 harmonograf.v1.Harmonograf/ListInterventions
 ```
 
-## Root cause candidates (ranked)
+## Root-cause candidates (ranked)
 
-1. **Detector wasn't on the callback path for this event kind** — e.g.
-   the error came from an async tool that the `after_tool_callback`
-   didn't observe. If `state.on_tool_end(..., error=...)`
-   (`adk.py:1369`) wasn't called, drift detection isn't scheduled.
-2. **Detect_drift raised and was swallowed** —
-   `DEBUG harmonograf_client.agent: HarmonografAgent: detect_drift raised: <exc>`
-   (`agent.py:562`, `agent.py:780`). If you're at INFO level, you
-   won't see this.
-3. **Callback path never fired** — `after_model_callback` /
-   `on_event_callback` is the belt-and-suspenders path; if neither
-   runs, no scan happens. Typically because the ADK version skipped
-   calling the callback for the event type you care about.
-4. **Tool reported success despite erroring** — the tool implementation
-   swallowed its exception and returned a value. The adapter has no
-   way to know the tool failed. Same symptom as (1).
-5. **Drift fired but throttled** — rare, because drift-not-firing
-   usually means zero entries in the log, but worth checking:
-   `refine: throttled kind=...`.
-6. **Plan was None when drift was evaluated** — `refine_plan_on_drift`
-   early-exits if there's no current plan; no log, no action. This
-   happens when a drift fires before the first plan was submitted.
-7. **Drift severity dropped to DEBUG** — info/warning severity is
-   logged at INFO or WARNING, but DEBUG-severity drifts are logged at
-   DEBUG (`adk.py:3315`). If your log level is INFO, you won't see
-   them.
+1. **Tool swallowed the exception** — a tool that does
+   `try: ... except: return {"error": "..."}` never trips
+   `on_tool_error_callback`. The tool returns "successfully" so
+   `TOOL_ERROR` doesn't fire. Same symptom: the agent clearly
+   failed, but harmonograf and goldfive see nothing.
+2. **Callback never fired** — the ADK version skipped the callback
+   for this event type. `after_tool_callback` coverage is the most
+   common gap.
+3. **Detector exception swallowed** — a detector raised and goldfive
+   logged at DEBUG. Run with `LOG_LEVEL=DEBUG` to see.
+4. **STEER annotation body was rejected** — empty body, body > 8 KiB,
+   or ASCII control characters. The client-side bridge rejects it
+   before goldfive's steerer sees it. Check the frontend for an
+   inline error.
+5. **STEER bypassed goldfive** — some clients don't install the
+   goldfive control bridge. Controls deliver but drift never synthesises.
+6. **Plan was None when drift was evaluated** — goldfive refuses to
+   refine against an empty plan. Check that `PlanSubmitted` fired
+   before the drift.
+7. **Duplicate `HarmonografTelemetryPlugin`** (#68) — if the plugin
+   was installed twice, the later instance silently disabled itself.
+   Span visibility may be intact but any drift inference that depended
+   on span-attribute hooks from the disabled instance is lost. Look
+   for `duplicate HarmonografTelemetryPlugin instance detected` at INFO.
+8. **Tool-loop threshold not reached** — `LOOPING_REASONING` needs a
+   minimum repetition count (configurable in goldfive). A two-step
+   loop won't trip it.
 
 ## Diagnostic steps
 
-### 1. Callback coverage
+### 1. Goldfive drift log
 
-Turn on `LOG_LEVEL=DEBUG` for `harmonograf_client.adk` and
-`harmonograf_client.agent`:
+Run with goldfive at INFO:
 
 ```bash
-grep -E 'before_tool_callback|after_tool_callback|on_tool_end|on_event_callback' /path/to/agent.log | tail -40
+GOLDFIVE_LOG_LEVEL=INFO ...
+grep -E 'DriftDetected' /path/to/agent.log
 ```
 
-You should see every ADK callback cross this log. If only some kinds
-appear, that is your gap.
+If you see drifts firing on unrelated events but not yours, the
+detector for your event class is blind.
 
-### 2. detect_drift exception
+### 2. Intervention RPC
 
 ```bash
-grep 'detect_drift raised' /path/to/agent.log
+grpcurl -plaintext \
+  -d '{"session_id":"sess_2026-04-21_0001"}' \
+  localhost:7531 harmonograf.v1.Harmonograf/ListInterventions | jq .
 ```
 
-Fix the underlying exception; it is usually a TypeError against a
-dict shape that changed.
+Empty `interventions` list for a session where you triggered a STEER
+means the annotation didn't make it to goldfive.
 
-### 3. Callback never fired
-
-Grep for the specific ADK event type:
+### 3. STEER annotation diagnostics
 
 ```bash
-grep -E 'invocation_id|event_type' /path/to/agent.log
-```
-
-If the ADK version doesn't fire `on_event_callback` for
-`StateDelta` events, the whole delegated-mode drift scanner is blind.
-You need to upgrade ADK, or add a pre-call hook.
-
-### 4. Tool swallowed error
-
-Read the tool's source. If it has `try: ... except: return {...}`,
-the adapter never sees the failure. No quick fix — audit the tool.
-
-### 5. Throttled
-
-```bash
-grep 'refine: throttled' /path/to/agent.log
-```
-
-### 6. Plan was None
-
-```bash
-grep 'apply_drift_from_control: no active sessions' /path/to/agent.log
-# and more generally:
 sqlite3 data/harmonograf.db \
-  "SELECT COUNT(*) FROM task_plans WHERE session_id='SESSION_ID';"
+  "SELECT id, kind, body, author, created_at, delivered_at
+   FROM annotations
+   WHERE session_id='<SID>' AND kind='STEERING'
+   ORDER BY created_at DESC LIMIT 5;"
 ```
 
-If zero, the drift fired before a plan existed. Submit a plan first.
+- `delivered_at IS NULL` → the STEER never made it to the agent. The
+  server dispatched a `STEER` ControlEvent but no ack came back.
+  Check `control_router` logs.
+- Body looks empty or malformed → validation rejected it on the
+  client bridge.
 
-### 7. DEBUG severity
+### 4. Duplicate plugin
 
 ```bash
-grep -i 'drift observed.*severity=debug' /path/to/agent.log
+grep 'duplicate HarmonografTelemetryPlugin' /path/to/agent.log
 ```
 
-If present, the detector *is* running; it's just quiet at INFO.
+If present, remove one of the installation points. The plugin is
+usually installed via `App(plugins=[HarmonografTelemetryPlugin(c)])`
+— make sure a downstream `observe()` or `add_plugin` isn't also
+installing it.
+
+### 5. Tool swallowing
+
+Audit the tool source. If it has broad `except`, let the exception
+propagate instead.
 
 ## Fixes
 
-1. **Missing callback path**: add the hook for the event kind you care
-   about. For tool errors, verify `after_tool_callback` is wired and
-   that tools raise exceptions instead of returning error objects.
-2. **detect_drift exception**: fix it and add a unit test.
-3. **Callback never fired**: upgrade ADK to a version that fires the
-   callback, or implement your own wrapper.
-4. **Tool swallowed error**: stop swallowing; let exceptions propagate
-   so `on_tool_end` sees `error=<exc>`.
-5. **Throttled**: not a bug; see goldfive's refine-throttle settings.
-6. **Plan missing**: ensure goldfive has submitted a plan for this run
-   (look for a `PlanSubmitted` event in the timeline).
-7. **Severity = DEBUG**: raise log level or change the detector to
-   emit at INFO.
-
-## Prevention
-
-- Audit every tool for swallowed exceptions on import — a tool that
-  returns `{"error": "..."}` is invisible to drift detection.
-- Unit-test each drift detector against a canned event log from the
-  ADK you support.
-- In CI, assert that a forced tool exception produces at least one
-  `drift observed kind=tool_error` log line.
+1. Stop swallowing tool exceptions.
+2. Upgrade ADK if a callback isn't firing.
+3. Fix the detector's exception, add a unit test.
+4. Post STEER annotations with non-empty, < 8 KiB bodies.
+5. Ensure only one `HarmonografTelemetryPlugin` lands on the
+   `PluginManager`.
+6. For loops, tune goldfive's `ToolLoopTracker` threshold or
+   instrument the tool to surface the ambiguity.
 
 ## Cross-links
 
-- [`dev-guide/debugging.md`](../dev-guide/debugging.md) §"A drift fires
-  repeatedly" — symmetric problem.
-- [`runbooks/frontend-shows-stale-data.md`](frontend-shows-stale-data.md)
-  — if the revision is happening but not reaching the UI.
+- [user-guide/control-actions.md](../user-guide/control-actions.md)
+  — STEER body constraints.
+- [user-guide/trajectory-view.md](../user-guide/trajectory-view.md) —
+  how drifts surface on the intervention timeline.
+- [dev-guide/debugging.md](../dev-guide/debugging.md) — server-side
+  SQL snippets for inspecting plans, annotations, agents.

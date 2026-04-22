@@ -49,17 +49,27 @@ pgrep -af 'pnpm dev\|vite'
 pgrep -af 'adk web'
 
 # Are the three default ports bound?
-lsof -nP -iTCP:7531 -sTCP:LISTEN
-lsof -nP -iTCP:5173 -sTCP:LISTEN
-lsof -nP -iTCP:8080 -sTCP:LISTEN
+lsof -nP -iTCP:7531 -sTCP:LISTEN         # harmonograf gRPC
+lsof -nP -iTCP:5174 -sTCP:LISTEN         # harmonograf gRPC-Web (for browsers)
+lsof -nP -iTCP:5173 -sTCP:LISTEN         # Vite dev server
+lsof -nP -iTCP:8080 -sTCP:LISTEN         # adk web
 
 # Is the LLM endpoint set and reachable?
-echo $OPENAI_API_BASE
-curl -s $OPENAI_API_BASE/models 2>/dev/null || echo "unreachable"
-
-# Vite logs (stdout of the `make demo` invocation — grep there)
-# ADK web logs
+echo "KIKUCHI_LLM_URL=$KIKUCHI_LLM_URL"
+echo "USER_MODEL_NAME=$USER_MODEL_NAME"
+echo "GOLDFIVE_EXAMPLE_PLANNER_MODEL=$GOLDFIVE_EXAMPLE_PLANNER_MODEL"
+curl -s "$KIKUCHI_LLM_URL/v1/models" | head 2>/dev/null || echo "unreachable"
 ```
+
+The demo uses:
+
+- `KIKUCHI_LLM_URL` — OpenAI-compatible endpoint (e.g. a local vLLM
+  or Ollama gateway).
+- `USER_MODEL_NAME` — model string for the primary user-facing agent
+  (defaults to `openai/qwen3.5-35b`).
+- `GOLDFIVE_EXAMPLE_PLANNER_MODEL` — model for the planner; defaults
+  to `USER_MODEL_NAME`. Override to run a smaller/faster model as the
+  planner.
 
 ## Root cause candidates (ranked)
 
@@ -68,9 +78,11 @@ curl -s $OPENAI_API_BASE/models 2>/dev/null || echo "unreachable"
    different project, etc.). Vite exits with `EADDRINUSE`; harmonograf
    server crashes; ADK web refuses to bind.
 2. **LLM endpoint missing / unreachable** — the presentation agent
-   needs a reachable LLM. If `OPENAI_API_BASE` (or `GOOGLE_API_KEY`) is
-   unset or points at a dead host, the agent either crashes at import
-   or responds with errors on the first turn.
+   needs a reachable LLM. If `KIKUCHI_LLM_URL` is unset or points at
+   a dead host, the agent either crashes at import (OpenAI client
+   initialisation) or responds with errors on the first turn. A
+   Gemini-backed demo uses `GOOGLE_API_KEY` / `GEMINI_API_KEY`
+   instead.
 3. **`HARMONOGRAF_SERVER` pointing at the wrong port** — the Makefile
    sets `HARMONOGRAF_SERVER=127.0.0.1:$(SERVER_PORT)` (Makefile ~line
    171); if you overrode it with something stale, the agent connects

@@ -50,7 +50,28 @@ flowchart TB
 
 ## Reading the axes
 
-Time runs horizontally; agents are stacked vertically, one row each. A bar represents a span on its agent's row, positioned by its start and end time. Cross-agent edges (the bezier curves) connect a TRANSFER on one row to the invocation it kicked off on another row.
+Time runs horizontally; agents are stacked vertically, **one row per ADK
+agent**, positioned by start and end time. Cross-agent edges (the bezier
+curves) connect a TRANSFER on one row to the invocation it kicked off on
+another row.
+
+### Per-agent rows (#80)
+
+A single `goldfive.wrap` run drives a tree of ADK agents —
+typically a coordinator, a handful of specialists, AgentTool wrappers,
+and occasionally a `SequentialAgent` / `ParallelAgent` container. The
+Gantt puts each one on its own row.
+
+The row label comes from the ADK agent's `name` (e.g. `coordinator`,
+`research_agent`, `writer_agent`); the row id is
+`<client.agent_id>:<adk_agent_name>` under the hood, stamped by the
+client's `HarmonografTelemetryPlugin` via `before_agent_callback` /
+`after_agent_callback`.
+
+If you're looking at an older session recorded before harmonograf#80
+landed, every agent collapses onto the client-root row. Fresh sessions
+on a current client render one row per sub-agent; no migration is
+required.
 
 ```mermaid
 flowchart LR
@@ -185,6 +206,14 @@ the **↩ Follow live** button on the transport bar to re-attach.
 
 Pausing agents also unfollows live (since "now" isn't moving any more).
 Resuming agents re-attaches.
+
+**Caveat on completed sessions (#89 in flight).** When you open a
+completed session the viewport currently opens to a window past the
+last span, and the LIVE badge may briefly show in the header even
+though the run is long finished. Pan left to reach the session's
+actual time range. A UX fix is tracked as harmonograf#89; until it
+lands, either press **F** to fit the whole session or drag the minimap
+to the spans region.
 
 ## Actor rows — `user` and `goldfive`
 

@@ -11,9 +11,17 @@ You've been asked to review a PR on the harmonograf repo, or you're self-reviewi
 
 ## Prerequisites
 
-1. Read `AGENTS.md` at the repo root — the project vision, the three-component architecture, the plan execution protocol (`session.state` + reporting tools + callback inspection).
-2. Know which batch-1 / batch-2 skill applies to the area being changed. For example: a proto field change should be reviewed against `hgraf-add-proto-field.md`; a drift kind change against `hgraf-add-drift-kind.md`. This review skill is the meta layer — it asks whether the right sub-skill was followed.
-3. Have the PR checked out locally. Don't review from the web UI alone — you'll miss generated-file drift and cross-layer incoherence.
+1. Read `AGENTS.md` at the repo root — the project vision, the
+   three-component architecture.
+2. Know which sibling skill applies to the area being changed
+   (`hgraf-add-proto-field`, `hgraf-add-drift-kind`,
+   `hgraf-migrate-sqlite-schema`, etc.). This review skill is the
+   meta layer — it asks whether the right sub-skill was followed.
+3. Have the PR checked out locally. Don't review from the web UI
+   alone — you'll miss generated-file drift and cross-layer
+   incoherence.
+4. No Claude / AI co-author trailer. Maintainer scrubs them; flag
+   any that slipped in.
 
 ## The review passes
 

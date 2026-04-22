@@ -28,12 +28,21 @@ Do **not** use this skill for unit-level work. Prefer `tests/e2e/test_scenarios.
    ```
    See `Makefile` targets `proto-python` and `proto-ts`. `proto-ts` requires `frontend/buf.gen.yaml`; if missing it silently skips.
 
-3. An OpenAI API key in the environment. The demo reads `OPENAI_API_KEY`; if unset, the Makefile falls back to the literal string `"dummy"` which will fail on the first model call. Export a real key:
+3. An LLM endpoint in the environment. The demo uses an
+   OpenAI-compatible endpoint (kikuchi, vLLM, Ollama gateway):
    ```bash
-   export OPENAI_API_KEY=sk-...
+   export KIKUCHI_LLM_URL=http://localhost:18000
+   export USER_MODEL_NAME=openai/qwen3.5-35b          # default
+   export GOLDFIVE_EXAMPLE_PLANNER_MODEL=openai/qwen3.5-35b  # optional override for planner
    ```
+   For Gemini-backed demos, set `GOOGLE_API_KEY` or `GEMINI_API_KEY`
+   instead.
 
-4. Ports free: **7531** (gRPC server), **5173** (Vite), **8080** (adk web). Override with `SERVER_PORT=`, `FRONTEND_PORT=`, `ADK_WEB_PORT=` (see `Makefile:demo`).
+4. Ports free: **7531** (native gRPC), **5174** (gRPC-Web for the
+   browser), **5173** (Vite dev server), **8080** (adk web).
+   Override with `SERVER_PORT=`, `FRONTEND_PORT=`, `ADK_WEB_PORT=`
+   (see `Makefile:demo`). Do not confuse 5173 (Vite) with 5174
+   (gRPC-Web); the Vite server talks to 5174 over the network.
 
 ## Step-by-step
 
@@ -66,7 +75,23 @@ You should see:
 - Open the **Harmonograf UI** at `http://127.0.0.1:5173` in a second tab. You should see a new session appear in the session list within ~1s of the first span.
 - Click the session to open the Gantt. Spans stream in live.
 
-The presentation agent itself is defined in `tests/reference_agents/presentation_agent/agent.py`. It is instrumented through `HarmonografAgent` which auto-registers reporting tools into every `LlmAgent` in its sub-tree (`client/harmonograf_client/agent.py:335-355` — `_auto_register_reporting_tools`).
+The presentation agent itself is defined in
+`tests/reference_agents/presentation_agent/agent.py`. It's a plain
+ADK agent tree wrapped via `goldfive.wrap(...)` plus
+`HarmonografTelemetryPlugin` for span telemetry. Goldfive's
+`ADKAdapter` auto-injects its reporting tools (`report_task_started`,
+`report_task_completed`, …) into every sub-agent; harmonograf's
+plugin observes and emits spans.
+
+Two variants appear in ADK web's agent picker:
+
+- `presentation_agent` — observation mode (plain ADK tree with
+  `HarmonografTelemetryPlugin`, no goldfive wrap).
+- `presentation_agent_orchestrated` — orchestration mode (same tree
+  wrapped with `goldfive.wrap(...)`). This is where you see plans,
+  drifts, STEERs, and the full intervention history. Per-agent
+  Gantt rows (#80) render here — coordinator + specialists each on
+  their own row.
 
 ### 3. Tail logs
 
@@ -106,7 +131,13 @@ sqlite3 data/harmonograf.sqlite "SELECT id, title, status, started_at FROM sessi
 
 ## Common pitfalls
 
-- **`OPENAI_API_KEY=dummy` is the default fallback.** The Makefile uses `$${OPENAI_API_KEY:-dummy}`. If your first call fails with `401 Unauthorized` you forgot to export a real key.
+- **`KIKUCHI_LLM_URL` unset.** If your first call errors with a
+  connection refusal, you forgot to export the URL or the local
+  kikuchi / vLLM / Ollama process isn't running. `curl
+  "$KIKUCHI_LLM_URL/v1/models"` confirms reachability.
+- **Lazy Hello (#85) means the session doesn't appear until the
+  first span emits.** Send a turn to the agent before panicking
+  that the picker is empty.
 - **Port collisions.** `pnpm dev --strictPort` will refuse to start if 5173 is taken; the trap in `make demo` will then kill the server and adk web too because `bash -eu` exits. Either free the port or set `FRONTEND_PORT=5174`.
 - **`.demo-agents/` is regenerated every run.** Do not edit files under `.demo-agents/` — your changes are wiped. Edit `tests/reference_agents/presentation_agent/agent.py` instead; the passthrough loads it by absolute file path (see `Makefile:.demo-agents-stage`).
 - **Symlinks under `.demo-agents/` will break ADK.** ADK's `_resolve_agent_dir` calls `Path.resolve()` and refuses paths that escape the agents root. The passthrough pattern in the Makefile is load-bearing — do not "simplify" it to a symlink.

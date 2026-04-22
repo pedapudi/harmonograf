@@ -1,10 +1,14 @@
 # Scenario: delegated handoff between specialist agents with drift detection
 
-A coordinator agent running in **delegated** mode (`OBS`) hands off to
-a chain of specialist agents using ADK's `AgentTool`. One specialist
-unexpectedly transfers to a fourth agent that is not in the plan, which
-fires a `transfer_to_unplanned_agent` drift. Harmonograf only observes
-— it does not drive the handoff.
+A coordinator agent running in delegated mode hands off to a chain of
+specialist agents using ADK's `AgentTool`. One specialist unexpectedly
+invokes a fourth agent that is not in the plan, which fires a
+`PLAN_DIVERGENCE` drift (the three-stage gate from goldfive#178 —
+cross-layer tool calls). Harmonograf only observes — it does not
+drive the handoff.
+
+With per-agent Gantt rows (#80), each specialist renders on its own row
+instead of collapsing onto the coordinator.
 
 This is the canonical example of how harmonograf acts as a monitor
 rather than an orchestrator.
@@ -22,7 +26,7 @@ sequenceDiagram
     Res-->>Coord: result
     Coord->>Web: AgentTool (planned)
     Web->>Dbg: AgentTool (UNPLANNED)
-    Note over Dbg: drift:<br/>transfer_to_unplanned_agent
+    Note over Dbg: drift:<br/>PLAN_DIVERGENCE
     Dbg-->>Web: result
     Web-->>Coord: result
     Coord->>Rev: AgentTool (planned)
@@ -90,7 +94,7 @@ plan — the plan expected `develop` → `review`, not `develop` →
 `debug` → `review`.
 
 The harmonograf client's drift detection catches this via the
-`unexpected_transfer` / `transfer_to_unplanned_agent` drift kinds (see
+`unexpected_transfer` / `PLAN_DIVERGENCE` drift kinds (see
 [tasks-and-plans.md → drift kinds](../tasks-and-plans.md#drift-kinds)).
 The client fires a deferential `refine` back to the planner with the
 current plan + drift context.
@@ -100,7 +104,7 @@ What you see in the UI:
 - A new orange solid TRANSFER arrow on the Graph view, from the
   web_developer column to the debugger column. Amber category on the
   PlanRevisionBanner pill: `↪ Unplanned transfer`.
-- The pill fires with detail text like `transfer_to_unplanned_agent:
+- The pill fires with detail text like `PLAN_DIVERGENCE:
   web_developer → debugger`.
 - The Plan revisions section in the drawer gains a new row. Expanded,
   it shows: added task `debug` (assignee `debugger`), modified `review`
@@ -154,7 +158,7 @@ On the web_developer's TRANSFER span:
 
 ```
 hgraf.task_id         = "develop"
-drift_kind            = "transfer_to_unplanned_agent"
+drift_kind            = "PLAN_DIVERGENCE"
 drift_severity        = "warning"
 drift_detail          = "web_developer -> debugger (not in plan)"
 ```
@@ -166,9 +170,9 @@ when the TRANSFER span has already closed.
 The subsequent plan revision carries:
 
 ```
-revision_kind     = "transfer_to_unplanned_agent"
+revision_kind     = "PLAN_DIVERGENCE"
 revision_severity = "warning"
-revision_reason   = "transfer_to_unplanned_agent: web_developer -> debugger"
+revision_reason   = "PLAN_DIVERGENCE: web_developer -> debugger"
 revision_index    = 1
 ```
 
@@ -184,8 +188,9 @@ revision_index    = 1
    span to match on. The Graph renders the forward arrow without a
    return. See [graph-view.md → following message flow](../graph-view.md#following-message-flow).
 4. **Drift detection still works without a walker.** Callback
-   inspection is the belt-and-suspenders path; you get `tool_error`,
-   `unexpected_transfer`, `context_pressure`, etc. even in `OBS` mode.
+   inspection is the belt-and-suspenders path; you get `TOOL_ERROR`,
+   `PLAN_DIVERGENCE`, `CONFABULATION_RISK`, `LOOPING_REASONING`, etc.
+   from goldfive's detectors regardless of orchestration mode.
 5. **The drawer's Links tab is the best way to walk a chain** in this
    scenario. `INVOKED` on the coordinator's TOOL_CALL points at the
    specialist's INVOCATION; `TRIGGERED_BY` points back. See

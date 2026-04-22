@@ -92,19 +92,19 @@ attributes table):
 tool.name        = "web_search"
 tool.args        = "{\"query\":\"2026 arm m-series benchmarks\"}"
 error            = "HTTPError: 503 Service Unavailable"
-drift_kind       = "tool_error"
-drift_severity   = "warning"
 ```
 
-The `drift_kind` is also stamped on the **active INVOCATION** span, not
-just the failed tool — this is how the planner knows to fire a refine.
-See [`docs/protocol/data-model.md`](../../protocol/data-model.md) :: Span.attributes.
+Goldfive's `after_tool_callback` observes the failed tool and emits a
+`DriftDetected(kind=TOOL_ERROR, severity=warning)` event — this is the
+signal the planner uses to fire a refine. Harmonograf renders the
+drift as an amber circle marker on the InterventionsTimeline strip.
 
 ### t=5.2s — PlanRevisionBanner fires
 
 A red pill slides in at the top of the shell: **⚠ Tool error** with
 detail `HTTPError 503 from web_search` and diff counts `+1 ~1`. The pill
-auto-dismisses in ~4 seconds.
+auto-dismisses in ~4 seconds. The corresponding intervention marker
+stays on the strip with its outcome chip set to `→ rev 1`.
 
 ![TODO: screenshot of the banner pill "Tool error +1 ~1"](_screenshots/example-research-pill.png)
 

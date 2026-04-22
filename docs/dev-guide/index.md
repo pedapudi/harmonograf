@@ -7,20 +7,31 @@ you are trying to *use* harmonograf to observe your own agents, see
 
 ## How to use this guide
 
-The guide is organized into ten files. Read them in the order below on your first
-pass; afterwards they work as reference.
+The guide is organized into fifteen files. Read the first nine in the order below on
+your first pass; the remaining six (`storage-backends`, `migration`, `deployment`,
+`security-model`, `performance-tuning`, `debugging`) are topical reference you grab
+when the situation demands.
 
 | # | File | When to read |
 |---|---|---|
 | 1 | [`setup.md`](setup.md) | First day. Clone, install, run `make demo`, smoke-test. |
 | 2 | [`architecture.md`](architecture.md) | Before touching anything that crosses a component boundary. |
-| 3 | [`client-library.md`](client-library.md) | Anything under `client/`. Orchestration modes, reporting tools, invariants. |
-| 4 | [`server.md`](server.md) | Anything under `server/`. Ingest pipeline, bus, storage, RPC surface. |
-| 5 | [`frontend.md`](frontend.md) | Anything under `frontend/`. SessionStore, renderer, uiStore, Connect-RPC. |
+| 3 | [`client-library.md`](client-library.md) | Anything under `client/`. Lazy Hello, per-agent callbacks, plugin dedup. |
+| 4 | [`server.md`](server.md) | Anything under `server/`. Ingest pipeline, bus, storage, intervention aggregator, RPC surface. |
+| 5 | [`frontend.md`](frontend.md) | Anything under `frontend/`. Stores, views, `InterventionsTimeline`, per-agent Gantt rows. |
 | 6 | [`working-with-protos.md`](working-with-protos.md) | Any `.proto` change. Codegen + forward-compat rules. |
-| 7 | [`testing.md`](testing.md) | Before writing a test or debugging a flake. Covers pytest + vitest + e2e. |
-| 8 | [`debugging.md`](debugging.md) | When something is broken. Logging, invariants, common failure modes. |
-| 9 | [`contributing.md`](contributing.md) | Before opening a PR. Commit style, CI expectations, AGENTS.md rules. |
+| 7 | [`storage-backends.md`](storage-backends.md) | SQLite schema, PostgreSQL adapter, session-relative times, agent metadata. |
+| 8 | [`testing.md`](testing.md) | Before writing a test or debugging a flake. Covers pytest + vitest + e2e. |
+| 9 | [`debugging.md`](debugging.md) | When something is broken. Logging, invariants, common failure modes. |
+| 10 | [`performance-tuning.md`](performance-tuning.md) | Per-LLM-call metrics, heartbeat cadence, aggregator cost. |
+| 11 | [`security-model.md`](security-model.md) | v0 posture (no auth, STEER body validation, local-only). |
+| 12 | [`migration.md`](migration.md) | Upgrade paths across the overlay / lazy-Hello / per-agent-row eras. |
+| 13 | [`deployment.md`](deployment.md) | Local + single-host deployment shape. |
+| 14 | [`contributing.md`](contributing.md) | Before opening a PR. Commit style, CI expectations, AGENTS.md rules. |
+
+The guide does not duplicate the wire-protocol reference or the ADR set — those
+live under [`docs/protocol/`](../protocol/) and [`docs/design/`](../design/).
+Cross-link wherever appropriate but do not rewrite.
 
 The map below shows how the chapters depend on each other on a first read:
 

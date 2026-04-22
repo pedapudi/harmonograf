@@ -113,6 +113,15 @@ The only thing the server actively validates beyond syntax:
 - **Payload size ceiling** (`ingest.py:65, 99-102`) —
   `PAYLOAD_MAX_BYTES = 64 * 1024 * 1024` per digest. This is a DoS
   bound, not authentication.
+- **STEER body validation** (`client/harmonograf_client/_control_bridge.py`) —
+  the client-side bridge between harmonograf control delivery and
+  goldfive rejects empty bodies and bodies larger than
+  `STEER_BODY_MAX_BYTES = 8 * 1024` before forwarding, and strips
+  ASCII control characters (`_sanitise_steer_body`). This defends
+  against a pathological UI / scripted caller submitting a multi-MB
+  "body" or smuggling escape sequences into an LLM prompt via
+  control codes. Not authentication — it's input hygiene. Harmonograf
+  #72 / goldfive #171.
 
 ### What the optional bearer token actually does
 

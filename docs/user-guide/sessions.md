@@ -9,6 +9,23 @@ Everything else in the UI is scoped to the currently-selected session.
 Selecting a different session reloads the Gantt, Graph, drawer, transport
 bar, and task panel.
 
+## One session per run (post lazy Hello, #84 / #85)
+
+Each end-to-end `goldfive.wrap` invocation corresponds to exactly one
+harmonograf session — the outer adk-web session id. A single run may
+drive a tree of ADK agents through AgentTool sub-Runners, each of
+which mints its own ADK session id, but the client's telemetry
+plugin caches the ROOT adk-web session id on first `before_run_callback`
+and stamps every subsequent span with it. The plan view, Gantt, and
+intervention history all land on the same session row.
+
+As of lazy Hello (harmonograf#85), constructing the client no longer
+opens a `StreamTelemetry` — the `Hello` frame is deferred until the
+first envelope arrives on the ring buffer. Importing
+`harmonograf_client` in a launcher or notebook no longer mints a ghost
+session that clutters the picker. If you expected a session to appear
+and don't see one, the agent likely hasn't emitted anything yet.
+
 ![Session picker showing multiple sessions with agent counts and status](../images/11-session-picker.png)
 
 ## Opening the picker

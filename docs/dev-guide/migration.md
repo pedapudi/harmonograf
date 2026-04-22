@@ -398,6 +398,72 @@ harmonograf no longer owns the `harmonograf.*` key schema. Evolution
 of that schema is a goldfive concern. See goldfive's docs for the
 current reader/writer contract.
 
+## Era migrations
+
+Harmonograf has gone through a handful of cross-cutting reshapes. If
+you're upgrading an old client or database, here's the map:
+
+### The goldfive migration (issue #2, mid-2025)
+
+Plans, tasks, drift kinds, control events, steering, and the
+reinvocation loop moved out of harmonograf into `goldfive`. Harmonograf
+became observability-only. Concrete markers:
+
+- `TelemetryUp.task_plan` (field 9) and `updated_task_status`
+  (field 10) reserved — all plan + task state rides inside
+  `goldfive_event = 11` now.
+- `types.proto` stopped declaring `Task`, `TaskEdge`, `TaskPlan`,
+  `DriftKind`, `ControlEvent`, `ControlAck`. Those types are imported
+  from `goldfive/v1/`.
+- `HarmonografAgent`, `HarmonografRunner`, `attach_adk`,
+  `make_adk_plugin` deleted from the client. Replaced by
+  `HarmonografSink` (for goldfive `EventSink`) and
+  `HarmonografTelemetryPlugin` (for ADK `BasePlugin`).
+
+Old sqlite files pre-migration still carry the `task_plans` table —
+schema is forward-compatible, goldfive_event ingest fills the same
+columns.
+
+### The overlay era (goldfive#141-144, early 2026)
+
+Goldfive replaced per-task driving with observation-driven overlay +
+soft follow-up + intervention ladder. User-visible effect on
+harmonograf:
+
+- Tasks can transition `PENDING → NOT_NEEDED` at invocation end, not
+  just terminal states. A PENDING task stuck indefinitely while the
+  agent is running is still a bug; see
+  [`runbooks/task-stuck-in-pending.md`](../runbooks/task-stuck-in-pending.md).
+- Plan revisions (`PlanRevised`) can fire without a backing drift when
+  the overlay folds in follow-ups autonomously. The intervention
+  aggregator surfaces these as `source="goldfive"` with kinds like
+  `cascade_cancel`, `refine_retry`, `human_intervention_required`.
+
+### Lazy Hello (harmonograf#84 / #85, 2026-04)
+
+`Client` construction no longer opens a `StreamTelemetry`. The
+transport defers `Hello` until the first envelope arrives on the ring
+buffer. Migration impact:
+
+- Library consumers that relied on `Client.session_id` being
+  populated immediately after construction must now emit at least
+  one span before reading it.
+- Old sessions created by mere library imports are gone — if your
+  session picker is suddenly missing a row, check whether the agent
+  actually emitted anything.
+
+### Per-agent Gantt rows (harmonograf#80, 2026-04)
+
+`HarmonografTelemetryPlugin` now stamps a per-ADK-agent id on every
+span via `before_agent_callback` / `after_agent_callback`. Historical
+sessions recorded pre-#80 show every agent collapsed onto the client
+root row — that's fine, they predate the fix. Fresh sessions on a
+newer client render one row per ADK agent.
+
+No database migration is required: per-agent rows are auto-registered
+on ingest via the existing `agents` table; old sessions retain their
+single row.
+
 ## Checklist for a proto change
 
 Before you open the PR:

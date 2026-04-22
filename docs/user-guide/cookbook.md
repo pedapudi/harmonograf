@@ -359,7 +359,8 @@ posted while watching. Not a tarball.
 ## 7. Filter and triage by drift kind
 
 **Goal.** You know something broke, and you want to see only the
-`tool_error` revisions (or the `llm_refused`, or the `context_pressure`…).
+`TOOL_ERROR` revisions (or the `AGENT_REFUSAL`, or the
+`LOOPING_REASONING`…).
 
 **Prerequisites.** The session has had at least one drift-tagged
 revision. See [tasks-and-plans.md → drift kinds](tasks-and-plans.md#drift-kinds)

@@ -4,6 +4,26 @@ Spans display in the UI with nonsense parenting: orphans, spans with
 parents that don't exist, cross-agent links that look random, or a
 tree whose shape doesn't match what the agent actually did.
 
+## Expected with per-agent rows (#80)
+
+A single `goldfive.wrap` run now registers one harmonograf agent row
+per ADK agent — a coordinator plus its specialists plus AgentTool
+wrappers — with ids shaped like
+`<client.agent_id>:<adk_agent_name>`. This is **expected**, not a bug.
+If you upgraded harmonograf recently and see "too many" agent rows,
+that's the per-agent fix landing.
+
+The auto-registration path is in
+`server/harmonograf_server/ingest.py`'s `_handle_span_start`: the
+first span it sees with an unknown `agent_id` is treated as a
+sub-agent of the root, harvesting `hgraf.agent.*` metadata hints
+from the span's attributes.
+
+If an agent row appears with no spans, that's the auto-register
+happening but subsequent spans never arriving. Look for a duplicate
+`HarmonografTelemetryPlugin` (#68) or a plugin install that happened
+after the first callback.
+
 **Triage decision tree** — the orphan/cross-agent SQL queries below split
 the cases. Buffer drops account for most "vanished parent" symptoms.
 

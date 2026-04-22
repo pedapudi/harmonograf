@@ -8,36 +8,42 @@ from "history bloat".
 
 ```mermaid
 flowchart TD
-    Start([context_window_tokens<br/>≥ limit_tokens]):::sym --> Q1{provider tokenizer ==<br/>client tokenizer?}
-    Q1 -- "no" --> F1[Tokenizer mismatch:<br/>swap to provider tokenizer]:::fix
-    Q1 -- "yes" --> Q2{Configured limit<br/>matches model docs?}
-    Q2 -- "no" --> F2[Wrong constant:<br/>fix context_window_limit]:::fix
-    Q2 -- "yes" --> Q3{session.state biggest<br/>key is task_results?}
-    Q3 -- "yes" --> F3[State bloat: only inject<br/>relevant completed results]:::fix
-    Q3 -- "no" --> Q4{Tool output payloads<br/>> 50KB?}
-    Q4 -- "yes" --> F4[Truncate tool outputs at<br/>emit; reference by URL]:::fix
-    Q4 -- "no" --> Q5{System prompt /<br/>retrieval bloated?}
-    Q5 -- "yes" --> F5[Compress / chunk retrieval]:::fix
-    Q5 -- "no" --> F6[Genuine long session —<br/>split via steer-restart<br/>with summary]:::fix
+    Start([context_window_tokens<br/>≥ limit_tokens]):::sym --> Q1{STEER was recently issued?}
+    Q1 -- "yes, several" --> F1[STEER-driven growth:<br/>truncate bodies, prune<br/>completed tasks from planner prompt]:::fix
+    Q1 -- "no" --> Q2{goldfive.llm.request.chars<br/>growing monotonically?}
+    Q2 -- "yes" --> F2[History bloat: summarise<br/>prior turns, drop stale state]:::fix
+    Q2 -- "no" --> Q3{Tool output payloads<br/>> 50 KB?}
+    Q3 -- "yes" --> F3[Truncate tool outputs at<br/>emit; reference by URL]:::fix
+    Q3 -- "no" --> Q4{System prompt /<br/>retrieval bloated?}
+    Q4 -- "yes" --> F4[Compress / chunk retrieval]:::fix
+    Q4 -- "no" --> F5[Genuine long session —<br/>split via steer-restart<br/>with summary]:::fix
 
     classDef sym fill:#fde2e4,stroke:#c0392b,color:#000
     classDef fix fill:#d4edda,stroke:#27ae60,color:#000
 ```
 
+**Post-STEER context growth is expected.** Every STEER the steerer
+applies adds the drift body + task-state snapshot into the planner's
+prompt. Several STEERs in a row grow the context predictably and
+observably — see
+[high-latency-callbacks.md](high-latency-callbacks.md) for the
+`goldfive.llm.request.chars` diagnostic.
+
 ## Symptoms
 
-- **UI**: drawer's context-window visualization shows
-  `tokens / limit_tokens` at or near 1.0; Gantt marks recent LLM_CALL
-  spans with errors.
-- **Client log**:
-  - `drift observed kind=context_pressure severity=... detail=...`
-    — drift detector fired the `context_pressure` drift kind.
-  - Possibly `plan refined: drift=context_pressure reason=... plan_id=...`
-    if the refine took effect.
-  - LLM client library errors, e.g. `google.api_core.exceptions.InvalidArgument:
-    prompt too long` or provider-specific equivalents.
+- **UI**: Gantt's per-agent context-window overlay renders red on the
+  agent rows that are near the limit; the per-agent header chip shows
+  `tokens / limit_tokens` at or near 1.0; recent LLM_CALL spans end
+  with errors.
+- **Goldfive log**:
+  - Per-LLM-call metrics (goldfive#172) —
+    `goldfive.llm.request.chars` climbing; `goldfive.llm.usage.*_tokens`
+    approaching `limit_tokens`.
+  - LLM client library errors, e.g. `openai.BadRequestError:
+    prompt too long`, `google.api_core.exceptions.InvalidArgument:
+    prompt too long`, or provider-specific equivalents.
 - **Heartbeat**: `context_window_tokens` ≥ `context_window_limit_tokens`
-  — see `ingest.py:587-609` for the sample publish path.
+  (published via `ingest.py`).
 
 ## Immediate checks
 

@@ -265,9 +265,32 @@ Useful one-liners:
 SELECT COUNT(*) FROM spans;
 SELECT id, kind, status, name, start_time, end_time FROM spans ORDER BY start_time DESC LIMIT 20;
 SELECT * FROM agents WHERE status='CONNECTED';
-SELECT plan_id, revision_index, revision_kind, summary FROM task_plans ORDER BY revision_index DESC LIMIT 10;
+
+-- Per-ADK-agent rows in one session (#80). Metadata holds the
+-- hgraf.agent.* hints harvested from the first span.
+SELECT id, name, metadata FROM agents WHERE session_id='<SID>' ORDER BY connected_at;
+
+-- Plan revision lineage with the drift kind that triggered each refine.
+SELECT id, revision_index, revision_kind, revision_severity, revision_reason, summary
+  FROM task_plans
+  WHERE session_id='<SID>'
+  ORDER BY created_at;
+
+-- Annotations (STEER / HUMAN_RESPONSE / COMMENT) posted on a session,
+-- newest first. `author` now carries the poster identity (#72).
+SELECT id, kind, author, body, created_at, delivered_at
+  FROM annotations
+  WHERE session_id='<SID>'
+  ORDER BY created_at DESC;
+
 SELECT digest, size, mime, evicted FROM payloads ORDER BY created_at DESC LIMIT 10;
 ```
+
+To inspect the intervention history the frontend sees for a session,
+either call `ListInterventions` directly against the server or read
+the three source tables (`annotations`, `task_plans` with
+`revision_kind != ''`, drift ring in the server's log) and merge them
+by hand. `docs/runbooks/drift-not-firing.md` has the full checklist.
 
 If the sqlite file is corrupted (power loss, aborted write), delete it and
 restart the server. Data retention is not authoritative — agents will

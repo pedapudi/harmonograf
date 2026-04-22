@@ -7,16 +7,29 @@ description: Script a complex multi-turn FakeLlm scenario — function calls, to
 
 ## When to use
 
-You are writing a test that needs a deterministic sequence of LLM turns, possibly interleaved with tool-call replies, transfers, drift triggers, or control events. The client already has a basic `FakeLlm` harness (`client/tests/test_dynamic_plans_real_adk.py:129`); this skill is for the next-level scenarios beyond single-turn replies.
+You are writing a test that needs a deterministic sequence of LLM turns, possibly interleaved with tool-call replies, transfers, drift triggers, or control events.
 
-For simple single-turn fakes and the general `FakeLlm` + StaticPlanner + InMemoryRunner fixture choice, see `hgraf-write-e2e-scenario.md` in batch 1. This skill goes deeper into scripting complex turn sequences.
+## Post-goldfive-migration scope
 
-## Prerequisites
+Harmonograf's dedicated FakeLlm harnesses moved out with the rest of
+the orchestration code. The current places to look for reusable
+FakeLlm patterns:
 
-1. Read `client/tests/test_dynamic_plans_real_adk.py:120-166` — the `_build_fake_llm` factory with `responses`, `cursor`, and the callable-hook trick for mid-invocation side effects.
-2. Read `client/tests/test_dynamic_plans_real_adk.py:169-183` — the `_text(...)` and `_fc(...)` builders for `LlmResponse` objects.
-3. Read `client/tests/test_orchestration_modes.py:109` for a second FakeLlm scaffold used in parallel/sequential orchestration tests.
-4. Know ADK's `LlmResponse`, `Content`, and `FunctionCall` shapes — they come from `google.adk.models.llm_response` and `google.genai.types`.
+- `tests/e2e/` — harmonograf's own end-to-end tests. Look for a
+  `FakeLlm` or similar fixture colocated with the scenario.
+- `third_party/goldfive/tests/` — goldfive's FakeLlm scaffolding,
+  which is what you actually want for scripted-turn tests that
+  exercise the planner / steerer / drift detectors.
+
+The two building blocks are the same:
+
+- `LlmResponse(content=Content(parts=[Part(text=...)]))` for plain
+  text turns.
+- `LlmResponse(content=Content(parts=[Part(function_call=FunctionCall(...))]))`
+  for tool calls.
+
+Both types come from `google.adk.models.llm_response` and
+`google.genai.types`.
 
 ## Scenario-building primitives
 
