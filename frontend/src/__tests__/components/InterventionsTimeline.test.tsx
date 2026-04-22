@@ -27,12 +27,12 @@ describe('<InterventionsTimeline />', () => {
     render(
       <InterventionsTimeline
         rows={[
-          row({ key: 'u1', source: 'user', kind: 'STEER', annotationId: 'ann_1' }),
-          row({ key: 'd1', source: 'drift', kind: 'LOOPING_REASONING' }),
-          row({ key: 'g1', source: 'goldfive', kind: 'CASCADE_CANCEL' }),
+          row({ key: 'u1', atMs: 100, source: 'user', kind: 'STEER', annotationId: 'ann_1' }),
+          row({ key: 'd1', atMs: 20_000, source: 'drift', kind: 'LOOPING_REASONING' }),
+          row({ key: 'g1', atMs: 50_000, source: 'goldfive', kind: 'CASCADE_CANCEL' }),
         ]}
         startMs={0}
-        endMs={1000}
+        endMs={60_000}
       />,
     );
     const user = screen.getByTestId('intervention-marker-u1');
@@ -54,6 +54,7 @@ describe('<InterventionsTimeline />', () => {
         rows={[
           row({
             key: 'd1',
+            atMs: 500,
             source: 'drift',
             kind: 'LOOPING_REASONING',
             bodyOrReason: 'agent re-read same doc',
@@ -63,7 +64,7 @@ describe('<InterventionsTimeline />', () => {
           }),
         ]}
         startMs={0}
-        endMs={1000}
+        endMs={10_000}
       />,
     );
     fireEvent.click(screen.getByTestId('intervention-marker-d1'));
@@ -81,6 +82,7 @@ describe('<InterventionsTimeline />', () => {
         rows={[
           row({
             key: 'd1',
+            atMs: 500,
             source: 'drift',
             outcome: 'plan_revised:r5',
             planRevisionIndex: 5,
@@ -100,12 +102,97 @@ describe('<InterventionsTimeline />', () => {
           },
         ]}
         startMs={0}
-        endMs={1000}
+        endMs={10_000}
         onJumpToRevision={onJump}
       />,
     );
     fireEvent.click(screen.getByTestId('intervention-marker-d1'));
     fireEvent.click(screen.getByTestId('intervention-card__jump'));
     expect(onJump).toHaveBeenCalledWith(5);
+  });
+
+  // --- #74: stable-anchor invariant -------------------------------------
+  //
+  // The strip must NOT shift marker X when the parent advances `endMs` on
+  // every render (e.g. because a live session's duration ticks up). With
+  // the stable-snapshot fix, the marker x stays pinned to the snapshot
+  // taken at mount; only a coarse 1s tick may move it.
+  it('keeps marker x stable when endMs advances on re-render (stable anchor)', () => {
+    const rows = [
+      row({ key: 'u1', atMs: 5_000, source: 'user', kind: 'STEER' }),
+    ];
+    const { rerender } = render(
+      <InterventionsTimeline
+        rows={rows}
+        startMs={0}
+        endMs={10_000}
+        width={400}
+        // Disable the rAF-driven live tick so the test is deterministic.
+        _liveTickMs={0}
+      />,
+    );
+    const first = screen.getByTestId('intervention-marker-u1');
+    const firstTransform = first.getAttribute('transform');
+    // Simulate the parent re-rendering with a much larger endMs (live
+    // session has grown). Without the fix, every marker would slide left.
+    rerender(
+      <InterventionsTimeline
+        rows={rows}
+        startMs={0}
+        endMs={60_000}
+        width={400}
+        _liveTickMs={0}
+      />,
+    );
+    const after = screen.getByTestId('intervention-marker-u1');
+    expect(after.getAttribute('transform')).toBe(firstTransform);
+  });
+
+  // --- #74: clustering ---------------------------------------------------
+  //
+  // Two markers whose centres would land within ~2% of the strip width of
+  // each other collapse into a single cluster badge. The badge carries a
+  // `data-count` attribute with the cluster size.
+  it('clusters dense interventions into a single badge with a count', () => {
+    const { container } = render(
+      <InterventionsTimeline
+        rows={[
+          row({ key: 's1', atMs: 5_000, source: 'user', kind: 'STEER' }),
+          row({ key: 's2', atMs: 5_050, source: 'user', kind: 'STEER' }),
+          row({ key: 's3', atMs: 5_100, source: 'user', kind: 'STEER' }),
+        ]}
+        startMs={0}
+        endMs={60_000}
+        width={400}
+        _liveTickMs={0}
+      />,
+    );
+    // No individual markers should render for clustered rows.
+    expect(screen.queryByTestId('intervention-marker-s1')).toBeNull();
+    expect(screen.queryByTestId('intervention-marker-s2')).toBeNull();
+    expect(screen.queryByTestId('intervention-marker-s3')).toBeNull();
+    // One cluster badge with count=3.
+    const cluster = container.querySelector(
+      '[data-testid^="intervention-cluster-"]',
+    );
+    expect(cluster).toBeTruthy();
+    expect(cluster?.getAttribute('data-count')).toBe('3');
+  });
+
+  it('does not cluster markers that are well-separated', () => {
+    render(
+      <InterventionsTimeline
+        rows={[
+          row({ key: 'a', atMs: 5_000, source: 'user', kind: 'STEER' }),
+          row({ key: 'b', atMs: 40_000, source: 'drift', kind: 'LOOPING' }),
+        ]}
+        startMs={0}
+        endMs={60_000}
+        width={400}
+        _liveTickMs={0}
+      />,
+    );
+    expect(screen.getByTestId('intervention-marker-a')).toBeTruthy();
+    expect(screen.getByTestId('intervention-marker-b')).toBeTruthy();
   });
 });
