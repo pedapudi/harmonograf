@@ -18,6 +18,13 @@ plugin to the ADK ``App`` that ``adk web`` / ``adk run`` builds::
 The plugin is safe to install alongside ``goldfive.adapters.adk`` 's
 own plugin — they operate on disjoint responsibilities and do not
 interfere with each other's ADK lifecycle callbacks.
+
+Duplicate-install safety: if two ``HarmonografTelemetryPlugin``
+instances end up on the same ADK ``PluginManager`` (easy to do under
+``goldfive.wrap`` + ``adk web`` — one comes from ``App.plugins``, one
+from ``observe()`` or ``add_plugin``), the later instance detects the
+earlier one on its first callback and silently disables itself. See
+harmonograf #68 / goldfive #166.
 """
 
 from __future__ import annotations
@@ -275,10 +282,84 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         # on the normal path and by the cancellation helper on the
         # error path.
         self._tool_span_invocations: dict[int, str] = {}
+        # Duplicate-install guard (harmonograf #68 / goldfive #166). Under
+        # ``goldfive.wrap`` + ``adk web`` + ``App(plugins=[...])`` it is
+        # easy to end up with two ``HarmonografTelemetryPlugin`` instances
+        # attached to the same ADK ``PluginManager``: one from
+        # ``App.plugins`` and one from a downstream ``observe()`` /
+        # ``add_plugin`` call. Each instance fires every callback, so
+        # every span appears twice in harmonograf's Gantt.
+        #
+        # On the first callback we inspect
+        # ``invocation_context.plugin_manager.plugins`` and, if another
+        # plugin named ``"harmonograf-telemetry"`` appears earlier in the
+        # list, flip this flag and short-circuit every callback from then
+        # on. The earliest instance is the authoritative emitter; later
+        # duplicates go silent.
+        #
+        # Semantics: silent-by-default (dedup should not make noise on
+        # healthy runs). We log at INFO exactly once per deduped
+        # instance so operators can see what happened if they wonder why
+        # their callbacks appear to be missing.
+        self._disabled_as_duplicate: bool = False
+        self._duplicate_log_emitted: bool = False
 
     @property
     def client(self) -> Client:
         return self._client
+
+    # ------------------------------------------------------------------
+    # Duplicate-install detection
+    # ------------------------------------------------------------------
+
+    def _maybe_disable_as_duplicate(self, ctx: Any) -> bool:
+        """Return True when this plugin instance should stay silent.
+
+        Inspects ``ctx.plugin_manager.plugins`` (ADK places the plugin
+        manager on the invocation / callback / tool context) and checks
+        whether another plugin with the same ``name`` appears *earlier*
+        in the list than ``self``. When it does, this instance is a
+        duplicate: the earlier instance will handle the callback and we
+        should no-op.
+
+        Idempotent — sets ``self._disabled_as_duplicate = True`` on the
+        first detection and returns the cached flag on subsequent calls
+        so the hot callback path doesn't walk the plugin list twice.
+        Logs at INFO exactly once per deduped instance.
+
+        Never raises: on any error (missing ``plugin_manager``, unusual
+        ``plugins`` shape) falls through to "enabled" so the plugin's
+        normal behaviour is preserved. The fix is an optimistic dedup,
+        not a hard gate.
+        """
+        if self._disabled_as_duplicate:
+            return True
+        pm = _safe_attr(ctx, "plugin_manager", None)
+        if pm is None:
+            return False
+        plugins = _safe_attr(pm, "plugins", None)
+        if not isinstance(plugins, list) or not plugins:
+            return False
+        own_name = getattr(self, "name", "harmonograf-telemetry")
+        # Find the first plugin with the same name. If that plugin is
+        # not ``self``, we are a duplicate.
+        for other in plugins:
+            if _safe_attr(other, "name", None) != own_name:
+                continue
+            if other is self:
+                return False
+            # Earlier instance with the same name: we are the dupe.
+            self._disabled_as_duplicate = True
+            if not self._duplicate_log_emitted:
+                self._duplicate_log_emitted = True
+                log.info(
+                    "telemetry_plugin: duplicate HarmonografTelemetryPlugin "
+                    "instance detected on plugin_manager; this instance will "
+                    "stay silent (earliest instance remains the authoritative "
+                    "emitter). See harmonograf #68 / goldfive #166.",
+                )
+            return True
+        return False
 
     def _stamp_session_id(self, ctx: Any) -> str:
         """Return the harmonograf session id to stamp on a span.
@@ -462,6 +543,8 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
     # ------------------------------------------------------------------
 
     async def before_run_callback(self, *, invocation_context: Any) -> None:
+        if self._maybe_disable_as_duplicate(invocation_context):
+            return
         inv_id = str(_safe_attr(invocation_context, "invocation_id", "") or "")
         agent = _safe_attr(invocation_context, "agent")
         name = str(_safe_attr(agent, "name", "") or "invocation")
@@ -520,6 +603,8 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
             self._invocation_spans[str(id(invocation_context))] = sid
 
     async def after_run_callback(self, *, invocation_context: Any) -> None:
+        if self._maybe_disable_as_duplicate(invocation_context):
+            return
         inv_id = str(_safe_attr(invocation_context, "invocation_id", "") or "")
         # Close any model-call spans that never saw a non-partial
         # finalize (error paths, client disconnect mid-stream). Without
@@ -608,6 +693,8 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
     async def before_model_callback(
         self, *, callback_context: Any, llm_request: Any
     ) -> None:
+        if self._maybe_disable_as_duplicate(callback_context):
+            return
         model = str(_safe_attr(llm_request, "model", "") or "")
         sid = self._client.emit_span_start(
             kind=SpanKind.LLM_CALL,
@@ -621,6 +708,8 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
     async def after_model_callback(
         self, *, callback_context: Any, llm_response: Any
     ) -> None:
+        if self._maybe_disable_as_duplicate(callback_context):
+            return
         key = self._model_span_key(callback_context)
         queue = self._model_spans.get(key)
         if not queue:
@@ -692,6 +781,8 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
     async def before_tool_callback(
         self, *, tool: Any, tool_args: Any, tool_context: Any
     ) -> None:
+        if self._maybe_disable_as_duplicate(tool_context):
+            return
         tool_name = str(_safe_attr(tool, "name", "") or "tool")
         payload = _serialize_args(tool_args)
         sid = self._client.emit_span_start(
@@ -721,6 +812,8 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         tool_context: Any,
         result: Any,
     ) -> None:
+        if self._maybe_disable_as_duplicate(tool_context):
+            return
         key = id(tool_context)
         sid = self._tool_spans.pop(key, None)
         self._tool_span_invocations.pop(key, None)
@@ -742,6 +835,8 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         tool_context: Any,
         error: Any,
     ) -> None:
+        if self._maybe_disable_as_duplicate(tool_context):
+            return
         key = id(tool_context)
         sid = self._tool_spans.pop(key, None)
         self._tool_span_invocations.pop(key, None)
