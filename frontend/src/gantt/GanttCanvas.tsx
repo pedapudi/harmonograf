@@ -400,6 +400,10 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
           ⟳ Return to live
         </button>
       )}
+      <EmptyWindowHint renderer={renderer} store={store} tick={overlayTick} />
+      {/* overlayTick read above so React re-evaluates visibility when the
+          renderer's onViewportChange fires — otherwise a post-activity pan
+          wouldn't redraw the hint. */}
       {hiddenAgentIds.size > 0 && (
         <button
           onClick={showAllAgents}
@@ -447,6 +451,63 @@ function layer(z: number): React.CSSProperties {
     zIndex: z,
     pointerEvents: 'none',
   };
+}
+
+// Inline hint shown when the user has panned/zoomed to a window that
+// contains no spans on a session with recorded activity. Clicking it slides
+// the viewport to the last activity while preserving zoom — the common
+// failure mode (#89) is opening a completed session whose default 5-minute
+// live window lands past the last span. This also serves as a safety net
+// for that same shape on a live session where the user pans into the
+// future.
+interface EmptyWindowHintProps {
+  renderer: GanttRenderer;
+  store: SessionStore;
+  tick: number;
+}
+function EmptyWindowHint({ renderer, store, tick }: EmptyWindowHintProps) {
+  // Read through renderer state rather than holding our own — the renderer
+  // is the source of truth and tick ensures we re-evaluate on viewport
+  // changes. `tick` is load-bearing here: React wouldn't otherwise notice
+  // that getViewport() has returned something new.
+  void tick;
+  const v = renderer.getViewport();
+  const maxEnd = store.spans.maxEndMs();
+  // Gate: only show when there's recorded activity, we're not in live
+  // follow (so not actively tracking a cursor that will catch up), and
+  // the viewport left edge sits past the last activity. The right-edge
+  // margin keeps the hint from flickering on/off during drag-zoom at the
+  // boundary.
+  if (maxEnd <= 0) return null;
+  if (v.liveFollow) return null;
+  const vs = v.endMs - v.windowMs;
+  const beyondEnd = vs > maxEnd;
+  if (!beyondEnd) return null;
+  return (
+    <button
+      data-testid="gantt-empty-window-hint"
+      onClick={() => renderer.jumpToLastActivity()}
+      style={{
+        position: 'absolute',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        padding: '10px 18px',
+        borderRadius: 999,
+        border: '1px solid var(--md-sys-color-outline-variant, #43474e)',
+        background: 'var(--md-sys-color-surface-container-high, #262931)',
+        color: 'var(--md-sys-color-on-surface, #e2e2e9)',
+        cursor: 'pointer',
+        fontSize: 13,
+        fontWeight: 500,
+        boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+        zIndex: 10,
+      }}
+      title="Jump to the last recorded activity in this session"
+    >
+      No activity in this window &middot; Jump to last activity
+    </button>
+  );
 }
 
 // Expose renderer through a ref-less side-channel for stress harness.

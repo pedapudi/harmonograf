@@ -22,7 +22,24 @@ import {
 import { useAnnotationStore } from '../state/annotationStore';
 import { packLanes } from '../gantt/layout';
 import type { ListSessionsResponse } from '../pb/harmonograf/v1/frontend_pb.js';
+import { SessionStatus as PbSessionStatus } from '../pb/harmonograf/v1/types_pb.js';
 import { applyGoldfiveEvent } from './goldfiveEvent';
+
+// Translate the generated SessionStatus enum to the closed string set
+// consumers actually care about. Unknown numeric values fall through to
+// 'UNKNOWN' so a forward-compatible server can't blow the UI up.
+function lifecycleFromPb(status: PbSessionStatus): SessionLifecycle {
+  switch (status) {
+    case PbSessionStatus.LIVE:
+      return 'LIVE';
+    case PbSessionStatus.COMPLETED:
+      return 'COMPLETED';
+    case PbSessionStatus.ABORTED:
+      return 'ABORTED';
+    default:
+      return 'UNKNOWN';
+  }
+}
 
 // --- Sessions list (polled) -------------------------------------------------
 
@@ -71,11 +88,26 @@ export function useSessions(pollIntervalMs = 5000): SessionsState {
 
 // --- Session watch (server-streaming) --------------------------------------
 
+// Lifecycle status exposed to consumers. We translate the wire enum so UI
+// code can switch on a small closed set without importing the generated
+// pb.ts types everywhere. 'UNKNOWN' means the stream hasn't delivered the
+// initial session payload yet.
+export type SessionLifecycle = 'UNKNOWN' | 'LIVE' | 'COMPLETED' | 'ABORTED';
+
 interface WatchSessionState {
   store: SessionStore;
   connected: boolean;
   initialBurstComplete: boolean;
   error: string | null;
+  // Session lifecycle as of the last stream event that reported it. Starts
+  // at 'UNKNOWN' before the initial session frame arrives; flips to
+  // COMPLETED/ABORTED when SessionEnded is received or the server initially
+  // reports an already-finished session during burst replay.
+  sessionStatus: SessionLifecycle;
+  // Wall-clock ms of the last event received on this stream. Consumers use
+  // this as a heuristic for "still live" when the server side hasn't
+  // transitioned status yet (e.g. if SessionEnded was never emitted).
+  lastEventAtMs: number;
 }
 
 // One SessionStore per sessionId, shared across hook consumers. Stores persist
@@ -83,6 +115,8 @@ interface WatchSessionState {
 // a second time rejoins the existing stream.
 const storeCache = new Map<string, SessionStore>();
 const originCache = new Map<string, SessionOrigin>();
+const statusCache = new Map<string, SessionLifecycle>();
+const lastEventCache = new Map<string, number>();
 const refCounts = new Map<string, number>();
 const abortControllers = new Map<string, AbortController>();
 
@@ -101,6 +135,44 @@ function getOrCreateStore(sessionId: string): SessionStore {
 export function getSessionStore(sessionId: string | null): SessionStore | undefined {
   if (!sessionId) return undefined;
   return storeCache.get(sessionId);
+}
+
+// Inactivity threshold (wall-clock ms) after which the heuristic treats a
+// session as "effectively completed" even if the server hasn't emitted a
+// SessionEnded yet. Kept generous so a momentarily chatty-but-slow agent
+// doesn't flip the viewport to fit-all mid-run.
+export const INACTIVITY_COMPLETED_MS = 30_000;
+
+/**
+ * True if a session is done (or effectively done) and the Gantt should stop
+ * following a live cursor. Accepts the structure returned by
+ * :func:`useSessionWatch` and a wall-clock reference for deterministic tests.
+ * Returns false until the initial burst is complete so we don't autofit on a
+ * fresh session whose first event hasn't arrived yet.
+ */
+export function sessionIsInactive(
+  state: Pick<
+    WatchSessionState,
+    'sessionStatus' | 'lastEventAtMs' | 'initialBurstComplete' | 'connected'
+  >,
+  nowWallMs: number = Date.now(),
+  inactivityMs: number = INACTIVITY_COMPLETED_MS,
+): boolean {
+  if (!state.initialBurstComplete) return false;
+  if (state.sessionStatus === 'COMPLETED' || state.sessionStatus === 'ABORTED') {
+    return true;
+  }
+  // Fallback: server didn't flip status but the stream has been quiet and
+  // we've been disconnected long enough that any live session would have
+  // heartbeated by now.
+  if (
+    !state.connected &&
+    state.lastEventAtMs > 0 &&
+    nowWallMs - state.lastEventAtMs > inactivityMs
+  ) {
+    return true;
+  }
+  return false;
 }
 
 // Reactive hook that re-renders whenever the agent registry changes for the
@@ -125,6 +197,8 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
     connected: false,
     initialBurstComplete: false,
     error: null,
+    sessionStatus: 'UNKNOWN',
+    lastEventAtMs: 0,
   });
 
   useEffect(() => {
@@ -135,6 +209,11 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
       connected: refCounts.get(sessionId) ? true : false,
       initialBurstComplete: false,
       error: null,
+      // Seed from module-level caches so a second consumer that joins an
+      // already-open subscription sees the last reported status immediately,
+      // not 'UNKNOWN' until the next event lands.
+      sessionStatus: statusCache.get(sessionId) ?? 'UNKNOWN',
+      lastEventAtMs: lastEventCache.get(sessionId) ?? 0,
     };
     setTick((n) => n + 1);
 
@@ -173,6 +252,14 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
           const kind = update.kind;
           if (!kind.case) continue;
 
+          // Every payload counts as a liveness tick. We don't guard on kind
+          // because all variants (including heartbeat-ish messages) prove
+          // the server considers the session active.
+          const nowWall = Date.now();
+          lastEventCache.set(sessionId, nowWall);
+          stateRef.current = { ...stateRef.current, lastEventAtMs: nowWall };
+          let statusChanged = false;
+
           switch (kind.case) {
             case 'session': {
               const s = kind.value;
@@ -181,6 +268,26 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
               origin = { startMs };
               originCache.set(sessionId, origin);
               store.wallClockStartMs = startMs;
+              const nextStatus = lifecycleFromPb(s.status);
+              if (statusCache.get(sessionId) !== nextStatus) {
+                statusCache.set(sessionId, nextStatus);
+                stateRef.current = { ...stateRef.current, sessionStatus: nextStatus };
+                statusChanged = true;
+              }
+              break;
+            }
+            case 'sessionEnded': {
+              const next = lifecycleFromPb(kind.value.finalStatus);
+              // Treat any terminal transition as COMPLETED-ish if the
+              // server didn't set final_status; better to auto-fit than
+              // leave the viewport stuck following a live cursor that
+              // will never advance again.
+              const resolved = next === 'UNKNOWN' ? 'COMPLETED' : next;
+              if (statusCache.get(sessionId) !== resolved) {
+                statusCache.set(sessionId, resolved);
+                stateRef.current = { ...stateRef.current, sessionStatus: resolved };
+                statusChanged = true;
+              }
               break;
             }
             case 'agent': {
@@ -381,6 +488,13 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
             }
             default:
               break;
+          }
+          if (statusChanged) {
+            // Only rerender on lifecycle flips; per-event ticks would thrash
+            // every consumer of the hook. Other event kinds already push
+            // updates through the SessionStore subscribe channels that
+            // React chrome subscribes to directly.
+            setTick((n) => n + 1);
           }
         }
       } catch (e) {

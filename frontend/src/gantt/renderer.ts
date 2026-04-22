@@ -476,6 +476,26 @@ export class GanttRenderer {
     });
   }
 
+  // Slide the current zoom window to land just past the last recorded span
+  // end, preserving window duration. Used by the "no activity in this window
+  // — jump to last activity" hint on completed sessions. Unlike fitAll(),
+  // this keeps the user's current zoom level, so a 30-second window doesn't
+  // get zoomed out to cover the full run; they just stop looking at empty
+  // space. Clears liveFollow since we're jumping to a fixed point.
+  jumpToLastActivity(): void {
+    const maxEnd = this.store.spans.maxEndMs();
+    if (maxEnd <= 0) return;
+    const windowMs = this.viewport.windowMs;
+    // Anchor so the last activity sits at ~80% of the visible width, leaving
+    // a narrow margin on the right for visual breathing room.
+    const endMs = Math.max(windowMs, maxEnd + windowMs * 0.2);
+    this.setViewport({
+      ...this.viewport,
+      endMs,
+      liveFollow: false,
+    });
+  }
+
   focusAgent(agentId: string | null): void {
     this.focusedAgentId = agentId;
     this.bgDirty = true;
