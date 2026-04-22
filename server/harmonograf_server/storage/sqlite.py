@@ -147,6 +147,13 @@ CREATE TABLE IF NOT EXISTS tasks (
     predicted_start_ms INTEGER DEFAULT 0,
     predicted_duration_ms INTEGER DEFAULT 0,
     bound_span_id TEXT,
+    -- harmonograf#110 / goldfive#205: structured cancel reason stamped by
+    -- the ingest pipeline from TaskCancelled.reason / TaskFailed.reason
+    -- envelopes. Colon-prefixed tag (upstream_failed / run_aborted /
+    -- user_cancel / user_steer / superseded_by_revision) followed by a
+    -- provenance id or human tail. Empty for PENDING / RUNNING /
+    -- COMPLETED / BLOCKED rows.
+    cancel_reason TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (plan_id, id),
     FOREIGN KEY (plan_id) REFERENCES task_plans(id) ON DELETE CASCADE
 );
@@ -233,6 +240,17 @@ class SqliteStore(Store):
         if "trigger_event_id" not in tp_cols:
             await self._db.execute(
                 "ALTER TABLE task_plans ADD COLUMN trigger_event_id TEXT NOT NULL DEFAULT ''"
+            )
+        # harmonograf#110 / goldfive#205: cancel_reason on tasks table.
+        # Additive, NOT NULL with empty-string default so existing rows
+        # remain valid under the new schema. Pre-#205 sessions keep
+        # empty reason; fresh runs populate it from TaskCancelled /
+        # TaskFailed envelopes in the ingest pipeline.
+        async with self._db.execute("PRAGMA table_info(tasks)") as cur:
+            task_cols = {row[1] for row in await cur.fetchall()}
+        if "cancel_reason" not in task_cols:
+            await self._db.execute(
+                "ALTER TABLE tasks ADD COLUMN cancel_reason TEXT NOT NULL DEFAULT ''"
             )
         await self._db.commit()
 
@@ -987,6 +1005,9 @@ class SqliteStore(Store):
                         predicted_start_ms=r["predicted_start_ms"] or 0,
                         predicted_duration_ms=r["predicted_duration_ms"] or 0,
                         bound_span_id=r["bound_span_id"],
+                        cancel_reason=(
+                            r["cancel_reason"] if "cancel_reason" in r.keys() else ""
+                        ) or "",
                     )
                 )
         return TaskPlan(
@@ -1031,6 +1052,8 @@ class SqliteStore(Store):
         task_id: str,
         status: TaskStatus,
         bound_span_id: Optional[str] = None,
+        *,
+        cancel_reason: str = "",
     ) -> Optional[Task]:
         async with self._lock:
             async with self.db.execute(
@@ -1045,12 +1068,21 @@ class SqliteStore(Store):
                 if bound_span_id is not None
                 else row["bound_span_id"]
             )
+            # harmonograf#110: preserve an already-stored cancel_reason
+            # on status transitions that don't carry a fresh one (e.g.
+            # later BLOCKED / RUNNING flips should not wipe the reason
+            # we stamped on the CANCELLED / FAILED transition).
+            existing_reason = (
+                row["cancel_reason"] if "cancel_reason" in row.keys() else ""
+            ) or ""
+            new_reason = cancel_reason or existing_reason
             await self.db.execute(
-                "UPDATE tasks SET status = ?, bound_span_id = ? WHERE plan_id = ? AND id = ?",
-                (status.value, new_bound, plan_id, task_id),
+                "UPDATE tasks SET status = ?, bound_span_id = ?, "
+                "cancel_reason = ? WHERE plan_id = ? AND id = ?",
+                (status.value, new_bound, new_reason, plan_id, task_id),
             )
             await self.db.commit()
-            return Task(
+            t = Task(
                 id=row["id"],
                 title=row["title"] or "",
                 description=row["description"] or "",
@@ -1059,7 +1091,9 @@ class SqliteStore(Store):
                 predicted_start_ms=row["predicted_start_ms"] or 0,
                 predicted_duration_ms=row["predicted_duration_ms"] or 0,
                 bound_span_id=new_bound,
+                cancel_reason=new_reason,
             )
+            return t
 
     # context window samples ----------------------------------------------
     async def append_context_window_sample(

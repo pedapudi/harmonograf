@@ -198,6 +198,8 @@ class PostgresStore(Store):
         task_id: str,
         status: TaskStatus,
         bound_span_id: Optional[str] = None,
+        *,
+        cancel_reason: str = "",
     ) -> Optional[Task]:
         raise NotImplementedError(_NOT_IMPLEMENTED)
 

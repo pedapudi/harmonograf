@@ -319,12 +319,18 @@ export class TaskRegistry {
     taskId: string,
     status: TaskStatus,
     boundSpanId?: string,
+    cancelReason?: string,
   ): void {
     for (const plan of this.plans) {
       const task = plan.tasks.find((t) => t.id === taskId);
       if (!task) continue;
       task.status = status;
       if (boundSpanId) task.boundSpanId = boundSpanId;
+      // harmonograf#110 / goldfive#205: stamp the structured cancel
+      // reason when the transition carried one. Preserve an already-
+      // stored reason across non-cancel transitions (e.g. a late
+      // BLOCKED ping should not blank a prior CANCELLED reason).
+      if (cancelReason) task.cancelReason = cancelReason;
       this.emit();
       return;
     }

@@ -408,6 +408,8 @@ class InMemoryStore(Store):
         task_id: str,
         status: TaskStatus,
         bound_span_id: Optional[str] = None,
+        *,
+        cancel_reason: str = "",
     ) -> Optional[Task]:
         async with self._lock:
             plan = self._task_plans.get(plan_id)
@@ -418,6 +420,12 @@ class InMemoryStore(Store):
                     t.status = status
                     if bound_span_id is not None:
                         t.bound_span_id = bound_span_id
+                    # harmonograf#110: same preserve-semantics as sqlite —
+                    # keep an existing cancel_reason when no fresh one is
+                    # supplied (e.g. BLOCKED transition after CANCELLED
+                    # must not blank the reason).
+                    if cancel_reason:
+                        t.cancel_reason = cancel_reason
                     return copy.deepcopy(t)
             return None
 

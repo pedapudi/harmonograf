@@ -366,6 +366,11 @@ def goldfive_pb_task_to_storage(pb: Any) -> Task:
         predicted_start_ms=pb.predicted_start_ms,
         predicted_duration_ms=pb.predicted_duration_ms,
         bound_span_id=pb.bound_span_id or "",
+        # harmonograf#110: plans submitted from goldfive don't carry a
+        # cancel_reason on tasks (the reason rides the TaskCancelled
+        # envelope). Default to empty; the ingest pipeline stamps it on
+        # the matching sqlite row when the cancel event arrives.
+        cancel_reason="",
     )
 
 

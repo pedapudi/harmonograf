@@ -755,7 +755,119 @@ function DagPane(props: DagProps) {
           </ul>
         </aside>
       )}
+      <TaskDeltaList plan={plan} />
     </div>
+  );
+}
+
+// ── TaskDeltaList ──────────────────────────────────────────────────────────
+//
+// harmonograf#110 / goldfive#205: lists every CANCELLED / FAILED task in
+// the currently selected rev with its structured cancel reason. Answers
+// "why was this task cancelled?" at a glance — the primary question the
+// Trajectory view is expected to answer when a run ends with a cascade
+// of cancelled tasks. Sibling to the Intervention list: where the
+// intervention list narrates WHY the plan changed, this list narrates
+// WHY individual tasks terminated the way they did.
+
+interface TaskDeltaListProps {
+  plan: TaskPlan;
+}
+
+function TaskDeltaList({ plan }: TaskDeltaListProps) {
+  const terminal = plan.tasks.filter(
+    (t) => t.status === 'CANCELLED' || t.status === 'FAILED',
+  );
+  if (terminal.length === 0) return null;
+  return (
+    <section
+      className="hg-traj__task-delta"
+      data-testid="trajectory-task-delta"
+      aria-label="Task terminal-status delta"
+      style={{
+        marginTop: 12,
+        padding: '8px 12px',
+        background: 'rgba(255,255,255,0.03)',
+        borderRadius: 6,
+        fontSize: 12,
+      }}
+    >
+      <header
+        style={{
+          fontSize: 10,
+          opacity: 0.65,
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+          marginBottom: 6,
+        }}
+      >
+        Task delta · {terminal.length} task{terminal.length === 1 ? '' : 's'} terminal
+      </header>
+      <ul
+        style={{
+          listStyle: 'none',
+          margin: 0,
+          padding: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+        }}
+      >
+        {terminal.map((t) => (
+          <li
+            key={t.id}
+            data-testid={`task-delta-row-${t.id}`}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(120px, 1fr) 80px 2fr',
+              gap: 8,
+              alignItems: 'center',
+              padding: '2px 0',
+            }}
+          >
+            <span
+              title={t.title || t.id}
+              style={{
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontWeight: 500,
+              }}
+            >
+              {t.title || t.id}
+            </span>
+            <span
+              data-status={t.status}
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: '0.05em',
+                color:
+                  t.status === 'FAILED'
+                    ? 'rgba(255,130,110,0.9)'
+                    : 'rgba(255,200,80,0.9)',
+              }}
+            >
+              {t.status}
+            </span>
+            <code
+              style={{
+                fontSize: 11,
+                opacity: 0.85,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontFamily:
+                  'var(--hg-mono, ui-monospace, Menlo, monospace)',
+              }}
+              title={t.cancelReason || ''}
+            >
+              {t.cancelReason || '—'}
+            </code>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -811,6 +923,30 @@ function DetailPane(props: DetailPaneProps) {
             </>
           )}
         </dl>
+        {/* harmonograf#110 / goldfive#205: cancel / failure reason on
+            terminal tasks. Answers "why was this task cancelled?" —
+            the primary question the Trajectory view is expected to
+            answer when a run ends with CANCELLED tasks. */}
+        {(t.status === 'CANCELLED' || t.status === 'FAILED') && t.cancelReason && (
+          <section
+            className="hg-traj__detail-cancel-reason"
+            data-testid="detail-task-cancel-reason"
+            style={{
+              marginTop: 8,
+              fontSize: 12,
+              background: 'rgba(255,200,80,0.08)',
+              borderLeft: '3px solid rgba(255,200,80,0.6)',
+              borderRadius: 4,
+              padding: '6px 10px',
+              fontFamily: 'var(--hg-mono, ui-monospace, Menlo, monospace)',
+            }}
+          >
+            <strong style={{ opacity: 0.7, marginRight: 6 }}>
+              {t.status === 'FAILED' ? 'failed:' : 'cancelled:'}
+            </strong>
+            <span>{t.cancelReason}</span>
+          </section>
+        )}
         {taskDrifts.length > 0 && (
           <section className="hg-traj__detail-drifts">
             <h4>Drifts on this task</h4>
