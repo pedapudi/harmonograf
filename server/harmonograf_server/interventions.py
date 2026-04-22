@@ -77,7 +77,14 @@ _OUTCOME_WINDOW_S: float = 5.0
 # drifts would strand the drift row and leak a second card. The
 # extended window is still bounded so two separate user STEERs in a
 # single session aren't claim-stolen by each other's plan revisions.
-_USER_OUTCOME_WINDOW_S: float = 300.0
+#
+# harmonograf#95 bumped this from 300s to 900s after observing a
+# 13m51s annotation→plan-revised gap on kikuchi/Qwen3.5-35B (user
+# STEER at 5:24, plan-revised at 19:15). The strict-id dedup added
+# via goldfive#196 is the primary fix — this wider window is a
+# belt-and-suspenders fallback for pre-#196 producers and for edges
+# where the id stamp fails to propagate.
+_USER_OUTCOME_WINDOW_S: float = 900.0
 
 
 def _outcome_window_for(drift_kind: str) -> float:
@@ -332,6 +339,14 @@ def _project_plans(
                 plan_revision_index=rev_index,
                 drift_kind=rev_kind if source != "goldfive" else "",
                 outcome=f"plan_revised:r{rev_index}",
+                # goldfive#196 / harmonograf#95: carry the source
+                # annotation id stamped on the plan so the final
+                # dedup pass can strict-join this row against the
+                # source annotation — no more time-window fallback
+                # for slow refines.
+                annotation_id=str(
+                    getattr(plan, "revision_annotation_id", "") or ""
+                ),
             )
         )
     return out
@@ -444,7 +459,14 @@ def _merge_by_annotation_id(
     kind gets folded in too. This catches the common case where the
     plan row made it through :func:`_project_plans` because the matching
     drift was suppressed but the plan row itself has no annotation_id
-    to join on (plans don't currently carry an annotation_id field).
+    to join on.
+
+    As of goldfive#196 plans do carry ``revision_annotation_id`` on the
+    wire, so most plan-sourced rows now group strictly by id in the
+    primary pass and never touch the time-window fallback. The fallback
+    survives for back-compat with pre-#196 data (older runs where the
+    id wasn't stamped) and for any emit path that fails to propagate
+    the id. See harmonograf#95 for the slow-refine case this fixes.
     """
 
     # Partition: rows keyed by annotation_id (the merge candidates), and

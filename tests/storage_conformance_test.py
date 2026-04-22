@@ -567,6 +567,46 @@ async def test_put_task_plan_replaces_tasks(store: Store):
     assert fetched.revision_reason == "replanned"
 
 
+async def test_put_task_plan_round_trips_revision_annotation_id(store: Store):
+    """harmonograf#95 / goldfive#196: source annotation id survives round-trip.
+
+    The id is stamped on the PlanRevised wire envelope by goldfive for
+    user-control refines and carried through every storage backend so
+    the intervention aggregator can strict-join plan-revision rows
+    against the source annotation without a time-window fallback.
+    """
+    await _seed(store)
+    plan = TaskPlan(
+        id="plan_ann",
+        session_id=SESSION_ID,
+        created_at=1_700_000_250.0,
+        revision_index=1,
+        revision_kind="user_steer",
+        revision_severity="warning",
+        revision_reason="by alice: pivot",
+        revision_annotation_id="ann_store_123",
+        tasks=[Task(id="t", title="t", status=TaskStatus.PENDING)],
+    )
+    await store.put_task_plan(plan)
+    fetched = await store.get_task_plan("plan_ann")
+    assert fetched is not None
+    assert fetched.revision_annotation_id == "ann_store_123"
+    # Autonomous refines (no id) continue to round-trip as "".
+    plan2 = TaskPlan(
+        id="plan_no_ann",
+        session_id=SESSION_ID,
+        created_at=1_700_000_260.0,
+        revision_index=2,
+        revision_kind="looping_reasoning",
+        revision_annotation_id="",
+        tasks=[Task(id="t2", title="t2", status=TaskStatus.PENDING)],
+    )
+    await store.put_task_plan(plan2)
+    fetched2 = await store.get_task_plan("plan_no_ann")
+    assert fetched2 is not None
+    assert fetched2.revision_annotation_id == ""
+
+
 async def test_list_task_plans_for_session(store: Store):
     await _seed(store)
     for i, ts in enumerate([1_700_000_300.0, 1_700_000_400.0]):

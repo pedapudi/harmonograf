@@ -470,6 +470,75 @@ async def test_plan_revised_increments_revision_metadata(pipeline, store):
     assert len(plan_deltas) >= 2
 
 
+async def test_plan_revised_persists_source_annotation_id(pipeline, store):
+    """goldfive#196 / harmonograf#95: the source annotation id stamped
+    on the PlanRevised envelope gets persisted on the stored TaskPlan.
+
+    Without this, harmonograf's intervention aggregator can't strict-
+    join the plan-revision row to the source annotation row and falls
+    back to a time window that strands slow refines (observed: ~14m
+    on kikuchi/Qwen3.5-35B).
+    """
+    pipe, bus, _ = pipeline
+    await _ensure_session(store)
+
+    # Initial plan.
+    initial = _make_event()
+    initial.plan_submitted.plan.CopyFrom(_plan_pb(plan_id="plan-B"))
+    await pipe.handle_message(_stream_ctx(), _wrap(initial))
+
+    # Revised plan with annotation_id stamped on both the envelope and
+    # the inlined Plan (goldfive#196 emits on both for back-compat).
+    revised = _make_event(sequence=1, event_id="e-ann")
+    revised_plan = _plan_pb(plan_id="plan-B", task_ids=["t1"])
+    revised_plan.revision_index = 1
+    revised_plan.revision_reason = "by alice: pivot"
+    revised_plan.revision_annotation_id = "ann_ingest_42"
+    revised.plan_revised.plan.CopyFrom(revised_plan)
+    revised.plan_revised.drift_kind = gt.DRIFT_KIND_USER_STEER
+    revised.plan_revised.severity = gt.DRIFT_SEVERITY_WARNING
+    revised.plan_revised.reason = "by alice: pivot"
+    revised.plan_revised.revision_index = 1
+    revised.plan_revised.annotation_id = "ann_ingest_42"
+    await pipe.handle_message(_stream_ctx(), _wrap(revised))
+
+    stored = await store.get_task_plan("plan-B")
+    assert stored is not None
+    assert stored.revision_annotation_id == "ann_ingest_42"
+
+
+async def test_plan_revised_envelope_annotation_id_fills_missing_plan_stamp(
+    pipeline, store
+):
+    """Back-compat: if the Plan inline message has no annotation_id stamp
+    but the PlanRevised envelope does, ingest populates from the envelope.
+
+    This covers the transitional case where a mixed producer emits an
+    id on the PlanRevised wrapper but forgets to copy it onto the
+    Plan (shouldn't happen with goldfive#196 code, but defensive).
+    """
+    pipe, _bus, _ = pipeline
+    await _ensure_session(store)
+
+    initial = _make_event()
+    initial.plan_submitted.plan.CopyFrom(_plan_pb(plan_id="plan-C"))
+    await pipe.handle_message(_stream_ctx(), _wrap(initial))
+
+    revised = _make_event(sequence=1, event_id="e-env-only")
+    revised_plan = _plan_pb(plan_id="plan-C", task_ids=["t1"])
+    revised_plan.revision_index = 1
+    # Plan stamp omitted intentionally — envelope-only.
+    revised.plan_revised.plan.CopyFrom(revised_plan)
+    revised.plan_revised.drift_kind = gt.DRIFT_KIND_USER_STEER
+    revised.plan_revised.annotation_id = "ann_env_only"
+    revised.plan_revised.revision_index = 1
+    await pipe.handle_message(_stream_ctx(), _wrap(revised))
+
+    stored = await store.get_task_plan("plan-C")
+    assert stored is not None
+    assert stored.revision_annotation_id == "ann_env_only"
+
+
 # ---- task status transitions --------------------------------------------
 
 

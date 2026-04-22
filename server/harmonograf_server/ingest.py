@@ -866,6 +866,17 @@ class IngestPipeline:
             overwrites["revision_reason"] = payload.reason
         if payload.revision_index and not stored.revision_index:
             overwrites["revision_index"] = int(payload.revision_index)
+        # goldfive#196 / harmonograf#95: prefer the envelope-level
+        # annotation_id when populated — it's the authoritative copy
+        # goldfive's steerer emits, even in the (rare) case the inlined
+        # Plan got cleared somewhere up the pipeline. Back-compat: the
+        # field is empty for autonomous refines and for pre-#196
+        # producers, so only overwrite when there's something to write
+        # AND the stored row doesn't already have it.
+        if not stored.revision_annotation_id:
+            env_ann_id = str(getattr(payload, "annotation_id", "") or "")
+            if env_ann_id:
+                overwrites["revision_annotation_id"] = env_ann_id
         if overwrites:
             for k, v in overwrites.items():
                 setattr(stored, k, v)

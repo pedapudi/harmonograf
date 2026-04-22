@@ -409,6 +409,10 @@ def goldfive_pb_plan_to_storage(
         revision_kind=_drift_kind_pb_to_string(pb.revision_kind),
         revision_severity=_drift_severity_pb_to_string(pb.revision_severity),
         revision_index=int(pb.revision_index),
+        # goldfive#196 / harmonograf#95: source annotation id for
+        # user-control refines. getattr-guarded for back-compat with
+        # pre-#196 wire envelopes where the field doesn't exist.
+        revision_annotation_id=getattr(pb, "revision_annotation_id", "") or "",
     )
 
 
@@ -500,6 +504,10 @@ def storage_plan_to_goldfive_pb(plan: TaskPlan) -> Any:
         revision_kind=_drift_kind_string_to_pb(plan.revision_kind),
         revision_severity=_drift_severity_string_to_pb(plan.revision_severity),
         revision_index=int(plan.revision_index),
+        # goldfive#196 / harmonograf#95: replay preserves the source
+        # annotation id so the intervention aggregator dedups correctly
+        # when a session is resumed from disk.
+        revision_annotation_id=plan.revision_annotation_id or "",
     )
     for task in plan.tasks:
         pb.tasks.append(storage_task_to_goldfive_pb(task))

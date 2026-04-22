@@ -368,6 +368,91 @@ describe('deriveInterventions', () => {
     expect(card.planRevisionIndex).toBe(1);
   });
 
+  it('collapses very-slow STEER refine via plan.revisionAnnotationId (harmonograf#95)', () => {
+    // kikuchi/Qwen3.5-35B case: refine lands 20 minutes after the drift —
+    // OUTSIDE the widened 15-min time window. The strict-id stamp on the
+    // plan (goldfive#196) is what actually merges this across the gap.
+    const twentyMinutesMs = 20 * 60 * 1000;
+    const rows = deriveInterventions({
+      annotations: [
+        mkAnnotation({
+          id: 'ann_very_slow',
+          createdAtMs: 100_000,
+          author: 'alice',
+          body: 'pivot',
+        }),
+      ],
+      drifts: [
+        mkDrift({
+          seq: 0,
+          kind: 'user_steer',
+          severity: 'warning',
+          detail: 'by alice: pivot',
+          recordedAtMs: 100_200,
+          annotationId: 'ann_very_slow',
+        }),
+      ],
+      plans: [
+        mkPlan({
+          id: 'p_very_slow',
+          createdAtMs: 100_000 + twentyMinutesMs,
+          revisionKind: 'user_steer',
+          revisionSeverity: 'warning',
+          revisionIndex: 1,
+          // goldfive#196 plan stamp — the only thing that can collapse
+          // this gap now that the time window is 15 min (still < 20 min).
+          revisionAnnotationId: 'ann_very_slow',
+        }),
+      ],
+    });
+    expect(rows).toHaveLength(1);
+    const card = rows[0];
+    expect(card.annotationId).toBe('ann_very_slow');
+    expect(card.outcome).toBe('plan_revised:r1');
+    expect(card.planRevisionIndex).toBe(1);
+  });
+
+  it('falls back to widened 15-min window for pre-#196 data (no plan stamp)', () => {
+    // Pre-goldfive#196 producer: plan row has no revisionAnnotationId.
+    // The drift has one; the 14-min gap is inside the widened 900s/15-min
+    // fallback window, so _find_merge_target still folds it in.
+    const fourteenMinutesMs = 14 * 60 * 1000;
+    const rows = deriveInterventions({
+      annotations: [
+        mkAnnotation({
+          id: 'ann_fb',
+          createdAtMs: 100_000,
+          author: 'alice',
+          body: 'pivot',
+        }),
+      ],
+      drifts: [
+        mkDrift({
+          seq: 0,
+          kind: 'user_steer',
+          severity: 'warning',
+          detail: 'by alice: pivot',
+          recordedAtMs: 100_200,
+          annotationId: 'ann_fb',
+        }),
+      ],
+      plans: [
+        mkPlan({
+          id: 'p_fb',
+          createdAtMs: 100_000 + fourteenMinutesMs,
+          revisionKind: 'user_steer',
+          revisionSeverity: 'warning',
+          revisionIndex: 1,
+          revisionAnnotationId: '',  // pre-#196
+        }),
+      ],
+    });
+    expect(rows).toHaveLength(1);
+    const card = rows[0];
+    expect(card.annotationId).toBe('ann_fb');
+    expect(card.outcome).toBe('plan_revised:r1');
+  });
+
   it('autonomous slow drift still fires two cards (tight 5s window unchanged)', () => {
     // Autonomous kinds keep the default 5s window so a slow refine here
     // doesn't claim-steal an unrelated later revision. Ensures the

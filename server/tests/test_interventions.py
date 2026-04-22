@@ -615,6 +615,148 @@ async def test_slow_user_steer_refine_still_dedups_to_one_card(store):
     assert card.severity == "warning"
 
 
+async def test_very_slow_user_steer_refine_dedups_via_annotation_id(store):
+    """harmonograf#95 / goldfive#196: refines that outrun the 15-min
+    time window still dedup via the strict annotation_id stamp on the
+    plan revision.
+
+    The observed pathology on kikuchi/Qwen3.5-35B was a 13m51s gap
+    (annotation 5:24 → plan-revised 19:15). Even the widened 15-min
+    fallback would strand a plan row just outside the window; the
+    strict-id join is what actually fixes the bug for refines of any
+    duration.
+    """
+
+    sid = "sess_very_slow_refine"
+    await _seed_session(store, sid)
+
+    # 1. User STEER annotation at t=100.
+    await store.put_annotation(
+        Annotation(
+            id="ann_very_slow",
+            session_id=sid,
+            target=AnnotationTarget(agent_id="a", time_start=100.0),
+            author="alice",
+            created_at=100.0,
+            kind=AnnotationKind.STEERING,
+            body="pivot",
+        )
+    )
+
+    # 2. USER_STEER drift with annotation_id at t=100.2.
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "run_id": "r1",
+                    "kind": "user_steer",
+                    "severity": "warning",
+                    "detail": "by alice: pivot",
+                    "annotation_id": "ann_very_slow",
+                    "recorded_at": 100.2,
+                }
+            ]
+        }
+    )
+
+    # 3. Plan revision lands 20 minutes later (= 1200s) — OUTSIDE the
+    #    new 15-min (900s) fallback window. Only the strict-id merge
+    #    (goldfive#196 plan stamp) can dedup this case.
+    await store.put_task_plan(
+        TaskPlan(
+            id="p_very_slow",
+            session_id=sid,
+            created_at=100.0 + 20 * 60,
+            summary="pivoted plan",
+            tasks=[],
+            edges=[],
+            revision_reason="by alice: pivot",
+            revision_kind="user_steer",
+            revision_severity="warning",
+            revision_index=1,
+            # goldfive#196: plan carries the source annotation id stamped
+            # by DefaultSteerer._apply_revision.
+            revision_annotation_id="ann_very_slow",
+        )
+    )
+
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+
+    # Exactly one card — strict-id merge collapses across the 20-min gap.
+    assert len(records) == 1, f"expected 1 card, got {len(records)}: {records}"
+    card = records[0]
+    assert card.source == "user"
+    assert card.kind == "STEER"
+    assert card.annotation_id == "ann_very_slow"
+    assert card.author == "alice"
+    assert card.outcome == "plan_revised:r1"
+    assert card.plan_revision_index == 1
+
+
+async def test_slow_user_steer_without_plan_annotation_id_uses_time_window(store):
+    """Back-compat: pre-#196 data (no annotation_id on plan) still dedups
+    via the widened 900s time window up to ~14 minutes.
+
+    Models the transition period: old runs persisted before goldfive#196
+    have empty ``revision_annotation_id`` on the stored plan but a
+    drift row still carries the id (#176). The widened window then
+    folds the plan row into the annotation via the drift_kind +
+    attribution-window fallback in ``_merge_by_annotation_id``.
+    """
+
+    sid = "sess_slow_fallback"
+    await _seed_session(store, sid)
+
+    await store.put_annotation(
+        Annotation(
+            id="ann_fb",
+            session_id=sid,
+            target=AnnotationTarget(agent_id="a", time_start=100.0),
+            author="alice",
+            created_at=100.0,
+            kind=AnnotationKind.STEERING,
+            body="pivot",
+        )
+    )
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "run_id": "r1",
+                    "kind": "user_steer",
+                    "severity": "warning",
+                    "detail": "by alice: pivot",
+                    "annotation_id": "ann_fb",
+                    "recorded_at": 100.2,
+                }
+            ]
+        }
+    )
+    # 14 minutes — inside widened 900s, outside old 300s. No plan-stamped
+    # annotation_id (pre-#196 producer).
+    await store.put_task_plan(
+        TaskPlan(
+            id="p_fb",
+            session_id=sid,
+            created_at=100.0 + 14 * 60,
+            summary="pivoted plan",
+            tasks=[],
+            edges=[],
+            revision_reason="by alice: pivot",
+            revision_kind="user_steer",
+            revision_severity="warning",
+            revision_index=1,
+            revision_annotation_id="",  # pre-#196: empty
+        )
+    )
+
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    assert len(records) == 1
+    card = records[0]
+    assert card.annotation_id == "ann_fb"
+    assert card.outcome == "plan_revised:r1"
+
+
 async def test_slow_autonomous_refine_is_still_bounded_by_5s(store):
     """Autonomous (non-user) drifts keep the tight 5s window.
 

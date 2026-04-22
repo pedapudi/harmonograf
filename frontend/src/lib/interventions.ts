@@ -72,7 +72,14 @@ const OUTCOME_WINDOW_MS = 5000;
 // The 5s default stranded the drift row and leaked a second card;
 // the extended window is still bounded so two separate user STEERs
 // in a session aren't claim-stolen by each other's plan revisions.
-const USER_OUTCOME_WINDOW_MS = 300_000;
+//
+// harmonograf#95 bumped this from 300s → 900s after observing a
+// 13m51s drift→plan gap on kikuchi/Qwen3.5-35B. The primary fix is
+// the strict-id dedup via the PlanRevised annotation_id stamp
+// (goldfive#196); the wider window is a belt-and-suspenders fallback
+// for pre-#196 producers and edge cases where the stamp fails to
+// propagate.
+const USER_OUTCOME_WINDOW_MS = 900_000;
 
 function outcomeWindowFor(driftKind: string): number {
   return USER_DRIFT_KINDS.has((driftKind || '').toLowerCase())
@@ -183,7 +190,11 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
       outcome: `plan_revised:r${revIdx}`,
       planRevisionIndex: revIdx,
       severity: plan.revisionSeverity || '',
-      annotationId: '',
+      // goldfive#196 / harmonograf#95: carry the source annotation id
+      // stamped on the plan so the final dedup pass can strict-join
+      // this row against the source annotation — no more time-window
+      // fallback for slow refines.
+      annotationId: plan.revisionAnnotationId || '',
       driftKind: source === 'goldfive' ? '' : revKind,
     });
   }

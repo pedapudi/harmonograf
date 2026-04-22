@@ -132,6 +132,12 @@ export interface TaskPlan {
   revisionKind?: string;
   revisionSeverity?: string;
   revisionIndex?: number;
+  // goldfive#196 / harmonograf#95: source annotation id stamped on
+  // user-control refines (USER_STEER / USER_CANCEL) so the
+  // intervention deriver can strict-join plan-revision rows against
+  // the source annotation without a time-window fallback. Empty on
+  // the initial plan and on autonomous refines.
+  revisionAnnotationId?: string;
 }
 
 // Per-agent context-window telemetry sample (task #3). Converted from the

@@ -174,6 +174,11 @@ export function convertGoldfivePlan(
       p.revisionSeverity as unknown as number,
     ),
     revisionIndex: Number(p.revisionIndex ?? 0),
+    // goldfive#196 / harmonograf#95: source annotation id stamped on
+    // user-control refines so the intervention deriver can strict-join
+    // plan-revision rows to the source annotation without a time-window
+    // fallback. Empty on the initial plan and on autonomous refines.
+    revisionAnnotationId: p.revisionAnnotationId || '',
   };
 }
 

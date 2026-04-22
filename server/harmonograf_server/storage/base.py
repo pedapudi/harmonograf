@@ -196,6 +196,16 @@ class TaskPlan:
     revision_kind: str = ""
     revision_severity: str = ""
     revision_index: int = 0
+    # Source annotation id when the plan was revised in response to a
+    # user-control drift (USER_STEER / USER_CANCEL) whose originating
+    # ControlMessage carried a bridge-supplied annotation id. Empty on
+    # initial plans and on autonomous refines (loop detection, tool
+    # error, cascade cancel). Stamped by goldfive#196 onto the
+    # PlanRevised.plan wire message; used by the intervention aggregator
+    # (#95) to strict-join the plan-revision row against the source
+    # annotation so a slow refine (observed: 13m51s on Qwen) still
+    # dedups to a single card when it outruns the time-window fallback.
+    revision_annotation_id: str = ""
 
 
 @dataclass
