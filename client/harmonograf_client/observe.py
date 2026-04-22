@@ -18,10 +18,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import TYPE_CHECKING, Any
 
 from .client import Client
+from .config import ClientConfig
 from .sink import HarmonografSink
 
 if TYPE_CHECKING:
@@ -37,6 +37,7 @@ def observe(
     name: str | None = None,
     framework: str = "CUSTOM",
     server_addr: str | None = None,
+    config: ClientConfig | None = None,
     install_adk_telemetry: bool = True,
 ) -> "goldfive.Runner":
     """Attach a :class:`HarmonografSink` to ``runner`` and return it.
@@ -61,7 +62,7 @@ def observe(
     client:
         Optional pre-built :class:`Client` to reuse (e.g. shared across
         multiple runners). When omitted, a new ``Client`` is constructed
-        from ``name`` / ``framework`` / ``server_addr``.
+        from ``name`` / ``framework`` / ``config`` (or ``server_addr``).
     name:
         Client display name. Defaults to ``"agent"``. Ignored when
         ``client`` is provided.
@@ -69,10 +70,17 @@ def observe(
         Client framework tag (shown in the UI). Defaults to
         ``"CUSTOM"``. Ignored when ``client`` is provided.
     server_addr:
-        Harmonograf server address. When omitted, reads the
-        ``HARMONOGRAF_SERVER`` environment variable; falls back to
-        ``Client``'s own default (``127.0.0.1:7531``). Ignored when
-        ``client`` is provided.
+        Harmonograf server address. Takes precedence over
+        ``config.server_addr`` when both are provided. When neither is
+        given, falls back to :data:`ClientConfig.server_addr`'s default
+        (``127.0.0.1:7531``). Ignored when ``client`` is provided.
+    config:
+        Optional :class:`ClientConfig` carrying explicit server address
+        and identity root. When omitted, a default
+        :class:`ClientConfig` is used (no env reads). Pass
+        :meth:`ClientConfig.from_environ` to preserve the legacy
+        ``HARMONOGRAF_SERVER`` / ``HARMONOGRAF_HOME`` behaviour. Ignored
+        when ``client`` is provided.
     install_adk_telemetry:
         When ``True`` (default), best-effort install
         :class:`HarmonografTelemetryPlugin` on the runner so ADK
@@ -99,7 +107,6 @@ def observe(
     should share a single ``Client``+bridge pair instead.
     """
     if client is None:
-        resolved_addr = server_addr or os.environ.get("HARMONOGRAF_SERVER")
         client_kwargs: dict[str, Any] = {
             "name": name or "agent",
             "framework": framework,
@@ -113,8 +120,18 @@ def observe(
             # built ``client=`` with custom capabilities.
             "capabilities": ["STEERING", "HUMAN_IN_LOOP"],
         }
-        if resolved_addr:
-            client_kwargs["server_addr"] = resolved_addr
+        # Explicit ``server_addr`` kwarg wins over ``config.server_addr``
+        # so the pre-#105 keyword-arg ergonomics are preserved. Only
+        # forward to Client when the caller actually supplied an address
+        # somewhere — leaving the kwarg out lets :class:`Client`'s
+        # dataclass default apply, matching the legacy no-arg behaviour
+        # and keeping the test-spy surface unchanged for that path.
+        if server_addr is not None:
+            client_kwargs["server_addr"] = server_addr
+        elif config is not None:
+            client_kwargs["server_addr"] = config.server_addr
+        if config is not None and config.home_dir is not None:
+            client_kwargs["identity_root"] = str(config.home_dir)
         client = Client(**client_kwargs)
 
     sink = HarmonografSink(client)

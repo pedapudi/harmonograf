@@ -262,13 +262,35 @@ target defaults it to `dummy` when unset; if you are running the underlying
 commands by hand, set it yourself.
 
 **The agent calls reporting tools but nothing shows up in harmonograf.**
-Verify the `HARMONOGRAF_SERVER` env var matches the server's gRPC port (`7531`
-by default). `make demo` sets this for you; if you are running the agent
-outside the Makefile target, set it explicitly:
+Verify the agent is pointed at the server's gRPC port (`7531` by default).
+Two ways:
 
-```bash
-HARMONOGRAF_SERVER=127.0.0.1:7531 uv run --extra demo adk web .demo-agents
-```
+- Python, preferred — construct a `ClientConfig` explicitly:
+
+  ```python
+  from harmonograf_client import ClientConfig, observe
+  observe(runner, name="my-agent",
+          config=ClientConfig(server_addr="127.0.0.1:7531"))
+  ```
+
+- Legacy — via the `HARMONOGRAF_SERVER` env var, with `from_environ()`
+  to opt in (no longer read implicitly as of harmonograf#105):
+
+  ```bash
+  HARMONOGRAF_SERVER=127.0.0.1:7531 uv run --extra demo adk web .demo-agents
+  ```
+
+  Code that drives `observe()` from an env-based agent needs to surface
+  the env read:
+
+  ```python
+  observe(runner, config=ClientConfig.from_environ())
+  ```
+
+  `make demo` sets the env for you and the reference agents already
+  call `from_environ()`; if you are running the agent outside the
+  Makefile target, set it yourself or migrate to explicit
+  `ClientConfig`.
 
 **Tasks appear in harmonograf but never transition past `STARTED`.**
 The agent is emitting spans but not calling `report_task_completed`. This is
