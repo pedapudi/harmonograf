@@ -14,7 +14,7 @@ import asyncio
 import logging
 import time
 import uuid
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional
 
 import grpc
 from google.protobuf.timestamp_pb2 import Timestamp
@@ -167,14 +167,39 @@ class FrontendServicerMixin:
                 for s in all_sessions
                 if needle in s.id.lower() or needle in (s.title or "").lower()
             ]
-        total = len(all_sessions)
+
+        # Hide "empty" sessions — zero spans AND zero goldfive task plans
+        # — from the picker unless the caller opts in via
+        # ``include_empty``. Eliminates ghost ``sess_YYYY-MM-DD_NNNN``
+        # rows the Hello handshake auto-created but which never received
+        # any content because the client's spans and goldfive events
+        # routed to a different session id (harmonograf#77). The row is
+        # still persisted — visible to admin tooling that sets
+        # ``include_empty=true`` — and hydrated later if content
+        # eventually lands on it. Scanning spans + plans is already on
+        # the hot path below (for attention_count / last_activity), so
+        # the filter adds no extra storage round-trip for non-empty
+        # sessions.
+        include_empty = bool(getattr(request, "include_empty", False))
+        hydrated: list[tuple[Any, list[Any], list[Any]]] = []
+        for sess in all_sessions:
+            spans = await self._store.get_spans(sess.id)
+            if include_empty or spans:
+                plans: list[Any] = []
+                hydrated.append((sess, spans, plans))
+                continue
+            # Zero spans — fall back to plans before deciding.
+            plans = await self._store.list_task_plans_for_session(sess.id)
+            if plans:
+                hydrated.append((sess, spans, plans))
+
+        total = len(hydrated)
         offset = request.offset or 0
         limit = request.limit or 50
-        page = all_sessions[offset : offset + limit]
+        page = hydrated[offset : offset + limit]
 
         resp = frontend_pb2.ListSessionsResponse(total_count=total)
-        for sess in page:
-            spans = await self._store.get_spans(sess.id)
+        for sess, spans, _plans in page:
             attention = sum(
                 1 for sp in spans if sp.status.value == "AWAITING_HUMAN"
             )
