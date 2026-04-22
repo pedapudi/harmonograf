@@ -39,23 +39,27 @@ flowchart LR
 ## Reading order
 
 1. [`server-ingest-bus.md`](server-ingest-bus.md) — the server fan-in for all
-   telemetry, the pub/sub bus with drop-oldest backpressure, and the
-   control-router that correlates acks from multiple live streams per agent.
+   telemetry, the pub/sub bus with drop-oldest backpressure, the
+   control-router that correlates acks from multiple live streams per agent,
+   the per-session drift ring used for late-subscribe replay, and the
+   intervention aggregator that merges annotations + drifts + plan
+   revisions into one chronological list.
 2. [`storage-sqlite.md`](storage-sqlite.md) — the SQLite backing store.
    Schema with inline commentary, the idempotent migration pattern, PRAGMAs,
    and the cascade-delete paths.
 3. [`session-store-task-registry.md`](session-store-task-registry.md) — the
-   mutable frontend hot path. `SessionStore` / `TaskRegistry` deliberately
-   sidestep React/Zustand and run direct subscriptions into the canvas
-   renderer. Read before adding any new field to the frontend data model.
+   mutable frontend hot path. `SessionStore` with `AgentRegistry`,
+   `SpanIndex`, `TaskRegistry`, `ContextSeriesRegistry`, `DriftRegistry`,
+   and `DelegationRegistry` deliberately sidestep React/Zustand and run
+   direct subscriptions into the canvas renderer. Read before adding any new
+   field to the frontend data model.
 4. [`renderer-pipeline.md`](renderer-pipeline.md) — how the Gantt canvas
    actually draws. Triple-buffered canvas layers, span bucketing for batch
    fill, binary-searched context-window overlay, and the hit-test path that
    powers selection.
-5. [`drift-taxonomy-catalog.md`](drift-taxonomy-catalog.md) — historical
-   drift taxonomy; superseded by goldfive's `DriftKind` (see goldfive's own
-   docs). Kept here for reference while the frontend still maps the same
-   string values onto badges.
+5. [`drift-taxonomy-catalog.md`](drift-taxonomy-catalog.md) — pointer
+   into goldfive's `DriftKind` taxonomy. The mapping of drift strings to
+   UI badges lives in `frontend/src/gantt/driftKinds.ts`.
 
 ## When to read which doc
 

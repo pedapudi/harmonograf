@@ -1,29 +1,121 @@
 # 11. Server Architecture
 
-## Executive Summary
+Status: **CURRENT** (2026-04, reflects the #63 / #66 / #71 / #80 / #85 refreshes).
 
-The Harmonograf Server acts as the centralized nervous system for observability and orchestration of complex, multi-agent artificial intelligence networks. Residing entirely inside a high-throughput, asynchronous Python daemon, the Server uniquely bounds disparate autonomous proxy chains inside real-time metrics routing bounds without causing bottleneck stalling globally natively.
+This is the operator-lens companion to [03-server.md](03-server.md).
+Where doc 03 justifies *why* the server is shaped the way it is, this
+doc walks through *what* you actually find in
+`server/harmonograf_server/` and how the pieces compose.
 
-## 1. Topologies and Entry Points
+## 1. Ingress surfaces
 
-The Server presents itself to the surrounding architecture through two primary networking boundaries inherently isolated via specific protocol layers locally. 
+The server presents two network surfaces from one process:
 
 ```mermaid
-graph LR
-    A[Agent Runtime] -->|gRPC / 7531| B[Ingest RPC]
-    C[Web Browser UI] -->|gRPC-Web / 7532| D[Sonora ASGI]
-    B --> E[Event Bus]
+flowchart LR
+    A[Agent runtime<br/>(harmonograf_client · goldfive)] -- "gRPC / 7531<br/>StreamTelemetry + SubscribeControl" --> B[Ingest RPC]
+    C[Web browser UI<br/>(Gantt console)] -- "gRPC-Web / 7532<br/>Sonora ASGI" --> D[Frontend RPC]
+    B --> E[(SessionBus)]
+    D --> E
     E --> F[Storage adapter]
-    E --> G[Stream Subscribers]
-    D --> G
+    E --> G[Frontend stream fan-out]
 ```
 
-Both ingress points implement active unauthenticated health checks natively ensuring robust orchestration boundaries inherently globally safely. 
+- **Agent ingress** (`rpc/telemetry.py`, `rpc/control.py`) — bidi
+  `StreamTelemetry` and server-streaming `SubscribeControl`, both
+  native gRPC on the same port. In v0 this binds to `127.0.0.1:7531`
+  by default; bearer-token auth (`--auth-token`) is optional and gated
+  on the loopback / non-loopback decision from
+  [ADR 0020](../adr/0020-no-auth-in-v0.md).
+- **Frontend ingress** (`rpc/frontend.py`) — unary and server-streaming
+  RPCs served over gRPC-Web via Sonora's ASGI shim
+  (`_sonora_shim.py`). Listed by `grpcurl` on the same port; the
+  browser hits the Sonora path.
 
-## 2. Ingestion and Bus Engine
+Both surfaces speak the same `proto/harmonograf/v1/` wire protocol
+(plus goldfive's imported `events.proto` / `control.proto`) and land
+on the same `SessionBus`.
 
-### The Dynamic Memory Bus 
-Because the UI streams events natively, database polling fails. The server uses a transient Pub/Sub matrix declared in [`bus.py`](file:///home/sunil/git/harmonograf/server/harmonograf_server/bus.py#L59-66):
+## 2. Ingest pipeline
+
+Per-telemetry-stream dispatch on the `TelemetryUp` oneof lives in
+[`ingest.py`](../../server/harmonograf_server/ingest.py). The pattern
+every branch follows is *dedup → persist → publish*:
+
+```mermaid
+flowchart LR
+    Up([TelemetryUp]) --> Disp{oneof}
+    Disp -- Hello --> H1[handle_hello<br/>create/join session<br/>register agent<br/>mint stream_id]
+    Disp -- SpanStart/Update/End --> H2[per-span session/agent override<br/>harvest hgraf.agent.* hints<br/>_ensure_route auto-register<br/>seen_span_ids dedup]
+    H2 --> ST[Store.append_span / update_span / end_span]
+    H2 --> Bus[(SessionBus publish)]
+    Disp -- PayloadUpload --> H3[_PayloadAssembler<br/>sha256 verify on last=true]
+    H3 --> ST
+    Disp -- Heartbeat --> H4[liveness · progress_counter<br/>stuck detection<br/>context-window sample]
+    Disp -- ControlAck --> H5[ControlRouter.record_ack]
+    Disp -- goldfive_event --> H6[route by event.session_id<br/>per-kind dispatch]
+    H6 --> ST
+    H6 --> Bus
+    H6 --> DR[drift ring<br/>(per-session, 500 cap)]
+    Disp -- Goodbye --> H7[close_stream]
+
+    classDef good fill:#d4edda,stroke:#27ae60,color:#000
+    class Bus,H2,H6 good
+```
+
+### Session routing (harmonograf #66 / goldfive #155)
+
+Spans and goldfive events route to different sessions on the same
+telemetry stream:
+
+- **Spans** route by `pb_span.session_id` falling back to
+  `ctx.session_id` (the stream's Hello session). This is how the
+  per-ADK-agent spans land on the correct session id when the plugin
+  stamps the outer adk-web session on every span (see
+  [ADR 0021](../adr/0021-session-id-pinning.md)).
+- **Goldfive events** route by `Event.session_id` (proto field 5,
+  added in goldfive #155 / #157). When the event carries a
+  `session_id` different from the stream's Hello session,
+  `_handle_goldfive_event` wraps the context in a `_SessionView`
+  read-only overlay that pins `session_id` without mutating the
+  underlying `StreamContext`, and calls `_ensure_route` to
+  auto-create the session/agent row if unseen.
+
+Empty `Event.session_id` falls back to the Hello session — the
+pre-#155 behavior — for backward compatibility with older goldfive
+clients.
+
+### Agent auto-registration (harmonograf #74 / #80)
+
+`_ensure_route` is the first-sight handler for any `(session_id,
+agent_id)` pair. The first span emitted by an agent carries
+`hgraf.agent.*` attributes (name, parent_id, kind, branch) that the
+handler harvests into `Agent.metadata` as `adk.agent.name`,
+`harmonograf.parent_agent_id`, `harmonograf.agent_kind`, and
+`adk.agent.branch`. Subsequent spans short-circuit via `seen_routes`
+so the hot-path pays the harvest cost once per agent, never per span.
+See [ADR 0024](../adr/0024-per-adk-agent-gantt-rows.md).
+
+The plugin side of the contract is
+`HarmonografTelemetryPlugin._register_agent_for_ctx` in
+[`telemetry_plugin.py`](../../client/harmonograf_client/telemetry_plugin.py).
+
+### Storage-before-publish invariant
+
+`Store.append_span` runs before `bus.publish_span_start` within the
+same handler. The `WatchSession` replay path reads from storage then
+attaches to the bus; if publish preceded persist, a reconnect could
+see a live delta for a span not yet in the store and end up with a
+duplicate on the frontend. This invariant is load-bearing — every
+handler keeps the order.
+
+## 3. SessionBus
+
+[`bus.py`](../../server/harmonograf_server/bus.py) is the per-session
+pub/sub surface with bounded per-subscriber queues and drop-oldest
+backpressure. One bus per process; internally
+`dict[session_id, list[Subscription]]`.
+
 ```python
 class SessionBus:
     """Per-session fan-out.
@@ -36,93 +128,107 @@ class SessionBus:
         self._lock = asyncio.Lock()
 ```
 
-When new data streams inside natively globally (via ingest APIs), it triggers explicit bounds bypassing SQL queries natively:
-```python
-    def publish_span_start(self, span: Span) -> None:
-        self.publish(Delta(span.session_id, DELTA_SPAN_START, span))
+Publish semantics: snapshot subscribers under the lock, then iterate
+without it. A slow subscriber can never block the fan-out to fast
+subscribers; instead its queue fills, `put_nowait` raises
+`QueueFull`, the bus records `DELTA_BACKPRESSURE` on that subscriber's
+queue, and the subscriber can resync via `WatchSession` if it detects
+the counter rising.
+
+### Convenience publishers
+
+One `publish_*` per delta kind:
+
 ```
-*See `bus.py`, lines 133-134.*
-
-### Backpressure Tolerances
-Crucially, reading streams from `SessionBus` occurs across async queues. If a frontend browser lags structurally natively, the bus catches `asyncio.QueueFull` limits and natively tracks `DELTA_BACKPRESSURE` bounds to notify developers without stalling upstream ingestion natively.
-*See [`bus.py` L101-112](file:///home/sunil/git/harmonograf/server/harmonograf_server/bus.py#L101-L112).*
-
-## 3. Storage Adapters and State
-
-The backend persistent layouts map exclusively into interchangeable data bindings organically natively.
-
-```mermaid
-classDiagram
-    BaseStorage <|-- MemoryStorage
-    BaseStorage <|-- SqliteStorage
-    class BaseStorage{
-      +upsert_span()
-      +list_sessions()
-      +ping()
-    }
+publish_span_start       publish_task_plan
+publish_span_update      publish_task_status
+publish_span_end         publish_agent_upsert
+publish_annotation       publish_agent_status
+publish_heartbeat        publish_task_report
+publish_context_window_sample
+publish_run_started / _run_completed / _run_aborted
+publish_plan_submitted / _plan_revised
+publish_drift_detected
+publish_delegation_observed / _agent_invocation_*
 ```
 
-### Memory and SQLite Bounds
-Memory instances are volatile topologies optimized for container integration boundaries natively. SQLite commits binary Protobuf traces via Write-Ahead Logs ensuring uncorrupted indexing structures reliably. SQLite persistence establishes explicit DAG variables tracking `Parent_Span` indices inherently defining cascade graphs organically natively globally. 
+The fan-out for goldfive events is substantially the same pattern as
+the legacy span deltas; the wire shape is passthrough via the
+`goldfive_event = 19` variant on `SessionUpdate`.
 
-## 4. Bi-Directional Event Routing
+## 4. ControlRouter
 
-A purely observable database is simply logging. Harmonograf acts as an intervention plane via the control routers inherently globally.
+[`control_router.py`](../../server/harmonograf_server/control_router.py)
+is the reverse direction:
 
-### Human-in-the-Loop Interventions
+- `subscribe(session_id, agent_id, stream_id)` registers a live
+  `SubscribeControl` stream with a bounded (256) event queue.
+- `deliver(agent_id, kind, payload, timeout, require_all_acks)` builds
+  a `goldfive.v1.ControlEvent`, fans it out to every live subscription
+  for the agent, awaits acks, and resolves via `_maybe_resolve`.
+- `record_ack(ack, stream_id)` is called from the telemetry ingest
+  path when `TelemetryUp.control_ack` arrives. The ack rides
+  telemetry, not the control stream itself, so happens-before is
+  preserved (see [ADR 0005](../adr/0005-acks-ride-telemetry.md)).
+- `register_alias(sub_agent_id, stream_agent_id)` maps an ADK
+  sub-agent name to the transport stream's registered agent_id so
+  control events addressed to a per-ADK-agent display name route to
+  the stream that actually owns it.
 
-```mermaid
-sequenceDiagram
-    participant UI as Frontend
-    participant Server as ControlRouter
-    participant Client as Harmonograf Client
-    participant ADK as Agent Runtime
-    
-    ADK->>Client: Blocked (Approval Needed)
-    Client->>Server: Span Update (Status=BLOCKED)
-    Server->>UI: Stream Event
-    UI->>Server: control_router.InjectPayload("approve", true)
-    Server->>Client: Unblock RPC Stream via UUID
-    Client->>ADK: Resume Context Logic
-```
+No queuing across reconnects: if `deliver` finds no live
+subscriptions, it returns `UNAVAILABLE` immediately and the frontend
+surfaces a snackbar. The exception is STEERING annotations, which
+persist as undelivered and replay on reconnect — but that's an
+annotation-layer concern, implemented in `rpc/frontend.py`, not in
+the router.
 
-The system inherently binds connection sockets across `identity.py` hashes securely. Resolving conflicts prevents autonomous networks stalling sequentially inherently locally safely. 
+## 5. Intervention aggregator
 
-**Ingest pipeline & bus subscribers** — every `TelemetryUp` variant routes
-through `IngestPipeline` and lands on `SessionBus`; subscribers (storage,
-WatchSession watchers, retention sweeper) read independently without
-contending on a SQL transaction.
+[`interventions.py`](../../server/harmonograf_server/interventions.py)
+is the chronological merge of three source streams:
 
-```mermaid
-flowchart LR
-    Up([TelemetryUp]) --> Disp{oneof}
-    Disp -- Hello --> Sess[SessionRegistry<br/>create / join]
-    Disp -- SpanStart/Update/End --> SP[span pipeline<br/>dedup + bind tasks]
-    Disp -- PayloadUpload --> PA[PayloadAssembler<br/>chunks → digest verify]
-    Disp -- Heartbeat --> HB[liveness + progress_counter]
-    Disp -- ControlAck --> CR[ControlRouter.deliver_ack]
-    SP --> Bus[(SessionBus<br/>per-session fan-out)]
-    PA --> Bus
-    HB --> Bus
-    Sess --> Bus
-    Bus --> Sub1[Storage adapter<br/>(SQLite / Memory)]
-    Bus --> Sub2[WatchSession queues<br/>(per frontend)]
-    Bus --> Sub3[Retention sweeper]
-    Bus --> Sub4[Stuck-detection<br/>heartbeat watcher]
+- `annotations` table — user STEER / HUMAN_RESPONSE / COMMENT.
+- Ingest pipeline drift ring (`_drifts_by_session`) — live
+  `drift_detected` events, per-session bounded at 500.
+- `task_plans.revision_kind` — plan revisions carrying a drift kind
+  or goldfive-autonomous kind (`cascade_cancel`, `refine_retry`,
+  `human_intervention_required`).
 
-    classDef good fill:#d4edda,stroke:#27ae60,color:#000
-    class Bus,SP good
-```
+The aggregator projects each source into a common
+`InterventionRecord` shape, runs outcome attribution (drift → plan
+revision within a 5-minute window for user-control kinds, 5s for
+autonomous drifts), and deduplicates by `annotation_id` so a single
+user STEER doesn't surface as three cards (see
+[ADR 0023](../adr/0023-intervention-dedup-by-annotation-id.md)).
 
-## 5. Drift Replay for Late Subscribers
+The `ListInterventions(session_id)` unary RPC (added in #87) exposes
+the merged list. Live updates arrive via the existing `WatchSession`
+deltas; the frontend deriver in `lib/interventions.ts` mirrors the
+aggregator so a late-joining client recomputes incrementally without
+a second subscribe.
 
-Goldfive `drift_detected` events are fanned out on the live bus the same way spans and plan events are. The catch is that drifts are also load-bearing for frontend-side features beyond the trajectory pane itself — the `__user__` and `__goldfive__` actor rows (see [frontend architecture §7](10-frontend-architecture.md#7-actor-attribution-and-span-synthesis)) are *lazily* materialized from drift events, so a frontend that subscribes after a drift has already fired would see only worker rows with no attribution for the existing pivots in the trajectory.
+## 6. Drift replay for late subscribers
 
-The fix is a bounded in-memory ring on `IngestPipeline` that retains recent drifts per-session and replays them in `WatchSession`'s initial burst.
+Drift events are load-bearing for frontend-side features beyond the
+trajectory pane — the `__user__` and `__goldfive__` actor rows are
+lazily materialized from drifts. A frontend that subscribes *after* a
+drift has fired would see only worker agent rows with no attribution
+for the existing pivots.
 
-**Ring structure** — [`ingest.py`](file:///home/sunil/git/harmonograf/server/harmonograf_server/ingest.py) holds `_drifts_by_session: dict[str, list[dict[str, Any]]]` with a per-session cap of `_drift_ring_max = 500`. The `_on_drift_detected` hook both publishes onto the bus *and* pushes a compact dict (kind, severity, detail, task_id, agent_id, emitted_at) onto the ring. `drifts_for_session(session_id)` exposes an iterable copy for replay.
+The fix is a bounded in-memory ring on `IngestPipeline`:
 
-**Replay step** — [`rpc/frontend.py`](file:///home/sunil/git/harmonograf/server/harmonograf_server/rpc/frontend.py) `WatchSession` handler runs an initial burst before attaching to the live tail. Step 4b.1 iterates `self._ingest.drifts_for_session(session_id)` and re-emits each as a synthesized `goldfive.v1.Event` with `drift_detected` populated and the cached `emitted_at` timestamp preserved. The client observes the replayed event on the same oneof dispatch it would observe a live one, so actor synthesis and trajectory ribbon population happen identically for reconnects.
+- `_drifts_by_session: dict[str, list[dict[str, Any]]]`, cap 500 per
+  session.
+- `_on_drift_detected` publishes onto the bus *and* pushes a compact
+  dict (kind, severity, detail, task_id, agent_id, emitted_at,
+  annotation_id) onto the ring.
+- `drifts_for_session(session_id)` returns an iterable copy for
+  replay.
+
+`rpc/frontend.py :: WatchSession` re-emits each ring entry as a
+synthesized `goldfive.v1.Event` with `drift_detected` populated and
+the cached `emitted_at` preserved, before attaching to the live bus.
+Client-side dispatch is identical for live vs replayed events.
 
 ```mermaid
 sequenceDiagram
@@ -134,7 +240,7 @@ sequenceDiagram
     participant Fe as Frontend
 
     Client->>Ingest: drift_detected
-    Ingest->>Ring: append compact dict
+    Ingest->>Ring: append compact dict<br/>(annotation_id included)
     Ingest->>Bus: publish live event
     Bus-->>Fe: live tail (if subscribed)
 
@@ -146,20 +252,60 @@ sequenceDiagram
     Watch-->>Fe: attach to live tail
 ```
 
-Retention is deliberately cheap: drifts are orders of magnitude less voluminous than spans (one event per plan pivot, not per LLM call), and the 500 cap bounds memory per session without losing the useful prefix for any reasonable run. SQLite persistence is not used for drifts at the moment — the ring is rebuilt from the live stream on server restart, at the cost of losing pre-restart drift history for long-lived sessions. Adding a drift table to the storage layer is tracked in [milestones.md](../milestones.md) but not load-bearing for v0.
+Retention is deliberately cheap: drifts are orders of magnitude less
+voluminous than spans (one per plan pivot, not one per LLM call), and
+the 500 cap bounds memory per session. SQLite persistence for drifts
+is on the roadmap but not load-bearing for v0 — the ring rebuilds
+from the live stream on server restart.
 
-## 6. System Health, Retention, and GC
+## 7. Storage adapter
 
-Large swarms of active autonomous agents flood bounding limitations frequently. The `retention.py` background chron process guarantees garbage collections natively:
-1. Validates timestamps dynamically globally.
-2. Removes inactive session records preserving database indexing arrays safely reliably natively.
-3. Automatically avoids quarantining loops mapping active processes explicitly structurally natively globally safely cleanly.
+Two backends, one interface (`storage/base.py`):
 
-## 7. Conclusion 
+- `storage/memory.py` — in-memory dicts + intervaltrees, lossy on
+  shutdown. Default for tests; selectable via `--store memory`.
+- `storage/sqlite.py` — `aiosqlite` + WAL, production default.
+  Payload bytes above a threshold live on disk under
+  `{data_dir}/payloads/{xx}/{digest}`; small payloads inline in the
+  `payloads` table.
 
-By splitting synchronous database persistence (`SqliteStorage`) away from transient volatile memory routings (`SessionBus`), the Harmonograf architecture achieves microsecond ingest latencies scaling massively linearly without inducing architectural blocks organically natively globally completely.
+Schema walkthrough lives in
+[internals/storage-sqlite.md](../internals/storage-sqlite.md). The
+header-level facts:
 
----
+- Every storage method is a coroutine that runs SQL on a thread
+  executor.
+- FK cascades are enforced only on `tasks.plan_id`; all other
+  cleanup in `delete_session` is explicit DELETE in FK order.
+- Migrations are additive `ALTER TABLE ADD COLUMN` checked via
+  `PRAGMA table_info`. No version table.
+
+## 8. Health and retention
+
+- `/healthz`, `/readyz` — unauthenticated probes from
+  [`health.py`](../../server/harmonograf_server/health.py).
+- `retention.py` — background sweeper that honors session-age limits
+  configured via CLI. v0 defaults to no auto-retention; operators
+  call `DeleteSession` explicitly.
+- `stress.py` — synthetic-load generator for benchmarks.
+
+## 9. What's NOT here anymore
+
+- **Orchestration.** Plan / task / drift / invariant / refine logic
+  moved to [goldfive](https://github.com/pedapudi/goldfive) in Phases
+  A–D. Harmonograf ingests `goldfive.v1.Event` envelopes via
+  `TelemetryUp.goldfive_event` and persists plan / task state, but
+  never decides any of it. See
+  [`../goldfive-integration.md`](../goldfive-integration.md).
+- **`ControlKind` / `ControlAck` / `ControlEvent` proto.** Control
+  wire types live in `goldfive/v1/control.proto` and harmonograf
+  imports them. Harmonograf's own `control.proto` is only the
+  `SubscribeControlRequest` envelope.
+- **`Task` / `TaskPlan` / `TaskEdge` / `UpdatedTaskStatus` proto.**
+  These moved to `goldfive/v1/types.proto`. Harmonograf's storage
+  schema still has a `task_plans` / `tasks` table because the server
+  *persists* plans derived from `PlanSubmitted` / `PlanRevised`
+  events, but the wire types are goldfive's.
 
 ## Related ADRs
 
@@ -170,3 +316,7 @@ By splitting synchronous database persistence (`SqliteStorage`) away from transi
 - [ADR 0017 — Task state is monotonic; terminal states absorb](../adr/0017-monotonic-task-state.md)
 - [ADR 0018 — Heartbeat + progress_counter for stuck detection](../adr/0018-heartbeat-stuck-detection.md)
 - [ADR 0020 — No authentication or multi-tenancy in v0](../adr/0020-no-auth-in-v0.md)
+- [ADR 0021 — Pin `goldfive.Session.id` to the outer adk-web session id](../adr/0021-session-id-pinning.md)
+- [ADR 0022 — Lazy Hello](../adr/0022-lazy-hello.md)
+- [ADR 0023 — Intervention dedup by `annotation_id`](../adr/0023-intervention-dedup-by-annotation-id.md)
+- [ADR 0024 — Per-ADK-agent Gantt rows with auto-registration](../adr/0024-per-adk-agent-gantt-rows.md)

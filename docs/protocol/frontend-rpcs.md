@@ -16,6 +16,7 @@ service declaration is in
 | [`PostAnnotation`](#postannotation) | unary | User note / steering / HITL response |
 | [`SendControl`](#sendcontrol) | unary | PAUSE / RESUME / STEER / STATUS_QUERY / etc. |
 | [`DeleteSession`](#deletesession) | unary | Purge a session |
+| [`ListInterventions`](#listinterventions) | unary | Merged chronological intervention history |
 | [`GetStats`](#getstats) | unary | Retention / storage stats |
 
 ## `ListSessions`
@@ -392,6 +393,57 @@ message DeleteSessionResponse {
 Refuses LIVE sessions unless `force=true`. Payloads are garbage-
 collected by digest: only the bytes that no other session still
 references are freed.
+
+## `ListInterventions`
+
+```proto
+rpc ListInterventions(ListInterventionsRequest) returns (ListInterventionsResponse);
+```
+
+```proto
+message ListInterventionsRequest {
+  string session_id = 1;
+}
+
+message ListInterventionsResponse {
+  repeated Intervention interventions = 1;
+}
+```
+
+Returns the chronologically merged view of user-initiated,
+drift-triggered, and goldfive-autonomous interventions for one
+session. Derived on the server by
+`server/harmonograf_server/interventions.py` from three sources that
+already exist on the wire:
+
+- the `annotations` table (STEERING / HUMAN_RESPONSE / COMMENT),
+- the in-memory drift ring (`_drifts_by_session`, bounded at 500 per
+  session),
+- `task_plans.revision_kind` / `revision_index` for plan revisions
+  carrying a drift kind or a goldfive autonomous kind
+  (`cascade_cancel`, `refine_retry`, `human_intervention_required`).
+
+Outcome attribution uses a per-kind window:
+- **5 minutes** for user-control drift kinds (`user_steer`,
+  `user_cancel`) — the LLM refine round-trip can take tens of seconds
+  on larger models.
+- **5 seconds** for autonomous drifts — those are fast-path
+  heuristics with no LLM round-trip to wait for.
+
+Dedup by `annotation_id`: rows that share an annotation id (the
+original STEER annotation, the `user_steer` drift goldfive emitted,
+and the subsequent `plan_revised`) collapse into one card. See
+[ADR 0023](../adr/0023-intervention-dedup-by-annotation-id.md).
+
+Live updates: the frontend mirrors the aggregator in
+`lib/interventions.ts`, consuming the `initial_annotation` /
+`new_annotation` / `goldfive_event.drift_detected` /
+`goldfive_event.plan_revised` deltas on `WatchSession`. A late-joining
+frontend reconciles by calling `ListInterventions` once at open time
+and relying on live deltas thereafter.
+
+See [`data-model.md#intervention`](data-model.md#intervention) for the
+`Intervention` message shape.
 
 ## `GetStats`
 

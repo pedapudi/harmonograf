@@ -1,14 +1,24 @@
 # `SubscribeControl` reference
 
 ```proto
-rpc SubscribeControl(SubscribeControlRequest) returns (stream ControlEvent);
+rpc SubscribeControl(SubscribeControlRequest) returns (stream goldfive.v1.ControlEvent);
 ```
 
 `SubscribeControl` is a server-streaming RPC opened by the agent right
 after its `StreamTelemetry` handshake (`Welcome`) completes. The server
-pushes `ControlEvent`s that the agent should honor; the agent's
-responses (`ControlAck`) travel **back upstream on
+pushes `goldfive.v1.ControlEvent`s that the agent should honor; the
+agent's responses (`goldfive.v1.ControlAck`) travel **back upstream on
 `StreamTelemetry`**, not on this stream.
+
+> **Wire type ownership.** Since harmonograf #34 / goldfive #83 /
+> harmonograf migration issue #37, `ControlKind`, `ControlEvent`,
+> `ControlAck`, `ControlAckResult`, `ControlTarget`, and every
+> per-kind payload (`SteerPayload`, `RewindPayload`, `ApprovePayload`,
+> `RejectPayload`, `InjectMessagePayload`) live in
+> [`goldfive/v1/control.proto`](https://github.com/pedapudi/goldfive/blob/main/proto/goldfive/v1/control.proto).
+> Harmonograf imports them — there is no parallel harmonograf
+> ControlEvent any more. The shapes below are therefore summaries of
+> the goldfive protos; their canonical definitions are in goldfive.
 
 ## Why acks ride telemetry
 
@@ -49,24 +59,47 @@ returned in that `Welcome`.
 
 ## Response
 
-The response stream is a sequence of `ControlEvent`s. `ControlEvent`
-lives in [`types.proto`](../../proto/harmonograf/v1/types.proto) so
-`SendControl` (in `frontend.proto`) can also reference it.
+The response stream is a sequence of `goldfive.v1.ControlEvent`s.
+`ControlEvent` lives in goldfive's control proto; `SendControl` (in
+`harmonograf/v1/frontend.proto`) also references it directly.
 
 ```proto
+// goldfive/v1/control.proto
 message ControlEvent {
   string id = 1;
   google.protobuf.Timestamp issued_at = 2;
   ControlTarget target = 3;
   ControlKind kind = 4;
-  bytes payload = 5;
+
+  oneof payload {
+    SteerPayload steer = 10;         // note, suggested_action, author, annotation_id
+    RewindPayload rewind = 11;       // task_id
+    ApprovePayload approve = 12;     // target_id, detail
+    RejectPayload reject = 13;       // target_id, detail
+    InjectMessagePayload inject_message = 14;  // role, text
+  }
 }
 
 message ControlTarget {
   string agent_id = 1;
-  string span_id = 2;  // optional, kind-dependent
+  string task_id = 2;      // goldfive task-level approval (Flow A)
+  string tool_call_id = 3; // ADK tool-confirmation (Flow B)
 }
 ```
+
+The `payload` is a **typed oneof** rather than `bytes`. Earlier
+revisions used `bytes payload` and each consumer invented its own
+JSON schema; that caused the schema drift that triggered the move
+to goldfive-owned protos in the first place.
+
+`SteerPayload` gained two fields in goldfive #171:
+
+- `author` — operator identity, populated from the originating
+  `Annotation.author` by `PostAnnotation`.
+- `annotation_id` — source annotation id, used by goldfive for
+  STEER idempotency and by harmonograf's intervention aggregator
+  for row dedup (see
+  [ADR 0023](../adr/0023-intervention-dedup-by-annotation-id.md)).
 
 ### Control kinds
 
@@ -216,6 +249,27 @@ The alias map is:
 - **Per-process** (no cross-server persistence).
 - **Cleared when the underlying stream disconnects** — aliases pointing
   at a dropped stream are removed in `ControlRouter.unsubscribe`.
+
+## STEER body validation (harmonograf #72 / goldfive #171)
+
+The client-side `ControlBridge` validates every `STEER` body before
+forwarding to goldfive's `ControlChannel`. The validation is local to
+the client — the server's outstanding `deliver` future still resolves
+via the `FAILURE` ack, not a timeout.
+
+```
+body empty / whitespace-only              → ack FAILURE, detail="body empty"
+body > STEER_BODY_MAX_BYTES (8192 utf-8)  → ack FAILURE, detail="body too long (N)"
+ASCII control chars (ord < 32, not \t/\n) → stripped; body forwarded
+```
+
+Implemented in
+[`client/harmonograf_client/_control_bridge.py`](../../client/harmonograf_client/_control_bridge.py)
+(`_validate_steer_body`, `_sanitise_steer_body`,
+`ControlBridge._events_loop`). The scrub step prevents smuggling
+escape sequences into the downstream LLM prompt; the cap prevents a
+pathological UI / scripted caller from bloating every subsequent
+model call and storage write.
 
 ## Reject / failure modes
 

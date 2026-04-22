@@ -88,6 +88,22 @@ If you are new to harmonograf, read in this order:
 - [0020 — No authentication or multi-tenancy in v0](0020-no-auth-in-v0.md)
   — loopback-first plus optional shared bearer token; auth v1 is a
   future concern.
+- [0021 — Pin `goldfive.Session.id` to the outer adk-web session id](0021-session-id-pinning.md)
+  — one adk-web run = one harmonograf session, even with AgentTool
+  sub-Runners minting their own session ids.
+- [0022 — Lazy Hello](0022-lazy-hello.md) — defer the `Hello` RPC
+  until the first real emit; eliminates ghost `sess_*` rows and lets
+  the home session stamp with the correct id from the start.
+- [0023 — Intervention dedup by `annotation_id`](0023-intervention-dedup-by-annotation-id.md)
+  — one user STEER can surface as an annotation, a drift, and a
+  plan revision; dedup structurally on the source annotation id.
+- [0024 — Per-ADK-agent Gantt rows with auto-registration](0024-per-adk-agent-gantt-rows.md)
+  — per-agent id stacking in the plugin + first-span `hgraf.agent.*`
+  hints + server-side auto-register give one Gantt row per ADK
+  agent without a new wire event.
+- [0025 — Intervention timeline viz on three channels](0025-intervention-timeline-viz.md)
+  — source (color) × kind (glyph) × severity (ring) plus stable
+  X-anchor hover; colorblind-safe by construction.
 
 ## Writing a new ADR
 

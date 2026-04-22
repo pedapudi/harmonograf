@@ -5,6 +5,23 @@ Scope: the Python process that terminates agent telemetry, persists session stat
 
 This doc presupposes the wire protocol in `01-data-model-and-rpc.md` and the frontend interactions in `04-frontend-and-interaction.md`. Storage and routing decisions here exist to serve those.
 
+> **Companion doc.** Operator-lens walkthrough of the same code is in
+> [11-server-architecture.md](11-server-architecture.md), which
+> covers the current state including session routing, agent
+> auto-registration, the drift ring, and the intervention
+> aggregator. This doc focuses on the *design rationale* for why the
+> server is shaped the way it is; doc 11 focuses on *what you find*
+> when you open the server package.
+>
+> **Post-migration deltas (2026-04).** The server now dispatches
+> `TelemetryUp.goldfive_event` envelopes (field 11) carrying
+> `goldfive.v1.Event` variants for plan / task / drift / run
+> lifecycle. `TaskPlan` (field 9) and `UpdatedTaskStatus` (field 10)
+> are **reserved** — plan / task state rides inside goldfive events.
+> New RPCs since this doc: `ListInterventions` (harmonograf #87).
+> New in-memory structures: `_drifts_by_session` ring (500 cap per
+> session) for late-subscribe replay.
+
 ---
 
 ## 1. Design goals

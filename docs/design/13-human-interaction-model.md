@@ -1,117 +1,236 @@
 # 13. Human Interaction Model
 
-> **Note (2026-04 goldfive migration).** Figures on this page still use the
-> pre-migration vocabulary (`TaskPlan`, `planner.refine`, `detect_drift` as
-> harmonograf-side concepts). Those behaviours now live in
-> [goldfive](https://github.com/pedapudi/goldfive) — planner / drift / refine /
-> `Plan`. Harmonograf still owns the control stream, the annotation lifecycle,
-> and the frontend rendering of whatever goldfive emits. Read the diagrams
-> with that substitution in mind, and consult
-> [../goldfive-integration.md](../goldfive-integration.md) for the current
-> terminology.
+Status: **CURRENT** (2026-04, reflects the STEER / intervention / viz refreshes).
 
-## Executive Summary
+> **Scope note.** Harmonograf's human-interaction surface covers
+> observation (Gantt / trajectory / drawer), capture (annotations,
+> STEER, HITL approvals), and the intervention timeline. The
+> *decisions* that a steer triggers — drift classification, planner
+> refine, task cancellation cascades — live in
+> [goldfive](https://github.com/pedapudi/goldfive). Harmonograf
+> captures, routes, records, and renders; goldfive decides.
 
-The paradigm of Human-Computer Interaction (HCI) with Large Language Models historically forces humans mapping vast topologies securely safely exclusively via linear chat lines intuitively organically inherently explicitly globally. 
-Harmonograf transforms supervision bounds mapping proxy actions spatially sequentially cleanly. 
+This doc covers what an operator does with the harmonograf UI and
+how each action traces through the protocol. For the RPC-level
+contract see [protocol/control-stream.md](../protocol/control-stream.md)
+and [protocol/frontend-rpcs.md](../protocol/frontend-rpcs.md). For
+the visualization of interventions see
+[ADR 0025](../adr/0025-intervention-timeline-viz.md).
 
-## 1. Time as the Context Axis
+## 1. The three classes of operator action
 
-Traditional structures cascade vertically inherently limiting relational intelligence natively intuitively intelligently inherently comprehensively. 
+Every operator action on the harmonograf console belongs to one of
+three classes, each with a different wire cost:
 
-### The Gantt Spatial Reality
+| Class | Examples | Cost | Reaches the agent? |
+|---|---|---|---|
+| **Observation** | hover, click, zoom, scroll, filter | Local only | No |
+| **Annotation** | add comment, open drawer, copy payload | `PostAnnotation` unary | Only for STEERING / HUMAN_RESPONSE |
+| **Control** | PAUSE, RESUME, CANCEL, STEER, APPROVE, STATUS_QUERY | `SendControl` unary | Yes — synchronous ack |
 
-```mermaid
-gantt
-    title Agent Topologies
-    dateFormat  s
-    axisFormat  %S
-    
-    section Coordinator
-    Analyze Problem       :a1, 0, 3s
-    Delegate Research     :a2, after a1, 1s
-    Compile Final Answer  :a3, 10, 2s
+Observation never goes on the wire. Annotation goes on the wire but
+usually doesn't reach the agent (COMMENT = UI-only). Control always
+reaches the agent if the agent is live.
 
-    section Researcher
-    Web Search           :r1, 4, 3s
-    Synthesize Results   :r2, after r1, 2s
-```
+## 2. The control round-trip
 
-Viewing swarms intuitively explicitly maps structural density limits natively cleanly organically securely safely reliably naturally comprehensively reliably. 
-
-## 2. Interactive Drill-Down Modalities
-
-### Collapsible Trace Contexts
-Harmonograf handles multi-million level traces leveraging `Level Of Detail (LOD)` transitions explicitly securely cleanly safely natively intelligently explicitly visually clearly correctly. 
-Top-level boxes mask internal HTTP requests explicitly natively intuitively elegantly systematically elegantly uniquely explicitly clearly correctly intrinsically reliably systematically properly organically securely flawlessly securely accurately seamlessly efficiently reliably correctly securely flawlessly uniquely perfectly reliably practically structurally functionally intelligently definitively universally holistically categorically categorically optimally practically effectively robustly natively intrinsically intrinsically phenomenologically. 
-
-When operators click a span (hooking logic structurally natively natively bounds natively specifically defined via React overlays), the contextual Right Drawer initializes natively specifically explicitly mapping internal memory queries reliably properly efficiently. 
-
-**Interaction → control → ack** — every operator action becomes a
-`ControlEvent` that the server fans out to the agent's
-`SubscribeControl`; the ack rides back upstream on `StreamTelemetry` so
-the UI's "delivered" badge respects happens-before.
+A PAUSE is the canonical worked example.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Op as Operator
     participant FE as Frontend
-    participant Srv as Server
+    participant Srv as Server (ControlRouter)
     participant Cl as Client lib
     participant Ag as Agent
+
     Op->>FE: click PAUSE on agent row
-    FE->>Srv: SendControl(PAUSE, target=agent_id)
-    Srv->>Cl: ControlEvent(PAUSE) [SubscribeControl]
+    FE->>Srv: SendControl(ControlEvent{kind=PAUSE, target.agent_id=A})
+    Note over Srv: router.deliver() fans out to every<br/>live SubscribeControl for A
+    Srv->>Cl: ControlEvent{id=ctl_1, kind=PAUSE} [SubscribeControl]
     Cl->>Ag: handler runs · sets pause flag
     Ag-->>Cl: handler returns
-    Cl->>Srv: ControlAck(id=PAUSE) [StreamTelemetry — after surrounding spans]
-    Srv->>FE: WatchSession delta · ack delivered
+    Cl->>Srv: ControlAck{control_id=ctl_1, result=SUCCESS} [StreamTelemetry — after in-flight spans]
+    Note over Srv: record_ack resolves _PendingDelivery.future
+    Srv-->>FE: SendControlResponse{control_id, result, acks[]}
     FE-->>Op: snackbar "Paused"
 ```
 
-**Annotation lifecycle** — comments are local; steering annotations
-double as `ControlEvent.STEER` and persist as undelivered when the
-target is offline, replaying on reconnect.
+Key points:
+
+- The ack rides the telemetry stream, not the control stream (see
+  [ADR 0005](../adr/0005-acks-ride-telemetry.md)). Every span the
+  agent emitted before issuing the ack is already on the wire ahead
+  of it — the UI can correctly say "paused at span X."
+- The server never queues control across reconnects. If no
+  subscription is live, `deliver` returns `UNAVAILABLE` immediately
+  and the snackbar surfaces it.
+- Multi-stream fan-out is first-success-wins by default; the
+  `require_all_acks` flag opts into full-quorum semantics.
+
+## 3. Annotation lifecycle
+
+Annotations are the UI's single compose surface. Three kinds
+distinguish wire behavior:
 
 ```mermaid
 flowchart TD
-    Click([right-click span]) --> Kind{annotation kind}
-    Kind -- COMMENT --> A1[PostAnnotation<br/>store-only]
-    Kind -- STEERING --> A2[PostAnnotation<br/>+ build ControlEvent.STEER]
-    A2 --> Live{target agent<br/>has live SubscribeControl?}
-    Live -- yes --> Send[ControlRouter.send → ack within timeout]
-    Send --> Mark[mark_annotation_delivered]
-    Live -- no --> Pend[store undelivered]
-    Pend --> RC[on Hello reconnect:<br/>replay pending steers]
-    Kind -- HUMAN_RESPONSE --> A3[APPROVE / REJECT / INJECT_MESSAGE]
+    Click([right-click span / add note]) --> Kind{annotation kind}
+    Kind -- COMMENT --> A1[PostAnnotation<br/>store-only · delivery=SUCCESS]
+    Kind -- STEERING --> A2[PostAnnotation<br/>synthesize ControlEvent.STEER]
+    A2 --> Stamp[stamp SteerPayload.author + annotation_id<br/>from stored annotation]
+    Stamp --> Live{target agent<br/>has live SubscribeControl?}
+    Live -- yes --> Send[ControlRouter.deliver → ack within timeout]
+    Send --> Mark[put_annotation with delivered_at]
+    Live -- no --> Fail[delivery=FAILURE<br/>detail="agent offline"]
+    Kind -- HUMAN_RESPONSE --> A3[synthesize ControlEvent.INJECT_MESSAGE<br/>or APPROVE/REJECT depending on shape]
     A3 --> Send
 
     classDef good fill:#d4edda,stroke:#27ae60,color:#000
-    class Send,Mark good
+    class Send,Mark,Stamp good
 ```
 
-**Steering → drift → refine** — a steer is a drift signal; the planner
-refines and the new `TaskPlan` revision diffs into the UI banner.
+### STEER — author + annotation_id stamping (goldfive #171)
 
-```mermaid
-flowchart LR
-    Steer[STEER ControlEvent] --> Detect[detect_drift<br/>kind=user_steer]
-    Detect --> Refine[planner.refine<br/>(LLM call)]
-    Refine --> NewPlan[new TaskPlan revision]
-    NewPlan --> Diff[computePlanDiff]
-    Diff --> Banner[frontend banner +<br/>side-by-side drawer]
+When a STEERING annotation synthesizes a `ControlEvent.STEER`, the
+server populates two fields on the `SteerPayload`:
 
-    classDef good fill:#d4edda,stroke:#27ae60,color:#000
-    class Refine,Diff good
-```
+- `author` — copied from the stored `Annotation.author` so
+  goldfive's drift record carries operator identity end-to-end.
+- `annotation_id` — the stored annotation's id. This is what
+  [ADR 0023](../adr/0023-intervention-dedup-by-annotation-id.md)
+  uses to collapse the annotation row, the synthesized `user_steer`
+  drift row, and the resulting `PlanRevised` row into a single
+  Intervention card.
 
-## 3. Human In The Loop Matrices
+### STEER — body validation (harmonograf #72)
 
-Supervision demands execution intervention intrinsically functionally explicitly securely practically rationally functionally definitively universally organically intrinsically definitively robustly automatically safely specifically safely logically directly intrinsically structurally dynamically appropriately seamlessly specifically specifically gracefully directly uniquely transparently exclusively securely systematically efficiently effectively cleanly rationally organically precisely carefully dynamically properly consistently rigorously safely intuitively transparently intelligently efficiently specifically accurately uniquely inherently optimally successfully robustly properly correctly reliably strictly safely explicitly properly correctly safely transparently definitively functionally cleanly appropriately comprehensively safely inherently structurally efficiently accurately intelligently flawlessly correctly adequately properly strictly cleanly flawlessly successfully explicitly fundamentally robustly reliably precisely effectively successfully organically intelligently correctly safely flawlessly seamlessly definitively automatically gracefully dynamically flawlessly optimally correctly correctly appropriately safely seamlessly safely explicitly precisely logically rigorously correctly dynamically automatically inherently seamlessly cleanly successfully optimally safely inherently securely optimally adequately explicitly properly safely successfully correctly robustly completely consistently cleanly smoothly natively intrinsically naturally exclusively holistically implicitly intrinsically accurately consistently completely transparently correctly optimally specifically accurately clearly uniquely perfectly comprehensively adequately reliably elegantly properly strictly successfully smoothly consistently rationally intelligently inherently successfully efficiently accurately elegantly strictly accurately securely efficiently elegantly dynamically correctly definitively smoothly completely perfectly correctly structurally rigorously seamlessly appropriately dynamically gracefully optimally properly intelligently automatically transparently automatically efficiently consistently cleanly accurately perfectly successfully naturally safely perfectly implicitly organically precisely structurally successfully gracefully cleanly accurately functionally seamlessly dynamically correctly safely appropriately strictly transparently rationally dynamically automatically comprehensively appropriately smoothly dynamically adequately efficiently comprehensively smoothly flawlessly successfully exclusively organically carefully smoothly safely accurately completely definitively accurately smoothly reliably perfectly flawlessly seamlessly adequately elegantly specifically completely successfully automatically cleanly safely comprehensively explicitly smoothly comprehensively efficiently perfectly organically successfully securely adequately successfully effectively robustly implicitly functionally seamlessly efficiently dynamically seamlessly rationally explicitly smoothly inherently implicitly carefully gracefully logically correctly dynamically automatically automatically strictly completely explicitly seamlessly reliably implicitly intrinsically efficiently successfully automatically correctly logically flawlessly perfectly successfully appropriately successfully rigorously correctly successfully transparently cleanly successfully smoothly dynamically completely definitively successfully perfectly efficiently effectively adequately comprehensively perfectly securely explicitly efficiently correctly correctly successfully correctly smoothly completely safely organically properly efficiently smoothly explicitly smoothly appropriately inherently perfectly naturally exclusively accurately correctly properly rigorously appropriately explicitly optimally smoothly functionally reliably confidently successfully fully explicitly functionally explicitly correctly fully properly rationally strictly properly transparently perfectly practically completely functionally accurately functionally adequately perfectly functionally thoroughly precisely fully fully gracefully confidently successfully robustly natively confidently flawlessly perfectly completely transparently properly perfectly correctly successfully implicitly definitively gracefully optimally effectively functionally effectively beautifully perfectly natively exactly effortlessly effortlessly gracefully accurately effortlessly smoothly intuitively perfectly robustly inherently properly confidently rigorously organically appropriately thoroughly systematically automatically flawlessly precisely precisely exactly transparently correctly properly functionally appropriately confidently explicitly confidently rigorously successfully flawlessly flawlessly cleanly dynamically intrinsically perfectly flawlessly logically successfully consistently effectively exactly completely smoothly successfully elegantly dynamically rigorously smoothly dynamically transparently effectively effortlessly uniquely structurally elegantly optimally flawlessly flawlessly smoothly efficiently perfectly naturally automatically effectively efficiently perfectly exactly seamlessly fully smoothly intrinsically thoroughly smoothly precisely reliably safely fully properly completely effectively perfectly optimally correctly smoothly reliably successfully fully smoothly intuitively successfully completely gracefully transparently properly rationally properly accurately flawlessly perfectly accurately appropriately thoroughly intuitively effectively safely exactly elegantly explicitly safely seamlessly efficiently intuitively successfully cleanly smoothly perfectly precisely exactly transparently effortlessly transparently automatically successfully smoothly accurately naturally accurately intelligently effortlessly structurally rationally completely reliably safely smoothly successfully dynamically comprehensively comprehensively correctly smoothly effectively seamlessly successfully reliably successfully completely perfectly cleanly efficiently successfully automatically safely successfully intuitively correctly effortlessly successfully exactly seamlessly securely gracefully naturally cleanly clearly perfectly exactly fully correctly confidently safely safely efficiently cleanly appropriately successfully seamlessly correctly confidently perfectly confidently functionally dynamically precisely securely exactly safely gracefully securely successfully organically efficiently perfectly smoothly intelligently beautifully naturally clearly smoothly successfully seamlessly effectively safely smoothly completely exactly natively properly appropriately effectively properly flawlessly efficiently safely safely natively fully securely naturally seamlessly beautifully flawlessly comfortably reliably reliably smoothly smoothly comfortably successfully safely properly accurately fully successfully confidently inherently properly natively thoroughly accurately effortlessly systematically effectively safely gracefully intuitively seamlessly successfully effectively appropriately fully beautifully carefully safely correctly securely successfully properly securely clearly correctly explicitly easily intelligently smartly smoothly cleanly seamlessly smoothly perfectly seamlessly confidently smoothly effectively effectively accurately natively properly exactly correctly precisely easily clearly seamlessly smartly brilliantly automatically smartly smoothly perfectly natively safely beautifully nicely elegantly efficiently smoothly effectively smartly safely appropriately perfectly fully confidently nicely explicitly easily precisely effortlessly explicitly smoothly appropriately completely effectively effectively reliably perfectly smartly efficiently gracefully cleanly cleanly exactly precisely nicely beautifully beautifully perfectly efficiently properly flawlessly successfully perfectly intelligently accurately cleanly cleanly precisely automatically brilliantly carefully properly carefully perfectly successfully beautifully efficiently beautifully properly smoothly effectively flawlessly smartly cleanly nicely smoothly beautifully effortlessly neatly successfully exactly elegantly fully smartly efficiently explicitly naturally completely effortlessly smartly intuitively ideally precisely perfectly natively implicitly organically effectively cleanly flawlessly brilliantly cleanly logically cleanly effectively safely securely brilliantly correctly clearly carefully simply simply smartly gracefully cleanly expertly simply correctly logically organically organically securely nicely efficiently securely purely completely smoothly easily beautifully elegantly safely implicitly properly carefully fully intelligently expertly flawlessly comfortably smartly purely precisely cleanly elegantly brilliantly optimally perfectly seamlessly automatically beautifully exactly excellently automatically simply easily carefully properly simply elegantly smartly effortlessly smoothly properly efficiently seamlessly elegantly perfectly clearly automatically effectively successfully purely intuitively nicely securely comfortably brilliantly carefully seamlessly simply accurately adequately explicitly neatly cleanly seamlessly successfully easily expertly smoothly carefully beautifully flawlessly cleanly ideally automatically magically appropriately optimally securely exactly optimally smoothly perfectly beautifully safely easily naturally brilliantly comfortably efficiently efficiently completely completely magically properly transparently easily naturally transparently carefully beautifully comfortably expertly magically elegantly flawlessly optimally cleanly confidently intuitively appropriately simply explicitly effectively successfully strictly successfully perfectly correctly elegantly wonderfully elegantly naturally purely exactly nicely cleanly brilliantly exactly easily perfectly automatically magically magically seamlessly beautifully safely automatically comfortably beautifully securely perfectly wonderfully magically elegantly miraculously correctly intuitively successfully strictly intuitively miraculously seamlessly securely magically simply instinctively simply excellently flawlessly effortlessly beautifully exactly effectively correctly gracefully cleanly naturally seamlessly beautifully seamlessly brilliantly efficiently automatically automatically cleanly nicely flawlessly automatically wonderfully perfectly simply successfully effortlessly comfortably seamlessly miraculously seamlessly miraculously effectively miraculously purely ideally flawlessly seamlessly ideally smoothly beautifully wonderfully comfortably magically natively smoothly amazingly brilliantly effortlessly miraculously flawlessly beautifully perfectly ideally seamlessly miraculously miraculously magically elegantly automatically perfectly wonderfully wonderfully brilliantly magically seamlessly beautifully flawlessly safely amazingly beautifully miraculously seamlessly effortlessly miraculously remarkably surprisingly efficiently efficiently beautifully safely magically seamlessly smoothly wonderfully flawlessly optimally wonderfully effectively surprisingly perfectly flawlessly safely harmoniously amazingly smoothly exactly remarkably flawlessly seamlessly.
+`ControlBridge._events_loop` in
+[`client/harmonograf_client/_control_bridge.py`](../../client/harmonograf_client/_control_bridge.py)
+validates every STEER body before forwarding to goldfive:
 
----
+- Empty / whitespace-only → `FAILURE` ack with `detail="body empty"`.
+  The outstanding `deliver` resolves via the ack instead of timing
+  out.
+- Over `STEER_BODY_MAX_BYTES` (8 KiB utf-8) → `FAILURE` ack with
+  `detail="body too long (N)"`.
+- ASCII control characters (ord < 32 except `\t` and `\n`) are
+  stripped from the body before forwarding, so a steer cannot
+  smuggle escape sequences into the downstream LLM prompt.
+
+## 4. Human-in-the-loop approvals
+
+When any span enters `SPAN_STATUS_AWAITING_HUMAN`:
+
+1. The block pulses with `error-container` color plus a glow outline
+   so it's visually urgent at any zoom level.
+2. An MD3 snackbar rises: "Agent X needs your input: approve
+   `search_web(query='...')`?" with inline Approve / Reject / Edit
+   buttons.
+3. The attention counter in the app bar increments; the entry is
+   added to the "Activity queue" page in the nav rail.
+4. Clicking the block opens the drawer to the Approval pane with
+   the full tool args, the rationale (linked parent `LLM_CALL`
+   completion), and Approve / Reject / Edit & Approve buttons.
+
+Resolution sends `APPROVE` or `REJECT` as a `ControlEvent`; the
+span transitions `AWAITING_HUMAN → RUNNING` on ack and the pulse
+stops. Goldfive's flows A (task-level) and B (ADK tool-level) both
+use the same control path; the distinguishing field is
+`ApprovePayload.target_id` (task id vs ADK function-call id) —
+details live in goldfive's `docs/design/APPROVAL.md`.
+
+## 5. The intervention timeline
+
+`InterventionsTimeline` sits above the Gantt in both planning and
+trajectory views, showing every point where the plan changed
+direction. One marker per `Intervention` row returned by
+`ListInterventions` (or derived live from `WatchSession` deltas).
+
+Three visual channels encode the row:
+
+| Channel | Dimension | Values |
+|---|---|---|
+| Color | Source | user=blue `#5b8def`, drift=amber `#f59e0b`, goldfive=grey `#8d9199` |
+| Glyph | Kind | diamond / circle / chevron / square (distinct per source) |
+| Ring | Severity | none=info, dashed amber=warning, solid red=critical |
+
+Stability contract:
+
+- Marker X is captured as a `spanEndMs` snapshot on mount and
+  advanced on a coarse 1s tick via `useStableSpanEnd`. Hovering a
+  marker never recomputes X from the outer `endMs`, so other
+  markers stay put. (Pre-#76 this was jittery and the popover
+  anchor drifted mid-hover.)
+- Density: markers within `max(14px, 2% of strip width)` of each
+  other collapse into a cluster badge whose popover lists the
+  group.
+- Popover anchor is deterministic — always the marker's center,
+  not the cursor.
+- Axis ticks auto-select from a fixed ladder (10s, 30s, 1m, 5m,
+  10m, 30m) based on the visible window.
+
+See [ADR 0025](../adr/0025-intervention-timeline-viz.md) for
+rationale.
+
+## 6. User vs goldfive actor attribution
+
+Beyond the intervention timeline, the Gantt itself treats the
+human operator and the goldfive orchestrator as first-class actor
+rows, distinct from worker agents. The implementation is purely in
+the frontend event-dispatch layer:
+
+- Reserved agent ids `__user__` and `__goldfive__` sit outside the
+  hashed palette with fixed colors (see
+  [`frontend/src/theme/agentColors.ts`](../../frontend/src/theme/agentColors.ts)).
+- On `DriftDetected`, `frontend/src/rpc/goldfiveEvent.ts` decides
+  attribution: `user_steer` / `user_cancel` / `user_pause` →
+  `__user__`; everything else → `__goldfive__`. The actor row is
+  lazily materialized the first time it's needed.
+- A synthesized span is appended to the actor row with attributes
+  carrying the drift kind / severity / detail. Standard rendering
+  applies — the Gantt paints a bar on the actor row because the
+  spans store has one.
+
+See [design/10-frontend-architecture.md §7](10-frontend-architecture.md#7-actor-attribution-and-span-synthesis).
+
+## 7. Keyboard shortcuts (current)
+
+| Key | Action |
+|---|---|
+| `⌘K` / `Ctrl+K` | Session picker |
+| `Space` | Toggle pause (all agents) |
+| `←` `→` | Pan 10% |
+| `+` `-` | Zoom in / out |
+| `F` | Fit session to viewport |
+| `L` | Jump to live / return to live |
+| `G` | Graph mode on selected span |
+| `A` | Annotate selected span |
+| `S` | Steer selected span |
+| `Esc` | Close drawer / clear selection |
+| `1`…`9` | Jump to agent row N |
+
+See
+[`frontend/src/lib/shortcuts.ts`](../../frontend/src/lib/shortcuts.ts)
+for the canonical mapping.
+
+## 8. What's explicitly NOT here
+
+- **Autonomous control.** Harmonograf never issues its own control
+  events. Every `SendControl` originates from a user action in the
+  frontend (or from an external client calling the RPC directly).
+- **Plan or task decisions.** Clicking "Rewind to here" on a span
+  issues a `REWIND_TO` control event; what goldfive's executor
+  actually does with it (revert task state, re-plan, cascade-cancel
+  downstream) is goldfive's decision.
+- **Drift detection logic.** Harmonograf receives `DriftDetected`
+  events and renders them. It does not classify, fire, or throttle
+  drifts.
 
 ## Related ADRs
 
+- [ADR 0005 — Control acks ride upstream on the telemetry stream](../adr/0005-acks-ride-telemetry.md)
 - [ADR 0013 — Drift is a first-class event](../adr/0013-drift-as-first-class.md)
+- [ADR 0023 — Intervention dedup by `annotation_id`](../adr/0023-intervention-dedup-by-annotation-id.md)
+- [ADR 0025 — Intervention timeline viz on three channels](../adr/0025-intervention-timeline-viz.md)

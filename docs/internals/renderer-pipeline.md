@@ -345,6 +345,40 @@ Task selection reconciliation at `GanttCanvas.tsx:149-167` subscribes to
 whenever the task registry mutates. This is how the Drawer and the
 Canvas stay in sync.
 
+## InterventionsTimeline insertion
+
+The strip is not part of the canvas renderer's draw loop — it's a
+separate React component
+(`components/Interventions/InterventionsTimeline.tsx`) that mounts
+above the Gantt in the planning and trajectory views. Data flow:
+
+- `ListInterventions(session_id)` unary RPC on view open returns the
+  full merged history.
+- Live updates come through the existing `WatchSession` deltas.
+  `lib/interventions.ts` mirrors the server aggregator (dedup by
+  `annotation_id`, outcome attribution) so rows reconcile without
+  a second RPC.
+
+Stability contract (harmonograf #76): the component captures
+`endMs` as an internal `spanEndMs` snapshot on mount and advances
+it on a coarse 1s tick via `useStableSpanEnd`. Hovering a marker
+never recomputes X positions from the outer `endMs`, so markers
+don't jitter mid-hover.
+
+Three visual channels encode the row (see
+[ADR 0025](../adr/0025-intervention-timeline-viz.md)):
+
+- Source (user / drift / goldfive) → color from `SOURCE_COLOR` in
+  `lib/interventions.ts`.
+- Kind → glyph (diamond / circle / chevron / square; distinct per
+  source).
+- Severity (warning / critical) → dashed amber or solid red ring.
+
+Density clustering kicks in at
+`max(14px, 2% of strip width)`; popover anchors deterministically
+to the marker center. Axis ticks auto-select from a fixed ladder
+(10s / 30s / 1m / 5m / 10m / 30m).
+
 ## Gotchas that bit prior iterations
 
 - **Do not fold bucketing into the subscription callbacks.** Bucketing
