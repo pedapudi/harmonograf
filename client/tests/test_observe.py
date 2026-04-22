@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from harmonograf_client import observe
+from harmonograf_client import ClientConfig, observe
 from harmonograf_client.client import Client
 from harmonograf_client.sink import HarmonografSink
 
@@ -128,6 +128,13 @@ async def test_observe_reuses_provided_client(client: Client) -> None:
 async def test_observe_respects_harmonograf_server_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Legacy env-var behaviour via explicit ``ClientConfig.from_environ``.
+
+    As of harmonograf#105 ``observe`` no longer reads
+    ``HARMONOGRAF_SERVER`` implicitly. Callers that want the legacy
+    env-driven behaviour opt in via
+    :meth:`ClientConfig.from_environ`; this test documents that path.
+    """
     captured: dict[str, Any] = {}
     original_init = Client.__init__
 
@@ -141,9 +148,97 @@ async def test_observe_respects_harmonograf_server_env(
     monkeypatch.setenv("HARMONOGRAF_SERVER", "remote.example:9999")
 
     runner = _FakeRunner()
-    observe(runner, name="env-client")
+    observe(runner, name="env-client", config=ClientConfig.from_environ())
 
     assert captured["server_addr"] == "remote.example:9999"
+    await runner.close()
+    runner.sinks[0]._client.shutdown(flush_timeout=0.1)
+
+
+@pytest.mark.asyncio
+async def test_observe_ignores_harmonograf_server_env_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without an explicit config, ``HARMONOGRAF_SERVER`` is not read.
+
+    Regression guard for harmonograf#105: the implicit env read inside
+    ``observe`` is gone. The env var still exists for legacy callers
+    but they must opt in via :meth:`ClientConfig.from_environ`.
+    """
+    captured: dict[str, Any] = {}
+    original_init = Client.__init__
+
+    def spy_init(self: Client, **kwargs: Any) -> None:
+        captured.update(kwargs)
+        kwargs["_transport_factory"] = make_factory([])
+        original_init(self, **kwargs)
+
+    monkeypatch.setattr(Client, "__init__", spy_init)
+    monkeypatch.setenv("HARMONOGRAF_SERVER", "remote.example:9999")
+
+    runner = _FakeRunner()
+    observe(runner, name="no-env-read")
+
+    # No config / server_addr passed => env is NOT consulted, and the
+    # server_addr kwarg is omitted so Client's own default applies.
+    assert "server_addr" not in captured
+    await runner.close()
+    runner.sinks[0]._client.shutdown(flush_timeout=0.1)
+
+
+@pytest.mark.asyncio
+async def test_observe_accepts_explicit_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Passing a :class:`ClientConfig` routes its ``server_addr`` through."""
+    captured: dict[str, Any] = {}
+    original_init = Client.__init__
+
+    def spy_init(self: Client, **kwargs: Any) -> None:
+        captured.update(kwargs)
+        kwargs["_transport_factory"] = make_factory([])
+        original_init(self, **kwargs)
+
+    monkeypatch.setattr(Client, "__init__", spy_init)
+    monkeypatch.delenv("HARMONOGRAF_SERVER", raising=False)
+
+    runner = _FakeRunner()
+    observe(
+        runner,
+        name="cfg-client",
+        config=ClientConfig(server_addr="cfg.example:9000"),
+    )
+
+    assert captured["server_addr"] == "cfg.example:9000"
+    await runner.close()
+    runner.sinks[0]._client.shutdown(flush_timeout=0.1)
+
+
+@pytest.mark.asyncio
+async def test_observe_explicit_server_addr_overrides_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``server_addr=`` kwarg takes precedence over ``config.server_addr``."""
+    captured: dict[str, Any] = {}
+    original_init = Client.__init__
+
+    def spy_init(self: Client, **kwargs: Any) -> None:
+        captured.update(kwargs)
+        kwargs["_transport_factory"] = make_factory([])
+        original_init(self, **kwargs)
+
+    monkeypatch.setattr(Client, "__init__", spy_init)
+    monkeypatch.delenv("HARMONOGRAF_SERVER", raising=False)
+
+    runner = _FakeRunner()
+    observe(
+        runner,
+        name="override",
+        server_addr="kwarg.example:1234",
+        config=ClientConfig(server_addr="cfg.example:9000"),
+    )
+
+    assert captured["server_addr"] == "kwarg.example:1234"
     await runner.close()
     runner.sinks[0]._client.shutdown(flush_timeout=0.1)
 

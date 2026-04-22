@@ -137,8 +137,25 @@ runner = harmonograf_client.observe(
 )
 ```
 
-When `server_addr` is omitted, `observe` reads `$HARMONOGRAF_SERVER` and
-otherwise falls back to `Client`'s default (`127.0.0.1:7531`).
+When neither `server_addr` nor `config` is passed, `observe` falls
+back to `Client`'s default (`127.0.0.1:7531`). As of harmonograf#105
+`$HARMONOGRAF_SERVER` is no longer read implicitly — opt in via an
+explicit `ClientConfig`:
+
+```python
+from harmonograf_client import ClientConfig
+
+# Legacy env-driven behaviour, explicit
+runner = harmonograf_client.observe(
+    goldfive.wrap(root_agent), config=ClientConfig.from_environ()
+)
+
+# Or construct directly
+runner = harmonograf_client.observe(
+    goldfive.wrap(root_agent),
+    config=ClientConfig(server_addr="remote:7531"),
+)
+```
 
 ### Composing with other sinks
 

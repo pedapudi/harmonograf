@@ -11,6 +11,12 @@ compose.
 
 ## Recent shape changes (what this doc assumes)
 
+- **Explicit `ClientConfig` (#105).** The two legacy env-var reads
+  inside the client (`HARMONOGRAF_SERVER` / `HARMONOGRAF_HOME`) are
+  gone. Callers construct a `ClientConfig` dataclass explicitly, or —
+  if they want the legacy env-driven behaviour — opt in via
+  `ClientConfig.from_environ()`. See [Explicit configuration](#explicit-configuration-103)
+  below.
 - **Lazy Hello (#85).** The transport defers the `Hello` RPC until the
   first envelope arrives on the ring buffer. Construction no longer
   opens a stream; ghost sessions from importing the library are gone.
@@ -51,12 +57,61 @@ The public surface is deliberately narrow (from
 `client/harmonograf_client/__init__.py`):
 
 - `Client`
+- `ClientConfig`
 - `HarmonografSink`
 - `HarmonografTelemetryPlugin`
 - `ControlAckSpec`
 - `Capability`, `SpanKind`, `SpanStatus`
 
 Anything not on that list is internal — feel free to rename it.
+
+## Explicit configuration (#105)
+
+`ClientConfig` is a plain dataclass that collects the two
+instance-level knobs the client used to read from the ambient
+environment:
+
+```python
+from harmonograf_client import ClientConfig
+
+cfg = ClientConfig(
+    server_addr="prod.harmonograf.internal:7531",
+    home_dir=Path("/var/lib/myagent"),
+)
+```
+
+Both fields are optional:
+
+- `server_addr` defaults to `"127.0.0.1:7531"` — the local-dev server.
+- `home_dir` defaults to `None`, which means identity files land under
+  `~/.harmonograf/` via `identity._default_root()`. Pass an explicit
+  `Path` for multi-tenant / test-isolation scenarios.
+
+### Legacy env-driven callers
+
+Pre-#105, two env vars were consulted implicitly:
+
+| Env var | Read by | Replacement |
+|---|---|---|
+| `HARMONOGRAF_SERVER` | `observe()` | `ClientConfig.server_addr` |
+| `HARMONOGRAF_HOME` | `identity._default_root()` | `ClientConfig.home_dir` |
+
+Neither is read by the core library anymore. Callers that still want
+the legacy behaviour opt in explicitly:
+
+```python
+from harmonograf_client import ClientConfig, observe
+
+# Pick up HARMONOGRAF_SERVER / HARMONOGRAF_HOME from the process env.
+cfg = ClientConfig.from_environ()
+observe(runner, name="my-agent", config=cfg)
+```
+
+`ClientConfig.from_environ()` accepts an optional `env=` mapping for
+deterministic testing; when omitted it reads `os.environ` lazily.
+
+New code should construct `ClientConfig` with explicit values — no
+env-var indirection, no monkey-patching in tests.
 
 ## Data flow
 
@@ -103,6 +158,11 @@ from harmonograf_client import Client
 client = Client(name="researcher")                               # 127.0.0.1:7531 default
 client = Client(name="researcher", server_addr="localhost:7531") # explicit
 ```
+
+For higher-level callers (the `observe()` helper) the two knobs are
+surfaced together as a [`ClientConfig`](#explicit-configuration-103)
+dataclass so scripts don't have to thread `server_addr` and
+`identity_root` separately.
 
 Shutdown is explicit: `client.shutdown(flush_timeout=5.0)` flushes pending
 envelopes and tears down the transport.

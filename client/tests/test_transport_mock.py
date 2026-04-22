@@ -206,7 +206,17 @@ def server():
 
 @pytest.fixture()
 def isolated_identity(tmp_path, monkeypatch):
-    monkeypatch.setenv("HARMONOGRAF_HOME", str(tmp_path))
+    """Isolate :func:`identity.load_or_create` to ``tmp_path``.
+
+    Pre-#105 this fixture relied on setting ``HARMONOGRAF_HOME``; the
+    implicit env read is gone, so we now monkeypatch ``_default_root``
+    directly. Tests construct :class:`Client` without passing
+    ``identity_root=``; the patched default sends all identity I/O
+    into ``tmp_path`` regardless.
+    """
+    from harmonograf_client import identity as _identity
+
+    monkeypatch.setattr(_identity, "_default_root", lambda: tmp_path)
     yield tmp_path
 
 

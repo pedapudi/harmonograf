@@ -30,9 +30,15 @@ _NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
 
 
 def _default_root() -> Path:
-    override = os.environ.get("HARMONOGRAF_HOME")
-    if override:
-        return Path(override).expanduser()
+    """Return the platform default identity root (``~/.harmonograf``).
+
+    The legacy ``HARMONOGRAF_HOME`` env var used to be consulted here
+    implicitly; as of harmonograf#105 it is read only on explicit
+    opt-in via :meth:`ClientConfig.from_environ`. Callers that want a
+    non-default root must pass it through
+    :class:`ClientConfig.home_dir` (or the legacy ``root=`` kwarg on
+    :func:`load_or_create` / :func:`identity_path`).
+    """
     return Path.home() / ".harmonograf"
 
 

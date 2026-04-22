@@ -65,8 +65,36 @@ def test_distinct_names_get_distinct_ids(tmp_path):
     assert a.agent_id != b.agent_id
 
 
-def test_honors_harmonograf_home_env(tmp_path, monkeypatch):
+def test_ignores_harmonograf_home_env_by_default(tmp_path, monkeypatch):
+    """Regression guard for harmonograf#105.
+
+    The implicit ``HARMONOGRAF_HOME`` read inside ``_default_root`` is
+    gone — callers that want the legacy env-driven behaviour opt in via
+    :meth:`ClientConfig.from_environ` and pass the resulting ``home_dir``
+    through as the ``root`` kwarg.
+    """
     monkeypatch.setenv("HARMONOGRAF_HOME", str(tmp_path))
-    ident = identity.load_or_create("envtest", framework="ADK")
+    # Without an explicit root, _default_root() resolves to
+    # ~/.harmonograf — NOT the env var.
+    assert identity._default_root() == (tmp_path.home() / ".harmonograf")
+
+
+def test_honors_explicit_root(tmp_path):
+    """Passing ``root=`` explicitly routes identity to that directory."""
+    ident = identity.load_or_create("roottest", framework="ADK", root=tmp_path)
+    assert (tmp_path / "agents" / "roottest.json").exists()
+    assert ident.name == "roottest"
+
+
+def test_client_config_from_environ_feeds_root(tmp_path, monkeypatch):
+    """Legacy env-driven behaviour via :meth:`ClientConfig.from_environ`."""
+    from harmonograf_client import ClientConfig
+
+    monkeypatch.setenv("HARMONOGRAF_HOME", str(tmp_path))
+    cfg = ClientConfig.from_environ()
+    assert cfg.home_dir == tmp_path
+    ident = identity.load_or_create(
+        "envtest", framework="ADK", root=cfg.home_dir
+    )
     assert (tmp_path / "agents" / "envtest.json").exists()
     assert ident.name == "envtest"

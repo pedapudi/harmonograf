@@ -36,6 +36,7 @@ Public surface (stable):
 from __future__ import annotations
 
 from .client import Client
+from .config import ClientConfig
 from .enums import Capability, SpanKind, SpanStatus
 from .observe import observe
 from .sink import HarmonografSink
@@ -45,6 +46,7 @@ from .transport import ControlAckSpec
 __all__ = [
     "Capability",
     "Client",
+    "ClientConfig",
     "ControlAckSpec",
     "HarmonografSink",
     "HarmonografTelemetryPlugin",
