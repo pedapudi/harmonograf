@@ -196,4 +196,41 @@ describe('<InterventionsTimeline />', () => {
     expect(screen.getByTestId('intervention-marker-a')).toBeTruthy();
     expect(screen.getByTestId('intervention-marker-b')).toBeTruthy();
   });
+
+  // --- #107: bounded strip width ---------------------------------------
+  //
+  // The strip has a max-width cap (set in CSS) so it never smears markers
+  // across an over-wide Gantt pane. Callers that pass an explicit `width`
+  // prop override the cap via an inline style on the wrapper so the strip
+  // can still match an intentionally wide container.
+  it('applies a max-width cap to the wrapper when no width prop is passed', () => {
+    render(
+      <InterventionsTimeline
+        rows={[row({ key: 'a', atMs: 1_000, source: 'user', kind: 'STEER' })]}
+        startMs={0}
+        endMs={60_000}
+        _liveTickMs={0}
+      />,
+    );
+    const wrapper = screen.getByTestId('interventions-timeline');
+    // Inline style only carries width:100% — max-width comes from CSS.
+    expect(wrapper.style.width).toBe('100%');
+    // Inline style MUST NOT set maxWidth (so the CSS cap applies).
+    expect(wrapper.style.maxWidth).toBe('');
+  });
+
+  it('lets an explicit width prop override the max-width cap', () => {
+    render(
+      <InterventionsTimeline
+        rows={[row({ key: 'a', atMs: 1_000, source: 'user', kind: 'STEER' })]}
+        startMs={0}
+        endMs={60_000}
+        width={800}
+        _liveTickMs={0}
+      />,
+    );
+    const wrapper = screen.getByTestId('interventions-timeline');
+    expect(wrapper.style.width).toBe('800px');
+    expect(wrapper.style.maxWidth).toBe('800px');
+  });
 });

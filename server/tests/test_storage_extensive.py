@@ -377,6 +377,68 @@ async def test_task_plan_round_trip(store):
     assert fetched.edges[0].from_task_id == "t1"
 
 
+# harmonograf#107 — edges must survive the full wire round-trip: storage
+# TaskPlan → goldfive.v1.Plan (WatchSession replay on the initial burst) →
+# back to storage via the ingest goldfive_pb_plan_to_storage convert. A
+# regression in either direction silently drops dependency arrows in the
+# Gantt pre-strip.
+async def test_task_plan_edges_survive_wire_roundtrip(store):
+    from harmonograf_server.convert import (
+        goldfive_pb_plan_to_storage,
+        storage_plan_to_goldfive_pb,
+    )
+
+    await store.create_session(_sess())
+    plan = TaskPlan(
+        id="plan-edges",
+        session_id="sess_1",
+        created_at=20.0,
+        planner_agent_id="planner",
+        summary="7-stage DAG",
+        tasks=[
+            Task(id=f"t{i}", title=f"step {i}", assignee_agent_id="worker")
+            for i in range(1, 8)
+        ],
+        edges=[
+            TaskEdge(from_task_id="t1", to_task_id="t2"),
+            TaskEdge(from_task_id="t2", to_task_id="t3"),
+            TaskEdge(from_task_id="t2", to_task_id="t4"),
+            TaskEdge(from_task_id="t3", to_task_id="t5"),
+            TaskEdge(from_task_id="t4", to_task_id="t5"),
+            TaskEdge(from_task_id="t5", to_task_id="t6"),
+            TaskEdge(from_task_id="t6", to_task_id="t7"),
+        ],
+    )
+    await store.put_task_plan(plan)
+    persisted = await store.get_task_plan("plan-edges")
+    assert persisted is not None
+    assert len(persisted.edges) == 7
+
+    # Outbound — WatchSession initial-burst synthesises goldfive.v1.Event
+    # frames from persisted plans. Every edge must ride.
+    pb = storage_plan_to_goldfive_pb(persisted)
+    assert len(pb.edges) == 7
+    assert pb.edges[0].from_task_id == "t1"
+    assert pb.edges[0].to_task_id == "t2"
+
+    # Inbound — ingest pipeline converts the same proto back to storage when
+    # a goldfive planner emits a fresh plan. Edges must also survive this
+    # direction so live-tail plans and replayed plans both render.
+    re_stored = goldfive_pb_plan_to_storage(
+        pb, session_id="sess_1", created_at=20.0, planner_agent_id="planner"
+    )
+    assert len(re_stored.edges) == 7
+    assert {(e.from_task_id, e.to_task_id) for e in re_stored.edges} == {
+        ("t1", "t2"),
+        ("t2", "t3"),
+        ("t2", "t4"),
+        ("t3", "t5"),
+        ("t4", "t5"),
+        ("t5", "t6"),
+        ("t6", "t7"),
+    }
+
+
 async def test_get_task_plan_missing_returns_none(store):
     assert await store.get_task_plan("no-plan") is None
 

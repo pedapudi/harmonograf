@@ -166,6 +166,7 @@ function computeSequence(store: SessionStore): SeqLayout {
     if (!parent || parent.agentId === s.agentId) continue;
     const key = `${parent.agentId}→${s.agentId}@${Math.round(s.startMs / 500)}`;
     if (coveredPairs.has(key)) continue; // already covered by method 1
+    coveredPairs.add(key);
     delegationArrows.push({
       fromId: parent.agentId,
       toId: s.agentId,
@@ -173,6 +174,30 @@ function computeSequence(store: SessionStore): SeqLayout {
       yMs: s.startMs,
       label: s.name.length > 22 ? s.name.slice(0, 21) + '…' : s.name,
       spanId: s.id,
+    });
+  }
+
+  // Method 3 — goldfive DelegationObserved events (#107). ADK coordinators
+  // that hand a sub-task to an agent via AgentTool emit a TOOL_CALL span on
+  // the coordinator row and a separate INVOCATION on the sub-agent row — the
+  // span tree does NOT have a cross-agent parent pointer, so Method 2 would
+  // miss it. goldfive's observer-side `delegation_observed` event is the
+  // authoritative record of that coordinator→sub-agent edge; we surface it
+  // as a delegation arrow here just like the Gantt renderer does.
+  const delegations = store.delegations.list();
+  for (const d of delegations) {
+    if (!d.fromAgentId || !d.toAgentId) continue;
+    if (d.fromAgentId === d.toAgentId) continue;
+    const key = `${d.fromAgentId}→${d.toAgentId}@${Math.round(d.observedAtMs / 500)}`;
+    if (coveredPairs.has(key)) continue; // already covered by Method 1 or 2
+    coveredPairs.add(key);
+    delegationArrows.push({
+      fromId: d.fromAgentId,
+      toId: d.toAgentId,
+      kind: 'delegation',
+      yMs: d.observedAtMs,
+      label: 'delegate',
+      spanId: `deleg-${d.seq}`,
     });
   }
 
@@ -407,7 +432,13 @@ export function GraphView() {
     const u1 = watch.store.spans.subscribe(() => setTick((n) => n + 1));
     const u2 = watch.store.agents.subscribe(() => setTick((n) => n + 1));
     const u3 = watch.store.tasks.subscribe(() => setTick((n) => n + 1));
-    return () => { u1(); u2(); u3(); };
+    // goldfive DelegationObserved events arrive on the delegations registry
+    // (#107). Without this subscription the sequence diagram never repaints
+    // when a new cross-agent delegation fires — so coordinator→sub-agent
+    // arrows lag or never appear until another store (spans/tasks/agents)
+    // happens to tick.
+    const u4 = watch.store.delegations.subscribe(() => setTick((n) => n + 1));
+    return () => { u1(); u2(); u3(); u4(); };
   }, [sessionId, watch.store]);
 
   // ── Viewport handlers (depend on refs, not reactive state) ──────────────
