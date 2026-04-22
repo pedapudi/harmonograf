@@ -388,7 +388,16 @@ class IngestPipeline:
         # stream's defaults from Hello when not set.
         agent_id = pb_span.agent_id or ctx.agent_id
         session_id = pb_span.session_id or ctx.session_id
-        await self._ensure_route(ctx, session_id, agent_id, name=pb_span.name)
+        # Harvest per-ADK-agent hints stamped by the telemetry plugin
+        # (harmonograf#74) — the first span from a new ADK agent
+        # carries hgraf.agent.{name,parent_id,kind,branch} so the
+        # server can register the row with the right human-readable
+        # name + parent link without needing a dedicated
+        # AgentRegister wire event.
+        agent_hints = _extract_agent_hints(pb_span.attributes) if pb_span.attributes else {}
+        await self._ensure_route(
+            ctx, session_id, agent_id, name=pb_span.name, agent_hints=agent_hints
+        )
 
         span = pb_span_to_storage(
             pb_span, agent_id=agent_id, session_id=session_id
@@ -429,10 +438,19 @@ class IngestPipeline:
         agent_id: str,
         *,
         name: str = "",
+        agent_hints: Optional[dict[str, str]] = None,
     ) -> None:
         """Auto-register (session, agent) the first time we see them on
         this stream. The session inherits the stream's framework metadata
         from Hello so cross-session views still know what produced it.
+
+        ``agent_hints`` (harmonograf#74) carries ``hgraf.agent.*``
+        attributes harvested from the first span emitted by this
+        per-ADK-agent id. The plugin stamps them on first-sight so the
+        server can register the agent with a human-readable name and
+        parent-agent link without a new wire event. Subsequent spans
+        from the same agent skip the stamp (``seen_routes`` short-
+        circuits the whole method), so hints only matter once.
         """
         key = (session_id, agent_id)
         if key in ctx.seen_routes:
@@ -463,14 +481,34 @@ class IngestPipeline:
                 agent_id,
             )
         if await self._store.get_agent(session_id, agent_id) is None:
+            # Prefer explicit ADK agent name from the span hints over
+            # the bare first-span name (span.name is the LLM model for
+            # LLM_CALL / tool name for TOOL_CALL — not useful as an
+            # agent label). Fall back to the span name, then the
+            # agent_id itself.
+            hints = agent_hints or {}
+            adk_name = hints.get("hgraf.agent.name", "")
+            display_name = adk_name or name or agent_id
+            meta: dict[str, str] = {}
+            if adk_name:
+                meta["adk.agent.name"] = adk_name
+            parent_id = hints.get("hgraf.agent.parent_id", "")
+            if parent_id:
+                meta["harmonograf.parent_agent_id"] = parent_id
+            kind = hints.get("hgraf.agent.kind", "")
+            if kind:
+                meta["harmonograf.agent_kind"] = kind
+            branch = hints.get("hgraf.agent.branch", "")
+            if branch:
+                meta["adk.agent.branch"] = branch
             agent = Agent(
                 id=agent_id,
                 session_id=session_id,
-                name=name or agent_id,
-                framework=Framework.UNKNOWN,
+                name=display_name,
+                framework=Framework.ADK if adk_name else Framework.UNKNOWN,
                 framework_version=ctx.framework_version or "",
                 capabilities=[],
-                metadata={},
+                metadata=meta,
                 connected_at=now,
                 last_heartbeat=now,
                 status=AgentStatus.CONNECTED,
@@ -478,9 +516,12 @@ class IngestPipeline:
             await self._store.register_agent(agent)
             self._bus.publish_agent_upsert(agent)
             logger.info(
-                "auto agent registered session_id=%s agent_id=%s",
+                "auto agent registered session_id=%s agent_id=%s name=%s kind=%s parent=%s",
                 session_id,
                 agent_id,
+                display_name,
+                kind or "<none>",
+                parent_id or "<none>",
             )
             # If the span's agent_id differs from the transport's registered
             # agent_id (e.g. ADK sub-agent name vs identity-file UUID), tell
@@ -1111,6 +1152,40 @@ def _span_status_to_task_status(status: SpanStatus) -> Optional[TaskStatus]:
     if status == SpanStatus.CANCELLED:
         return TaskStatus.CANCELLED
     return None
+
+
+_AGENT_HINT_KEYS = (
+    "hgraf.agent.name",
+    "hgraf.agent.parent_id",
+    "hgraf.agent.kind",
+    "hgraf.agent.branch",
+)
+
+
+def _extract_agent_hints(attributes: Any) -> dict[str, str]:
+    """Pull ``hgraf.agent.*`` string-valued attributes from a span's attribute map.
+
+    Used by ``_ensure_route`` to populate an auto-registered Agent row's
+    ``name`` / ``metadata`` fields without a dedicated wire event. The
+    plugin stamps these on the FIRST span emitted by each per-ADK-agent
+    id; ``_ensure_route``'s ``seen_routes`` short-circuit means later
+    spans from the same agent don't re-pay the attribute scan cost.
+
+    Returns an empty dict when no hints are present, so the caller
+    sees the same shape as older clients that don't stamp them —
+    preserving back-compat for observe-mode agents that still ship
+    spans without ``hgraf.agent.*``.
+    """
+    out: dict[str, str] = {}
+    for key in _AGENT_HINT_KEYS:
+        av = attributes.get(key)
+        if av is None:
+            continue
+        if av.HasField("string_value"):
+            val = av.string_value
+            if val:
+                out[key] = val
+    return out
 
 
 def _payload_ref_kwargs(refs) -> dict:

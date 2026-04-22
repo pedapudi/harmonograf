@@ -399,6 +399,103 @@ class TestPresentationGoldfiveRunner:
             )
 
 
+class TestOrchestratedPerAgentRows:
+    """Regression for harmonograf#74 — per-ADK-agent Gantt rows.
+
+    Before the fix, a goldfive-wrapped presentation tree (coordinator +
+    research + web_developer + reviewer + debugger) produced a SINGLE
+    ``agents`` row in the harmonograf store — the client-root id — and
+    every span attributed to that one id. The Gantt UI therefore
+    collapsed the whole tree onto one row.
+
+    After the fix, the :class:`HarmonografTelemetryPlugin` stamps each
+    ADK agent with its own derived per-agent id
+    (``<client.agent_id>:<adk_name>``) and emits
+    ``hgraf.agent.{name,parent_id,kind,branch}`` on the first span of
+    each agent, which the server harvests into the auto-registered
+    ``Agent.metadata``. The test below runs a mock orchestrated pass
+    and asserts the store has one row per ADK agent with the right
+    parent-agent links.
+    """
+
+    @pytest.mark.asyncio
+    async def test_orchestrated_mock_run_registers_one_row_per_adk_agent(
+        self,
+        presentation_agent_orchestrated_module: Any,
+        harmonograf_server: dict,
+    ) -> None:
+        from harmonograf_client import Client
+
+        client = Client(
+            name="pres-per-agent",
+            server_addr=harmonograf_server["addr"],
+            framework="ADK",
+        )
+        try:
+            runner, _memory_sink, _bound_client, _harmonograf_sink = (
+                presentation_agent_orchestrated_module.build_goldfive_runner(
+                    topic="waffles",
+                    mock=True,
+                    client=client,
+                )
+            )
+            outcome = await runner.run("make a presentation about waffles")
+            await runner.close()
+            assert outcome.success is True, outcome.reason
+        finally:
+            await asyncio.to_thread(client.shutdown, 5.0)
+
+        store = harmonograf_server["store"]
+        # Poll until agents land — spans flow over the wire async.
+        deadline = asyncio.get_event_loop().time() + 5.0
+        rows: list[Any] = []
+        while asyncio.get_event_loop().time() < deadline:
+            sessions = await store.list_sessions()
+            rows = []
+            for s in sessions or []:
+                rows.extend(await store.list_agents_for_session(s.id))
+            # Expect at least the coordinator + research specialist (the
+            # two agents that actually fire callbacks in mock mode).
+            coord_hits = [
+                r for r in rows if r.metadata.get("adk.agent.name") == "coordinator_agent"
+            ]
+            if coord_hits:
+                break
+            await asyncio.sleep(0.1)
+
+        # The client-root id appears as one row (Hello-registered); the
+        # per-agent rows appear as additional rows with
+        # ``adk.agent.name`` metadata.
+        adk_named_rows = [r for r in rows if r.metadata.get("adk.agent.name")]
+        adk_names = {r.metadata["adk.agent.name"] for r in adk_named_rows}
+        assert "coordinator_agent" in adk_names, (
+            f"expected coordinator_agent row; got adk names {adk_names!r} across {len(rows)} rows"
+        )
+        # Every per-agent row must carry a real display name
+        # (``Agent.name``), a kind metadata, and either no parent (for
+        # the coordinator / root) or a parent_agent_id that references
+        # another per-agent row in this same session.
+        for row in adk_named_rows:
+            assert row.name, f"agent row missing display name: {row.id}"
+            assert row.metadata.get("harmonograf.agent_kind"), (
+                f"agent row missing kind metadata: {row.id} / {row.metadata!r}"
+            )
+        # If the run drove into a sub-agent (mock mode routes through
+        # research), confirm the parent link is wired up.
+        specialists = [
+            r for r in adk_named_rows
+            if r.metadata.get("adk.agent.name") != "coordinator_agent"
+        ]
+        if specialists:
+            coord_id = coord_hits[0].id
+            for spec in specialists:
+                parent = spec.metadata.get("harmonograf.parent_agent_id")
+                assert parent == coord_id, (
+                    f"specialist {spec.metadata['adk.agent.name']} has parent "
+                    f"{parent!r}; expected coordinator id {coord_id!r}"
+                )
+
+
 async def _wait_for_plan_with_tasks(
     store: Any, *, expected_task_ids: set, timeout: float
 ) -> list[Any]:

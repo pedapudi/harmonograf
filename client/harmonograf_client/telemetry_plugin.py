@@ -5,6 +5,18 @@ plan, task, drift, and steering logic now lives in goldfive (see issue
 #2); harmonograf just emits spans so the server's timeline /
 Gantt renders per-invocation, per-model-call, and per-tool-call bars.
 
+Per-ADK-agent attribution (harmonograf#74). A single ``goldfive.wrap``
+run drives a tree of ADK agents — coordinator, specialists, AgentTool
+wrappers, sequential/parallel/loop containers. The plugin stamps every
+span with a per-agent harmonograf ``agent_id`` derived from the client's
+root id and the ADK agent's name (``<client_agent_id>:<agent.name>``),
+so the harmonograf Gantt renders one row per ADK agent instead of
+collapsing the whole tree onto the client root. Parent-agent and kind
+hints ride on the first span emitted by each agent via
+``hgraf.agent.*`` attributes — the server harvests them into the
+agent's ``metadata`` the first time it auto-registers the agent row.
+See :meth:`HarmonografTelemetryPlugin.before_agent_callback`.
+
 Install by passing a pre-built ADK runner with this plugin to
 :class:`goldfive.adapters.adk.ADKAdapter`, or (more commonly) add the
 plugin to the ADK ``App`` that ``adk web`` / ``adk run`` builds::
@@ -33,7 +45,7 @@ import json
 import logging
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 from .client import Client
 from .enums import SpanKind, SpanStatus
@@ -304,9 +316,229 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         self._disabled_as_duplicate: bool = False
         self._duplicate_log_emitted: bool = False
 
+        # Per-ADK-agent attribution (harmonograf#74).
+        #
+        # ``_agent_stash`` maps ``invocation_id -> [per_agent_id, ...]`` as
+        # a stack so nested sub-agent invocations (e.g. coordinator calls
+        # an AgentTool which runs a specialist sub-Runner) pop back to the
+        # caller's id when the callee's ``after_agent_callback`` fires.
+        # Using ``invocation_id`` as the key handles ADK's
+        # CallbackContext-rebuild pattern (plugins rebuild Context objects
+        # between before/after hooks, so ``id(ctx)`` is unstable) and
+        # co-exists with the existing ``_model_spans`` keying by
+        # ``invocation_id``. Sub-Runners spawned by AgentTool get a fresh
+        # ``invocation_id``, so they get their own stack slot — the parent
+        # agent's stash is untouched. Both resolve via
+        # :meth:`_resolve_agent_id`.
+        #
+        # ``_seen_agents`` is a set of ``(session_id, per_agent_id)``
+        # tuples the plugin has already seen on this session. We stamp
+        # ``hgraf.agent.*`` attributes on each agent's FIRST span only;
+        # subsequent spans from the same agent skip those attributes so
+        # every span doesn't pay the metadata cost. The server uses them
+        # to auto-register the agent row on first-sight. Bounded by the
+        # session lifetime — a long-running session with many agents will
+        # accumulate entries but at ~tens-of-bytes per entry this is
+        # negligible.
+        self._agent_stash: dict[str, list[str]] = {}
+        self._seen_agents: set[tuple[str, str]] = set()
+        # Lookup: per_agent_id -> (adk_name, parent_agent_id, kind, branch)
+        # so we can re-stamp metadata attributes on the first span after
+        # an ``after_agent_callback`` clears the stash but a span from
+        # that agent still arrives (edge case: spans enqueued during
+        # agent teardown). Populated by
+        # :meth:`_register_agent_for_ctx`.
+        self._agent_metadata: dict[str, dict[str, str]] = {}
+
     @property
     def client(self) -> Client:
         return self._client
+
+    # ------------------------------------------------------------------
+    # Per-agent attribution (harmonograf#74)
+    # ------------------------------------------------------------------
+
+    def _derive_agent_id(self, agent_name: str) -> str:
+        """Return the stable per-ADK-agent harmonograf id.
+
+        Format: ``<client.agent_id>:<adk_agent_name>``. Embedding the
+        client's own agent_id as a prefix keeps the id globally unique
+        across concurrent runs (the client's agent_id is already a
+        UUID) while a suffix of the ADK agent.name gives operators a
+        human-readable trailing token in the Gantt gutter.
+
+        Returns the client's bare ``agent_id`` when ``agent_name`` is
+        empty, preserving the pre-#74 attribution (everything collapsed
+        onto the client root) as a safe degraded mode.
+        """
+        if not agent_name:
+            return str(self._client.agent_id)
+        return f"{self._client.agent_id}:{agent_name}"
+
+    def _agent_kind_hint(self, agent: Any) -> str:
+        """Best-effort ADK-class → harmonograf ``kind`` hint.
+
+        The server does not currently do anything authoritative with the
+        kind hint — it rides as metadata so operators can tell at a
+        glance whether a row is a worker (``llm``), an AgentTool wrapper
+        (``tool_wrapped``), a workflow container (``workflow``), or the
+        tree root when the agent object is unavailable (``unknown``).
+        New ADK agent classes fall through to ``unknown`` rather than
+        crashing the callback — keep this robust: telemetry must never
+        raise.
+        """
+        if agent is None:
+            return "unknown"
+        # Walk the MRO to handle user subclasses of LlmAgent /
+        # SequentialAgent / etc. without having to import each class.
+        for cls in type(agent).__mro__:
+            n = cls.__name__
+            if n in ("LlmAgent", "Agent"):
+                return "llm"
+            if n in ("SequentialAgent", "ParallelAgent", "LoopAgent"):
+                return "workflow"
+            if n in ("AgentTool",):
+                # AgentTool wraps another agent — it's a tool from the
+                # caller's perspective but harmonograf attributes work
+                # done inside the wrapped agent directly to that agent's
+                # row, not the AgentTool's row. Kept for completeness in
+                # case ADK ever fires agent callbacks on AgentTool
+                # itself (it currently doesn't).
+                return "tool_wrapped"
+        return "unknown"
+
+    def _register_agent_for_ctx(self, ctx: Any) -> str:
+        """Compute the per-agent id for ``ctx`` and prime the metadata cache.
+
+        Called from ``before_agent_callback`` on every agent entry
+        (including AgentTool sub-Runner roots — ADK propagates the
+        plugin manager and fires agent callbacks inside sub-Runners
+        too). Returns the per-agent id the caller should stash.
+
+        Also populates ``_agent_metadata[per_agent_id]`` with the
+        hgraf.agent.* payload the next emitting span from this agent
+        will stamp on its first arrival at the server. The payload is
+        intentionally minimal (name, parent, kind, branch) — the server
+        parses strings into ``Agent.metadata`` without needing a proto
+        schema change or a new wire event.
+        """
+        agent = _safe_attr(ctx, "agent", None)
+        # Different ADK versions expose the agent under either
+        # ``ctx.agent`` (InvocationContext) or
+        # ``ctx._invocation_context.agent`` (CallbackContext). Fall back
+        # through both. ``agent_name`` is the ReadonlyContext property.
+        if agent is None:
+            inv = _safe_attr(ctx, "_invocation_context", None)
+            if inv is not None:
+                agent = _safe_attr(inv, "agent", None)
+        agent_name = ""
+        if agent is not None:
+            agent_name = str(_safe_attr(agent, "name", "") or "")
+        if not agent_name:
+            agent_name = str(_safe_attr(ctx, "agent_name", "") or "")
+        per_agent_id = self._derive_agent_id(agent_name)
+        # Parent: prefer agent.parent_agent.name (ADK BaseAgent exposes
+        # this); fall back to parsing the InvocationContext.branch
+        # (dot-delimited ancestry).
+        parent_name = ""
+        if agent is not None:
+            parent = _safe_attr(agent, "parent_agent", None)
+            if parent is not None:
+                parent_name = str(_safe_attr(parent, "name", "") or "")
+        if not parent_name:
+            branch = _safe_attr(ctx, "branch", None)
+            if branch is None:
+                inv = _safe_attr(ctx, "_invocation_context", None)
+                if inv is not None:
+                    branch = _safe_attr(inv, "branch", None)
+            if isinstance(branch, str) and branch:
+                # Branch format: ``root.child.grandchild``. The current
+                # agent sits at the tail; its immediate parent is
+                # second-to-last. When branch has one segment the current
+                # agent IS the root and there is no parent.
+                segments = branch.split(".")
+                if len(segments) >= 2:
+                    parent_name = segments[-2]
+        parent_id = self._derive_agent_id(parent_name) if parent_name else ""
+        meta = {
+            "hgraf.agent.name": agent_name,
+            "hgraf.agent.kind": self._agent_kind_hint(agent),
+        }
+        if parent_id:
+            meta["hgraf.agent.parent_id"] = parent_id
+        # Also carry the ADK branch for forensic debugging — operators
+        # can read it from the agent metadata to reconstruct the exact
+        # dispatch path that produced an agent row.
+        branch_val = _safe_attr(ctx, "branch", None)
+        if branch_val is None:
+            inv = _safe_attr(ctx, "_invocation_context", None)
+            if inv is not None:
+                branch_val = _safe_attr(inv, "branch", None)
+        if isinstance(branch_val, str) and branch_val:
+            meta["hgraf.agent.branch"] = branch_val
+        self._agent_metadata[per_agent_id] = meta
+        return per_agent_id
+
+    def _resolve_agent_id(self, ctx: Any) -> str:
+        """Return the per-agent id to stamp on a span emitted from ``ctx``.
+
+        Lookup order:
+
+        1. The top of the invocation's agent stack
+           (``_agent_stash[invocation_id][-1]``) when ``ctx`` carries
+           an invocation id and the stack is non-empty. This is the
+           hot path — every span from within a before/after_agent
+           window lands here.
+        2. Fall back to the client's root ``agent_id`` otherwise —
+           preserves pre-#74 behaviour for spans emitted outside any
+           agent window (startup, teardown, unit tests driving one
+           callback without a before_agent).
+        """
+        inv_id = str(_safe_attr(ctx, "invocation_id", "") or "")
+        if inv_id:
+            stack = self._agent_stash.get(inv_id)
+            if stack:
+                return stack[-1]
+        return str(self._client.agent_id)
+
+    def _stamp_agent_attrs(
+        self, per_agent_id: str, attrs: Optional[dict[str, Any]] = None
+    ) -> Optional[dict[str, Any]]:
+        """Return span attributes augmented with ``hgraf.agent.*`` on first-sight.
+
+        Only the FIRST span the server sees for a given
+        ``(session_id, per_agent_id)`` pair needs to carry the metadata
+        payload; subsequent spans inherit the agent row via
+        ``_ensure_route``'s auto-register and don't re-pay the cost.
+        The plugin tracks first-sight locally via ``_seen_agents``,
+        keyed on ``(session_id, per_agent_id)`` because the same
+        per-agent id can appear in multiple sessions over a plugin
+        lifetime (adk-web reuses the process across runs).
+
+        Returns ``attrs`` unchanged (may be ``None``) for already-seen
+        agents so the hot span-emit path doesn't copy dicts for every
+        model / tool call.
+        """
+        if per_agent_id == str(self._client.agent_id):
+            # The client root id is registered by the Hello frame —
+            # never stamp hgraf.agent.* on spans landing on the root.
+            return attrs
+        session_id = self._root_session_id or str(self._client.session_id or "")
+        key = (session_id, per_agent_id)
+        if key in self._seen_agents:
+            return attrs
+        self._seen_agents.add(key)
+        meta = self._agent_metadata.get(per_agent_id, {})
+        if not meta:
+            # Degraded path: span was emitted before ``before_agent_callback``
+            # populated the metadata cache. Stamp a name-only entry so the
+            # server still creates a row.
+            meta = {"hgraf.agent.name": per_agent_id.split(":", 1)[-1]}
+        merged: dict[str, Any] = dict(attrs or {})
+        # Caller-provided attrs win (don't clobber user metadata).
+        for k, v in meta.items():
+            merged.setdefault(k, v)
+        return merged
 
     # ------------------------------------------------------------------
     # Duplicate-install detection
@@ -494,6 +726,14 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
                     exc_info=True,
                 )
 
+        # Drop any leftover agent-stack entries for this invocation
+        # (harmonograf#74). On cancel, after_agent_callback may not fire
+        # on the in-flight agent, leaving a stale stack entry keyed by
+        # ``invocation_id``. Clear the whole entry — ``_agent_stash``
+        # is keyed per-invocation so the cleanup is scoped to the
+        # cancelled invocation without touching concurrent siblings.
+        self._agent_stash.pop(invocation_id, None)
+
         # If the cancelled invocation was the cached ROOT, release the
         # root-session cache and tear down the per-session control sub.
         # Without this, a subsequent run after a user cancel would still
@@ -590,10 +830,17 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
             attrs["adk.invocation_id"] = inv_id
         if adk_sid:
             attrs["adk.session_id"] = adk_sid
+        # The INVOCATION span is the outermost bar for this agent's run.
+        # Register the agent (before_agent_callback may not have fired
+        # yet for the root in some ADK flows) and stamp the per-agent
+        # id so the Gantt puts this invocation on the right row.
+        per_agent_id = self._register_agent_for_ctx(invocation_context)
+        augmented_attrs = self._stamp_agent_attrs(per_agent_id, attrs)
         sid = self._client.emit_span_start(
             kind=SpanKind.INVOCATION,
             name=name,
-            attributes=attrs or None,
+            attributes=augmented_attrs or None,
+            agent_id=per_agent_id,
             session_id=self._stamp_session_id(invocation_context),
         )
         if inv_id:
@@ -668,6 +915,67 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
                     )
 
     # ------------------------------------------------------------------
+    # Per-agent lifecycle (harmonograf#74)
+    # ------------------------------------------------------------------
+
+    async def before_agent_callback(
+        self, *, agent: Any, callback_context: Any
+    ) -> None:
+        """Push the per-agent id onto the invocation's agent stack.
+
+        ADK fires this once per agent entry: the root agent, every
+        sub-agent it transfers to, and every sub-agent wrapped by an
+        AgentTool (AgentTool spawns a sub-Runner whose own root agent
+        fires before_agent). The stack structure handles the nested
+        case — coordinator pushes 'coordinator', AgentTool sub-Runner
+        pushes 'research_agent', research's after_agent pops 'research',
+        and the coordinator's subsequent spans stamp 'coordinator'
+        again. Sub-Runner sessions get a fresh ``invocation_id`` so
+        they have their own stack slot.
+
+        Idempotent: the duplicate-install guard short-circuits. If
+        called without a matching after_agent (e.g. a cancelled
+        invocation), the stack is cleaned up by
+        :meth:`_close_stale_spans_for_invocation` on cancellation.
+        """
+        if self._maybe_disable_as_duplicate(callback_context):
+            return
+        per_agent_id = self._register_agent_for_ctx(callback_context)
+        inv_id = str(_safe_attr(callback_context, "invocation_id", "") or "")
+        if not inv_id:
+            # No invocation id: fall back to the ADK agent name so the
+            # stack still balances. Rare — ADK always populates
+            # invocation_id on a real callback — but a zero-id here
+            # would silently collapse every agent onto one stack slot.
+            inv_id = f"_agent:{_safe_attr(agent, 'name', 'unknown')}"
+        self._agent_stash.setdefault(inv_id, []).append(per_agent_id)
+
+    async def after_agent_callback(
+        self, *, agent: Any, callback_context: Any
+    ) -> None:
+        """Pop the per-agent id off the invocation's agent stack.
+
+        Balances :meth:`before_agent_callback`. When the stack drains
+        the entry is removed wholesale so ``_agent_stash`` never grows
+        unbounded across many sequential invocations.
+
+        Defensive on underflow: a stray after_agent (e.g. ADK races the
+        cancellation cleanup) is a no-op rather than raising. Telemetry
+        must not surface internal bookkeeping errors into the
+        orchestration control path.
+        """
+        if self._maybe_disable_as_duplicate(callback_context):
+            return
+        inv_id = str(_safe_attr(callback_context, "invocation_id", "") or "")
+        if not inv_id:
+            inv_id = f"_agent:{_safe_attr(agent, 'name', 'unknown')}"
+        stack = self._agent_stash.get(inv_id)
+        if stack:
+            stack.pop()
+            if not stack:
+                self._agent_stash.pop(inv_id, None)
+
+    # ------------------------------------------------------------------
     # LLM call lifecycle
     # ------------------------------------------------------------------
 
@@ -696,10 +1004,14 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         if self._maybe_disable_as_duplicate(callback_context):
             return
         model = str(_safe_attr(llm_request, "model", "") or "")
+        per_agent_id = self._resolve_agent_id(callback_context)
+        attrs: dict[str, Any] = {"llm.model": model} if model else {}
+        augmented_attrs = self._stamp_agent_attrs(per_agent_id, attrs or None)
         sid = self._client.emit_span_start(
             kind=SpanKind.LLM_CALL,
             name=model or "llm_call",
-            attributes={"llm.model": model} if model else None,
+            attributes=augmented_attrs or None,
+            agent_id=per_agent_id,
             session_id=self._stamp_session_id(callback_context),
         )
         key = self._model_span_key(callback_context)
@@ -785,9 +1097,13 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
             return
         tool_name = str(_safe_attr(tool, "name", "") or "tool")
         payload = _serialize_args(tool_args)
+        per_agent_id = self._resolve_agent_id(tool_context)
+        augmented_attrs = self._stamp_agent_attrs(per_agent_id, None)
         sid = self._client.emit_span_start(
             kind=SpanKind.TOOL_CALL,
             name=tool_name,
+            attributes=augmented_attrs or None,
+            agent_id=per_agent_id,
             payload=payload,
             payload_role="input",
             session_id=self._stamp_session_id(tool_context),
