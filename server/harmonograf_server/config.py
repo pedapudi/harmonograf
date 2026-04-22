@@ -23,3 +23,11 @@ class ServerConfig:
     retention_interval_seconds: float = 300.0
     metrics_interval_seconds: float = 30.0  # 0 disables periodic metrics
     auth_token: str = ""  # empty string disables shared-secret auth
+    # Opt-in legacy time-window fallback for plan-revision attribution
+    # (pre-strict-id-dedup behaviour from before harmonograf#99). Default
+    # 0 disables the fallback — plan revisions without a trigger_event_id
+    # become their own intervention card. Set to a positive ms value to
+    # allow the aggregator to merge plan-revision rows onto annotations
+    # / drifts within that wall-clock window when no strict id is
+    # available. See docs/runbooks/plan-revision-dedup.md.
+    legacy_plan_attribution_window_ms: float = 0.0

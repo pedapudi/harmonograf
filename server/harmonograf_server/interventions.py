@@ -31,10 +31,12 @@ their originating annotation / drift when the id matches. Rows that do
 not match surface as their own cards (not silently dropped).
 
 A legacy time-window fallback (the pre-#99 behaviour) is preserved
-behind the ``HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS`` env var so
-operators with in-flight investigations can opt back in. Default: 0
-(disabled). When enabled, a merge via the fallback logs a WARNING so
-operators can diagnose mis-attribution.
+behind the ``legacy_plan_attribution_window_ms`` parameter so operators
+with in-flight investigations can opt back in. Default: 0 (disabled).
+The parameter is plumbed from ``ServerConfig.legacy_plan_attribution_window_ms``
+/ CLI flag ``--legacy-plan-attribution-window-ms``. When enabled, a
+merge via the fallback logs a WARNING so operators can diagnose
+mis-attribution.
 
 Pre-fix (pre-harmonograf#99) data that lacks ``trigger_event_id`` is
 explicitly unsupported — operators should drop their dev databases
@@ -50,7 +52,6 @@ render the same way without taxonomy hooks.
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 from typing import Any, Iterable, Optional
 
@@ -89,49 +90,14 @@ _GOLDFIVE_REVISION_KINDS: frozenset[str] = frozenset(
 #
 # Rescope: goldfive#199 stamps ``trigger_event_id`` on EVERY refine
 # (user-control + autonomous), and harmonograf merges by strict id only
-# by default. The old time-window path is preserved behind an env var
-# so operators can opt back in during migration if they find the strict
-# dedup too aggressive (e.g. live sessions in flight against a pre-#199
-# goldfive). Default: disabled.
+# by default. The old time-window path is preserved behind the
+# ``legacy_plan_attribution_window_ms`` parameter on :func:`list_interventions`
+# (plumbed from :class:`ServerConfig.legacy_plan_attribution_window_ms` /
+# the ``--legacy-plan-attribution-window-ms`` CLI flag) so operators can
+# opt back in during migration if they find the strict dedup too
+# aggressive (e.g. live sessions in flight against a pre-#199 goldfive).
+# Default: disabled (0.0).
 # -----------------------------------------------------------------------------
-
-
-def _read_legacy_window_ms() -> float:
-    """Read the legacy time-window from the env var (0 / disabled by default).
-
-    Env var: ``HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS``.
-    Returns 0.0 when unset, invalid, or set to 0.
-    """
-    raw = os.environ.get("HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS", "")
-    if not raw:
-        return 0.0
-    try:
-        val = float(raw)
-    except ValueError:
-        logger.warning(
-            "HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS is not a number: %r; "
-            "disabling fallback",
-            raw,
-        )
-        return 0.0
-    if val <= 0:
-        return 0.0
-    return val
-
-
-# Cached on module load so tests that mutate the env before import see
-# a live value; tests that mutate at runtime should call the getter
-# directly rather than reading the cached constant.
-_LEGACY_TIME_WINDOW_PLAN_ATTRIBUTION_MS: float = _read_legacy_window_ms()
-
-
-def _legacy_window_ms() -> float:
-    """Return the active legacy window in ms (re-read each call).
-
-    Tests and operators toggling the env var at runtime are reflected
-    without requiring a reimport. Returns 0.0 when disabled.
-    """
-    return _read_legacy_window_ms()
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +149,7 @@ async def list_interventions(
     *,
     store: Store,
     drifts_provider: Any,
+    legacy_plan_attribution_window_ms: float = 0.0,
 ) -> list[InterventionRecord]:
     """Return chronologically ordered interventions for ``session_id``.
 
@@ -191,21 +158,28 @@ async def list_interventions(
     boundary so tests can drive the aggregator without spinning a full
     ingest stack.
 
+    ``legacy_plan_attribution_window_ms`` enables the opt-in Tier-2
+    time-window fallback (see below). Default 0.0 disables. Plumbed
+    from :class:`ServerConfig.legacy_plan_attribution_window_ms` /
+    ``--legacy-plan-attribution-window-ms`` CLI flag.
+
     Dedup contract (harmonograf#99 rescope):
 
       * Tier 1 — always on. Plan-revision rows merge onto their source
         annotation / drift row when ``trigger_event_id`` matches the
         annotation id or drift id.
-      * Tier 2 — opt-in via ``HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS``
-        env var (default 0 / disabled). Time-window fallback: a plan
-        row whose ``trigger_event_id`` matched nothing strictly merges
-        onto a preceding user-control row of the same drift_kind within
-        the configured window. Emits a WARNING log so operators can see
+      * Tier 2 — opt-in via ``legacy_plan_attribution_window_ms``
+        (default 0 / disabled). Time-window fallback: a plan row whose
+        ``trigger_event_id`` matched nothing strictly merges onto a
+        preceding user-control row of the same drift_kind within the
+        configured window. Emits a WARNING log so operators can see
         what would not have merged under strict-id-only.
 
     Rows that don't match either tier surface as their own cards — never
     silently merged.
     """
+
+    window_ms = max(0.0, float(legacy_plan_attribution_window_ms or 0.0))
 
     annotations = await store.list_annotations(session_id=session_id)
     try:
@@ -226,12 +200,11 @@ async def list_interventions(
     records.extend(_project_plans(plans))
 
     records.sort(key=lambda r: r.at)
-    _attribute_outcomes(records, plans)
+    _attribute_outcomes(records, plans, legacy_window_ms=window_ms)
     records = _merge_by_trigger_event_id(records)
     # Tier 2 — opt-in legacy time-window merge for plan rows with NO
     # trigger_event_id (pre-#99 data or goldfive-bridge misconfigured).
     # Default off; WARNING logged on every match so operators notice.
-    window_ms = _legacy_window_ms()
     if window_ms > 0:
         records = _legacy_time_window_merge_orphan_plans(
             records, window_s=window_ms / 1000.0, window_ms=window_ms
@@ -244,11 +217,12 @@ def _legacy_time_window_merge_orphan_plans(
 ) -> list[InterventionRecord]:
     """Opt-in legacy merge for plan rows without a ``trigger_event_id``.
 
-    Fires only when ``HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS`` is
-    set to a positive value. Walks the sorted record list; a plan row
-    (no trigger_event_id, drift_kind set, outcome=plan_revised:*) folds
-    onto the most recent preceding user / drift row within ``window_s``
-    whose drift_kind matches. WARNING logged on every match.
+    Fires only when the caller passed a positive
+    ``legacy_plan_attribution_window_ms`` (via ServerConfig / CLI flag /
+    direct kwarg). Walks the sorted record list; a plan row (no
+    trigger_event_id, drift_kind set, outcome=plan_revised:*) folds onto
+    the most recent preceding user / drift row within ``window_s`` whose
+    drift_kind matches. WARNING logged on every match.
 
     Strict-id rows are never touched — they're already merged and their
     trigger_event_id provides the authoritative join.
@@ -281,7 +255,8 @@ def _legacy_time_window_merge_orphan_plans(
             logger.warning(
                 "interventions: legacy time-window fallback merged "
                 "plan_revision_index=%d (drift_kind=%s, no trigger_event_id) "
-                "onto %s row. HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS=%.0f. "
+                "onto %s row. legacy_plan_attribution_window_ms=%.0f "
+                "(ServerConfig field / --legacy-plan-attribution-window-ms). "
                 "Investigate why strict-id did not match (pre-#99 data? "
                 "goldfive < #199?).",
                 rec.plan_revision_index,
@@ -450,7 +425,10 @@ def _project_plans(plans: Iterable[TaskPlan]) -> list[InterventionRecord]:
 
 
 def _attribute_outcomes(
-    records: list[InterventionRecord], plans: Iterable[TaskPlan]
+    records: list[InterventionRecord],
+    plans: Iterable[TaskPlan],
+    *,
+    legacy_window_ms: float = 0.0,
 ) -> None:
     """Fill in ``outcome`` for drift and user rows.
 
@@ -462,7 +440,7 @@ def _attribute_outcomes(
         with the plan row whose trigger_event_id matches — that pairing
         yields ``plan_revised:rN``.
       * Only when strict-id yields nothing does the legacy time-window
-        get consulted (and only when enabled via env var).
+        get consulted (and only when ``legacy_window_ms > 0``).
       * Rows with no strict pairing fall through to the cascade-cancel
         heuristic for user/drift rows, or are left as ``recorded``.
     """
@@ -477,7 +455,7 @@ def _attribute_outcomes(
             continue
         plan_by_trigger.setdefault(plan.trigger_event_id, plan)
 
-    window_ms = _legacy_window_ms()
+    window_ms = max(0.0, float(legacy_window_ms or 0.0))
     window_s = window_ms / 1000.0 if window_ms > 0 else 0.0
 
     for rec in records:
@@ -504,9 +482,11 @@ def _attribute_outcomes(
                 logger.warning(
                     "interventions: legacy time-window fallback matched "
                     "drift_kind=%s trigger_event_id=%r -> plan rev=%d "
-                    "(trigger_event_id=%r). HARMONOGRAF_LEGACY_PLAN_"
-                    "ATTRIBUTION_WINDOW_MS=%.0f. Investigate why strict-id "
-                    "did not match (pre-#99 data? goldfive < #199?).",
+                    "(trigger_event_id=%r). legacy_plan_attribution_"
+                    "window_ms=%.0f (ServerConfig field / "
+                    "--legacy-plan-attribution-window-ms). Investigate "
+                    "why strict-id did not match (pre-#99 data? "
+                    "goldfive < #199?).",
                     rec.drift_kind,
                     rec.trigger_event_id,
                     fallback.revision_index,

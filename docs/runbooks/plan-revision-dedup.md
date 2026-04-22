@@ -3,8 +3,11 @@
 As of harmonograf#99 (pairs with goldfive#199), the intervention
 aggregator merges plan-revision rows onto their originating annotation
 or drift by **strict id only**. The pre-#99 time-window fallback is
-gated behind `HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS` and
-disabled by default.
+gated behind the `ServerConfig.legacy_plan_attribution_window_ms` field
+(CLI flag `--legacy-plan-attribution-window-ms`) on the server and the
+`legacyPlanAttributionWindowMs` option on the frontend deriver, and is
+disabled by default. See harmonograf#101 for the env-var → config/param
+migration.
 
 ## What changed
 
@@ -43,15 +46,42 @@ rm -rf /tmp/demo-data          # or whatever --data-dir points at
 
 If you need to keep pre-fix sessions showing up as they used to — for
 example, a live investigation where you can't drop the DB yet — enable
-the fallback:
+the fallback via config / option. There is **no env var**; per
+harmonograf#101 the surface is the normal config field + CLI flag.
+
+### Server
+
+CLI flag (operators):
 
 ```sh
-# Server:
-export HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS=900000   # 15 min
-
-# Frontend (build-time):
-export VITE_HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS=900000
+harmonograf-server --legacy-plan-attribution-window-ms 900000   # 15 min
 ```
+
+Programmatic (tests, stress harness, embeds):
+
+```python
+from harmonograf_server.config import ServerConfig
+cfg = ServerConfig(legacy_plan_attribution_window_ms=900_000.0)
+```
+
+### Frontend
+
+The aggregator (`deriveInterventions` / `deriveInterventionsFromStore`)
+takes an optional `legacyPlanAttributionWindowMs` field. The React
+components read it from the app's runtime config context — there is
+no build-time `import.meta.env` lookup. A minimum-viable caller just
+leaves it unset, which is equivalent to 0 / disabled:
+
+```ts
+deriveInterventions({
+  annotations,
+  drifts,
+  plans,
+  legacyPlanAttributionWindowMs: 900_000, // opt in
+});
+```
+
+### WARNING on match
 
 When the fallback fires, a WARNING is logged (server: `interventions`
 logger; frontend: `console.warn`) so operators can see which rows

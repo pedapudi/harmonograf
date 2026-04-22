@@ -90,6 +90,15 @@ def build_parser() -> argparse.ArgumentParser:
             "disables auth. /healthz and /readyz are always unauthenticated."
         ),
     )
+    p.add_argument(
+        "--legacy-plan-attribution-window-ms",
+        type=float,
+        default=0.0,
+        help=(
+            "Opt-in fallback for plan-revision attribution; 0 (default) "
+            "disables. See docs/runbooks/plan-revision-dedup.md."
+        ),
+    )
     return p
 
 
@@ -108,6 +117,7 @@ def config_from_args(argv: list[str] | None = None) -> ServerConfig:
         log_format=args.log_format,
         metrics_interval_seconds=args.metrics_interval_seconds,
         auth_token=args.auth_token,
+        legacy_plan_attribution_window_ms=args.legacy_plan_attribution_window_ms,
     )
 
 

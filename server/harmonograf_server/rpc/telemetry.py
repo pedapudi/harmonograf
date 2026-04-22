@@ -15,6 +15,7 @@ import grpc
 from google.protobuf.timestamp_pb2 import Timestamp
 
 from harmonograf_server.bus import SessionBus
+from harmonograf_server.config import ServerConfig
 from harmonograf_server.control_router import ControlRouter
 from harmonograf_server.ingest import IngestPipeline
 from harmonograf_server.pb import service_pb2_grpc, telemetry_pb2
@@ -41,12 +42,18 @@ class TelemetryServicer(
         store: Optional[Store] = None,
         bus: Optional[SessionBus] = None,
         data_dir: str = "",
+        config: Optional[ServerConfig] = None,
     ) -> None:
         self._ingest = ingest
         self._router = router or ControlRouter()
         self._store = store if store is not None else ingest.store
         self._bus = bus if bus is not None else ingest.bus
         self._data_dir = data_dir
+        # Held by reference so RPC handlers can read opt-in config fields
+        # (e.g. legacy_plan_attribution_window_ms) without a separate
+        # plumb through each call site. Defaults keep test construction
+        # zero-arg friendly.
+        self._config = config if config is not None else ServerConfig()
 
     async def StreamTelemetry(
         self,

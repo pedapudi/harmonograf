@@ -2,7 +2,7 @@
 // Mirrors the server-side tests in server/tests/test_interventions.py so
 // the merge + attribution logic stays behavior-identical across the wire.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   deriveInterventions,
   markerRadiusFor,
@@ -405,6 +405,101 @@ describe('deriveInterventions', () => {
     const plan = rows.find((r) => r.outcome.startsWith('plan_revised:'));
     expect(drift?.outcome).toBe('recorded');
     expect(plan?.planRevisionIndex).toBe(2);
+  });
+
+  // harmonograf#101 — legacy time-window opt-in now flows through the
+  // ``legacyPlanAttributionWindowMs`` option, not ``import.meta.env``.
+  // Coverage mirrors the server tests in test_interventions.py.
+
+  it('legacy window default (0) leaves orphan plan as its own card', () => {
+    // Plan row with no triggerEventId cannot strict-merge; with the
+    // window disabled (default) the aggregator does NOT fold it onto
+    // the preceding user-control rows — two cards survive.
+    const rows = deriveInterventions({
+      annotations: [
+        mkAnnotation({ id: 'ann_lw_off', createdAtMs: 100_000 }),
+      ],
+      drifts: [
+        mkDrift({
+          seq: 0,
+          kind: 'user_steer',
+          severity: 'warning',
+          recordedAtMs: 100_200,
+          annotationId: 'ann_lw_off',
+          driftId: 'drift_lw_off',
+        }),
+      ],
+      plans: [
+        mkPlan({
+          id: 'p_lw_off',
+          createdAtMs: 700_000,
+          revisionKind: 'user_steer',
+          revisionSeverity: 'warning',
+          revisionIndex: 1,
+          // No triggerEventId.
+        }),
+      ],
+      // legacyPlanAttributionWindowMs omitted → default 0 / disabled.
+    });
+
+    expect(rows).toHaveLength(2);
+    const merged = rows.find((r) => r.annotationId === 'ann_lw_off');
+    const orphan = rows.find(
+      (r) => r.planRevisionIndex === 1 && !r.annotationId,
+    );
+    expect(merged?.outcome).toBe('recorded');
+    expect(orphan?.outcome).toBe('plan_revised:r1');
+  });
+
+  it('legacy window enabled via option merges + warns', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const rows = deriveInterventions({
+        annotations: [
+          mkAnnotation({ id: 'ann_lw_on', createdAtMs: 100_000 }),
+        ],
+        drifts: [
+          mkDrift({
+            seq: 0,
+            kind: 'user_steer',
+            severity: 'warning',
+            recordedAtMs: 100_200,
+            annotationId: 'ann_lw_on',
+            driftId: 'drift_lw_on',
+          }),
+        ],
+        plans: [
+          mkPlan({
+            id: 'p_lw_on',
+            createdAtMs: 700_000, // 10min past annotation — inside 15min
+            revisionKind: 'user_steer',
+            revisionSeverity: 'warning',
+            revisionIndex: 1,
+            // No triggerEventId; must fall back to time-window.
+          }),
+        ],
+        legacyPlanAttributionWindowMs: 900_000,
+      });
+
+      // Annotation + drift collapse via strict id; the orphan plan row
+      // folds onto the drift via the legacy fallback, so exactly one
+      // user-sourced card with the plan_revised outcome survives.
+      const userCards = rows.filter((r) => r.source === 'user');
+      expect(userCards).toHaveLength(1);
+      expect(userCards[0].outcome).toBe('plan_revised:r1');
+
+      // Warning must reference the new option name, not the old env var.
+      expect(warnSpy).toHaveBeenCalled();
+      const message = warnSpy.mock.calls
+        .map((args) => args.join(' '))
+        .join('\n');
+      expect(message).toContain('legacyPlanAttributionWindowMs');
+      expect(message).not.toContain(
+        'VITE_HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS',
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
 
