@@ -4,11 +4,15 @@
 > tools, task state machine, `session.state["harmonograf.*"]` keys,
 > `_AdkState`, `state_protocol.extract_agent_writes`, walker) now live
 > in [goldfive](https://github.com/pedapudi/goldfive). Harmonograf still
-> owns the span timeline, the control stream, the session + storage, and
-> the UI. Read the mental model with that substitution in mind — the
-> *composition* story is accurate; the module names are out of date.
-> See [../goldfive-integration.md](../goldfive-integration.md) for the
-> current surface.
+> owns the span timeline, the control stream, the session + storage,
+> the intervention aggregator, and the UI (six views: Sessions,
+> Activity, Graph, Trajectory, Notes, Settings). Read the mental model
+> with that substitution in mind — the *composition* story is accurate;
+> the module names are out of date. See
+> [../goldfive-integration.md](../goldfive-integration.md) for the
+> current surface and
+> [../milestones.md#post-migration-shipped-2026-04](../milestones.md)
+> for what's shipped since the migration.
 
 This document is not a glossary. A glossary defines terms in isolation; a
 mental model explains how the pieces *compose*. By the end you should be
@@ -375,8 +379,13 @@ handshake.
 The control kinds currently include:
 
 - `PAUSE` / `RESUME` — freeze or unfreeze an agent's next turn
-- `STEER` — inject a note / nudge into the agent's next prompt
-- `STATUS_QUERY` — ask the agent for an explicit status report
+- `STEER` — inject a note / nudge into the agent's next prompt. Body is
+  validated on the client (`ControlBridge`): empty or >8 KiB UTF-8 is
+  rejected, ASCII control chars stripped (harmonograf#72). Server stamps
+  `author` + `annotation_id`.
+- `CANCEL` — cancel in-flight work, optionally cascading through the
+  plan DAG.
+- `STATUS_QUERY` — ask the agent for an explicit status report.
 - (more as the coordination surface grows)
 
 Acks come back **upstream on the telemetry stream**, not on the control
@@ -386,6 +395,46 @@ spans the agent emitted before issuing the ack, so the UI can show
 delivery; the telemetry stream carries the acknowledgment. Every new
 client adapter forgets this exactly once. See
 [docs/protocol/wire-ordering.md](../protocol/wire-ordering.md).
+
+## Interventions: the chronological log of every plan change
+
+Every control event you send, plus every autonomous drift goldfive fires
+via `HarmonografSink`, becomes an **Intervention** on the session. The
+server's `interventions.py` aggregator joins:
+
+- `annotations` (STEER / HUMAN_RESPONSE rows)
+- ingest drift ring (`drift_detected` events, including `user_steer` /
+  `user_cancel` kinds)
+- `task_plans.revision_kind` (plan revisions carrying the drift kind or
+  autonomous kinds like `cascade_cancel`)
+
+…into one chronological list. The `ListInterventions(session_id)` unary
+RPC returns it; the frontend has a live deriver that mirrors the shape
+for in-flight deltas (harmonograf#69 / #71). User-control kinds merge
+inside a 5-minute window (harmonograf#81 / #87) so rapid-fire STEERs on
+the same target show up as one card.
+
+This is the single data source behind the **Trajectory view**: each
+intervention is a marker on the horizontal ribbon, glyph-by-kind,
+color-by-source (user vs. autonomous), outer ring by severity. Clicking
+a marker opens a popover with body, author, and outcome. If the
+intervention was immediately followed by a plan revision or cascade
+cancel, the popover links to it. This is where harmonograf's story of
+*who did what, when, and what happened next* actually lives.
+
+## Per-ADK-agent attribution
+
+Under `goldfive.wrap(...)`, one `goldfive.Runner` drives a tree of ADK
+agents (coordinator, specialists, `AgentTool` wrappers, sequential /
+parallel / loop containers). `HarmonografTelemetryPlugin` stacks a
+`per_agent_id = "{client_id}:{adk_name}"` via `before_agent_callback` /
+`after_agent_callback` so the Activity view renders one Gantt row per
+ADK agent. Each agent's first span carries `hgraf.agent.*` hints (name,
+parent, kind, branch, framework) which the server's `_ensure_route`
+harvests into the agent's metadata the first time it auto-registers.
+Nothing in user code opts into this — the plugin handles it, whether
+installed via `observe()` or via `App.plugins=[...]`. See
+harmonograf#74 / #80.
 
 User-facing view: [docs/user-guide/control-actions.md](../user-guide/control-actions.md).
 

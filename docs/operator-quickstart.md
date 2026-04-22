@@ -1,6 +1,9 @@
 # Operator Quickstart
 
-A minimal walkthrough for getting a local Harmonograf instance running end-to-end: server, frontend, and one real agent emitting spans. Every command below is copy-pasteable from the repository root.
+The operator view: how to start watching a running goldfive rollout, how
+to steer it live from the UI, and how to interpret the intervention cards
+the Trajectory view shows. Every command below is copy-pasteable from the
+repository root.
 
 For deeper architectural context see [docs/design/03-server.md](design/03-server.md) and [docs/design/02-client-library.md](design/02-client-library.md).
 
@@ -181,10 +184,74 @@ cd server && uv run python -m harmonograf_server \
 
 Periodic metrics snapshots (sessions / spans / ingest rate / active streams) are emitted every `--metrics-interval-seconds` (default `30`); set to `0` to disable.
 
-## 9. Known limitations
+## 9. Watching a live goldfive run
+
+Once the server, frontend, and an agent are up:
+
+1. The **Sessions** picker auto-selects the newest live session. Post
+   lazy-Hello (harmonograf#85) there is one row per ADK session you drive
+   — no ghost rows per app-build. The session id pinned on the row is
+   whatever `adk web` / your orchestrator passed through as
+   `goldfive.Session.id` (harmonograf#66).
+2. The **Activity** (Gantt) view renders one row per ADK agent in the
+   wrapped tree. Rows auto-register on the first span each agent emits —
+   coordinator, specialists, and any `AgentTool` / sequential / parallel /
+   loop wrappers (harmonograf#74 / #80).
+3. The **Trajectory** view (↪ in the nav rail) is the operator's primary
+   handle — one horizontal ribbon with one marker per intervention event.
+
+## 10. Steering from the UI
+
+Every intervention path lives in one of three places:
+
+- **Inspector drawer → Control tab.** Pick any span in Activity, open the
+  drawer, and use the Control tab to send PAUSE, RESUME, STEER (free-form
+  text), or CANCEL. The client's `ControlBridge` validates the STEER body
+  (empty / over 8 KiB UTF-8 rejected, ASCII control chars stripped) before
+  forwarding; the server stamps `author` + `annotation_id` (harmonograf#72).
+- **Keyboard shortcut (Space).** Toggles global PAUSE / RESUME in the
+  Gantt view.
+- **Annotation with deliver-to-agent.** Posting an annotation on a span /
+  task with the "deliver to agent" box checked synthesizes a STEER
+  targeting the annotated actor.
+
+Every successful STEER / CANCEL / PAUSE you issue becomes one marker in
+Trajectory. If the same target sees a second user-control intervention
+within 5 minutes, its card **merges** with the previous one so the
+timeline doesn't spray out duplicates (harmonograf#81 / #87 closing
+prior #75 / #73 / #86).
+
+## 11. Reading intervention cards
+
+Clicking a marker in Trajectory opens the intervention popover. Each card
+carries:
+
+- **Source** — `user` (you, via the UI) vs. autonomous (goldfive's steerer).
+  Colour and marker glyph differ by source.
+- **Kind** — STEER, CANCEL, PAUSE, RESUME for user-control; `tool_error`,
+  `agent_refusal`, `new_work_discovered`, `task_failed_recoverable`, …
+  for autonomous drift. Glyphs differ by kind.
+- **Severity** — info / warn / critical, rendered as an outer ring on the
+  marker.
+- **Body** — the STEER text or drift detail.
+- **Author** — who issued the intervention (usually `operator` for user
+  control).
+- **Outcome** — if the intervention was immediately followed (within ~5 s)
+  by a plan revision or cascade-cancel, the card links to it
+  (`plan_revised:rN`, `cascade_cancel:N_tasks`). See
+  [`server/harmonograf_server/interventions.py`](../server/harmonograf_server/interventions.py)
+  for the join logic.
+
+If markers look clustered or the timestamps feel off, see
+harmonograf#87 — convertAnnotation now stores session-relative ms, which
+is the shape the density clusterer expects.
+
+## 12. Known limitations
 
 - **In-memory vs. sqlite.** `make server-run` uses `--store sqlite` against `<repo>/data`. `--store memory` is fine for tests but loses everything on restart.
 - **sonora CORS shim.** The server monkey-patches `sonora.asgi` at startup to work around a bytes/str comparison bug in sonora's preflight path (see `server/harmonograf_server/_sonora_shim.py`, commit `5c00817`). An `INFO` line is logged on startup confirming the shim is active. If you upgrade sonora and the preflight path is fixed upstream, the shim can be removed.
 - **No TLS.** The gRPC and gRPC-Web listeners are plaintext. Keep them on loopback; `--host` values other than `127.0.0.1` log a warning.
 - **Frontend does not currently send a bearer token.** If you start the server with `--auth-token`, the UI will be rejected with 401 until frontend auth lands. Run the UI against an unauthenticated dev server for now.
 - **Single-process, single-node.** There is no clustering, no replication, no horizontal scale. One server process owns the canonical timeline.
+- **Gantt viewport on completed sessions** currently opens past the last
+  span rather than framed on it; tracked as harmonograf#89 (in flight).

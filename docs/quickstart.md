@@ -162,21 +162,38 @@ make demo SERVER_PORT=17531 FRONTEND_PORT=15173 ADK_WEB_PORT=18080
    ```
 
 3. Switch to the **harmonograf tab** at `http://127.0.0.1:5173`. The session
-   picker should auto-select the newest live session. You should see:
-   - A row per agent (`coordinator_agent`, `research_agent`,
-     `web_developer_agent`, `reviewer_agent`, and `debugger_agent` if the
-     reviewer surfaces issues).
+   picker should auto-select the newest live session. Post-lazy-Hello
+   (harmonograf#85) you'll see exactly one row in the picker per ADK session
+   you drive, not one per restart. On the Activity (Gantt) view you should
+   see:
+   - One row per ADK agent in the wrapped tree — `coordinator_agent`,
+     `research_agent`, `web_developer_agent`, `reviewer_agent`, and
+     `debugger_agent` if the reviewer surfaces issues. Each row is
+     auto-registered the first time the agent emits a span (harmonograf#80).
    - Blocks on the timeline filling in as each task moves through started →
      running → completed.
    - A live-tail cursor following the head of the run.
-   - A plan-diff banner if the coordinator replans mid-run (e.g. because the
-     reviewer flagged an issue and the debugger was added).
+   - A plan-revision banner if the coordinator replans mid-run (e.g. because
+     the reviewer flagged an issue and the debugger was added).
 
 4. Click any block to open the **inspector drawer** and see the tool call
    arguments, return value, and any payloads.
 
-5. When you are done, Ctrl-C the `make demo` shell. All three processes exit
-   together.
+5. Switch to the **Trajectory** view via the nav rail (↪ icon). You'll see
+   a horizontal intervention ribbon with one marker per point where the
+   plan changed direction — drift events, plan revisions, and anything you
+   STEER/CANCEL/PAUSE from the UI. Click a marker to see who, when, why,
+   and what happened next.
+
+6. Try steering: pick a span in Activity view, open the drawer's Control
+   tab, and send a STEER. The server forwards it via the control stream,
+   your agent reacts on its next turn, and a new marker lights up in
+   Trajectory. If you STEER twice within five minutes on the same target,
+   the intervention card merges them into one — that's harmonograf#81/#87
+   user-control dedup.
+
+7. When you are done, Ctrl-C the `make demo` shell. All three processes
+   exit together.
 
 ---
 
@@ -199,13 +216,17 @@ A healthy first run looks like this on stdout:
 
 In the harmonograf frontend, a successful rollout looks like:
 
-- 4–5 agent rows populated within a few seconds of sending the ADK prompt.
-- Task blocks that transition colour as they complete (harmonograf uses a
-  monotonic state machine — blocks never go backwards).
+- 4–5 agent rows populated within a few seconds of sending the ADK prompt
+  (the plugin auto-registers each ADK agent on its first `before_agent`
+  callback).
+- Task blocks that transition colour as they complete (goldfive's task
+  state machine is monotonic — blocks never go backwards).
 - A small liveness indicator on each row that pulses while the agent is
   actively emitting.
 - A completed session badge at the top of the timeline when the coordinator
   calls `report_task_completed` on the root task.
+- One intervention marker on the **Trajectory** view per drift or
+  user-control event (if any). Plan revisions produce an up-chevron marker.
 
 ---
 
@@ -280,16 +301,45 @@ make install
 
 ---
 
+## Other paths
+
+### Standalone observability (no ADK, no goldfive)
+
+If you want to emit spans from a plain Python process with no orchestration
+framework at all:
+
+```bash
+make demo-standalone
+```
+
+That boots server + frontend and runs `examples/standalone_observability/
+spans_only.py` against them. See
+[standalone-observability.md](standalone-observability.md) for the full
+non-ADK story.
+
+### Bare-ADK observation (no goldfive.wrap)
+
+If you already have your own orchestrator and just want the console:
+attach a `HarmonografTelemetryPlugin` to your `App(plugins=[...])`. See
+[`examples/standalone_observability/adk_telemetry.py`](../examples/standalone_observability/adk_telemetry.py).
+Plans, tasks, drift, and intervention history will stay empty — but the
+Gantt, inspector, and control surfaces all light up.
+
 ## What to read next
 
-- [overview.md](overview.md) — motivation, design principles, what ships, what
-  doesn't, roadmap.
-- [operator-quickstart.md](operator-quickstart.md) — every server flag, health
-  probes, retention, bearer-token auth.
-- [reporting-tools.md](reporting-tools.md) — the canonical agent ↔ harmonograf
-  protocol.
-- [docs/user-guide/](user-guide/) — the UI walk-through with keyboard shortcuts.
-- [docs/dev-guide/](dev-guide/) — building from source, adding a storage
-  backend, writing tests, contribution workflow.
-- [docs/protocol/](protocol/) — proto reference, session-state schema, drift
+- [tour/15-minute-tour.md](tour/15-minute-tour.md) — narrative
+  walkthrough of the problem, the primitives, and a single rollout end to
+  end.
+- [overview.md](overview.md) — motivation, design principles, what ships,
+  what doesn't, roadmap.
+- [operator-quickstart.md](operator-quickstart.md) — every server flag,
+  health probes, retention, bearer-token auth.
+- [goldfive-integration.md](goldfive-integration.md) — the full
+  orchestration-observability contract.
+- [standalone-observability.md](standalone-observability.md) — the non-ADK
+  flow.
+- [user-guide/](user-guide/) — the UI walk-through with keyboard shortcuts.
+- [dev-guide/](dev-guide/) — building from source, adding a storage backend,
+  writing tests, contribution workflow.
+- [protocol/](protocol/) — proto reference, session-state schema, drift
   taxonomy, plan-diff semantics.

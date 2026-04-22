@@ -2,20 +2,22 @@
 
 **Use harmonograf as an observability console — without goldfive
 orchestration.** Emit spans via `harmonograf_client.Client`, and the
-frontend's Gantt / agent panels render them the same as any other
-source. Plans, tasks, and drift (goldfive's signals) stay out of the
-picture; the Tasks panel is simply empty.
+frontend's Sessions / Activity (Gantt) / Graph views render them the
+same as any other source. Plans, tasks, drift, and intervention history
+(goldfive's signals) stay out of the picture: the task panel and
+Trajectory views are empty.
 
 See [`docs/standalone-observability.md`](../../docs/standalone-observability.md)
-for the full story.
+for the full story, including the lazy-Hello / home-session semantics
+for non-ADK clients (harmonograf#85).
 
 ## What's in this directory
 
 | File | What it does | Imports goldfive? |
 | --- | --- | --- |
-| [`spans_only.py`](spans_only.py) | Hand-authored synthetic spans via `Client.emit_span_*` — the "no-framework" path. | No. |
-| [`adk_telemetry.py`](adk_telemetry.py) | A real ADK agent instrumented with `HarmonografTelemetryPlugin`. Telemetry only. | No. |
-| [`with_orchestration.py`](with_orchestration.py) | Counterpoint: goldfive's `Runner` + `observe()` to light up plans + tasks + drift. | **Yes** — needs `uv sync --extra orchestration`. |
+| [`spans_only.py`](spans_only.py) | Hand-authored synthetic spans via `Client.emit_span_*` — the "no-framework, no-ADK" path. | No. |
+| [`adk_telemetry.py`](adk_telemetry.py) | A real ADK agent instrumented with `HarmonografTelemetryPlugin` on `App(plugins=[...])`. Telemetry only — no `goldfive.wrap`. | No. |
+| [`with_orchestration.py`](with_orchestration.py) | Counterpoint: `goldfive.wrap(...)` + `harmonograf_client.observe()` to light up plans + tasks + drift + intervention history. | **Yes** — needs `uv sync --extra orchestration`. |
 
 Verify the first two truly have zero goldfive references:
 
@@ -64,10 +66,15 @@ make demo-standalone
 
 | Panel | spans_only.py | adk_telemetry.py | with_orchestration.py |
 | --- | --- | --- | --- |
-| Gantt (agent activity) | populated | populated | populated |
+| Sessions picker | populated (1 session) | populated (1 session) | populated (1 session) |
+| Activity (Gantt, agent rows) | populated (1 row) | populated (N rows, one per ADK agent) | populated (N rows per goldfive.wrap tree) |
+| Graph view | populated | populated | populated |
 | Messages | populated | populated | populated |
-| Tasks | **empty** | **empty** | populated |
-| Plan view | **empty** | **empty** | populated |
-| Drift indicators | **empty** | **empty** | populated |
+| Tasks / plan banner | **empty** | **empty** | populated |
+| Trajectory (interventions) | **empty** | **empty** | populated |
+| Drift markers | **empty** | **empty** | populated |
 
-Empty Tasks panel is the expected standalone state — not an error.
+Empty task panel / Trajectory is the expected standalone state — not an
+error. The `adk_telemetry.py` path gets per-ADK-agent rows for free
+because the plugin stacks per-agent ids even without `goldfive.wrap`
+(harmonograf#74 / #80).

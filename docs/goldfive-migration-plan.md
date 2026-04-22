@@ -1,15 +1,26 @@
 # Harmonograf → Goldfive Migration Plan
 
-> **STATUS: COMPLETED (Phase D landed 2026-04-18).**
+> **STATUS: COMPLETED (Phase D landed 2026-04-18). Preserved as a design
+> record; no further updates expected.**
+>
 > All four phases merged on `main`:
 > - Phase A — proto migration + goldfive dependency ([#6](https://github.com/pedapudi/harmonograf/pull/6), closes [#2](https://github.com/pedapudi/harmonograf/issues/2))
 > - Phase B — `HarmonografSink` + goldfive event ingest ([#7](https://github.com/pedapudi/harmonograf/pull/7), closes [#3](https://github.com/pedapudi/harmonograf/issues/3))
 > - Phase C — delete legacy client orchestration, rewire demos on goldfive ([#9](https://github.com/pedapudi/harmonograf/pull/9), closes [#4](https://github.com/pedapudi/harmonograf/issues/4))
-> - Phase D — e2e validation + cleanup + integration guide (this PR, closes [#5](https://github.com/pedapudi/harmonograf/issues/5) and meta [#1](https://github.com/pedapudi/harmonograf/issues/1))
+> - Phase D — e2e validation + cleanup + integration guide (closes [#5](https://github.com/pedapudi/harmonograf/issues/5) and meta [#1](https://github.com/pedapudi/harmonograf/issues/1))
 >
-> The current integration surface is documented in
-> [goldfive-integration.md](goldfive-integration.md). The rest of this file is
-> preserved as the design record.
+> **For current state, read:**
+> - [goldfive-integration.md](goldfive-integration.md) — the live integration
+>   contract (`goldfive.wrap` + `observe()`, per-ADK-agent rows, session
+>   unification, plugin dedup, intervention emission).
+> - [standalone-observability.md](standalone-observability.md) — the
+>   non-goldfive path for clients that just want the span console.
+> - [milestones.md](milestones.md) §"Post-migration shipped (2026-04)" —
+>   log of per-agent rows, intervention history, lazy Hello, session
+>   unification, STEER validation, plugin dedup.
+>
+> The rest of this file is the original architectural scratchpad that
+> drove the migration. Keep for history; do not edit further.
 
 ---
 

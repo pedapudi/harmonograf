@@ -6,12 +6,13 @@ Inside each milestone, 4–5 streams run in parallel.
 
 Auth is deferred to its own project — local-only for now.
 
-> **Note (2026-04).** Milestones A–D below predate the goldfive migration.
+> **Note (2026-04).** Milestones A–E below predate the goldfive migration.
 > References to `attach_adk`, `HarmonografAgent`, reporting-tool
 > interception, etc. describe the pre-migration implementation — the
 > integration surface today is `goldfive.Runner` + `HarmonografSink` +
 > an optional `HarmonografTelemetryPlugin`. The milestone *goals* are
-> still useful context; the code pointers are not.
+> still useful context; the code pointers are not. See the
+> "Post-migration shipped" section at the bottom for the current delta.
 
 The roadmap at a glance — five milestones, each ending in a thing the user can run and react to:
 
@@ -133,3 +134,57 @@ End state: repo is in a state you could send to a colleague.
 
 - **Auth** — its own project, out of current scope since the demo is
   local-only. Tracked separately.
+
+---
+
+## Post-migration shipped (2026-04)
+
+Everything below landed after the goldfive migration. These are the
+changes reflected in the current README / AGENTS.md / integration docs
+and account for the drift from milestones A–E's pre-migration pointers.
+
+- **Per-ADK-agent Gantt rows** (harmonograf#74, #80). `HarmonografTelemetryPlugin`
+  stacks `per_agent_id = "{client_id}:{adk_name}"` via before/after_agent
+  callbacks and rides hints on the first span; `_ensure_route` on the
+  server auto-registers the agent. One row per ADK agent in the wrapped
+  tree, not one collapsed root.
+
+- **Intervention history** (harmonograf#69, #71). Server `interventions.py`
+  merges annotations + ingest drift ring + `task_plans.revision_kind`
+  into a unified chronological list. `ListInterventions(session_id)`
+  unary RPC returns it. Frontend has a live deriver that mirrors the
+  shape for in-flight deltas.
+
+- **Intervention timeline redesign** (harmonograf#76). Stable X anchor,
+  glyph-by-kind, color-by-source, severity ring, density clustering,
+  deterministic popover, axis ticks, fade-only entrance.
+
+- **Intervention card dedup** (harmonograf#81, #87 closed #75, #73, #86).
+  User-control kinds merge by `annotation_id` inside a 5-minute window;
+  autonomous drifts keep tight window + own cards. `convertAnnotation`
+  stores session-relative ms (bug previously caused visual clustering
+  mismatches).
+
+- **Lazy Hello** (harmonograf#85). Client defers Hello RPC until first
+  emit. No ghost `sess_2026-…` sessions per ADK run. Non-ADK client
+  flows still auto-create home session on first emit.
+
+- **Session unification** (harmonograf#63, #66). Outer adk-web session id
+  pinned on `goldfive.Session.id`; spans route by `ctx.session.id`,
+  goldfive events route by per-event `session_id`.
+
+- **STEER body validation + author** (harmonograf#72). Client
+  `ControlBridge._events_loop` validates body (empty / >8 KiB UTF-8
+  rejected, ASCII control chars stripped) before forward; server stamps
+  `SteerPayload.author` + `SteerPayload.annotation_id`.
+
+- **Plugin dedup** (harmonograf#68). Second `HarmonografTelemetryPlugin`
+  instance on the same ADK `PluginManager` silently no-ops beyond the
+  first.
+
+- **Session picker** shows one row per session post-lazy-Hello.
+
+### In flight
+
+- **Gantt viewport UX on completed sessions** (harmonograf#89) — opens
+  past last span; being fixed in parallel.
