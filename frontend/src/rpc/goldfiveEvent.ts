@@ -174,6 +174,10 @@ export function convertGoldfivePlan(
       p.revisionSeverity as unknown as number,
     ),
     revisionIndex: Number(p.revisionIndex ?? 0),
+    // harmonograf#99 / goldfive#199: carry the trigger_event_id off the
+    // wire so lib/interventions.ts can strict-id-merge plan revisions
+    // onto their originating annotation or drift.
+    triggerEventId: p.revisionTriggerEventId || '',
   };
 }
 
@@ -271,6 +275,11 @@ export function applyGoldfiveEvent(
         // so harmonograf#75's deduper can merge them into the annotation
         // row. Empty string for autonomous drifts.
         annotationId: d.annotationId || '',
+        // goldfive#199 / harmonograf#99: goldfive-minted drift id,
+        // always non-empty. Used as the strict join key when merging a
+        // subsequent PlanRevised (whose trigger_event_id == this id)
+        // onto the drift row.
+        driftId: d.id || '',
       });
       // Attribute the drift to an actor row so it shows up in gantt / graph /
       // trajectory without those views having to special-case drift events.

@@ -129,7 +129,11 @@ CREATE TABLE IF NOT EXISTS task_plans (
     revision_reason TEXT NOT NULL DEFAULT '',
     revision_kind TEXT NOT NULL DEFAULT '',
     revision_severity TEXT NOT NULL DEFAULT '',
-    revision_index INTEGER NOT NULL DEFAULT 0
+    revision_index INTEGER NOT NULL DEFAULT 0,
+    -- harmonograf#99 / goldfive#199: strict dedup key joining plan
+    -- revisions to their originating annotation or drift. Non-empty on
+    -- every revision (empty only on the initial plan).
+    trigger_event_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_task_plans_session ON task_plans(session_id);
 
@@ -220,6 +224,15 @@ class SqliteStore(Store):
         if "revision_index" not in tp_cols:
             await self._db.execute(
                 "ALTER TABLE task_plans ADD COLUMN revision_index INTEGER NOT NULL DEFAULT 0"
+            )
+        # harmonograf#99: strict-id trigger_event_id column. No backfill
+        # path for pre-fix data — operators drop/recreate dev DBs
+        # (documented in CHANGELOG). Rows created before this migration
+        # keep the default empty string and will surface as their own
+        # cards (no merge) until a fresh session replaces them.
+        if "trigger_event_id" not in tp_cols:
+            await self._db.execute(
+                "ALTER TABLE task_plans ADD COLUMN trigger_event_id TEXT NOT NULL DEFAULT ''"
             )
         await self._db.commit()
 
@@ -879,8 +892,9 @@ class SqliteStore(Store):
                     INSERT INTO task_plans (id, session_id, invocation_span_id,
                                             planner_agent_id, created_at, summary, edges,
                                             revision_reason, revision_kind,
-                                            revision_severity, revision_index)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                            revision_severity, revision_index,
+                                            trigger_event_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         session_id=excluded.session_id,
                         invocation_span_id=excluded.invocation_span_id,
@@ -891,7 +905,8 @@ class SqliteStore(Store):
                         revision_reason=excluded.revision_reason,
                         revision_kind=excluded.revision_kind,
                         revision_severity=excluded.revision_severity,
-                        revision_index=excluded.revision_index
+                        revision_index=excluded.revision_index,
+                        trigger_event_id=excluded.trigger_event_id
                     """,
                     (
                         plan.id,
@@ -910,6 +925,7 @@ class SqliteStore(Store):
                         plan.revision_kind or "",
                         plan.revision_severity or "",
                         int(plan.revision_index or 0),
+                        plan.trigger_event_id or "",
                     ),
                 )
                 # Replace tasks for this plan (simplest correct semantics for
@@ -986,6 +1002,7 @@ class SqliteStore(Store):
             revision_kind=(row["revision_kind"] if "revision_kind" in row.keys() else "") or "",
             revision_severity=(row["revision_severity"] if "revision_severity" in row.keys() else "") or "",
             revision_index=int(row["revision_index"]) if "revision_index" in row.keys() and row["revision_index"] is not None else 0,
+            trigger_event_id=(row["trigger_event_id"] if "trigger_event_id" in row.keys() else "") or "",
         )
 
     async def get_task_plan(self, plan_id: str) -> Optional[TaskPlan]:

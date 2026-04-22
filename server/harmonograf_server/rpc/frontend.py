@@ -319,6 +319,10 @@ class FrontendServicerMixin:
                 # initial burst just like they do for live arrivals
                 # (harmonograf#75).
                 ev.drift_detected.annotation_id = dr.get("annotation_id", "") or ""
+                # Propagate the goldfive-minted drift id (goldfive#199 /
+                # harmonograf#99) so reconnecting clients have the strict
+                # join key for autonomous-drift plan-revision merges.
+                ev.drift_detected.id = dr.get("id", "") or ""
                 ra = dr.get("recorded_at")
                 if isinstance(ra, (int, float)):
                     ts = float_to_ts(float(ra))
@@ -882,6 +886,10 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
         # Propagate the source annotation_id so the frontend can dedup the
         # drift row against the source user annotation (harmonograf#75).
         ev.drift_detected.annotation_id = p.get("annotation_id", "") or ""
+        # Propagate the goldfive-minted drift id (goldfive#199 /
+        # harmonograf#99) so the frontend has the strict join key for
+        # autonomous-drift plan-revision merges.
+        ev.drift_detected.id = p.get("drift_id", "") or ""
         # Stamp ``emitted_at`` so the frontend renders a correct
         # session-relative timestamp. Previously this was omitted on the
         # live DELTA_DRIFT path, which caused the deriver to fall back to

@@ -866,6 +866,15 @@ class IngestPipeline:
             overwrites["revision_reason"] = payload.reason
         if payload.revision_index and not stored.revision_index:
             overwrites["revision_index"] = int(payload.revision_index)
+        # harmonograf#99 / goldfive#199: persist the envelope-level
+        # ``trigger_event_id`` so the intervention aggregator can
+        # strict-id-merge the plan-revision row onto its originating
+        # annotation or drift. Prefer the envelope value; fall through
+        # to ``plan.revision_trigger_event_id`` (populated by goldfive's
+        # ``_apply_revision``) only if the envelope stamp is missing.
+        envelope_trig = getattr(payload, "trigger_event_id", "") or ""
+        if envelope_trig and not stored.trigger_event_id:
+            overwrites["trigger_event_id"] = envelope_trig
         if overwrites:
             for k, v in overwrites.items():
                 setattr(stored, k, v)
@@ -1007,6 +1016,11 @@ class IngestPipeline:
         # etc). Used by the intervention aggregator (#75) to dedup the
         # drift row against the source annotation so a single user STEER
         # no longer surfaces as three separate cards.
+        # harmonograf#99 / goldfive#199: ``id`` is the goldfive-minted
+        # drift id (UUID4), always non-empty. Used as the strict join
+        # key when a follow-up PlanRevised was triggered by an autonomous
+        # drift — the aggregator merges plan rows whose trigger_event_id
+        # matches this drift's id.
         record: dict[str, Any] = {
             "run_id": run_id,
             "kind": _drift_kind_pb_to_string(payload.kind),
@@ -1015,6 +1029,7 @@ class IngestPipeline:
             "current_task_id": payload.current_task_id,
             "current_agent_id": payload.current_agent_id,
             "annotation_id": getattr(payload, "annotation_id", "") or "",
+            "id": getattr(payload, "id", "") or "",
             "recorded_at": self._now(),
         }
         ring = self._drifts_by_session.setdefault(ctx.session_id, [])
@@ -1030,6 +1045,7 @@ class IngestPipeline:
             current_task_id=record["current_task_id"],
             current_agent_id=record["current_agent_id"],
             annotation_id=record["annotation_id"],
+            drift_id=record["id"],
             recorded_at=record["recorded_at"],
         )
 

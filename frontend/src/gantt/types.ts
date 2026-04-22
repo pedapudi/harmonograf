@@ -132,6 +132,11 @@ export interface TaskPlan {
   revisionKind?: string;
   revisionSeverity?: string;
   revisionIndex?: number;
+  // harmonograf#99 / goldfive#199: strict dedup key joining this plan
+  // revision to its originating annotation or drift. Non-empty on every
+  // revision (user-control = annotation_id, autonomous = DriftEvent.id);
+  // empty on the initial plan.
+  triggerEventId?: string;
 }
 
 // Per-agent context-window telemetry sample (task #3). Converted from the
