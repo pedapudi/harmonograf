@@ -33,7 +33,6 @@ message ListSessionsRequest {
   string search = 2;                // free text over title + metadata values
   int32 limit = 3;
   int32 offset = 4;
-  bool include_empty = 5;           // default false: hide zero-span, zero-plan rows
 }
 
 message ListSessionsResponse {
@@ -57,13 +56,6 @@ message SessionSummary {
 - `search` matches substrings in `Session.title` and the values of
   `Session.metadata`. Case-insensitive.
 - `limit == 0` means "server default" (100 v0). Negative values → error.
-- `include_empty` defaults to **false**. "Empty" means a session with
-  zero spans AND zero goldfive task plans — typically the ghost
-  `sess_YYYY-MM-DD_NNNN` row the `Hello` handshake auto-creates before
-  the client knows the outer adk-web session id (harmonograf#77). Admin
-  tooling / retention jobs that want the full set set this true. The
-  row is still persisted and hydrates into the picker once content
-  lands on it.
 
 ## `WatchSession`
 

@@ -45,13 +45,6 @@ message ListSessionsRequest {
   string search = 2;
   int32 limit = 3;
   int32 offset = 4;
-  // Include "empty" sessions — those with zero spans AND zero goldfive
-  // task plans. Defaults to false so the picker hides ghost home
-  // sessions that the Hello handshake auto-created but which never
-  // accumulated content because the client's spans and goldfive events
-  // routed to a different session id (harmonograf#77). Flipped true by
-  // admin tools / retention jobs that want to audit the full set.
-  bool include_empty = 5;
 }
 
 message ListSessionsResponse {

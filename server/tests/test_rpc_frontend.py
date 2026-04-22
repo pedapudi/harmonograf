@@ -124,11 +124,8 @@ async def _seed_minimal(store, session_id: str, *, n_spans: int = 0,
 
 async def test_list_sessions_offset_paginates(harness, stub):
     store = harness["store"]
-    # Seed with at least one span each — ListSessions hides empty
-    # sessions by default (harmonograf#77) so pagination tests need
-    # content-bearing sessions.
     for i in range(5):
-        await _seed_minimal(store, f"sess_p{i}", n_spans=1, created_at=1000.0 + i)
+        await _seed_minimal(store, f"sess_p{i}", created_at=1000.0 + i)
 
     resp = await stub.ListSessions(
         frontend_pb2.ListSessionsRequest(limit=2, offset=0)
@@ -151,79 +148,14 @@ async def test_list_sessions_empty_returns_zero_count(harness, stub):
 
 async def test_list_sessions_search_case_insensitive(harness, stub):
     store = harness["store"]
-    # Seed via _seed_minimal so the session has a span and survives the
-    # default empty-session filter (harmonograf#77).
-    await _seed_minimal(store, "sess_x", n_spans=1, created_at=1.0)
-    await store.update_session(
-        "sess_x", title="Codegen Alpha"
+    await store.create_session(
+        Session(id="sess_x", title="Codegen Alpha", created_at=1.0,
+                status=SessionStatus.LIVE)
     )
     resp = await stub.ListSessions(
         frontend_pb2.ListSessionsRequest(search="CODEGEN")
     )
     assert {s.id for s in resp.sessions} == {"sess_x"}
-
-
-# ---- ListSessions: ghost-session filter (harmonograf#77) -----------------
-
-
-async def test_list_sessions_hides_empty_sessions_by_default(harness, stub):
-    """Sessions with zero spans AND zero task plans are hidden from the picker.
-
-    Reproduces the ghost ``sess_YYYY-MM-DD_NNNN`` session the Hello
-    handshake auto-creates before the client knows the outer adk-web
-    session id. Under goldfive+adk-web, every span and goldfive event
-    carries its own ``session_id`` (harmonograf#64 / #66), so the
-    Hello-registered session sits with zero content. The picker should
-    only surface sessions that actually accumulated telemetry.
-    """
-    store = harness["store"]
-    # Ghost home session — zero spans, zero plans. Pathological row.
-    await _seed_minimal(store, "sess_2026-04-22_0004", n_spans=0,
-                        created_at=1000.0)
-    # Real session the spans/events routed onto.
-    await _seed_minimal(store, "orch_v2_1776822086", n_spans=3,
-                        created_at=1001.0)
-
-    resp = await stub.ListSessions(frontend_pb2.ListSessionsRequest(limit=50))
-    assert {s.id for s in resp.sessions} == {"orch_v2_1776822086"}
-    assert resp.total_count == 1
-
-
-async def test_list_sessions_keeps_sessions_with_only_task_plans(harness, stub):
-    """A session with zero spans but at least one goldfive task plan is kept.
-
-    Guards against a naive "filter on spans only" implementation that
-    would drop a goldfive-driven session that posted a Plan but has not
-    yet produced any spans (e.g., planning-only mode, or a run that
-    errored during task execution before the first span opened).
-    """
-    store = harness["store"]
-    await _seed_minimal(store, "sess_planonly", n_spans=0, created_at=1000.0)
-    await store.put_task_plan(
-        TaskPlan(
-            id="plan_planonly",
-            session_id="sess_planonly",
-            planner_agent_id="a",
-            tasks=[Task(id="t1", title="do thing", status=TaskStatus.PENDING)],
-            created_at=1000.5,
-        )
-    )
-
-    resp = await stub.ListSessions(frontend_pb2.ListSessionsRequest(limit=50))
-    assert "sess_planonly" in {s.id for s in resp.sessions}
-
-
-async def test_list_sessions_include_empty_returns_ghosts(harness, stub):
-    """``include_empty=true`` brings ghost sessions back (admin tooling path)."""
-    store = harness["store"]
-    await _seed_minimal(store, "ghost_session", n_spans=0, created_at=1000.0)
-    await _seed_minimal(store, "real_session", n_spans=2, created_at=1001.0)
-
-    resp = await stub.ListSessions(
-        frontend_pb2.ListSessionsRequest(limit=50, include_empty=True)
-    )
-    assert {s.id for s in resp.sessions} == {"ghost_session", "real_session"}
-    assert resp.total_count == 2
 
 
 # ---- WatchSession ---------------------------------------------------------
