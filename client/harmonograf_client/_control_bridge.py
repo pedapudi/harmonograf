@@ -26,6 +26,14 @@ transport:
    channel closed so any in-flight ``channel.acks()`` consumer exits
    its iterator.
 
+STEER annotations are additionally validated before forwarding
+(goldfive#171): empty / whitespace-only bodies and bodies over
+:data:`STEER_BODY_MAX_BYTES` bytes are rejected locally with a
+``FAILURE`` ack so the runner never sees them, and ASCII control
+characters (ord < 32 except ``\\t`` / ``\\n``) are stripped from the
+forwarded body so prompt injection via control sequences can't poison
+downstream LLM calls.
+
 The bridge operates directly on a :class:`ControlChannel` — it is the
 caller's responsibility to attach that channel to the runner (via
 :attr:`Runner.control`, or by passing ``control=`` to
@@ -55,6 +63,49 @@ if TYPE_CHECKING:
     from .client import Client
 
 log = logging.getLogger("harmonograf_client._control_bridge")
+
+
+# STEER body validation (goldfive#171). The cap is a defense against
+# a pathological UI / scripted caller submitting a multi-MB "body" that
+# would otherwise bloat every subsequent LLM call + storage write.
+STEER_BODY_MAX_BYTES = 8192
+
+
+def _sanitise_steer_body(body: str) -> str:
+    """Strip ASCII control characters from ``body`` before forwarding.
+
+    Keeps ``\\t`` (9) and ``\\n`` (10); strips every other ord < 32 so
+    a steer cannot smuggle control sequences into the downstream
+    prompt. The \\r (13) is dropped so ``\\r\\n``-delimited clients
+    don't produce spurious blank lines either. Non-ASCII characters
+    (ord >= 128) pass through unchanged.
+    """
+    if not body:
+        return body
+    keep = (9, 10)  # tab, newline
+    return "".join(ch for ch in body if ord(ch) >= 32 or ord(ch) in keep)
+
+
+def _validate_steer_body(body: str) -> tuple[bool, str]:
+    """Return ``(ok, failure_detail)`` for a STEER body.
+
+    Shape is designed so callers can::
+
+        ok, detail = _validate_steer_body(body)
+        if not ok:
+            send_ack(FAILURE, detail); return
+
+    Validation ordering is: empty first (shortest path), then cap.
+    """
+    if not body or not body.strip():
+        return False, "body empty"
+    # Budget is bytes so multibyte glyph counts don't drift from what
+    # downstream sees on the wire. encode() is O(n); the guard above
+    # keeps this from running on None.
+    encoded = body.encode("utf-8", errors="replace")
+    if len(encoded) > STEER_BODY_MAX_BYTES:
+        return False, f"body too long ({len(encoded)})"
+    return True, ""
 
 
 class ControlBridge:
@@ -131,6 +182,7 @@ class ControlBridge:
     # ------------------------------------------------------------------
 
     async def _events_loop(self) -> None:
+        from goldfive.control import ControlKind
         from goldfive.conv import from_pb_control_event
 
         while True:
@@ -151,6 +203,25 @@ class ControlBridge:
                     f"failed to decode control event: {exc!r}",
                 )
                 continue
+
+            # STEER body validation (goldfive#171). Reject empty /
+            # whitespace-only and over-cap bodies locally so the runner
+            # never sees them — the server's outstanding deliver
+            # resolves via the FAILURE ack instead of timing out. The
+            # scrub step drops ASCII control characters so the forwarded
+            # body can't smuggle escape sequences into an LLM prompt.
+            if msg.kind is ControlKind.STEER:
+                body = str(msg.payload.get("note", "") or "")
+                ok, detail = _validate_steer_body(body)
+                if not ok:
+                    log.debug(
+                        "dropping STEER id=%s with invalid body: %s", msg.id, detail
+                    )
+                    self._client.send_control_ack(msg.id, "failure", detail)
+                    continue
+                sanitised = _sanitise_steer_body(body)
+                if sanitised != body:
+                    msg.payload["note"] = sanitised
 
             try:
                 await self._channel.send(msg)
