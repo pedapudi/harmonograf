@@ -56,12 +56,12 @@ describe('OrchestrationTimeline thinking preview', () => {
     mockStore = undefined;
   });
 
-  it('renders a 🧠 preview on reporting-tool rows whose span has thinking', () => {
-    // LLM span carrying thinking. The thinking-map is keyed by span.id, so
+  it('renders a 🧠 preview on reporting-tool rows whose span has reasoning', () => {
+    // LLM span carrying reasoning. The thinking-map is keyed by span.id, so
     // the reporting-tool row must share the same span.id as the LLM span to
     // surface the preview (in real life an orchestration event is keyed by
-    // the report_task_* span, so the thinking must live there). The helper
-    // collects thinking from every span in the agent's index.
+    // the report_task_* span, so the reasoning must live there). The helper
+    // collects reasoning from every span in the agent's index.
     mockStore!.spans.append(
       mkSpan({
         id: 'sp-report',
@@ -70,10 +70,10 @@ describe('OrchestrationTimeline thinking preview', () => {
         startMs: 100,
         attributes: {
           tool_args_preview: str(JSON.stringify({ task_id: 't1', detail: 'halfway' })),
-          'llm.thought': str(
+          'llm.reasoning': str(
             'The user wants me to summarize three documents so I should start with the first.',
           ),
-          has_thinking: bool(true),
+          has_reasoning: bool(true),
         },
       }),
     );

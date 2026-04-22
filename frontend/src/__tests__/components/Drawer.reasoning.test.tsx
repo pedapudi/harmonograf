@@ -144,4 +144,67 @@ describe('ReasoningSection', () => {
     const body = screen.getByTestId('drawer-reasoning-body');
     expect(body.textContent).toMatch(/truncated \(1000 more chars\)/);
   });
+
+  // --- Aggregate variant (harmonograf#108) --------------------------------
+
+  it('relabels as "Agent reasoning trail" with a turn-count badge when isAggregate is set', () => {
+    render(
+      <ReasoningSection
+        inline={'[LLM call 1]\nfirst\n\n---\n\n[LLM call 2]\nsecond'}
+        payloadRef={undefined}
+        callCount={2}
+        isAggregate
+      />,
+    );
+    const toggle = screen.getByTestId('drawer-reasoning-toggle');
+    expect(toggle.textContent).toMatch(/Agent reasoning trail/);
+    const badge = screen.getByTestId('drawer-reasoning-call-count');
+    expect(badge.textContent).toBe('2 turns');
+  });
+
+  it('singularizes the turn-count badge for one LLM call', () => {
+    render(
+      <ReasoningSection
+        inline={'only one turn'}
+        payloadRef={undefined}
+        callCount={1}
+        isAggregate
+      />,
+    );
+    expect(screen.getByTestId('drawer-reasoning-call-count').textContent).toBe(
+      '1 turn',
+    );
+  });
+
+  it('renders the concatenated trail body when opened', () => {
+    const trail =
+      '[LLM call 1]\nstep A reasoning\n\n---\n\n[LLM call 2]\nstep B reasoning';
+    render(
+      <ReasoningSection
+        inline={trail}
+        payloadRef={undefined}
+        callCount={2}
+        isAggregate
+      />,
+    );
+    fireEvent.click(screen.getByTestId('drawer-reasoning-toggle'));
+    const body = screen.getByTestId('drawer-reasoning-body');
+    expect(body.textContent).toContain('step A reasoning');
+    expect(body.textContent).toContain('step B reasoning');
+    expect(body.textContent).toContain('[LLM call 1]');
+    expect(body.textContent).toContain('[LLM call 2]');
+  });
+
+  it('omits the turn-count badge on per-LLM_CALL reasoning (no isAggregate, no count)', () => {
+    render(
+      <ReasoningSection
+        inline={'single call reasoning'}
+        payloadRef={undefined}
+      />,
+    );
+    expect(screen.queryByTestId('drawer-reasoning-call-count')).toBeNull();
+    expect(screen.getByTestId('drawer-reasoning-toggle').textContent).toMatch(
+      /^▸Reasoning$/,
+    );
+  });
 });
