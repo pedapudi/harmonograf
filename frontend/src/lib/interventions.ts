@@ -18,12 +18,12 @@
 //   * Tier 1 — always on. Plan-revision rows merge onto their source
 //     annotation or drift row when ``triggerEventId`` matches the
 //     annotation id or drift id.
-//   * Tier 2 — opt-in via ``VITE_HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS``
-//     (default 0 / disabled). Time-window fallback: a plan row whose
-//     ``triggerEventId`` matched nothing strictly merges onto a
-//     preceding user-control row of the same ``driftKind`` within the
-//     configured window. Console WARNING on match so operators can
-//     diagnose mis-attribution.
+//   * Tier 2 — opt-in via the ``legacyPlanAttributionWindowMs`` option
+//     on :func:`deriveInterventions` (default 0 / disabled). Time-window
+//     fallback: a plan row whose ``triggerEventId`` matched nothing
+//     strictly merges onto a preceding user-control row of the same
+//     ``driftKind`` within the configured window. Console WARNING on
+//     match so operators can diagnose mis-attribution.
 //
 // The derivation is intentionally tree-agnostic. No taxonomy knowledge is
 // baked into the marker rendering; downstream components can show whatever
@@ -73,18 +73,6 @@ const GOLDFIVE_REVISION_KINDS = new Set([
   'human_intervention_required',
 ]);
 
-// harmonograf#99: legacy time-window fallback. Default disabled. Opt in
-// via VITE_HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS at build time.
-function legacyWindowMs(): number {
-  const raw = (import.meta as unknown as {
-    env?: { VITE_HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS?: string };
-  }).env?.VITE_HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS;
-  if (!raw) return 0;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
-  return parsed;
-}
-
 // Pretty labels for drift kinds emitted from the user. Uppercase so the
 // renderer can splash them next to other kinds without special-casing.
 function normalizeDriftKind(raw: string): string {
@@ -106,6 +94,12 @@ export interface DeriveInput {
   annotations: readonly Annotation[];
   drifts: readonly DriftRecord[];
   plans: readonly TaskPlan[]; // every plan rev ever seen, chronological
+  // Opt-in Tier-2 legacy time-window fallback for plan-revision
+  // attribution (pre-#99 behaviour). Default 0 / undefined disables.
+  // Provided by the caller (app runtime context) — never read from
+  // ``import.meta.env`` — so the aggregator stays testable and doesn't
+  // carry build-time config knowledge.
+  legacyPlanAttributionWindowMs?: number;
 }
 
 export function deriveInterventions(input: DeriveInput): InterventionRow[] {
@@ -183,8 +177,11 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
 
   rows.sort((a, b) => a.atMs - b.atMs);
 
-  // Outcome attribution (pre-merge). Strict-id only by default.
-  const windowMs = legacyWindowMs();
+  // Outcome attribution (pre-merge). Strict-id only by default; the
+  // caller may opt in to the legacy time-window by passing
+  // ``legacyPlanAttributionWindowMs``.
+  const rawWindow = input.legacyPlanAttributionWindowMs ?? 0;
+  const windowMs = Number.isFinite(rawWindow) && rawWindow > 0 ? rawWindow : 0;
   attributeOutcomes(rows, input.plans, { windowMs });
 
   // Tier 1 merge — strict trigger_event_id.
@@ -238,7 +235,7 @@ function attributeOutcomes(
               row.triggerEventId,
             )} -> plan rev=${fallback.revisionIndex} ` +
             `(triggerEventId=${JSON.stringify(fallback.triggerEventId ?? '')}). ` +
-            `VITE_HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS=${opts.windowMs}. ` +
+            `legacyPlanAttributionWindowMs=${opts.windowMs}. ` +
             `Investigate why strict-id did not match (pre-#99 data? goldfive < #199?).`,
         );
         const idx = fallback.revisionIndex ?? 0;
@@ -388,7 +385,7 @@ function legacyTimeWindowMerge(
         `[interventions] legacy time-window fallback merged plan rev=` +
           `${row.planRevisionIndex} (driftKind=${row.driftKind}, no ` +
           `triggerEventId) onto ${target.source} row. ` +
-          `VITE_HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS=${windowMs}. ` +
+          `legacyPlanAttributionWindowMs=${windowMs}. ` +
           `Investigate why strict-id did not match (pre-#99 data?).`,
       );
       if (!target.outcome || target.outcome === 'recorded') {
@@ -406,9 +403,15 @@ function legacyTimeWindowMerge(
 // Convenience adapter: pull the three inputs from a live SessionStore +
 // annotation store snapshot and run the deriver. Used by the React
 // components so they don't duplicate the shape plumbing.
+//
+// ``opts.legacyPlanAttributionWindowMs`` is forwarded to the underlying
+// :func:`deriveInterventions` call when provided. Callers that want the
+// Tier-2 fallback wire it in from their runtime config context (there
+// is no build-time env var — that was the previous design).
 export function deriveInterventionsFromStore(
   store: SessionStore,
   annotations: readonly Annotation[],
+  opts: { legacyPlanAttributionWindowMs?: number } = {},
 ): InterventionRow[] {
   const plans = store.tasks.listPlans();
   const allRevs: TaskPlan[] = [];
@@ -425,6 +428,7 @@ export function deriveInterventionsFromStore(
     annotations,
     drifts: store.drifts.list(),
     plans: allRevs,
+    legacyPlanAttributionWindowMs: opts.legacyPlanAttributionWindowMs,
   });
 }
 

@@ -673,7 +673,7 @@ async def test_autonomous_drift_plan_revision_strict_id_merge(store):
 
 
 async def test_no_trigger_id_no_merge_by_default(store):
-    """Empty trigger_event_id + legacy flag UNSET → 2 cards (no silent merge).
+    """Empty trigger_event_id + legacy param UNSET → 2 cards (no silent merge).
 
     Documented behaviour: pre-#99 data, or a refine where goldfive didn't
     stamp trigger_event_id, surfaces as a standalone plan card. The
@@ -681,194 +681,189 @@ async def test_no_trigger_id_no_merge_by_default(store):
     default.
     """
 
-    import os
-
-    # Ensure the legacy flag is unset for this test.
-    old = os.environ.pop("HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS", None)
-    try:
-        sid = "sess_no_trigger"
-        await _seed_session(store, sid)
-        await store.put_annotation(
-            Annotation(
-                id="ann_no_trigger",
-                session_id=sid,
-                target=AnnotationTarget(agent_id="a", time_start=100.0),
-                author="alice",
-                created_at=100.0,
-                kind=AnnotationKind.STEERING,
-                body="pivot",
-            )
+    sid = "sess_no_trigger"
+    await _seed_session(store, sid)
+    await store.put_annotation(
+        Annotation(
+            id="ann_no_trigger",
+            session_id=sid,
+            target=AnnotationTarget(agent_id="a", time_start=100.0),
+            author="alice",
+            created_at=100.0,
+            kind=AnnotationKind.STEERING,
+            body="pivot",
         )
-        drifts = _StubDrifts({sid: []})
-        await store.put_task_plan(
-            TaskPlan(
-                id="p_nojoin",
-                session_id=sid,
-                created_at=105.0,
-                summary="",
-                tasks=[],
-                edges=[],
-                revision_reason="pivot",
-                revision_kind="user_steer",
-                revision_severity="warning",
-                revision_index=1,
-                # No trigger_event_id — pre-#99 row or bridge misconfigured.
-            )
+    )
+    drifts = _StubDrifts({sid: []})
+    await store.put_task_plan(
+        TaskPlan(
+            id="p_nojoin",
+            session_id=sid,
+            created_at=105.0,
+            summary="",
+            tasks=[],
+            edges=[],
+            revision_reason="pivot",
+            revision_kind="user_steer",
+            revision_severity="warning",
+            revision_index=1,
+            # No trigger_event_id — pre-#99 row or bridge misconfigured.
         )
-        records = await list_interventions(sid, store=store, drifts_provider=drifts)
-        # 2 cards: annotation + orphan plan row.
-        assert len(records) == 2
-        kinds = sorted(r.kind for r in records)
-        assert kinds == ["STEER", "STEER"]
-    finally:
-        if old is not None:
-            os.environ["HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS"] = old
+    )
+    # Default window (0.0) → fallback disabled.
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    # 2 cards: annotation + orphan plan row.
+    assert len(records) == 2
+    kinds = sorted(r.kind for r in records)
+    assert kinds == ["STEER", "STEER"]
 
 
-async def test_legacy_flag_enables_time_window(store, caplog):
-    """Env flag set → time-window fallback merges + emits WARNING log."""
-
-    import os
+async def test_legacy_flag_enabled_via_config(store, caplog):
+    """Legacy window passed via param → fallback fires + WARNING logged."""
 
     caplog.set_level("WARNING", logger="harmonograf_server.interventions")
-    os.environ["HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS"] = "900000"
-    try:
-        sid = "sess_legacy_on"
-        await _seed_session(store, sid)
-        await store.put_annotation(
-            Annotation(
-                id="ann_legacy",
-                session_id=sid,
-                target=AnnotationTarget(agent_id="a", time_start=100.0),
-                author="alice",
-                created_at=100.0,
-                kind=AnnotationKind.STEERING,
-                body="pivot",
-            )
+    sid = "sess_legacy_on"
+    await _seed_session(store, sid)
+    await store.put_annotation(
+        Annotation(
+            id="ann_legacy",
+            session_id=sid,
+            target=AnnotationTarget(agent_id="a", time_start=100.0),
+            author="alice",
+            created_at=100.0,
+            kind=AnnotationKind.STEERING,
+            body="pivot",
         )
-        drifts = _StubDrifts(
-            {
-                sid: [
-                    {
-                        "run_id": "r1",
-                        "kind": "user_steer",
-                        "severity": "warning",
-                        "detail": "by alice: pivot",
-                        "annotation_id": "ann_legacy",
-                        "id": "drift_legacy",
-                        "recorded_at": 100.2,
-                    }
-                ]
-            }
+    )
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "run_id": "r1",
+                    "kind": "user_steer",
+                    "severity": "warning",
+                    "detail": "by alice: pivot",
+                    "annotation_id": "ann_legacy",
+                    "id": "drift_legacy",
+                    "recorded_at": 100.2,
+                }
+            ]
+        }
+    )
+    # Plan with NO trigger_event_id — strict-id won't merge, so the
+    # legacy time-window path must fire. Gap: 10 min (inside 15 min
+    # window).
+    await store.put_task_plan(
+        TaskPlan(
+            id="p_legacy",
+            session_id=sid,
+            created_at=700.0,
+            summary="",
+            tasks=[],
+            edges=[],
+            revision_reason="pivot",
+            revision_kind="user_steer",
+            revision_severity="warning",
+            revision_index=1,
+            # No trigger_event_id.
         )
-        # Plan with NO trigger_event_id — strict-id won't merge, so the
-        # legacy time-window path must fire. Gap: 10 min (inside 15 min
-        # window).
-        await store.put_task_plan(
-            TaskPlan(
-                id="p_legacy",
-                session_id=sid,
-                created_at=700.0,
-                summary="",
-                tasks=[],
-                edges=[],
-                revision_reason="pivot",
-                revision_kind="user_steer",
-                revision_severity="warning",
-                revision_index=1,
-                # No trigger_event_id.
-            )
-        )
-        records = await list_interventions(sid, store=store, drifts_provider=drifts)
-        # User annotation + drift merge via strict id (both have
-        # "ann_legacy" on trigger_event_id). Plan row's outcome was
-        # attributed via legacy fallback onto the drift row during
-        # _attribute_outcomes — the plan row itself remains because it
-        # lacks a trigger_event_id for strict merging.
-        user_cards = [r for r in records if r.source == "user"]
-        assert len(user_cards) == 1
-        assert user_cards[0].outcome == "plan_revised:r1"
-        # WARNING logged so operators notice when the fallback fires.
-        warnings = [
-            rec for rec in caplog.records
-            if rec.levelname == "WARNING"
-            and "legacy time-window fallback" in rec.getMessage()
-        ]
-        assert warnings, "expected a WARNING log on legacy fallback match"
-    finally:
-        os.environ.pop("HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS", None)
+    )
+    records = await list_interventions(
+        sid,
+        store=store,
+        drifts_provider=drifts,
+        legacy_plan_attribution_window_ms=900_000.0,
+    )
+    # User annotation + drift merge via strict id (both have
+    # "ann_legacy" on trigger_event_id). Plan row's outcome was
+    # attributed via legacy fallback onto the drift row during
+    # _attribute_outcomes — the plan row itself remains because it
+    # lacks a trigger_event_id for strict merging.
+    user_cards = [r for r in records if r.source == "user"]
+    assert len(user_cards) == 1
+    assert user_cards[0].outcome == "plan_revised:r1"
+    # WARNING logged so operators notice when the fallback fires.
+    warnings = [
+        rec for rec in caplog.records
+        if rec.levelname == "WARNING"
+        and "legacy time-window fallback" in rec.getMessage()
+    ]
+    assert warnings, "expected a WARNING log on legacy fallback match"
+    # WARNING references the new config/flag surface, not the old env var.
+    assert any(
+        "legacy_plan_attribution_window_ms" in rec.getMessage()
+        for rec in warnings
+    )
+    assert not any(
+        "HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS" in rec.getMessage()
+        for rec in warnings
+    )
 
 
 async def test_legacy_flag_disabled_default(store):
-    """Env flag unset → no time-window fallback fires (2 cards stay 2)."""
+    """Default window (0.0) → no time-window fallback fires (2 cards stay 2)."""
 
-    import os
-
-    old = os.environ.pop("HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS", None)
-    try:
-        sid = "sess_legacy_off"
-        await _seed_session(store, sid)
-        await store.put_annotation(
-            Annotation(
-                id="ann_no_legacy",
-                session_id=sid,
-                target=AnnotationTarget(agent_id="a", time_start=100.0),
-                author="alice",
-                created_at=100.0,
-                kind=AnnotationKind.STEERING,
-                body="pivot",
-            )
+    sid = "sess_legacy_off"
+    await _seed_session(store, sid)
+    await store.put_annotation(
+        Annotation(
+            id="ann_no_legacy",
+            session_id=sid,
+            target=AnnotationTarget(agent_id="a", time_start=100.0),
+            author="alice",
+            created_at=100.0,
+            kind=AnnotationKind.STEERING,
+            body="pivot",
         )
-        drifts = _StubDrifts(
-            {
-                sid: [
-                    {
-                        "run_id": "r1",
-                        "kind": "user_steer",
-                        "severity": "warning",
-                        "detail": "by alice: pivot",
-                        "annotation_id": "ann_no_legacy",
-                        "id": "drift_no_legacy",
-                        "recorded_at": 100.2,
-                    }
-                ]
-            }
+    )
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "run_id": "r1",
+                    "kind": "user_steer",
+                    "severity": "warning",
+                    "detail": "by alice: pivot",
+                    "annotation_id": "ann_no_legacy",
+                    "id": "drift_no_legacy",
+                    "recorded_at": 100.2,
+                }
+            ]
+        }
+    )
+    await store.put_task_plan(
+        TaskPlan(
+            id="p_no_legacy",
+            session_id=sid,
+            created_at=700.0,
+            summary="",
+            tasks=[],
+            edges=[],
+            revision_reason="pivot",
+            revision_kind="user_steer",
+            revision_severity="warning",
+            revision_index=1,
+            # No trigger_event_id.
         )
-        await store.put_task_plan(
-            TaskPlan(
-                id="p_no_legacy",
-                session_id=sid,
-                created_at=700.0,
-                summary="",
-                tasks=[],
-                edges=[],
-                revision_reason="pivot",
-                revision_kind="user_steer",
-                revision_severity="warning",
-                revision_index=1,
-                # No trigger_event_id.
-            )
-        )
-        records = await list_interventions(sid, store=store, drifts_provider=drifts)
-        # Two cards: the merged annotation+drift (strict-id via
-        # annotation_id), PLUS the standalone plan-row (no
-        # trigger_event_id so no strict merge; legacy window is
-        # disabled). The plan row's STEER kind comes from the
-        # revision_kind so it rolls up as source="user".
-        assert len(records) == 2
-        merged_card = next(
-            r for r in records if r.annotation_id == "ann_no_legacy"
-        )
-        orphan_plan = next(
-            r for r in records if r.plan_revision_index == 1 and not r.annotation_id
-        )
-        # The merged row inherited nothing from the plan — attribution
-        # didn't run because strict-id missed and legacy was off.
-        assert merged_card.outcome == "recorded"
-        assert orphan_plan.outcome == "plan_revised:r1"
-    finally:
-        if old is not None:
-            os.environ["HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS"] = old
+    )
+    # Default (0.0) keeps the fallback disabled.
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    # Two cards: the merged annotation+drift (strict-id via
+    # annotation_id), PLUS the standalone plan-row (no
+    # trigger_event_id so no strict merge; legacy window is
+    # disabled). The plan row's STEER kind comes from the
+    # revision_kind so it rolls up as source="user".
+    assert len(records) == 2
+    merged_card = next(
+        r for r in records if r.annotation_id == "ann_no_legacy"
+    )
+    orphan_plan = next(
+        r for r in records if r.plan_revision_index == 1 and not r.annotation_id
+    )
+    # The merged row inherited nothing from the plan — attribution
+    # didn't run because strict-id missed and legacy was off.
+    assert merged_card.outcome == "recorded"
+    assert orphan_plan.outcome == "plan_revised:r1"
 
 
 async def test_autonomous_drift_and_mismatched_plan_keep_separate_cards(store):

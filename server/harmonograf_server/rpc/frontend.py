@@ -20,6 +20,7 @@ import grpc
 from google.protobuf.timestamp_pb2 import Timestamp
 from google.protobuf import timestamp_pb2
 
+from harmonograf_server.config import ServerConfig
 from harmonograf_server.bus import (
     DELTA_AGENT_INVOCATION_COMPLETED,
     DELTA_AGENT_INVOCATION_STARTED,
@@ -144,6 +145,8 @@ class FrontendServicerMixin:
       self._ingest:  IngestPipeline
       self._router:  ControlRouter
       self._data_dir: str   (for GetStats reporting)
+      self._config:  ServerConfig (read-only; ListInterventions reads the
+                     legacy_plan_attribution_window_ms field)
     """
 
     _store: Store
@@ -151,6 +154,7 @@ class FrontendServicerMixin:
     _ingest: IngestPipeline
     _router: ControlRouter
     _data_dir: str
+    _config: ServerConfig
 
     # ---- ListSessions -------------------------------------------------
 
@@ -661,8 +665,14 @@ class FrontendServicerMixin:
                 grpc.StatusCode.NOT_FOUND, f"session {request.session_id} not found"
             )
             return frontend_pb2.ListInterventionsResponse()
+        legacy_window_ms = float(
+            getattr(self._config, "legacy_plan_attribution_window_ms", 0.0) or 0.0
+        )
         records = await list_interventions(
-            request.session_id, store=self._store, drifts_provider=self._ingest
+            request.session_id,
+            store=self._store,
+            drifts_provider=self._ingest,
+            legacy_plan_attribution_window_ms=legacy_window_ms,
         )
         resp = frontend_pb2.ListInterventionsResponse()
         for rec in records:

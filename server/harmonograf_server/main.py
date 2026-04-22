@@ -94,7 +94,9 @@ class Harmonograf:
 
         router.on_status_query_response(_on_status_query)
 
-        servicer = TelemetryServicer(ingest, router=router, data_dir=data_dir)
+        servicer = TelemetryServicer(
+            ingest, router=router, data_dir=data_dir, config=cfg
+        )
         return cls(
             cfg,
             store=store,
