@@ -409,6 +409,11 @@ def goldfive_pb_plan_to_storage(
         revision_kind=_drift_kind_pb_to_string(pb.revision_kind),
         revision_severity=_drift_severity_pb_to_string(pb.revision_severity),
         revision_index=int(pb.revision_index),
+        # harmonograf#99 / goldfive#199: inline trigger_event_id from the
+        # Plan proto (mirrored from PlanRevised.trigger_event_id by the
+        # goldfive steerer's _apply_revision). Non-empty for every
+        # revision; empty on the initial plan submission.
+        trigger_event_id=getattr(pb, "revision_trigger_event_id", "") or "",
     )
 
 
@@ -500,6 +505,7 @@ def storage_plan_to_goldfive_pb(plan: TaskPlan) -> Any:
         revision_kind=_drift_kind_string_to_pb(plan.revision_kind),
         revision_severity=_drift_severity_string_to_pb(plan.revision_severity),
         revision_index=int(plan.revision_index),
+        revision_trigger_event_id=plan.trigger_event_id or "",
     )
     for task in plan.tasks:
         pb.tasks.append(storage_task_to_goldfive_pb(task))

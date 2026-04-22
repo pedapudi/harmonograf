@@ -108,7 +108,9 @@ async def test_list_interventions_merges_annotations_drifts_and_refines(store):
             body="try a different approach",
         )
     )
-    # Drift at t=120 — drift source.
+    # Drift at t=120 — drift source. goldfive#199: every drift carries a
+    # stable ``id`` (UUID4) that harmonograf's aggregator uses as the
+    # strict join key for a subsequent refine's trigger_event_id.
     drifts = _StubDrifts(
         {
             sid: [
@@ -119,13 +121,14 @@ async def test_list_interventions_merges_annotations_drifts_and_refines(store):
                     "detail": "agent re-reading same doc",
                     "current_task_id": "t1",
                     "current_agent_id": "a",
+                    "id": "drift_loop_1",
                     "recorded_at": 120.0,
                 }
             ]
         }
     )
-    # Plan revision at t=122 (within the 5s window) — should attach as
-    # outcome of the drift above, not a separate intervention row.
+    # Plan revision at t=122 — strict-id merges via trigger_event_id
+    # matching the drift id above.
     await store.put_task_plan(
         TaskPlan(
             id="p1",
@@ -146,6 +149,7 @@ async def test_list_interventions_merges_annotations_drifts_and_refines(store):
             revision_kind="looping_reasoning",
             revision_severity="warning",
             revision_index=2,
+            trigger_event_id="drift_loop_1",
         )
     )
     # Autonomous cascade_cancel revision at t=130 — no preceding drift
@@ -335,6 +339,7 @@ async def test_plan_revision_with_matching_drift_is_not_double_counted(store):
                     "kind": "agent_refusal",
                     "severity": "warning",
                     "detail": "refused",
+                    "id": "drift_refusal_1",
                     "recorded_at": 600.0,
                 }
             ]
@@ -351,6 +356,7 @@ async def test_plan_revision_with_matching_drift_is_not_double_counted(store):
             revision_reason="",
             revision_kind="agent_refusal",
             revision_index=2,
+            trigger_event_id="drift_refusal_1",
         )
     )
     records = await list_interventions(sid, store=store, drifts_provider=drifts)
@@ -409,7 +415,7 @@ async def test_user_steer_annotation_plus_drift_plus_plan_collapse_to_one_card(s
     )
 
     # 3. Plan revision produced by the refine path, revision_kind=user_steer,
-    #    landing inside the 5s attribution window.
+    #    carrying the source annotation_id as its trigger_event_id (goldfive#199).
     await store.put_task_plan(
         TaskPlan(
             id="p_rev",
@@ -422,6 +428,7 @@ async def test_user_steer_annotation_plus_drift_plus_plan_collapse_to_one_card(s
             revision_kind="user_steer",
             revision_severity="warning",
             revision_index=1,
+            trigger_event_id="ann_steer_42",
         )
     )
 
@@ -537,22 +544,19 @@ async def test_user_steer_drift_without_annotation_id_keeps_separate_card(store)
     assert all(r.source == "user" for r in records)
 
 
-async def test_slow_user_steer_refine_still_dedups_to_one_card(store):
-    """harmonograf#86: drift→plan gap > 5s must still collapse for user STEERs.
+async def test_user_steer_plan_revision_strict_id_merge(store):
+    """harmonograf#99 (rescope): 20-min refine still merges via strict id.
 
-    The user's STEER routes through the planner's LLM, which on large
-    local models (e.g. Qwen3.5-35B) can take tens of seconds to return
-    a refined plan. The narrow 5s attribution window used for
-    autonomous drifts strand-suppresses the drift row in that case —
-    leaving the annotation merged with the drift AND a separate
-    plan-sourced STEER card. After #86 the user-control kinds use an
-    extended window so both paths still collapse onto the same card.
+    Replaces the pre-#99 time-window test. The strict-id contract means
+    arbitrary refine latency no longer matters — the plan-revision row
+    carries the source annotation_id as its ``trigger_event_id``, so the
+    aggregator collapses annotation + drift + plan onto one card by
+    exact id match regardless of the gap.
     """
 
     sid = "sess_slow_refine"
     await _seed_session(store, sid)
 
-    # 1. User STEER annotation at t=100.
     await store.put_annotation(
         Annotation(
             id="ann_steer_slow",
@@ -565,8 +569,6 @@ async def test_slow_user_steer_refine_still_dedups_to_one_card(store):
         )
     )
 
-    # 2. USER_STEER drift with annotation_id at t=100.2 (near-immediate
-    #    relay from the bridge).
     drifts = _StubDrifts(
         {
             sid: [
@@ -576,19 +578,19 @@ async def test_slow_user_steer_refine_still_dedups_to_one_card(store):
                     "severity": "warning",
                     "detail": "by alice: pivot to solar flares",
                     "annotation_id": "ann_steer_slow",
+                    "id": "drift_user_steer_slow",
                     "recorded_at": 100.2,
                 }
             ]
         }
     )
 
-    # 3. Plan revision lands 70s later — the refine LLM took a while.
-    #    Inside _USER_OUTCOME_WINDOW_S but well outside the default 5s.
+    # Plan revision lands 20 minutes later. Strict-id doesn't care.
     await store.put_task_plan(
         TaskPlan(
             id="p_slow",
             session_id=sid,
-            created_at=170.5,
+            created_at=1300.5,  # +20 minutes
             summary="pivoted plan",
             tasks=[],
             edges=[],
@@ -596,12 +598,12 @@ async def test_slow_user_steer_refine_still_dedups_to_one_card(store):
             revision_kind="user_steer",
             revision_severity="warning",
             revision_index=1,
+            trigger_event_id="ann_steer_slow",
         )
     )
 
     records = await list_interventions(sid, store=store, drifts_provider=drifts)
 
-    # Exactly one card — the slow refine must not leak a second STEER row.
     assert len(records) == 1, f"expected 1 card, got {len(records)}: {records}"
     card = records[0]
     assert card.source == "user"
@@ -609,23 +611,278 @@ async def test_slow_user_steer_refine_still_dedups_to_one_card(store):
     assert card.annotation_id == "ann_steer_slow"
     assert card.author == "alice"
     assert card.body_or_reason == "pivot to solar flares"
-    # The plan_revised outcome is attributed even across the wider gap.
     assert card.outcome == "plan_revised:r1"
     assert card.plan_revision_index == 1
     assert card.severity == "warning"
 
 
-async def test_slow_autonomous_refine_is_still_bounded_by_5s(store):
-    """Autonomous (non-user) drifts keep the tight 5s window.
+async def test_autonomous_drift_plan_revision_strict_id_merge(store):
+    """harmonograf#99: autonomous drift + its plan revision → 1 card (strict-id).
 
-    Widening only the user-control kinds means a slow goldfive refine
-    (which doesn't happen in practice — autonomous plan revisions fire
-    fast) followed by a model-kind drift doesn't claim-steal an
-    unrelated later revision. Covered here so a future relaxation
-    doesn't accidentally apply across the board.
+    Previously autonomous drift + subsequent plan revision were always
+    separate cards (the pre-#99 code only merged via annotation_id, which
+    autonomous drifts don't have). The rescope stamps a drift-id
+    ``trigger_event_id`` on the plan so harmonograf's merge collapses
+    the drift + plan onto one card.
+
+    This also exercises the test case from the rescope spec:
+    LOOPING_REASONING drift + its PlanRevised at t+10min → 1 card.
     """
 
-    sid = "sess_slow_autonomous"
+    sid = "sess_auto_loop"
+    await _seed_session(store, sid)
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "run_id": "r1",
+                    "kind": "looping_reasoning",
+                    "severity": "warning",
+                    "detail": "stuck on same doc",
+                    "current_task_id": "t1",
+                    "id": "drift_loop_AUTO",
+                    "recorded_at": 100.0,
+                }
+            ]
+        }
+    )
+    # Plan revision lands 10 minutes later — strict-id still merges.
+    await store.put_task_plan(
+        TaskPlan(
+            id="p_loop",
+            session_id=sid,
+            created_at=700.0,
+            summary="revised around loop",
+            tasks=[],
+            edges=[],
+            revision_reason="loop workaround",
+            revision_kind="looping_reasoning",
+            revision_severity="warning",
+            revision_index=1,
+            trigger_event_id="drift_loop_AUTO",
+        )
+    )
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+
+    assert len(records) == 1, f"expected 1 card, got {len(records)}: {records}"
+    card = records[0]
+    assert card.source == "drift"
+    assert card.kind == "LOOPING_REASONING"
+    assert card.outcome == "plan_revised:r1"
+    assert card.plan_revision_index == 1
+
+
+async def test_no_trigger_id_no_merge_by_default(store):
+    """Empty trigger_event_id + legacy flag UNSET → 2 cards (no silent merge).
+
+    Documented behaviour: pre-#99 data, or a refine where goldfive didn't
+    stamp trigger_event_id, surfaces as a standalone plan card. The
+    aggregator does NOT silently merge on time-window heuristics by
+    default.
+    """
+
+    import os
+
+    # Ensure the legacy flag is unset for this test.
+    old = os.environ.pop("HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS", None)
+    try:
+        sid = "sess_no_trigger"
+        await _seed_session(store, sid)
+        await store.put_annotation(
+            Annotation(
+                id="ann_no_trigger",
+                session_id=sid,
+                target=AnnotationTarget(agent_id="a", time_start=100.0),
+                author="alice",
+                created_at=100.0,
+                kind=AnnotationKind.STEERING,
+                body="pivot",
+            )
+        )
+        drifts = _StubDrifts({sid: []})
+        await store.put_task_plan(
+            TaskPlan(
+                id="p_nojoin",
+                session_id=sid,
+                created_at=105.0,
+                summary="",
+                tasks=[],
+                edges=[],
+                revision_reason="pivot",
+                revision_kind="user_steer",
+                revision_severity="warning",
+                revision_index=1,
+                # No trigger_event_id — pre-#99 row or bridge misconfigured.
+            )
+        )
+        records = await list_interventions(sid, store=store, drifts_provider=drifts)
+        # 2 cards: annotation + orphan plan row.
+        assert len(records) == 2
+        kinds = sorted(r.kind for r in records)
+        assert kinds == ["STEER", "STEER"]
+    finally:
+        if old is not None:
+            os.environ["HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS"] = old
+
+
+async def test_legacy_flag_enables_time_window(store, caplog):
+    """Env flag set → time-window fallback merges + emits WARNING log."""
+
+    import os
+
+    caplog.set_level("WARNING", logger="harmonograf_server.interventions")
+    os.environ["HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS"] = "900000"
+    try:
+        sid = "sess_legacy_on"
+        await _seed_session(store, sid)
+        await store.put_annotation(
+            Annotation(
+                id="ann_legacy",
+                session_id=sid,
+                target=AnnotationTarget(agent_id="a", time_start=100.0),
+                author="alice",
+                created_at=100.0,
+                kind=AnnotationKind.STEERING,
+                body="pivot",
+            )
+        )
+        drifts = _StubDrifts(
+            {
+                sid: [
+                    {
+                        "run_id": "r1",
+                        "kind": "user_steer",
+                        "severity": "warning",
+                        "detail": "by alice: pivot",
+                        "annotation_id": "ann_legacy",
+                        "id": "drift_legacy",
+                        "recorded_at": 100.2,
+                    }
+                ]
+            }
+        )
+        # Plan with NO trigger_event_id — strict-id won't merge, so the
+        # legacy time-window path must fire. Gap: 10 min (inside 15 min
+        # window).
+        await store.put_task_plan(
+            TaskPlan(
+                id="p_legacy",
+                session_id=sid,
+                created_at=700.0,
+                summary="",
+                tasks=[],
+                edges=[],
+                revision_reason="pivot",
+                revision_kind="user_steer",
+                revision_severity="warning",
+                revision_index=1,
+                # No trigger_event_id.
+            )
+        )
+        records = await list_interventions(sid, store=store, drifts_provider=drifts)
+        # User annotation + drift merge via strict id (both have
+        # "ann_legacy" on trigger_event_id). Plan row's outcome was
+        # attributed via legacy fallback onto the drift row during
+        # _attribute_outcomes — the plan row itself remains because it
+        # lacks a trigger_event_id for strict merging.
+        user_cards = [r for r in records if r.source == "user"]
+        assert len(user_cards) == 1
+        assert user_cards[0].outcome == "plan_revised:r1"
+        # WARNING logged so operators notice when the fallback fires.
+        warnings = [
+            rec for rec in caplog.records
+            if rec.levelname == "WARNING"
+            and "legacy time-window fallback" in rec.getMessage()
+        ]
+        assert warnings, "expected a WARNING log on legacy fallback match"
+    finally:
+        os.environ.pop("HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS", None)
+
+
+async def test_legacy_flag_disabled_default(store):
+    """Env flag unset → no time-window fallback fires (2 cards stay 2)."""
+
+    import os
+
+    old = os.environ.pop("HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS", None)
+    try:
+        sid = "sess_legacy_off"
+        await _seed_session(store, sid)
+        await store.put_annotation(
+            Annotation(
+                id="ann_no_legacy",
+                session_id=sid,
+                target=AnnotationTarget(agent_id="a", time_start=100.0),
+                author="alice",
+                created_at=100.0,
+                kind=AnnotationKind.STEERING,
+                body="pivot",
+            )
+        )
+        drifts = _StubDrifts(
+            {
+                sid: [
+                    {
+                        "run_id": "r1",
+                        "kind": "user_steer",
+                        "severity": "warning",
+                        "detail": "by alice: pivot",
+                        "annotation_id": "ann_no_legacy",
+                        "id": "drift_no_legacy",
+                        "recorded_at": 100.2,
+                    }
+                ]
+            }
+        )
+        await store.put_task_plan(
+            TaskPlan(
+                id="p_no_legacy",
+                session_id=sid,
+                created_at=700.0,
+                summary="",
+                tasks=[],
+                edges=[],
+                revision_reason="pivot",
+                revision_kind="user_steer",
+                revision_severity="warning",
+                revision_index=1,
+                # No trigger_event_id.
+            )
+        )
+        records = await list_interventions(sid, store=store, drifts_provider=drifts)
+        # Two cards: the merged annotation+drift (strict-id via
+        # annotation_id), PLUS the standalone plan-row (no
+        # trigger_event_id so no strict merge; legacy window is
+        # disabled). The plan row's STEER kind comes from the
+        # revision_kind so it rolls up as source="user".
+        assert len(records) == 2
+        merged_card = next(
+            r for r in records if r.annotation_id == "ann_no_legacy"
+        )
+        orphan_plan = next(
+            r for r in records if r.plan_revision_index == 1 and not r.annotation_id
+        )
+        # The merged row inherited nothing from the plan — attribution
+        # didn't run because strict-id missed and legacy was off.
+        assert merged_card.outcome == "recorded"
+        assert orphan_plan.outcome == "plan_revised:r1"
+    finally:
+        if old is not None:
+            os.environ["HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS"] = old
+
+
+async def test_autonomous_drift_and_mismatched_plan_keep_separate_cards(store):
+    """Strict-id: drift + plan whose ids don't match → 2 cards (harmonograf#99).
+
+    Under the rescope, the dedup key is ``trigger_event_id``. A drift
+    with a given id and a plan revision with a different id (or none)
+    do not merge — they surface as separate cards. This preserves the
+    intent of the old 5s-window test (unrelated revisions can't
+    claim-steal each other) but the mechanism is exact-id match rather
+    than a heuristic window.
+    """
+
+    sid = "sess_mismatched"
     await _seed_session(store, sid)
 
     drifts = _StubDrifts(
@@ -635,13 +892,14 @@ async def test_slow_autonomous_refine_is_still_bounded_by_5s(store):
                     "kind": "looping_reasoning",
                     "severity": "warning",
                     "detail": "loop",
+                    "id": "drift_loop_A",
                     "recorded_at": 100.0,
                 }
             ]
         }
     )
-    # Plan revision 60s later — way outside 5s, inside 300s. Autonomous
-    # kinds must still emit a separate card.
+    # Plan revision 60s later with a DIFFERENT trigger_event_id — an
+    # unrelated refine on the same kind.
     await store.put_task_plan(
         TaskPlan(
             id="p_later",
@@ -653,12 +911,13 @@ async def test_slow_autonomous_refine_is_still_bounded_by_5s(store):
             revision_reason="",
             revision_kind="looping_reasoning",
             revision_index=2,
+            trigger_event_id="drift_loop_B_unrelated",
         )
     )
 
     records = await list_interventions(sid, store=store, drifts_provider=drifts)
-    # Two cards: the drift (outcome=recorded, since too far to attribute)
-    # and the plan revision as its own entry.
+    # Two cards: the drift (unmerged, outcome=recorded) and the plan as
+    # its own entry.
     assert len(records) == 2
     drift_row = next(r for r in records if r.source == "drift" and not r.outcome.startswith("plan_revised:"))
     plan_row = next(r for r in records if r.outcome.startswith("plan_revised:"))

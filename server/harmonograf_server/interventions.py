@@ -18,13 +18,28 @@ the wire, so no new persistence layer is introduced:
                                       goldfive-autonomous kinds.
 
 The join happens in-memory on a per-call basis. Each source is projected
-into a common ``(at, source, kind, body, author, outcome, severity,
-revision_index, annotation_id, drift_kind)`` shape, then a second pass
-attributes outcomes: a drift event immediately followed by a plan
-revision becomes ``plan_revised:rN``; a drift event immediately followed
-by cancelled tasks becomes ``cascade_cancel:N_tasks``. The attribution
-window is deliberately small (configurable; default 5s) so unrelated
-late events do not accidentally claim an outcome.
+into a common ``InterventionRecord`` shape and merged by
+``trigger_event_id`` — a strict goldfive-minted identifier introduced by
+goldfive#199 / harmonograf#99 that every ``PlanRevised`` envelope
+carries:
+
+  * User-control refines → ``trigger_event_id`` == source ``annotation.id``.
+  * Autonomous drift refines → ``trigger_event_id`` == ``DriftDetected.id``.
+
+Dedup is strict-id-only by default — plan-revision rows only merge onto
+their originating annotation / drift when the id matches. Rows that do
+not match surface as their own cards (not silently dropped).
+
+A legacy time-window fallback (the pre-#99 behaviour) is preserved
+behind the ``HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS`` env var so
+operators with in-flight investigations can opt back in. Default: 0
+(disabled). When enabled, a merge via the fallback logs a WARNING so
+operators can diagnose mis-attribution.
+
+Pre-fix (pre-harmonograf#99) data that lacks ``trigger_event_id`` is
+explicitly unsupported — operators should drop their dev databases
+after upgrading. The fallback path exists for live-migration scenarios
+only.
 
 This module is deliberately tree-agnostic — it never inspects the plan's
 task graph beyond counting cancelled tasks for cascade attribution, so
@@ -35,6 +50,7 @@ render the same way without taxonomy hooks.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any, Iterable, Optional
 
@@ -42,7 +58,6 @@ from harmonograf_server.storage import (
     Annotation,
     AnnotationKind,
     Store,
-    Task,
     TaskPlan,
     TaskStatus,
 )
@@ -64,36 +79,59 @@ _GOLDFIVE_REVISION_KINDS: frozenset[str] = frozenset(
     {"cascade_cancel", "refine_retry", "human_intervention_required"}
 )
 
-# How far forward we look to attribute an outcome to a drift. Five
-# seconds is wide enough to cover realistic end-to-end latencies (drift
-# detected → planner called → plan_revised emitted) but tight enough
-# that a drift and a much later unrelated revision are not conflated.
-_OUTCOME_WINDOW_S: float = 5.0
+# -----------------------------------------------------------------------------
+# Legacy time-window fallback (harmonograf#99 rescope).
+#
+# Pre-#99, the aggregator merged plan-revision rows onto their
+# originating drift/annotation using a time window. That was brittle:
+# a slow refine (kikuchi/Qwen ~14min) would strand the plan row outside
+# the window and leak a duplicate card.
+#
+# Rescope: goldfive#199 stamps ``trigger_event_id`` on EVERY refine
+# (user-control + autonomous), and harmonograf merges by strict id only
+# by default. The old time-window path is preserved behind an env var
+# so operators can opt back in during migration if they find the strict
+# dedup too aggressive (e.g. live sessions in flight against a pre-#199
+# goldfive). Default: disabled.
+# -----------------------------------------------------------------------------
 
-# Extended window applied only to user-control drifts (USER_STEER /
-# USER_CANCEL). A user STEER flows through the planner's LLM which can
-# take tens of seconds on a long prompt (issue #86 saw a 70s gap on a
-# local Qwen3.5-35B), so the narrow 5s window used for autonomous
-# drifts would strand the drift row and leak a second card. The
-# extended window is still bounded so two separate user STEERs in a
-# single session aren't claim-stolen by each other's plan revisions.
-_USER_OUTCOME_WINDOW_S: float = 300.0
 
+def _read_legacy_window_ms() -> float:
+    """Read the legacy time-window from the env var (0 / disabled by default).
 
-def _outcome_window_for(drift_kind: str) -> float:
-    """Per-kind window used by ``_project_plans`` and ``_attribute_outcomes``.
-
-    User-control kinds get :data:`_USER_OUTCOME_WINDOW_S` — the planner's
-    refine latency routinely exceeds the default 5s on larger models.
-    Every other kind keeps the tight default because autonomous drift
-    causes are fast-path heuristics: a looping-reasoning detection has
-    no LLM round-trip to wait for.
+    Env var: ``HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS``.
+    Returns 0.0 when unset, invalid, or set to 0.
     """
-    return (
-        _USER_OUTCOME_WINDOW_S
-        if (drift_kind or "").lower() in _USER_DRIFT_KINDS
-        else _OUTCOME_WINDOW_S
-    )
+    raw = os.environ.get("HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS", "")
+    if not raw:
+        return 0.0
+    try:
+        val = float(raw)
+    except ValueError:
+        logger.warning(
+            "HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS is not a number: %r; "
+            "disabling fallback",
+            raw,
+        )
+        return 0.0
+    if val <= 0:
+        return 0.0
+    return val
+
+
+# Cached on module load so tests that mutate the env before import see
+# a live value; tests that mutate at runtime should call the getter
+# directly rather than reading the cached constant.
+_LEGACY_TIME_WINDOW_PLAN_ATTRIBUTION_MS: float = _read_legacy_window_ms()
+
+
+def _legacy_window_ms() -> float:
+    """Return the active legacy window in ms (re-read each call).
+
+    Tests and operators toggling the env var at runtime are reflected
+    without requiring a reimport. Returns 0.0 when disabled.
+    """
+    return _read_legacy_window_ms()
 
 
 # ---------------------------------------------------------------------------
@@ -117,8 +155,22 @@ class InterventionRecord:
     outcome: str = ""
     plan_revision_index: int = 0
     severity: str = ""
+    # ``annotation_id`` is the source annotation's id on user-authored
+    # rows (STEER / HUMAN_RESPONSE). Also populated on drift rows minted
+    # from a user ControlMessage for the user-side strict merge.
     annotation_id: str = ""
     drift_kind: str = ""
+    # harmonograf#99 / goldfive#199: opaque id of the event that
+    # triggered a plan revision (or that the row _is_, for drift/annotation
+    # rows). Dedup key used by :func:`_merge_by_trigger_event_id`:
+    #   * For an annotation row, equals the annotation's own id.
+    #   * For a drift row, equals the goldfive drift.id (UUID4). Also
+    #     equals the annotation_id when the drift was minted from a
+    #     user ControlMessage — user-control plan revisions match on
+    #     that value; autonomous plan revisions match on the drift.id.
+    #   * For a plan-revision row, equals the ``PlanRevised.trigger_event_id``
+    #     goldfive stamped on the wire.
+    trigger_event_id: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -139,14 +191,20 @@ async def list_interventions(
     boundary so tests can drive the aggregator without spinning a full
     ingest stack.
 
-    Dedup contract (harmonograf#75): when an annotation_id is present on
-    a row, it becomes the canonical join key. Rows from other sources
-    that share that annotation_id merge their outcome/severity onto the
-    annotation row rather than producing their own card. The practical
-    case is a single user STEER that currently surfaces as three
-    records (annotation, USER_STEER drift, plan_revised:rN) — the
-    deduper collapses them into one user-authored intervention card
-    whose outcome reflects the plan revision.
+    Dedup contract (harmonograf#99 rescope):
+
+      * Tier 1 — always on. Plan-revision rows merge onto their source
+        annotation / drift row when ``trigger_event_id`` matches the
+        annotation id or drift id.
+      * Tier 2 — opt-in via ``HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS``
+        env var (default 0 / disabled). Time-window fallback: a plan
+        row whose ``trigger_event_id`` matched nothing strictly merges
+        onto a preceding user-control row of the same drift_kind within
+        the configured window. Emits a WARNING log so operators can see
+        what would not have merged under strict-id-only.
+
+    Rows that don't match either tier surface as their own cards — never
+    silently merged.
     """
 
     annotations = await store.list_annotations(session_id=session_id)
@@ -165,12 +223,81 @@ async def list_interventions(
     records: list[InterventionRecord] = []
     records.extend(_project_annotations(annotations))
     records.extend(_project_drifts(drifts))
-    records.extend(_project_plans(plans, drifts))
+    records.extend(_project_plans(plans))
 
     records.sort(key=lambda r: r.at)
     _attribute_outcomes(records, plans)
-    records = _merge_by_annotation_id(records)
+    records = _merge_by_trigger_event_id(records)
+    # Tier 2 — opt-in legacy time-window merge for plan rows with NO
+    # trigger_event_id (pre-#99 data or goldfive-bridge misconfigured).
+    # Default off; WARNING logged on every match so operators notice.
+    window_ms = _legacy_window_ms()
+    if window_ms > 0:
+        records = _legacy_time_window_merge_orphan_plans(
+            records, window_s=window_ms / 1000.0, window_ms=window_ms
+        )
     return records
+
+
+def _legacy_time_window_merge_orphan_plans(
+    records: list[InterventionRecord], *, window_s: float, window_ms: float
+) -> list[InterventionRecord]:
+    """Opt-in legacy merge for plan rows without a ``trigger_event_id``.
+
+    Fires only when ``HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS`` is
+    set to a positive value. Walks the sorted record list; a plan row
+    (no trigger_event_id, drift_kind set, outcome=plan_revised:*) folds
+    onto the most recent preceding user / drift row within ``window_s``
+    whose drift_kind matches. WARNING logged on every match.
+
+    Strict-id rows are never touched — they're already merged and their
+    trigger_event_id provides the authoritative join.
+    """
+    survivors: list[InterventionRecord] = []
+    for rec in records:
+        is_orphan_plan = (
+            not rec.trigger_event_id
+            and rec.drift_kind
+            and rec.outcome.startswith("plan_revised:")
+        )
+        if not is_orphan_plan:
+            survivors.append(rec)
+            continue
+        # Look back for a merge target: most recent user/drift row with
+        # same drift_kind inside the window.
+        target: InterventionRecord | None = None
+        for prior in reversed(survivors):
+            if prior.source not in ("user", "drift"):
+                continue
+            if prior.drift_kind != rec.drift_kind:
+                continue
+            delta = rec.at - prior.at
+            if 0.0 <= delta <= window_s:
+                target = prior
+                break
+            if delta > window_s:
+                break  # past the window; search no further
+        if target is not None:
+            logger.warning(
+                "interventions: legacy time-window fallback merged "
+                "plan_revision_index=%d (drift_kind=%s, no trigger_event_id) "
+                "onto %s row. HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS=%.0f. "
+                "Investigate why strict-id did not match (pre-#99 data? "
+                "goldfive < #199?).",
+                rec.plan_revision_index,
+                rec.drift_kind,
+                target.source,
+                window_ms,
+            )
+            if not target.outcome or target.outcome == "recorded":
+                target.outcome = rec.outcome
+            if not target.plan_revision_index:
+                target.plan_revision_index = rec.plan_revision_index
+            if not target.severity and rec.severity:
+                target.severity = rec.severity
+            continue
+        survivors.append(rec)
+    return survivors
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +311,11 @@ def _project_annotations(annotations: Iterable[Annotation]) -> list[Intervention
     Only STEERING and HUMAN_RESPONSE are surfaced. COMMENT annotations are
     observational ("an operator read this and left a note") and not a
     plan-direction change, so the unified view omits them.
+
+    The annotation row's ``trigger_event_id`` equals the annotation's
+    own id — that's the identifier goldfive stamps on a user-control
+    ``PlanRevised.trigger_event_id`` when the revision was driven by
+    this annotation.
     """
 
     out: list[InterventionRecord] = []
@@ -202,6 +334,9 @@ def _project_annotations(annotations: Iterable[Annotation]) -> list[Intervention
                 body_or_reason=ann.body or "",
                 author=ann.author or "user",
                 annotation_id=ann.id,
+                # harmonograf#99: the annotation's id IS the strict join
+                # key for a downstream PlanRevised refine.
+                trigger_event_id=ann.id,
             )
         )
     return out
@@ -215,10 +350,11 @@ def _project_drifts(drifts: Iterable[dict[str, Any]]) -> list[InterventionRecord
     the plan revision; every other drift is ``source="drift"`` (model- or
     runtime-initiated).
 
-    ``annotation_id`` (goldfive#176) is carried through when present so
-    the downstream deduper can collapse the drift row into the source
-    annotation row. Autonomous drifts (no backing ControlMessage) emit
-    with an empty ``annotation_id`` and keep their own card.
+    ``trigger_event_id`` (harmonograf#99): for user-control drifts we
+    use the source annotation_id (so the downstream merge folds drift +
+    plan onto the annotation row). For autonomous drifts we use the
+    goldfive-minted drift id — a subsequent PlanRevised whose
+    ``trigger_event_id`` equals this value merges onto the drift row.
     """
 
     out: list[InterventionRecord] = []
@@ -241,6 +377,13 @@ def _project_drifts(drifts: Iterable[dict[str, Any]]) -> list[InterventionRecord
         at = dr.get("recorded_at")
         if not isinstance(at, (int, float)):
             continue
+        ann_id = str(dr.get("annotation_id") or "")
+        drift_id = str(dr.get("id") or "")
+        # For user-control drifts prefer annotation_id as the
+        # trigger_event_id so we merge onto the annotation row; for
+        # autonomous drifts use the drift.id so a subsequent refine's
+        # PlanRevised can strict-match back to this drift row.
+        trig = ann_id if is_user and ann_id else drift_id
         out.append(
             InterventionRecord(
                 at=float(at),
@@ -249,75 +392,38 @@ def _project_drifts(drifts: Iterable[dict[str, Any]]) -> list[InterventionRecord
                 body_or_reason=dr.get("detail") or "",
                 severity=dr.get("severity") or "",
                 drift_kind=drift_kind,
-                annotation_id=str(dr.get("annotation_id") or ""),
+                annotation_id=ann_id,
+                trigger_event_id=trig,
             )
         )
     return out
 
 
-def _project_plans(
-    plans: Iterable[TaskPlan], drifts: Iterable[dict[str, Any]]
-) -> list[InterventionRecord]:
-    """Map plan revisions that have no matching drift to intervention rows.
+def _project_plans(plans: Iterable[TaskPlan]) -> list[InterventionRecord]:
+    """Project every plan revision (index > 0) to an InterventionRecord.
 
-    Autonomous goldfive revisions (cascade_cancel, refine_retry, …) land
-    here. Revisions whose ``revision_kind`` matches a drift that fired
-    within the attribution window are skipped — the drift itself already
-    represents the intervention and will own the ``plan_revised:rN``
-    outcome attribution in the next pass.
+    Unlike the pre-#99 projector, this one does **not** try to suppress
+    the plan row when a matching drift exists — the merge is strict-id
+    (:func:`_merge_by_trigger_event_id`) and doesn't need a heuristic
+    pre-filter. Plan rows that successfully merge disappear during merge;
+    orphans (no matching annotation / drift) surface as their own cards.
 
-    When the matching drift carries an ``annotation_id`` (goldfive#176),
-    we propagate that id onto the plan record too so the final dedup
-    pass (:func:`_merge_by_annotation_id`) can fold the plan outcome
-    into the annotation row. Without this, a user STEER whose drift +
-    plan revision land strictly within the 5s window gets its drift row
-    suppressed here (good) but the plan row rolls through with no id —
-    then the final merge can't fold it onto the annotation and the user
-    sees a STEER annotation card plus a bonus STEER plan card.
+    ``trigger_event_id`` comes off the persisted plan row (stamped by
+    ingest.py::_on_plan_revised from ``PlanRevised.trigger_event_id``).
     """
 
     out: list[InterventionRecord] = []
-    drift_list = list(drifts)
     for plan in plans:
         rev_kind = (plan.revision_kind or "").lower()
         rev_index = int(plan.revision_index or 0)
         if not rev_kind or rev_index <= 0:
             # Initial plan submission — not an intervention.
             continue
-        # If a drift with the same kind fired just before this plan
-        # revision, let the drift row own the intervention and skip the
-        # plan here. Otherwise this is an autonomous goldfive revision
-        # (cascade_cancel, refine_retry) or a drift we never ingested,
-        # and we record it directly.
-        #
-        # The window is kind-dependent (:func:`_outcome_window_for`):
-        # user-control kinds allow a long refine latency (goldfive has
-        # to run the planner LLM before emitting plan_revised); every
-        # other kind keeps the tight 5s default. Issue #86 triggered a
-        # 70s drift-to-plan gap on a local Qwen3.5-35B that the 5s
-        # default strand-suppressed, leaving both drift and plan rows
-        # as separate cards.
-        window = _outcome_window_for(rev_kind)
-        preceding_drift: dict[str, Any] | None = None
-        for dr in drift_list:
-            if (dr.get("kind") or "").lower() != rev_kind:
-                continue
-            ra = dr.get("recorded_at")
-            if not isinstance(ra, (int, float)):
-                continue
-            delta = float(plan.created_at) - float(ra)
-            if 0.0 <= delta <= window:
-                preceding_drift = dr
-                break
-        if preceding_drift is not None:
-            continue
         if rev_kind in _GOLDFIVE_REVISION_KINDS:
             source = "goldfive"
         elif rev_kind in _USER_DRIFT_KINDS:
             source = "user"
         else:
-            # A drift kind that never made it through the ingest ring —
-            # record it as drift-sourced so the timeline still shows it.
             source = "drift"
         kind_label = rev_kind.upper() if source != "user" else (
             "STEER" if rev_kind == "user_steer" else "CANCEL"
@@ -332,6 +438,7 @@ def _project_plans(
                 plan_revision_index=rev_index,
                 drift_kind=rev_kind if source != "goldfive" else "",
                 outcome=f"plan_revised:r{rev_index}",
+                trigger_event_id=plan.trigger_event_id or "",
             )
         )
     return out
@@ -345,68 +452,92 @@ def _project_plans(
 def _attribute_outcomes(
     records: list[InterventionRecord], plans: Iterable[TaskPlan]
 ) -> None:
-    """Fill in ``outcome`` / ``plan_revision_index`` for drift + user rows.
+    """Fill in ``outcome`` for drift and user rows.
 
-    Mutates ``records`` in place. Runs after the sort so forward-looking
-    attribution is O(n log n) — one binary-search sweep over ``records``
-    plus an O(plans) scan per drift.
+    Runs before the trigger_event_id merge so merged-away plan rows can
+    still donate their outcome to the survivor. Unlike the pre-#99
+    attributor, the primary pairing is strict-id:
 
-    Rules:
-      • Drift/user row followed by a plan revision whose created_at is
-        within ``_OUTCOME_WINDOW_S`` → ``plan_revised:rN``. The revision
-        must share the row's drift_kind when available, otherwise the
-        nearest revision wins.
-      • Drift row with no matching revision but ≥1 CANCELLED task that
-        transitioned to CANCELLED after the drift → ``cascade_cancel:N``.
-      • Everything else → left as "recorded" (for drift/user) or the
-        value the plan projector already set.
+      * A drift/user row with a non-empty trigger_event_id is paired
+        with the plan row whose trigger_event_id matches — that pairing
+        yields ``plan_revised:rN``.
+      * Only when strict-id yields nothing does the legacy time-window
+        get consulted (and only when enabled via env var).
+      * Rows with no strict pairing fall through to the cascade-cancel
+        heuristic for user/drift rows, or are left as ``recorded``.
     """
 
     plan_list = sorted(plans, key=lambda p: p.created_at)
+    # Build a quick lookup of revision plans by trigger_event_id.
+    plan_by_trigger: dict[str, TaskPlan] = {}
+    for plan in plan_list:
+        if int(plan.revision_index or 0) <= 0:
+            continue
+        if not plan.trigger_event_id:
+            continue
+        plan_by_trigger.setdefault(plan.trigger_event_id, plan)
+
+    window_ms = _legacy_window_ms()
+    window_s = window_ms / 1000.0 if window_ms > 0 else 0.0
 
     for rec in records:
         if rec.source not in ("drift", "user"):
-            # goldfive rows already carry their outcome.
             continue
         if rec.outcome:
-            # Already attributed (e.g. from the plan projector path).
             continue
 
-        revised = _find_matching_revision(rec, plan_list)
-        if revised is not None:
-            rec.outcome = f"plan_revised:r{revised.revision_index}"
-            rec.plan_revision_index = int(revised.revision_index or 0)
+        # Tier 1 — strict-id.
+        matched = (
+            plan_by_trigger.get(rec.trigger_event_id) if rec.trigger_event_id else None
+        )
+        if matched is not None:
+            rec.outcome = f"plan_revised:r{matched.revision_index}"
+            rec.plan_revision_index = int(matched.revision_index or 0)
             continue
+
+        # Tier 2 — legacy time-window (opt-in).
+        if window_s > 0:
+            fallback = _legacy_find_matching_revision(
+                rec, plan_list, window_s=window_s
+            )
+            if fallback is not None:
+                logger.warning(
+                    "interventions: legacy time-window fallback matched "
+                    "drift_kind=%s trigger_event_id=%r -> plan rev=%d "
+                    "(trigger_event_id=%r). HARMONOGRAF_LEGACY_PLAN_"
+                    "ATTRIBUTION_WINDOW_MS=%.0f. Investigate why strict-id "
+                    "did not match (pre-#99 data? goldfive < #199?).",
+                    rec.drift_kind,
+                    rec.trigger_event_id,
+                    fallback.revision_index,
+                    fallback.trigger_event_id,
+                    window_ms,
+                )
+                rec.outcome = f"plan_revised:r{fallback.revision_index}"
+                rec.plan_revision_index = int(fallback.revision_index or 0)
+                continue
 
         cascade = _count_cascade_cancels(rec, plan_list)
         if cascade > 0:
             rec.outcome = f"cascade_cancel:{cascade}_tasks"
             continue
 
-        # No forward correlation — record the drift/user row as observed.
         rec.outcome = "recorded"
 
 
-def _find_matching_revision(
-    rec: InterventionRecord, plans: list[TaskPlan]
+def _legacy_find_matching_revision(
+    rec: InterventionRecord, plans: list[TaskPlan], *, window_s: float
 ) -> Optional[TaskPlan]:
-    # Use the extended window for user-control drifts (see
-    # :func:`_outcome_window_for`) so a slow refine still attributes its
-    # plan_revised outcome back to the drift row that caused it.
-    window = _outcome_window_for(rec.drift_kind)
+    """Pre-#99 time-window matcher. Opt-in only."""
     best: Optional[TaskPlan] = None
-    best_delta: float = window + 1.0
+    best_delta: float = window_s + 1.0
     for plan in plans:
         delta = float(plan.created_at) - rec.at
-        if delta < 0 or delta > window:
+        if delta < 0 or delta > window_s:
             continue
         rev_kind = (plan.revision_kind or "").lower()
-        # Require the revision to carry a revision_kind (i.e. it is
-        # indeed a refine, not the initial plan submission).
         if not rev_kind or (plan.revision_index or 0) <= 0:
             continue
-        # Prefer an exact kind match; otherwise fall back to the nearest
-        # revision in the window.
         if rec.drift_kind and rev_kind == rec.drift_kind:
             if delta < best_delta:
                 best_delta = delta
@@ -417,43 +548,39 @@ def _find_matching_revision(
     return best
 
 
-def _merge_by_annotation_id(
+def _merge_by_trigger_event_id(
     records: list[InterventionRecord],
 ) -> list[InterventionRecord]:
-    """Collapse rows that share an ``annotation_id`` into a single card.
+    """Collapse rows that share a ``trigger_event_id`` into a single card.
 
-    Rule (harmonograf#75):
+    Strict-id merge (harmonograf#99 rescope):
 
-      * Rows with ``annotation_id`` populated (annotation rows, user-control
-        drift rows tagged by goldfive#176) are grouped by that id.
-      * Each group keeps exactly one row — the annotation row when present,
-        otherwise the earliest surviving row in the group.
-      * The kept row absorbs non-empty fields from the others — ``outcome``
-        and ``plan_revision_index`` in particular, since the drift / plan
-        path is usually the one that attributed a ``plan_revised:rN``.
-        ``severity`` is also promoted so user-authored cards inherit the
-        drift severity (WARNING for STEER, CRITICAL for CANCEL).
+      * Rows with a non-empty ``trigger_event_id`` group on that id.
+      * Each group keeps one survivor: the annotation row if present,
+        otherwise the drift row, otherwise the earliest row.
+      * Survivor absorbs ``outcome`` / ``plan_revision_index`` /
+        ``severity`` / ``drift_kind`` from the others.
 
-    Rows without ``annotation_id`` pass through untouched — autonomous
-    drifts (LOOPING_REASONING, TOOL_ERROR, …) keep their own cards as
-    the user directive requires.
+    Rows with empty ``trigger_event_id`` pass through unchanged. That
+    preserves:
 
-    Additionally, when a group has an annotation row, any plan-sourced
-    row whose ``at`` falls inside the attribution window after the
-    annotation AND whose ``drift_kind`` matches the group's user-control
-    kind gets folded in too. This catches the common case where the
-    plan row made it through :func:`_project_plans` because the matching
-    drift was suppressed but the plan row itself has no annotation_id
-    to join on (plans don't currently carry an annotation_id field).
+      * Legitimate standalone cards (e.g. a drift with no downstream
+        refine).
+      * Pre-#99 plan rows (unsupported, documented as such) that would
+        have merged via time-window on the old code path. They now
+        surface as their own cards — the rescope's explicit semantic.
+
+    The legacy time-window fallback lives in :func:`_attribute_outcomes`
+    (outcome attribution) rather than here: the merge stays strict
+    regardless of env flag, so mis-attributed cards via the legacy
+    window never collapse silently.
     """
 
-    # Partition: rows keyed by annotation_id (the merge candidates), and
-    # everything else that flows through unchanged.
     grouped: dict[str, list[InterventionRecord]] = {}
     passthrough: list[InterventionRecord] = []
     for rec in records:
-        if rec.annotation_id:
-            grouped.setdefault(rec.annotation_id, []).append(rec)
+        if rec.trigger_event_id:
+            grouped.setdefault(rec.trigger_event_id, []).append(rec)
         else:
             passthrough.append(rec)
 
@@ -461,102 +588,43 @@ def _merge_by_annotation_id(
         return records
 
     merged: list[InterventionRecord] = list(passthrough)
-    for ann_id, group in grouped.items():
-        # Prefer the annotation row as the survivor; it carries the user's
-        # text / author / wall-clock timestamp authoritatively.
-        annotation_row: InterventionRecord | None = None
-        others: list[InterventionRecord] = []
+    for _trig, group in grouped.items():
+        group.sort(key=lambda r: r.at)
+        # Prefer the annotation row as the survivor (annotation rows have
+        # source="user" AND no drift_kind).
+        survivor: InterventionRecord | None = None
         for rec in group:
-            # ``_project_annotations`` produces the only rows with
-            # source="user" AND kind in {"STEER", "CANCEL", ...} AND
-            # ``author`` set AND empty ``drift_kind``. That combination is
-            # unique to annotation rows — drift rows tagged with the same
-            # annotation_id carry ``drift_kind`` (e.g. "user_steer") and
-            # have no author. Using drift_kind as the discriminator keeps
-            # the logic robust to future annotation-source additions.
-            if not rec.drift_kind and rec.source == "user":
-                annotation_row = rec
-            else:
-                others.append(rec)
-        if annotation_row is None:
-            # No annotation row in the group (shouldn't happen in prod
-            # — goldfive only stamps annotation_id on drifts minted from
-            # a user annotation — but stay defensive). Keep the earliest
-            # row and merge the rest onto it.
-            group.sort(key=lambda r: r.at)
-            annotation_row = group[0]
-            others = group[1:]
-        # Promote non-empty fields from ``others`` onto the survivor.
-        # For ``outcome``: prefer a real attribution (``plan_revised:rN``,
-        # ``cascade_cancel:N_tasks``) over the fallback ``recorded``. The
-        # drift path is the one that actually knows which revision fired,
-        # so if the annotation row had to fall back to ``recorded``
-        # (e.g. because the user_steer drift was stranded outside the
-        # default attribution window) we still get the right label on
-        # the surviving card (issue #86).
+            if rec.source == "user" and not rec.drift_kind:
+                survivor = rec
+                break
+        if survivor is None:
+            # No annotation row — prefer the drift row (has drift_kind set
+            # but no plan_revision_index), then fall back to earliest.
+            for rec in group:
+                if rec.drift_kind and not rec.plan_revision_index:
+                    survivor = rec
+                    break
+        if survivor is None:
+            survivor = group[0]
+        others = [r for r in group if r is not survivor]
         for other in others:
             if other.outcome and other.outcome != "recorded":
-                if (
-                    not annotation_row.outcome
-                    or annotation_row.outcome == "recorded"
-                ):
-                    annotation_row.outcome = other.outcome
-            elif other.outcome and not annotation_row.outcome:
-                annotation_row.outcome = other.outcome
-            if (
-                other.plan_revision_index
-                and not annotation_row.plan_revision_index
-            ):
-                annotation_row.plan_revision_index = other.plan_revision_index
-            if other.severity and not annotation_row.severity:
-                annotation_row.severity = other.severity
-            if other.drift_kind and not annotation_row.drift_kind:
-                annotation_row.drift_kind = other.drift_kind
-        merged.append(annotation_row)
+                if not survivor.outcome or survivor.outcome == "recorded":
+                    survivor.outcome = other.outcome
+            elif other.outcome and not survivor.outcome:
+                survivor.outcome = other.outcome
+            if other.plan_revision_index and not survivor.plan_revision_index:
+                survivor.plan_revision_index = other.plan_revision_index
+            if other.severity and not survivor.severity:
+                survivor.severity = other.severity
+            if other.drift_kind and not survivor.drift_kind:
+                survivor.drift_kind = other.drift_kind
+            if other.annotation_id and not survivor.annotation_id:
+                survivor.annotation_id = other.annotation_id
+        merged.append(survivor)
 
-    # Also fold in plan-sourced rows whose drift_kind matches a merged
-    # annotation row's promoted drift_kind and whose ``at`` lands inside
-    # the attribution window — covers the case where _project_plans
-    # emitted a row because its matching drift was deduped at the
-    # suppress step, leaving no carrier for annotation_id. Uses the
-    # kind-dependent window (:func:`_outcome_window_for`) so a slow
-    # user-STEER refine can still fold — issue #86.
-    def _find_merge_target(plan_row: InterventionRecord) -> InterventionRecord | None:
-        window = _outcome_window_for(plan_row.drift_kind)
-        for rec in merged:
-            if not rec.annotation_id or not rec.drift_kind:
-                continue
-            if rec.drift_kind != plan_row.drift_kind:
-                continue
-            delta = plan_row.at - rec.at
-            if 0.0 <= delta <= window:
-                return rec
-        return None
-
-    survivors: list[InterventionRecord] = []
-    for rec in merged:
-        # Plan-sourced rows (no annotation_id, carries drift_kind + outcome,
-        # user-control kind) are merge candidates.
-        if (
-            not rec.annotation_id
-            and rec.drift_kind in _USER_DRIFT_KINDS
-            and rec.outcome.startswith("plan_revised:")
-        ):
-            target = _find_merge_target(rec)
-            if target is not None:
-                # Prefer the plan's real outcome (``plan_revised:rN``)
-                # over a fallback ``recorded`` that the annotation row
-                # may have picked up during attribution when the drift
-                # was stranded outside the default window (issue #86).
-                if not target.outcome or target.outcome == "recorded":
-                    target.outcome = rec.outcome
-                if not target.plan_revision_index:
-                    target.plan_revision_index = rec.plan_revision_index
-                continue
-        survivors.append(rec)
-
-    survivors.sort(key=lambda r: r.at)
-    return survivors
+    merged.sort(key=lambda r: r.at)
+    return merged
 
 
 def _count_cascade_cancels(

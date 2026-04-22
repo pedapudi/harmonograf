@@ -18,6 +18,7 @@ function row(over: Partial<InterventionRow>): InterventionRow {
     severity: 'warning',
     annotationId: '',
     driftKind: 'looping_reasoning',
+    triggerEventId: '',
     ...over,
   };
 }

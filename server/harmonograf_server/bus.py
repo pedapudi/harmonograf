@@ -341,6 +341,7 @@ class SessionBus:
         current_task_id: str = "",
         current_agent_id: str = "",
         annotation_id: str = "",
+        drift_id: str = "",
         recorded_at: float | None = None,
     ) -> None:
         # ``annotation_id`` is non-empty for user-control drifts (USER_STEER,
@@ -348,6 +349,11 @@ class SessionBus:
         # its payload (goldfive#176). The frontend dedup path (harmonograf#75)
         # uses it to collapse the drift row into the source annotation row
         # so a single user STEER renders as one intervention card, not three.
+        #
+        # ``drift_id`` (goldfive#199 / harmonograf#99) is the goldfive-minted
+        # UUID4 on every DriftDetected. The intervention aggregator uses
+        # it as the strict join key when merging PlanRevised rows
+        # triggered by autonomous drifts onto the drift row.
         #
         # ``recorded_at`` is the wall-clock moment the drift was ingested
         # (seconds since epoch). Forwarded to the delta payload so the
@@ -366,6 +372,7 @@ class SessionBus:
                     "current_task_id": current_task_id,
                     "current_agent_id": current_agent_id,
                     "annotation_id": annotation_id,
+                    "drift_id": drift_id,
                     "recorded_at": recorded_at,
                 },
             )

@@ -40,6 +40,7 @@ function mkDrift(over: Partial<DriftRecord> = {}): DriftRecord {
     agentId: 'a',
     recordedAtMs: 200,
     annotationId: '',
+    driftId: '',
     ...over,
   };
 }
@@ -57,6 +58,7 @@ function mkPlan(over: Partial<TaskPlan> = {}): TaskPlan {
     revisionKind: '',
     revisionSeverity: '',
     revisionIndex: 0,
+    triggerEventId: '',
     ...over,
   };
 }
@@ -71,15 +73,17 @@ describe('deriveInterventions', () => {
           kind: 'looping_reasoning',
           severity: 'warning',
           recordedAtMs: 120,
+          driftId: 'drift_loop_1',
         }),
       ],
       plans: [
-        // revision inside the 5s window → claimed as outcome of the drift.
+        // Revision with strict triggerEventId matching the drift.
         mkPlan({
           id: 'p1',
           createdAtMs: 122,
           revisionKind: 'looping_reasoning',
           revisionIndex: 2,
+          triggerEventId: 'drift_loop_1',
         }),
         // autonomous cascade_cancel with no preceding drift.
         mkPlan({
@@ -194,6 +198,7 @@ describe('deriveInterventions', () => {
           kind: 'agent_refusal',
           severity: 'warning',
           recordedAtMs: 600,
+          driftId: 'drift_refusal_1',
         }),
       ],
       plans: [
@@ -202,6 +207,7 @@ describe('deriveInterventions', () => {
           createdAtMs: 601,
           revisionKind: 'agent_refusal',
           revisionIndex: 2,
+          triggerEventId: 'drift_refusal_1',
         }),
       ],
     });
@@ -245,6 +251,7 @@ describe('deriveInterventions', () => {
           revisionKind: 'user_steer',
           revisionSeverity: 'warning',
           revisionIndex: 1,
+          triggerEventId: 'ann_s1',
         }),
       ],
     });
@@ -315,20 +322,16 @@ describe('deriveInterventions', () => {
     expect(rows).toHaveLength(2);
   });
 
-  // harmonograf#86 — user STEERs involve a planner LLM round-trip that
-  // can take 30-90s on large local models. The pre-#86 deriver used a
-  // flat 5s attribution window and stranded the drift row + emitted a
-  // separate plan-sourced card whose atMs was the plan's createdAtMs
-  // (rendered as 6:33), alongside the annotation row rendered with an
-  // absolute-ms timestamp bug (29613779:31). Both symptoms go away when
-  // the user-control kinds use the extended window AND the annotation's
-  // createdAtMs is session-relative (fixed in convertAnnotation).
-  it('collapses STEER + drift + slow plan revision (70s gap) into one card', () => {
+  // harmonograf#99 rescope — strict-id dedup removes the time-window
+  // fragility entirely. A user STEER with an arbitrary refine delay now
+  // collapses to one card because the plan carries the source
+  // annotation_id as its triggerEventId.
+  it('collapses STEER + drift + slow plan revision (20min gap) via strict id', () => {
     const rows = deriveInterventions({
       annotations: [
         mkAnnotation({
           id: 'ann_slow',
-          createdAtMs: 100_200, // session-relative — the #86 convert.ts fix
+          createdAtMs: 100_200,
           author: 'alice',
           body: 'pivot to solar flares',
         }),
@@ -341,17 +344,18 @@ describe('deriveInterventions', () => {
           detail: 'by alice: pivot to solar flares',
           recordedAtMs: 100_300,
           annotationId: 'ann_slow',
+          driftId: 'drift_slow_steer',
         }),
       ],
       plans: [
         mkPlan({
           id: 'p_slow',
-          // 70s after the drift — way outside the 5s default window, but
-          // inside the user-control 5-minute extended window.
-          createdAtMs: 170_300,
+          // 20 minutes after the drift — strict-id doesn't care.
+          createdAtMs: 1_300_500,
           revisionKind: 'user_steer',
           revisionSeverity: 'warning',
           revisionIndex: 1,
+          triggerEventId: 'ann_slow',
         }),
       ],
     });
@@ -368,10 +372,11 @@ describe('deriveInterventions', () => {
     expect(card.planRevisionIndex).toBe(1);
   });
 
-  it('autonomous slow drift still fires two cards (tight 5s window unchanged)', () => {
-    // Autonomous kinds keep the default 5s window so a slow refine here
-    // doesn't claim-steal an unrelated later revision. Ensures the
-    // widened user-control window does NOT bleed across kinds.
+  it('autonomous drift + mismatched plan keeps two cards (harmonograf#99)', () => {
+    // Strict-id: a drift with one id + a plan with a different id do
+    // not merge. Preserves the intent of the old 5s-window test
+    // (unrelated revisions can't claim-steal each other) via exact-id
+    // matching rather than a heuristic window.
     const rows = deriveInterventions({
       annotations: [],
       drifts: [
@@ -380,14 +385,16 @@ describe('deriveInterventions', () => {
           kind: 'looping_reasoning',
           severity: 'warning',
           recordedAtMs: 100_000,
+          driftId: 'drift_loop_A',
         }),
       ],
       plans: [
         mkPlan({
           id: 'p_autonomous',
-          createdAtMs: 160_000, // 60s gap — autonomous window is 5s
+          createdAtMs: 160_000,
           revisionKind: 'looping_reasoning',
           revisionIndex: 2,
+          triggerEventId: 'drift_loop_B_unrelated',
         }),
       ],
     });
@@ -415,6 +422,7 @@ describe('marker sizing / palette', () => {
       severity: 'critical',
       annotationId: 'ann',
       driftKind: '',
+      triggerEventId: 'ann',
     });
     const baseDrift = markerRadiusFor({
       key: 'd',
@@ -428,6 +436,7 @@ describe('marker sizing / palette', () => {
       severity: 'critical',
       annotationId: '',
       driftKind: 'x',
+      triggerEventId: '',
     });
     expect(baseDrift).toBeGreaterThan(baseUser);
   });

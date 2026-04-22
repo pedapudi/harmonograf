@@ -11,10 +11,19 @@
 //   1. annotationStore  — user STEERING / HUMAN_RESPONSE rows
 //   2. DriftRegistry    — goldfive drift_detected events (user_steer /
 //                          user_cancel kinds flag source=user)
-//   3. TaskRegistry     — plan revisions with a non-empty revisionKind
-//                          that are NOT already covered by a matching
-//                          drift in the attribution window (autonomous
-//                          goldfive escalations like cascade_cancel)
+//   3. TaskRegistry     — plan revisions (revisionIndex > 0)
+//
+// Dedup contract (harmonograf#99 / goldfive#199):
+//
+//   * Tier 1 — always on. Plan-revision rows merge onto their source
+//     annotation or drift row when ``triggerEventId`` matches the
+//     annotation id or drift id.
+//   * Tier 2 — opt-in via ``VITE_HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS``
+//     (default 0 / disabled). Time-window fallback: a plan row whose
+//     ``triggerEventId`` matched nothing strictly merges onto a
+//     preceding user-control row of the same ``driftKind`` within the
+//     configured window. Console WARNING on match so operators can
+//     diagnose mis-attribution.
 //
 // The derivation is intentionally tree-agnostic. No taxonomy knowledge is
 // baked into the marker rendering; downstream components can show whatever
@@ -46,6 +55,10 @@ export interface InterventionRow {
   severity: string; // "info" | "warning" | "critical" | ""
   annotationId: string; // present for user-sourced rows
   driftKind: string;   // raw lowercase drift kind for drift-sourced rows
+  // harmonograf#99 / goldfive#199: opaque id of the event that triggered
+  // a plan revision (or that the row _is_, for drift/annotation rows).
+  // Strict dedup key.
+  triggerEventId: string;
 }
 
 // Drift kinds emitted by goldfive when the user pulled the trigger. Mirrors
@@ -60,24 +73,16 @@ const GOLDFIVE_REVISION_KINDS = new Set([
   'human_intervention_required',
 ]);
 
-// How far forward we look to attribute an outcome to a drift / user row.
-// Matches the server's _OUTCOME_WINDOW_S (5 seconds). Expressed in ms
-// because every timeline in the UI is already session-relative ms.
-const OUTCOME_WINDOW_MS = 5000;
-
-// Extended window for user-control drifts (user_steer / user_cancel).
-// Mirrors the server's _USER_OUTCOME_WINDOW_S. A user STEER routes
-// through the planner's LLM which can take tens of seconds on a long
-// prompt (issue #86 saw a 70s drift→plan gap on a local Qwen3.5-35B).
-// The 5s default stranded the drift row and leaked a second card;
-// the extended window is still bounded so two separate user STEERs
-// in a session aren't claim-stolen by each other's plan revisions.
-const USER_OUTCOME_WINDOW_MS = 300_000;
-
-function outcomeWindowFor(driftKind: string): number {
-  return USER_DRIFT_KINDS.has((driftKind || '').toLowerCase())
-    ? USER_OUTCOME_WINDOW_MS
-    : OUTCOME_WINDOW_MS;
+// harmonograf#99: legacy time-window fallback. Default disabled. Opt in
+// via VITE_HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS at build time.
+function legacyWindowMs(): number {
+  const raw = (import.meta as unknown as {
+    env?: { VITE_HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS?: string };
+  }).env?.VITE_HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS;
+  if (!raw) return 0;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return parsed;
 }
 
 // Pretty labels for drift kinds emitted from the user. Uppercase so the
@@ -121,6 +126,9 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
       severity: '',
       annotationId: ann.id,
       driftKind: '',
+      // harmonograf#99: the annotation's id IS the strict join key for
+      // a downstream PlanRevised refine.
+      triggerEventId: ann.id,
     });
   }
 
@@ -128,6 +136,9 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
     const driftKind = (dr.kind || '').toLowerCase();
     if (!driftKind) continue;
     const isUser = USER_DRIFT_KINDS.has(driftKind);
+    // harmonograf#99: for user-control drifts use annotationId (so we
+    // merge onto the annotation); for autonomous drifts use driftId.
+    const trig = (isUser && dr.annotationId) ? dr.annotationId : (dr.driftId || '');
     rows.push({
       key: `drift:${dr.seq}`,
       atMs: dr.recordedAtMs,
@@ -138,35 +149,16 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
       outcome: '',
       planRevisionIndex: 0,
       severity: dr.severity || '',
-      // Thread annotation_id through (goldfive#176). Present on
-      // user-control drifts; empty on autonomous ones. The post-sort
-      // dedup pass uses this to fold the drift into the annotation row.
       annotationId: dr.annotationId || '',
       driftKind,
+      triggerEventId: trig,
     });
   }
 
-  // Plans projected as interventions only when they are (a) a revision
-  // (revisionIndex > 0 and a revisionKind is set) AND (b) not already
-  // covered by a drift in the window. The second condition prevents the
-  // common path (drift → plan_revised) from emitting two rows for one
-  // logical intervention. The window is kind-dependent: user-control
-  // kinds use the extended USER_OUTCOME_WINDOW_MS since the refine LLM
-  // may take tens of seconds (issue #86), while autonomous kinds keep
-  // the tight default so unrelated revisions aren't claim-stolen.
-  const driftList = input.drifts;
   for (const plan of input.plans) {
     const revKind = (plan.revisionKind || '').toLowerCase();
     const revIdx = plan.revisionIndex ?? 0;
     if (!revKind || revIdx <= 0) continue;
-    const window = outcomeWindowFor(revKind);
-    const hasPrecedingDrift = driftList.some(
-      (dr) =>
-        (dr.kind || '').toLowerCase() === revKind &&
-        plan.createdAtMs - dr.recordedAtMs >= 0 &&
-        plan.createdAtMs - dr.recordedAtMs <= window,
-    );
-    if (hasPrecedingDrift) continue;
     let source: InterventionSource;
     if (GOLDFIVE_REVISION_KINDS.has(revKind)) source = 'goldfive';
     else if (USER_DRIFT_KINDS.has(revKind)) source = 'user';
@@ -185,62 +177,81 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
       severity: plan.revisionSeverity || '',
       annotationId: '',
       driftKind: source === 'goldfive' ? '' : revKind,
+      triggerEventId: plan.triggerEventId || '',
     });
   }
 
   rows.sort((a, b) => a.atMs - b.atMs);
 
-  // Outcome attribution pass — fill in the outcome for drift and user
-  // rows that did not already carry one.
-  const revisionPlans = input.plans.filter(
-    (p) => (p.revisionIndex ?? 0) > 0 && (p.revisionKind || '').length > 0,
-  );
-  const latestPlanAfter = (atMs: number): TaskPlan | null => {
-    let latest: TaskPlan | null = null;
-    for (const p of input.plans) {
-      if (p.createdAtMs <= atMs) continue;
-      if (latest === null || p.createdAtMs > latest.createdAtMs) latest = p;
+  // Outcome attribution (pre-merge). Strict-id only by default.
+  const windowMs = legacyWindowMs();
+  attributeOutcomes(rows, input.plans, { windowMs });
+
+  // Tier 1 merge — strict trigger_event_id.
+  let merged = mergeByTriggerEventId(rows);
+
+  // Tier 2 merge — opt-in legacy time-window, only for plan rows with
+  // no triggerEventId (pre-#99 data or bridge misconfigured).
+  if (windowMs > 0) {
+    merged = legacyTimeWindowMerge(merged, windowMs);
+  }
+
+  return merged;
+}
+
+function attributeOutcomes(
+  rows: InterventionRow[],
+  plans: readonly TaskPlan[],
+  opts: { windowMs: number },
+): void {
+  const planByTrigger = new Map<string, TaskPlan>();
+  for (const p of plans) {
+    if ((p.revisionIndex ?? 0) <= 0) continue;
+    if (!p.triggerEventId) continue;
+    if (!planByTrigger.has(p.triggerEventId)) {
+      planByTrigger.set(p.triggerEventId, p);
     }
-    return latest;
-  };
+  }
 
   for (const row of rows) {
-    if (row.outcome) continue;
     if (row.source === 'goldfive') continue;
+    if (row.outcome) continue;
 
-    // Prefer a revision that matches this row's driftKind within the
-    // kind-dependent window. User-control drifts (issue #86) use the
-    // extended USER_OUTCOME_WINDOW_MS to tolerate long refine latencies.
-    const window = outcomeWindowFor(row.driftKind);
-    let bestPlan: TaskPlan | null = null;
-    let bestDelta = Infinity;
-    for (const plan of revisionPlans) {
-      const delta = plan.createdAtMs - row.atMs;
-      if (delta < 0 || delta > window) continue;
-      const revKind = (plan.revisionKind || '').toLowerCase();
-      if (row.driftKind && revKind === row.driftKind) {
-        if (delta < bestDelta) {
-          bestDelta = delta;
-          bestPlan = plan;
-        }
-      } else if (!row.driftKind && bestPlan === null) {
-        bestDelta = delta;
-        bestPlan = plan;
+    // Tier 1 — strict-id.
+    if (row.triggerEventId) {
+      const matched = planByTrigger.get(row.triggerEventId);
+      if (matched) {
+        const idx = matched.revisionIndex ?? 0;
+        row.outcome = `plan_revised:r${idx}`;
+        row.planRevisionIndex = idx;
+        continue;
       }
     }
-    if (bestPlan !== null) {
-      row.outcome = `plan_revised:r${bestPlan.revisionIndex ?? 0}`;
-      row.planRevisionIndex = bestPlan.revisionIndex ?? 0;
-      continue;
+
+    // Tier 2 — opt-in legacy time-window.
+    if (opts.windowMs > 0) {
+      const fallback = legacyFindRevision(row, plans, opts.windowMs);
+      if (fallback) {
+        console.warn(
+          `[interventions] legacy time-window fallback matched ` +
+            `driftKind=${row.driftKind} triggerEventId=${JSON.stringify(
+              row.triggerEventId,
+            )} -> plan rev=${fallback.revisionIndex} ` +
+            `(triggerEventId=${JSON.stringify(fallback.triggerEventId ?? '')}). ` +
+            `VITE_HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS=${opts.windowMs}. ` +
+            `Investigate why strict-id did not match (pre-#99 data? goldfive < #199?).`,
+        );
+        const idx = fallback.revisionIndex ?? 0;
+        row.outcome = `plan_revised:r${idx}`;
+        row.planRevisionIndex = idx;
+        continue;
+      }
     }
 
-    // No revision in the window — fall back to cascade_cancel if the
-    // latest subsequent plan has cancelled tasks.
-    const latestPlan = latestPlanAfter(row.atMs);
-    if (latestPlan) {
-      const cancelled = latestPlan.tasks.filter(
-        (t) => t.status === 'CANCELLED',
-      ).length;
+    // Fallback: cascade_cancel if a later plan has cancelled tasks.
+    const latest = latestPlanAfter(row.atMs, plans);
+    if (latest) {
+      const cancelled = latest.tasks.filter((t) => t.status === 'CANCELLED').length;
       if (cancelled > 0) {
         row.outcome = `cascade_cancel:${cancelled}_tasks`;
         continue;
@@ -248,31 +259,56 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
     }
     row.outcome = 'recorded';
   }
-
-  return mergeByAnnotationId(rows);
 }
 
-// harmonograf#75: collapse rows that share an annotation_id into a single
-// card. Rule: annotation row wins as the survivor; drift + plan rows
-// with the same annotation_id merge their outcome / severity /
-// planRevisionIndex / driftKind onto it. Rows with no annotation_id
-// (autonomous drifts, goldfive-autonomous plan revisions) pass through
-// unchanged — they keep their own cards per the user directive
-// ("steering due to drift IS a steering").
-//
-// A final post-pass folds plan-sourced rows whose driftKind matches a
-// merged annotation's driftKind AND whose atMs lands inside the 5s
-// attribution window — catches the case where _project_plans had to
-// emit a plan row because its matching drift was suppressed by the
-// dedup step but the plan itself has no annotation_id to join on.
-function mergeByAnnotationId(rows: InterventionRow[]): InterventionRow[] {
+function legacyFindRevision(
+  row: InterventionRow,
+  plans: readonly TaskPlan[],
+  windowMs: number,
+): TaskPlan | null {
+  let best: TaskPlan | null = null;
+  let bestDelta = windowMs + 1;
+  for (const plan of plans) {
+    const delta = plan.createdAtMs - row.atMs;
+    if (delta < 0 || delta > windowMs) continue;
+    const revKind = (plan.revisionKind || '').toLowerCase();
+    if (!revKind || (plan.revisionIndex ?? 0) <= 0) continue;
+    if (row.driftKind && revKind === row.driftKind) {
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        best = plan;
+      }
+    } else if (!row.driftKind && best === null) {
+      bestDelta = delta;
+      best = plan;
+    }
+  }
+  return best;
+}
+
+function latestPlanAfter(
+  atMs: number,
+  plans: readonly TaskPlan[],
+): TaskPlan | null {
+  let latest: TaskPlan | null = null;
+  for (const p of plans) {
+    if (p.createdAtMs <= atMs) continue;
+    if (latest === null || p.createdAtMs > latest.createdAtMs) latest = p;
+  }
+  return latest;
+}
+
+// harmonograf#99 strict-id merge: collapse rows sharing a triggerEventId.
+// Survivor priority: annotation row → drift row → earliest. Rows with
+// empty triggerEventId pass through unchanged.
+function mergeByTriggerEventId(rows: InterventionRow[]): InterventionRow[] {
   const groups = new Map<string, InterventionRow[]>();
   const passthrough: InterventionRow[] = [];
   for (const row of rows) {
-    if (row.annotationId) {
-      const g = groups.get(row.annotationId);
+    if (row.triggerEventId) {
+      const g = groups.get(row.triggerEventId);
       if (g) g.push(row);
-      else groups.set(row.annotationId, [row]);
+      else groups.set(row.triggerEventId, [row]);
     } else {
       passthrough.push(row);
     }
@@ -281,27 +317,20 @@ function mergeByAnnotationId(rows: InterventionRow[]): InterventionRow[] {
 
   const merged: InterventionRow[] = [...passthrough];
   for (const group of groups.values()) {
-    // Prefer the annotation row as the survivor; it carries user text +
-    // author + wall-clock-correct timestamp. Annotation rows are the only
-    // ones with source="user" AND no driftKind (drift rows set driftKind).
-    let survivor: InterventionRow | undefined;
-    const others: InterventionRow[] = [];
-    for (const row of group) {
-      if (!row.driftKind && row.source === 'user') survivor = row;
-      else others.push(row);
+    group.sort((a, b) => a.atMs - b.atMs);
+    // Prefer annotation row (source=user, no driftKind).
+    let survivor: InterventionRow | undefined = group.find(
+      (r) => r.source === 'user' && !r.driftKind,
+    );
+    if (!survivor) {
+      // Otherwise prefer drift row (has driftKind set, no planRevisionIndex).
+      survivor = group.find((r) => r.driftKind && !r.planRevisionIndex);
     }
     if (!survivor) {
-      group.sort((a, b) => a.atMs - b.atMs);
       survivor = group[0];
-      others.splice(0, others.length, ...group.slice(1));
     }
-    for (const other of others) {
-      // Prefer the other row's outcome when the survivor either has no
-      // outcome yet OR has only the fallback 'recorded' label — the
-      // drift path is usually the one that attributed a real
-      // ``plan_revised:rN`` (especially for slow refines beyond the
-      // default attribution window; issue #86). Never downgrade a real
-      // outcome back to 'recorded'.
+    for (const other of group) {
+      if (other === survivor) continue;
       if (other.outcome && other.outcome !== 'recorded') {
         if (!survivor.outcome || survivor.outcome === 'recorded') {
           survivor.outcome = other.outcome;
@@ -314,47 +343,63 @@ function mergeByAnnotationId(rows: InterventionRow[]): InterventionRow[] {
       }
       if (other.severity && !survivor.severity) survivor.severity = other.severity;
       if (other.driftKind && !survivor.driftKind) survivor.driftKind = other.driftKind;
+      if (other.annotationId && !survivor.annotationId) {
+        survivor.annotationId = other.annotationId;
+      }
     }
     merged.push(survivor);
   }
 
-  // Fold in plan-sourced rows (no annotation_id, driftKind = user_*,
-  // outcome starts with plan_revised:) whose driftKind matches a merged
-  // annotation row inside the kind-dependent attribution window. The
-  // extended user window catches slow refines (issue #86).
-  const findMergeTarget = (planRow: InterventionRow): InterventionRow | null => {
-    const window = outcomeWindowFor(planRow.driftKind);
-    for (const row of merged) {
-      if (!row.annotationId || !row.driftKind) continue;
-      if (row.driftKind !== planRow.driftKind) continue;
-      const delta = planRow.atMs - row.atMs;
-      if (delta >= 0 && delta <= window) return row;
-    }
-    return null;
-  };
+  merged.sort((a, b) => a.atMs - b.atMs);
+  return merged;
+}
+
+// harmonograf#99 opt-in fallback: merge orphan plan rows (no
+// triggerEventId) onto preceding user/drift rows by time window.
+function legacyTimeWindowMerge(
+  rows: InterventionRow[],
+  windowMs: number,
+): InterventionRow[] {
   const survivors: InterventionRow[] = [];
-  for (const row of merged) {
-    if (
-      !row.annotationId &&
-      USER_DRIFT_KINDS.has(row.driftKind) &&
-      row.outcome.startsWith('plan_revised:')
-    ) {
-      const target = findMergeTarget(row);
-      if (target) {
-        // Prefer the plan's real outcome (plan_revised:rN) over a
-        // fallback 'recorded' that the annotation row may have picked
-        // up during attribution when the drift was stranded outside
-        // the default window (issue #86).
-        if (!target.outcome || target.outcome === 'recorded') {
-          target.outcome = row.outcome;
-        }
-        if (!target.planRevisionIndex) target.planRevisionIndex = row.planRevisionIndex;
-        continue;
+  for (const row of rows) {
+    const orphanPlan =
+      !row.triggerEventId &&
+      row.driftKind &&
+      row.outcome.startsWith('plan_revised:');
+    if (!orphanPlan) {
+      survivors.push(row);
+      continue;
+    }
+    // Find most recent preceding user/drift row of matching kind.
+    let target: InterventionRow | null = null;
+    for (let i = survivors.length - 1; i >= 0; i--) {
+      const prior = survivors[i];
+      if (prior.source !== 'user' && prior.source !== 'drift') continue;
+      if (prior.driftKind !== row.driftKind) continue;
+      const delta = row.atMs - prior.atMs;
+      if (delta >= 0 && delta <= windowMs) {
+        target = prior;
+        break;
       }
+      if (delta > windowMs) break;
+    }
+    if (target) {
+      console.warn(
+        `[interventions] legacy time-window fallback merged plan rev=` +
+          `${row.planRevisionIndex} (driftKind=${row.driftKind}, no ` +
+          `triggerEventId) onto ${target.source} row. ` +
+          `VITE_HARMONOGRAF_LEGACY_PLAN_ATTRIBUTION_WINDOW_MS=${windowMs}. ` +
+          `Investigate why strict-id did not match (pre-#99 data?).`,
+      );
+      if (!target.outcome || target.outcome === 'recorded') {
+        target.outcome = row.outcome;
+      }
+      if (!target.planRevisionIndex) target.planRevisionIndex = row.planRevisionIndex;
+      if (!target.severity && row.severity) target.severity = row.severity;
+      continue;
     }
     survivors.push(row);
   }
-  survivors.sort((a, b) => a.atMs - b.atMs);
   return survivors;
 }
 

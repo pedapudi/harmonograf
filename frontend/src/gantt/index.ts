@@ -526,6 +526,11 @@ export interface DriftRecord {
   // to collapse the drift row into the source annotation row so a
   // single user STEER renders as one card, not three.
   annotationId: string;
+  // goldfive#199 / harmonograf#99: goldfive-minted drift id (UUID4),
+  // always non-empty. Used as the strict join key when merging a
+  // PlanRevised row triggered by this autonomous drift onto the drift
+  // row (the PlanRevised.trigger_event_id will match).
+  driftId: string;
 }
 
 // Drift registry — in-memory list of DriftDetected events received during

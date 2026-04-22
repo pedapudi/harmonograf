@@ -196,6 +196,13 @@ class TaskPlan:
     revision_kind: str = ""
     revision_severity: str = ""
     revision_index: int = 0
+    # harmonograf#99 / goldfive#199: opaque id of the event that triggered
+    # this revision. Used as the strict join key by the intervention
+    # aggregator when merging plan-revision rows with their originating
+    # annotation or drift. Non-empty on every revision (user-control =
+    # annotation_id, autonomous = DriftEvent.id). Empty on the initial
+    # plan.
+    trigger_event_id: str = ""
 
 
 @dataclass
