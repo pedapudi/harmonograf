@@ -1,11 +1,18 @@
 # SessionStore and TaskRegistry
 
-`frontend/src/gantt/index.ts` (~600 lines) owns the frontend data model
-for a live session. It exposes four registries — `AgentRegistry`,
-`SpanIndex`, `TaskRegistry`, `ContextSeriesRegistry` — bundled together
-under a `SessionStore` class, and it is deliberately *not* a Zustand /
-Redux / signals store. The hot rendering path reads directly from these
-objects on every frame with zero React in the middle.
+`frontend/src/gantt/index.ts` (~900 lines) owns the frontend data model
+for a live session. It exposes a set of registries bundled under a
+`SessionStore` class — `AgentRegistry`, `SpanIndex`, `TaskRegistry`,
+`ContextSeriesRegistry`, `DriftRegistry`, `DelegationRegistry` — and
+it is deliberately *not* a Zustand / Redux / signals store. The hot
+rendering path reads directly from these objects on every frame with
+zero React in the middle.
+
+The `DriftRegistry` and `DelegationRegistry` were added after the
+goldfive migration (harmonograf #60 / #62 family). They mirror the
+pattern of the earlier registries — append / list / clear / subscribe —
+and back actor synthesis and cross-agent edge rendering respectively.
+See [design/10 §7–8](../design/10-frontend-architecture.md#7-actor-attribution-and-span-synthesis).
 
 ## Why not Zustand
 
@@ -88,18 +95,30 @@ classDiagram
 
 
 
-`SessionStore` is defined at `index.ts:455-593`. It owns:
+`SessionStore` is defined near the end of `index.ts`. It owns:
 
 - `agents: AgentRegistry` — active agents, status, metadata.
-- `spans: SpanIndex` — the time-indexed span store.
+  Includes reserved synthetic actor ids (`__user__`,
+  `__goldfive__`) when drift events have materialized them.
+- `spans: SpanIndex` — the time-indexed span store. Includes
+  synthesized drift spans on the synthetic actor rows.
 - `tasks: TaskRegistry` — plans, tasks, revisions.
 - `contextSeries: ContextSeriesRegistry` — per-agent context-window
   samples.
-- `wallClockStartMs: number` (`index.ts:580`) — session start on the
-  wall clock, used to convert absolute timestamps from the server into
+- `drifts: DriftRegistry` — `DriftRecord` ring per session; drives
+  actor attribution and the trajectory ribbon. Live `driftDetected`
+  events append here; the `WatchSession` initial burst replays the
+  ring. See [`design/10 §7`](../design/10-frontend-architecture.md#7-actor-attribution-and-span-synthesis).
+- `delegations: DelegationRegistry` — `DelegationObserved` entries.
+  Drives cross-agent dashed edges in the Gantt
+  (`drawDelegations()` in `renderer.ts`) and faint
+  "↪↪ delegated to: X" annotations in the trajectory DAG. See
+  [`design/10 §8`](../design/10-frontend-architecture.md#8-delegation-edges).
+- `wallClockStartMs: number` — session start on the wall clock, used
+  to convert absolute timestamps from the server into
   session-relative `tMs` values the renderer uses.
-- `nowMs: number` (`index.ts:584`) — current session-relative now,
-  advanced by the renderer each frame.
+- `nowMs: number` — current session-relative now, advanced by the
+  renderer each frame.
 
 Two higher-level helpers also live here:
 

@@ -29,6 +29,10 @@ From [`telemetry.proto`](../../proto/harmonograf/v1/telemetry.proto):
 
 ```proto
 message TelemetryUp {
+  // Reserved: were TaskPlan task_plan = 9 / UpdatedTaskStatus
+  // task_status_update = 10 before the goldfive migration (issue #2).
+  // Plan + task state now ride inside goldfive_event.
+  reserved 9, 10;
   oneof msg {
     Hello hello = 1;
     SpanStart span_start = 2;
@@ -36,21 +40,37 @@ message TelemetryUp {
     SpanEnd span_end = 4;
     PayloadUpload payload = 5;
     Heartbeat heartbeat = 6;
-    ControlAck control_ack = 7;
+    goldfive.v1.ControlAck control_ack = 7;
     Goodbye goodbye = 8;
-    TaskPlan task_plan = 9;
-    UpdatedTaskStatus task_status_update = 10;
+    goldfive.v1.Event goldfive_event = 11;
   }
 }
 ```
 
 Every `TelemetryUp` carries exactly one oneof variant.
 
+> **Wire type ownership.** `control_ack` carries `goldfive.v1.ControlAck`
+> (not a harmonograf type — see
+> [`control-stream.md`](control-stream.md)). Fields 9 / 10 are
+> **reserved** — they were `TaskPlan` / `UpdatedTaskStatus` before
+> the goldfive migration; plan / task state now rides inside
+> `goldfive_event = 11`.
+
 ### `Hello` (oneof tag 1)
 
 First message on every telemetry stream. Exactly one `Hello` per stream.
 A second `Hello` is rejected by ingest (`ingest.handle_message` raises
 `ValueError`).
+
+**Lazy Hello** (harmonograf #83 / #85): the reference client transport
+defers sending `Hello` until the first real `TelemetryUp` is queued.
+The `session_id` stamped on Hello is derived from the first envelope
+(so the home session stamps with the correct id from the start). This
+eliminates ghost `sess_*` rows that used to appear for processes that
+opened a Client but never emitted. See
+[ADR 0022](../adr/0022-lazy-hello.md). New clients implementing the
+wire do not have to defer Hello, but doing so gives them the same
+ghost-session guarantee for free.
 
 ```proto
 message Hello {
@@ -314,38 +334,36 @@ sequenceDiagram
     Note over I,C2: v0 server ignores resume_token; client<br/>resends any unconfirmed spans (dedup by id)
 ```
 
-### `TaskPlan` (oneof tag 9)
+### `goldfive_event` (oneof tag 11)
 
-The planner-helper agent's plan, emitted once before normal execution
-begins. See [`data-model.md#taskplan`](data-model.md#taskplan) for
-field-by-field semantics and [`task-state-machine.md`](task-state-machine.md)
-for how plans are revised in flight.
+Goldfive orchestration event envelope. Carries a
+`goldfive.v1.Event` with a typed `payload` oneof:
 
-A plan may also be **re-submitted** at any time to replace a prior
-revision (that's how refine delivers a revised plan). The server
-canonicalizes by `(session_id, plan_id)`; the new plan supersedes the
-old one and a `TaskPlan` delta fans out on `WatchSession`.
+| Payload | Meaning |
+|---|---|
+| `run_started` / `run_completed` / `run_aborted` | Run lifecycle |
+| `goal_derived` | Goal list and success predicates |
+| `plan_submitted` / `plan_revised` | Task plan (first submission or refine) |
+| `task_started` / `task_progress` / `task_completed` / `task_failed` / `task_blocked` / `task_cancelled` | Task lifecycle |
+| `drift_detected` | Observer-detected drift (plan divergence, loop, refusal, user_steer, user_cancel, etc.) |
+| `conversation_started` / `conversation_ended` | Cross-turn chat context |
+| `approval_requested` / `approval_granted` / `approval_rejected` | HITL approval flow |
+| `agent_invocation_started` / `agent_invocation_completed` | Per-agent invocation boundaries |
+| `delegation_observed` | `AgentTool(sub_agent)` call surfaces as a cross-agent edge |
 
-### `UpdatedTaskStatus` (oneof tag 10)
+**Per-event session routing** (goldfive #155 / PR #157):
+`Event.session_id` (field 5) is stamped by the Runner / Steerer /
+Executors on every event so one transport stream can multiplex events
+across sessions (e.g. ADK's `AgentTool` mints sub-Runner sessions
+inside a single adk-web run). Ingest routes on this field, falling
+back to the stream's Hello session when empty. See
+[`../design/14-information-flow.md`](../design/14-information-flow.md)
+§Tier 3.
 
-Explicit task status delta. Use this when no span carries the task's
-`hgraf.task_id` stamp (e.g. the task completes in a code path the
-client does not span around).
-
-```proto
-message UpdatedTaskStatus {
-  string plan_id = 1;
-  string task_id = 2;
-  TaskStatus status = 3;
-  string bound_span_id = 4;
-  google.protobuf.Timestamp updated_at = 5;
-}
-```
-
-Most of the time, task state derives automatically from spans carrying
-the `hgraf.task_id` attribute (see
-[`span-lifecycle.md#task-binding`](span-lifecycle.md#task-binding)).
-`UpdatedTaskStatus` is an escape hatch.
+Fields 9 and 10 are **reserved** (were `TaskPlan` / `UpdatedTaskStatus`
+pre-migration). Plan and task state updates now ride inside
+`goldfive_event` via `plan_submitted` / `plan_revised` /
+`task_started` / `task_completed` / etc.
 
 ## Downstream — `TelemetryDown`
 

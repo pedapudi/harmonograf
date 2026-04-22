@@ -1,18 +1,22 @@
 # Server ingest, bus, and control router
 
-The server's fan-in surface is split across three files:
+The server's fan-in surface is split across four files:
 
-- `server/harmonograf_server/ingest.py` (~770 lines) — the telemetry
+- `server/harmonograf_server/ingest.py` (~1000 lines) — the telemetry
   envelope pipeline. Receives every message from every client's
-  `StreamTelemetry` RPC, deduplicates, persists, and publishes.
-- `server/harmonograf_server/bus.py` (~230 lines) — the per-session
+  `StreamTelemetry` RPC, deduplicates, persists, publishes, and
+  maintains the per-session drift ring for late-subscribe replay.
+- `server/harmonograf_server/bus.py` (~260 lines) — the per-session
   pub/sub bus with bounded per-subscriber queues and drop-oldest
   backpressure.
 - `server/harmonograf_server/control_router.py` (~350 lines) — the
   reverse direction. Frontend sends control, server routes to live
   client streams, correlates acks back to pending requests.
+- `server/harmonograf_server/interventions.py` (~550 lines) — the
+  intervention aggregator. Merges annotations + drift ring + plan
+  revisions into one chronological list; dedups by `annotation_id`.
 
-All three are single-process, in-memory. Persistence is delegated to
+All four are single-process, in-memory. Persistence is delegated to
 the storage layer (see [`storage-sqlite.md`](storage-sqlite.md)); the
 bus only fans out the live stream to subscribers currently watching.
 
@@ -112,11 +116,16 @@ The dispatcher. Branches on message kind:
 - `payload` → `_handle_payload`
 - `heartbeat` → `_handle_heartbeat`
 - `control_ack` → forwarded to `ControlRouter.record_ack`
-- `task_plan` → `_handle_task_plan`
-- `task_status_update` → `_handle_task_status_update`
-- `context_window_sample` → `_handle_context_window_sample`
-- `task_report` → `_handle_task_report`
+- `goldfive_event` → `_handle_goldfive_event` (dispatches on the
+  `Event.payload` oneof — `run_started`, `plan_submitted`,
+  `plan_revised`, `task_started/progress/completed/failed/blocked/
+  cancelled`, `drift_detected`, `run_completed/aborted`,
+  `agent_invocation_*`, `delegation_observed`, ...)
 - `goodbye` → mark stream shut
+
+`task_plan = 9` and `task_status_update = 10` are **reserved** in the
+proto — pre-goldfive-migration they were their own oneof variants;
+plan / task state now rides inside `goldfive_event`.
 
 Every branch follows the same three-phase pattern: *dedup if
 applicable → persist → publish*.
@@ -150,6 +159,54 @@ subscribes to the bus for the live stream. If publishing preceded
 storage, the watcher could see a live span that the replay hadn't
 yet observed and end up with a duplicate. By persisting first, the
 storage state is always at least as fresh as what's on the bus.
+
+### Session routing (harmonograf #63 / #66 / #85)
+
+Spans and goldfive events route to different session ids on the same
+telemetry stream:
+
+- **Spans** route by `pb_span.session_id` (falling back to
+  `ctx.session_id`). A `HarmonografTelemetryPlugin` configured with
+  the outer adk-web session id stamps it on every span, so spans
+  land on the correct session row even when ADK's `AgentTool`
+  sub-Runner minted its own id. See
+  [ADR 0021](../adr/0021-session-id-pinning.md).
+- **Goldfive events** route by `Event.session_id` (goldfive field
+  5, added in goldfive #155). When an event carries a session id
+  different from the stream's Hello session,
+  `_handle_goldfive_event` wraps the context in a read-only
+  `_SessionView` that pins `session_id` without mutating the
+  shared `StreamContext`, then calls `_ensure_route` to
+  auto-create the session / agent row if unseen.
+
+Both paths preserve back-compat: empty `session_id` on a span or
+goldfive event falls back to the Hello session.
+
+### Agent auto-registration (harmonograf #74 / #80)
+
+`_ensure_route` is the first-sight handler. On a fresh
+`(session_id, agent_id)` pair it:
+
+1. Creates the session row if missing.
+2. Reads `hgraf.agent.name` / `hgraf.agent.parent_id` /
+   `hgraf.agent.kind` / `hgraf.agent.branch` attributes off the
+   span and writes them as `adk.agent.name`,
+   `harmonograf.parent_agent_id`, `harmonograf.agent_kind`,
+   `adk.agent.branch` in the agent's `metadata`.
+3. Prefers `hgraf.agent.name` over the bare `span.name` for the
+   display name (LLM/tool span names are the model/tool name, not
+   the agent name).
+4. Registers the Agent row with `Framework.ADK` when a name hint
+   is present, and publishes an `agent_upsert` delta.
+
+`seen_routes` on the `StreamContext` short-circuits subsequent
+spans so the hot path pays the harvest cost once per agent, never
+per span. See
+[ADR 0024](../adr/0024-per-adk-agent-gantt-rows.md).
+
+The plugin side of the contract is in
+[`client/harmonograf_client/telemetry_plugin.py`](../../client/harmonograf_client/telemetry_plugin.py)
+(`_register_agent_for_ctx`, `_stamp_agent_attrs`).
 
 ### Stream lifecycle
 
@@ -445,6 +502,68 @@ SUCCESS. This is how the "refresh status" button in the frontend
 gets its delayed response — the ack payload carries the agent's
 state_delta snapshot, which the router forwards to registered
 listeners.
+
+## Drift ring and late-subscribe replay
+
+`IngestPipeline._drifts_by_session: dict[str, list[dict]]` is a
+per-session bounded ring (`_drift_ring_max = 500`) that captures
+every `drift_detected` event the ingest pipeline observed.
+`_on_drift_detected` both publishes onto the bus *and* pushes a
+compact dict (kind, severity, detail, task_id, agent_id,
+emitted_at, annotation_id) onto the ring.
+
+The `WatchSession` handler in `rpc/frontend.py` re-emits each ring
+entry as a synthesized `goldfive.v1.Event` with `drift_detected`
+populated (and `annotation_id` / `emitted_at` preserved) during the
+initial burst, before attaching to the live bus. Client-side
+dispatch is identical for live vs replayed events, so actor
+synthesis (`__user__` / `__goldfive__` row materialization) and
+trajectory ribbon population happen correctly for reconnects.
+
+The ring is rebuilt from the live stream on server restart — no
+SQLite persistence for drifts yet. Per-session cap of 500 bounds
+memory without losing the useful prefix of any reasonable run.
+
+## Intervention aggregator (`interventions.py`)
+
+`list_interventions(store, session_id, ingest)` is the
+chronologically merged view of every point where the plan changed
+direction. Three source projections:
+
+- **Annotations** (`_project_annotations`) — STEER / HUMAN_RESPONSE
+  rows from the `annotations` table become user-sourced
+  interventions with `annotation_id` populated.
+- **Drift ring** (`_project_drifts`) — every drift in
+  `IngestPipeline.drifts_for_session(...)` becomes a row; user-source
+  drift kinds (`user_steer` / `user_cancel`) get `source="user"` with
+  the annotation id carried through; autonomous drifts get
+  `source="drift"`.
+- **Plan revisions** (`_project_plans`) — `task_plans` rows whose
+  `revision_kind` matches a known drift kind or goldfive-autonomous
+  kind become an intervention row; when a matching drift carries an
+  `annotation_id`, it's propagated onto the plan row so the final
+  dedup pass can fold the plan outcome back onto the annotation.
+
+The projected rows pass through two passes:
+
+1. `_attribute_outcomes(records)` — walks rows in time order,
+   attributing a drift/plan row to its successor within the
+   attribution window. Window is **5 minutes for user-control
+   kinds** (`user_steer` / `user_cancel`) — the refine LLM
+   roundtrip routinely takes tens of seconds — and **5 seconds for
+   autonomous drifts**. The narrow default keeps unrelated late
+   events from stealing attribution.
+2. `_merge_by_annotation_id(records)` — collapses rows that share an
+   `annotation_id` into a single user-authored card, merging
+   outcome / severity / plan_revision_index onto the surviving
+   annotation row. Rows without an `annotation_id` pass through
+   unchanged (that's how autonomous drifts keep their own cards).
+
+See [ADR 0023](../adr/0023-intervention-dedup-by-annotation-id.md).
+
+The frontend deriver (`frontend/src/lib/interventions.ts`) mirrors
+the same projection + attribution + dedup so live deltas from
+`WatchSession` reconcile incrementally without a second RPC.
 
 ## Backpressure semantics summary
 

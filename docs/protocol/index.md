@@ -43,8 +43,8 @@ flowchart LR
 | [`overview.md`](overview.md) | The five RPC-level concerns, why telemetry / control / frontend split three ways, how a new client first attaches. |
 | [`telemetry-stream.md`](telemetry-stream.md) | `StreamTelemetry` upstream (`TelemetryUp`) and downstream (`TelemetryDown`) variants, Hello/Welcome, resume_token, Goodbye. |
 | [`control-stream.md`](control-stream.md) | `SubscribeControl`, `ControlEvent` → `ControlAck` lifecycle, capability negotiation, multi-stream fan-out, `require_all_acks`. |
-| [`frontend-rpcs.md`](frontend-rpcs.md) | UI-facing RPCs: `ListSessions`, `WatchSession`, `GetPayload`, `GetSpanTree`, `PostAnnotation`, `SendControl`, `DeleteSession`, `GetStats`. |
-| [`data-model.md`](data-model.md) | Every shared `types.proto` message: `Session`, `Agent`, `Span`, `AttributeValue`, `PayloadRef`, `ErrorInfo`, `TaskPlan`, `Task`, `TaskEdge`, `UpdatedTaskStatus`, `Annotation`, `ControlEvent`, `ControlAck`. |
+| [`frontend-rpcs.md`](frontend-rpcs.md) | UI-facing RPCs: `ListSessions`, `WatchSession`, `GetPayload`, `GetSpanTree`, `PostAnnotation`, `SendControl`, `DeleteSession`, `ListInterventions`, `GetStats`. |
+| [`data-model.md`](data-model.md) | Every shared `types.proto` message: `Session`, `Agent`, `Span`, `AttributeValue`, `PayloadRef`, `ErrorInfo`, `Annotation`, `Intervention`; plus the `goldfive.v1.*` types imported for control + events. |
 | [`task-state-machine.md`](task-state-machine.md) | Plan execution protocol: `session.state` schema, reporting tools, orchestration modes, monotonic transitions, 26-kind drift taxonomy, refine pipeline, invariant validator. |
 | [`span-lifecycle.md`](span-lifecycle.md) | `SpanStart` / `SpanUpdate` / `SpanEnd`, attribute merging, the `hgraf.task_id` binding attribute, cross-agent links. |
 | [`payload-flow.md`](payload-flow.md) | Content-addressed `PayloadRef`s, chunked `PayloadUpload`, client-side eviction, server-side `PayloadRequest` re-requests, the `PayloadAvailable` delta. |
@@ -68,12 +68,16 @@ matches what you're implementing:
   original architectural rationale for the split. Whenever a "why" in
   this reference gets long, the answer usually lives there.
 - [`docs/design/12-client-library-and-adk.md`](../design/12-client-library-and-adk.md)
-  — design of the Python ADK adapter; see for the rationale behind the
-  reporting tools and the walker.
-- **Task #7 — Developer guide** — how to build and run the stack, plus
-  internal module layout. This reference does not cover local dev setup.
-- **Task #6 — User guide** — how the Gantt UI renders what lands on the
-  wire. The semantics here become pixels there.
+  — design of the Python ADK integration (observability plugin). The
+  bulk of this doc is superseded by the goldfive migration; see
+  [`../goldfive-integration.md`](../goldfive-integration.md) for the
+  current integration story.
+- **Dev guide** (`docs/dev-guide/`) — how to build and run the stack,
+  plus internal module layout. This reference does not cover local
+  dev setup.
+- **User guide** (`docs/user-guide/`) — how the Gantt UI renders what
+  lands on the wire. The semantics here become pixels there.
 - [`docs/reporting-tools.md`](../reporting-tools.md) — agent-facing
-  quick reference for the seven `report_*` tools. See
-  [`task-state-machine.md`](task-state-machine.md) for the full contract.
+  quick reference for goldfive's reporting tools. The task state
+  machine itself now lives in goldfive (see
+  [`task-state-machine.md`](task-state-machine.md) for the redirect).

@@ -1,9 +1,19 @@
 # Data model
 
-Every shared entity on the wire. All definitions live in
+Every shared entity on the wire. Definitions live in
 [`types.proto`](../../proto/harmonograf/v1/types.proto). Messages
 specific to one RPC (`Hello`, `Welcome`, `SessionUpdate`, etc.) live in
 the channel-specific protos and are covered in the channel docs.
+
+> **Scope note (post-goldfive migration).** Orchestration types
+> (`Plan` / `Task` / `TaskEdge` / `UpdatedTaskStatus` / `TaskStatus`)
+> and control types (`ControlKind` / `ControlEvent` / `ControlAck` /
+> `SteerPayload` / `RewindPayload` / `ApprovePayload` /
+> `RejectPayload` / `InjectMessagePayload` / `ControlTarget` /
+> `ControlAckResult`) now live in
+> `goldfive/v1/types.proto` and `goldfive/v1/control.proto`.
+> Harmonograf imports them wherever they cross the wire. See
+> [../goldfive-integration.md](../goldfive-integration.md).
 
 ## Entity map
 
@@ -15,24 +25,22 @@ classDiagram
     Span "1" --> "*" PayloadRef : payload_refs
     Span "1" --> "*" SpanLink : links
     Span "1" ..> Span : parent_span_id / links.target_span_id
-    TaskPlan "1" --> "*" Task : tasks
-    TaskPlan "1" --> "*" TaskEdge : edges
-    Task "1" ..> Span : bound_span_id
     Annotation --> AnnotationTarget
     AnnotationTarget "1" ..> Span : span_id
     AnnotationTarget "1" ..> AgentTimePoint : agent_time
-    ControlEvent --> ControlTarget
-    ControlEvent "1" ..> ControlAck : by control_id
+    Intervention "1" ..> Annotation : annotation_id (dedup)
+    GoldfiveEvent "1" ..> Session : session_id (field 5)
+    GoldfiveControlEvent "1" ..> GoldfiveControlAck : control_id
 
     class Session { id; title; created_at; ended_at; status; agent_ids[]; metadata }
     class Agent { id; session_id; name; framework; framework_version; capabilities[]; metadata; connected_at; last_heartbeat; status }
     class Span { id; session_id; agent_id; parent_span_id; kind; kind_string; status; name; start_time; end_time; attributes; payload_refs[]; links[]; error }
     class PayloadRef { digest; size; mime; summary; role; evicted }
-    class TaskPlan { id; session_id; invocation_span_id; planner_agent_id; created_at; summary; tasks[]; edges[]; revision_* }
-    class Task { id; title; description; assignee_agent_id; status; predicted_start_ms; predicted_duration_ms; bound_span_id }
     class Annotation { id; session_id; target; author; created_at; kind; body; delivered_at }
-    class ControlEvent { id; issued_at; target; kind; payload }
-    class ControlAck { control_id; result; detail; acked_at }
+    class Intervention { at; source; kind; body_or_reason; author; outcome; plan_revision_index; severity; annotation_id; drift_kind }
+    class GoldfiveEvent { event_id; run_id; sequence; emitted_at; session_id; payload (oneof) }
+    class GoldfiveControlEvent { id; issued_at; target; kind; payload (typed oneof) }
+    class GoldfiveControlAck { control_id; result; detail; acked_at }
 ```
 
 ## `Session`
@@ -50,8 +58,10 @@ message Session {
 ```
 
 - **`id`** — human-readable. Regex `^[a-zA-Z0-9_-]{1,128}$`. Either
-  user-supplied (`Hello.session_id`) or server-generated as
-  `sess_YYYY-MM-DD_NNNN`.
+  user-supplied (`Hello.session_id`), derived from the outer adk-web
+  `ctx.session.id` (see
+  [ADR 0021](../adr/0021-session-id-pinning.md)), or server-generated
+  as `sess_YYYY-MM-DD_NNNN`.
 - **`title`** — defaults to `id` if empty. Set by the first Hello via
   `Hello.session_title`; later Hellos **cannot change it**.
 - **`created_at`** — server wall-clock at session creation.
@@ -66,7 +76,8 @@ message Session {
   | `SESSION_STATUS_ABORTED` | Session was force-terminated |
 
 - **`agent_ids`** — denormalized for fast listing. Populated as agents
-  Hello in.
+  Hello in (or auto-register on first span — see
+  [ADR 0024](../adr/0024-per-adk-agent-gantt-rows.md)).
 - **`metadata`** — free-form; deep-merged from each Hello.
 
 ## `Agent`
@@ -86,16 +97,29 @@ message Agent {
 }
 ```
 
-- **`id`** — client-chosen, persisted to disk so a restarted agent
-  reclaims its row in the Gantt chart. Multiple concurrent telemetry
-  streams may exist under one `id` — each gets its own `stream_id`
-  from `Welcome`.
+- **`id`** — client-chosen and persisted to disk so a restarted
+  agent reclaims its row in the Gantt. Under the
+  `HarmonografTelemetryPlugin`, per-ADK-agent ids have the form
+  `{client_id}:{adk_name}` — the plugin stacks them per ADK agent
+  in the tree (see
+  [ADR 0024](../adr/0024-per-adk-agent-gantt-rows.md)).
 - **`framework`** — `FRAMEWORK_ADK`, `FRAMEWORK_CUSTOM`, or
   `FRAMEWORK_UNSPECIFIED`.
 - **`capabilities`** — what the agent will honor on `SubscribeControl`:
   `PAUSE_RESUME`, `CANCEL`, `REWIND`, `STEERING`, `HUMAN_IN_LOOP`,
   `INTERCEPT_TRANSFER`. Frontend uses these to grey out control
   buttons.
+- **`metadata`** — free-form. Reserved keys populated by the server
+  on auto-register when `hgraf.agent.*` hints arrive on the first
+  span from an agent:
+
+  | Key | Source attribute | Meaning |
+  |---|---|---|
+  | `adk.agent.name` | `hgraf.agent.name` | ADK-level agent name (e.g. `research_agent`) |
+  | `harmonograf.parent_agent_id` | `hgraf.agent.parent_id` | Parent per-agent id in the ADK tree |
+  | `harmonograf.agent_kind` | `hgraf.agent.kind` | `coordinator` / `specialist` / `agent_tool` / `sequential_container` / etc. |
+  | `adk.agent.branch` | `hgraf.agent.branch` | ADK's dotted ancestry string |
+
 - **`status`** — one of:
 
   | Enum | Meaning |
@@ -132,8 +156,10 @@ message Span {
   server dedups by `id` when a client replays buffered spans.
 - **`session_id`** / **`agent_id`** — may differ from the owning
   telemetry stream's Hello defaults. Per-span overrides let one
-  client emit on behalf of multiple sub-agents / sessions on a single
-  stream (see `ingest._ensure_route`).
+  client emit on behalf of multiple sub-agents / sessions on a
+  single stream (see `ingest._ensure_route`). This is how the
+  `HarmonografTelemetryPlugin` lands per-ADK-agent spans on
+  per-agent rows under one Client.
 - **`parent_span_id`** — intra-agent parent. Empty for roots.
 - **`kind`** — categorical type:
 
@@ -170,9 +196,12 @@ message Span {
   | Key | Meaning |
   |---|---|
   | `hgraf.task_id` | Task binding stamp (see [`span-lifecycle.md#task-binding`](span-lifecycle.md#task-binding)) |
+  | `hgraf.agent.name` / `.parent_id` / `.kind` / `.branch` | First-span agent-hint attributes (harvested into `Agent.metadata`; see [ADR 0024](../adr/0024-per-adk-agent-gantt-rows.md)) |
   | `task_report` | Proactive status report; broadcast as a `TaskReport` delta |
   | `drift_kind`, `drift_severity`, `drift_detail`, `error` | Stamped on the active INVOCATION span by critical drifts |
   | `finish_reason` | LLM finish reason (`MAX_TOKENS`, `LENGTH`, etc.) — used for context-pressure drift |
+  | `llm.reasoning` / `llm.has_thinking` | Reasoning / thinking content extracted by the plugin from provider-specific fields |
+  | `adk.session_id` | Per-ctx ADK session id kept for forensic debugging when session id is pinned to the outer adk-web session |
 
 - **`payload_refs`** — zero or more payloads, distinguished by `role`.
 - **`links`** — cross-span edges. See [`SpanLink`](#spanlink).
@@ -251,8 +280,6 @@ is intra-agent.
 | `LINK_RELATION_FOLLOWS` | Sequential dependency across agents |
 | `LINK_RELATION_REPLACES` | This span supersedes a prior one (e.g. after rewind) |
 
-The five `LinkRelation` values shown as the cross-span edges they produce — INVOKED and TRIGGERED_BY are inverses of each other, REPLACES is rewind-only:
-
 ```mermaid
 flowchart LR
     A["Span A<br/>(orchestrator)"]
@@ -283,80 +310,6 @@ message ErrorInfo {
 
 Attached to failed spans. `stack` is free-form; clients may truncate
 or omit.
-
-## `TaskPlan` / `Task` / `TaskEdge`
-
-```proto
-message TaskPlan {
-  string id = 1;
-  string session_id = 2;
-  string invocation_span_id = 3;
-  string planner_agent_id = 4;
-  google.protobuf.Timestamp created_at = 5;
-  string summary = 6;
-  repeated Task tasks = 7;
-  repeated TaskEdge edges = 8;
-  string revision_reason = 9;
-  string revision_kind = 10;
-  string revision_severity = 11;
-  int64 revision_index = 12;
-}
-
-message Task {
-  string id = 1;
-  string title = 2;
-  string description = 3;
-  string assignee_agent_id = 4;
-  TaskStatus status = 5;
-  int64 predicted_start_ms = 6;
-  int64 predicted_duration_ms = 7;
-  string bound_span_id = 8;
-}
-
-message TaskEdge {
-  string from_task_id = 1;
-  string to_task_id = 2;
-}
-```
-
-- **`TaskPlan.id`** is stable across revisions. Re-submitting a plan
-  with the same id replaces it; `revision_index` increments.
-- **`revision_kind`** is the structured drift tag that triggered the
-  revision (e.g. `"tool_error"`, `"new_work_discovered"`). Empty on
-  initial plans. See [`task-state-machine.md#drift-taxonomy`](task-state-machine.md#drift-taxonomy).
-- **`revision_severity`** is `"info"` / `"warning"` / `"critical"`.
-- **`Task.status`** transitions are **monotonic** — see
-  [`task-state-machine.md#state-machine`](task-state-machine.md#state-machine).
-- **`Task.bound_span_id`** is set when a span carrying
-  `hgraf.task_id = <task.id>` begins running, or by explicit
-  `UpdatedTaskStatus.bound_span_id`.
-- **`predicted_start_ms` / `predicted_duration_ms`** are session-relative
-  hints from the planner. Both zero → the frontend falls back to t=0
-  stacking.
-
-| `TaskStatus` | Meaning |
-|---|---|
-| `TASK_STATUS_PENDING` | Queued, deps not yet satisfied |
-| `TASK_STATUS_RUNNING` | Bound to a live span |
-| `TASK_STATUS_COMPLETED` | Terminal, success |
-| `TASK_STATUS_FAILED` | Terminal, failure |
-| `TASK_STATUS_CANCELLED` | Terminal, cascaded from an unrecoverable upstream failure |
-
-## `UpdatedTaskStatus`
-
-```proto
-message UpdatedTaskStatus {
-  string plan_id = 1;
-  string task_id = 2;
-  TaskStatus status = 3;
-  string bound_span_id = 4;
-  google.protobuf.Timestamp updated_at = 5;
-}
-```
-
-Escape hatch for task state changes not tied to a span. Rides
-`TelemetryUp.task_status_update` upstream and fans out on
-`WatchSession.updated_task_status` downstream.
 
 ## `Annotation`
 
@@ -395,41 +348,106 @@ message Annotation {
 - `target` is a `oneof`: either a concrete `span_id` or an
   `(agent_id, timestamp)` point on the timeline.
 - `COMMENT` is UI-only.
-- `STEERING` is routed as a synthesized `CONTROL_KIND_STEER` event; the
-  agent ack fills in `delivered_at`.
-- `HUMAN_RESPONSE` is routed as `CONTROL_KIND_APPROVE` and is expected
+- `STEERING` is routed as a synthesized `goldfive.v1.ControlEvent`
+  with `kind=STEER`. The server populates `SteerPayload.author`
+  and `SteerPayload.annotation_id` from the stored annotation so
+  goldfive can dedup retries and propagate operator identity
+  (goldfive #171; see
+  [ADR 0023](../adr/0023-intervention-dedup-by-annotation-id.md)).
+- `HUMAN_RESPONSE` is routed as `CONTROL_KIND_INJECT_MESSAGE` or
+  `CONTROL_KIND_APPROVE` depending on the response shape; expected
   to target a `SPAN_STATUS_AWAITING_HUMAN` span.
 
-## `ControlEvent` / `ControlTarget` / `ControlAck`
+`delivered_at` is stamped by `PostAnnotation` after a successful
+ack.
+
+## `Intervention`
+
+Added in harmonograf #71 / #81. A chronologically merged view of
+every point where the plan changed direction.
 
 ```proto
-message ControlTarget {
-  string agent_id = 1;
-  string span_id = 2;
-}
-
-message ControlEvent {
-  string id = 1;
-  google.protobuf.Timestamp issued_at = 2;
-  ControlTarget target = 3;
-  ControlKind kind = 4;
-  bytes payload = 5;
-}
-
-message ControlAck {
-  string control_id = 1;
-  ControlAckResult result = 2;
-  string detail = 3;
-  google.protobuf.Timestamp acked_at = 4;
+message Intervention {
+  google.protobuf.Timestamp at = 1;
+  string source = 2;
+  string kind = 3;
+  string body_or_reason = 4;
+  string author = 5;
+  string outcome = 6;
+  int32 plan_revision_index = 7;
+  string severity = 8;
+  string annotation_id = 9;
+  string drift_kind = 10;
 }
 ```
 
-- `ControlEvent.id` is the correlation token. The agent must echo it
-  verbatim in `ControlAck.control_id`.
-- `span_id` on `ControlTarget` is meaningful for some kinds only
-  (`REWIND_TO`, `APPROVE`/`REJECT`, `STEER` when targeting a specific
-  span).
-- `payload` interpretation is `ControlKind`-specific — see
-  [`control-stream.md#control-kinds`](control-stream.md#control-kinds).
+- **`source`** — `"user"` | `"drift"` | `"goldfive"`.
+- **`kind`** — source-specific label:
+  - User: `"STEER"` / `"CANCEL"` / `"PAUSE"` / `"RESUME"`.
+  - Drift: upper-case drift kind (e.g. `"LOOPING_REASONING"`).
+  - Goldfive: `"CASCADE_CANCEL"` / `"REFINE_RETRY"` /
+    `"HUMAN_INTERVENTION_REQUIRED"`.
+- **`body_or_reason`** — user text, drift detail, or cascade/goldfive
+  reason.
+- **`author`** — populated for user-sourced rows; empty otherwise.
+- **`outcome`** — attribution string: `"plan_revised:rN"`,
+  `"cascade_cancel:N_tasks"`, `"paused"`, `"run_cancelled"`, or
+  `"recorded"` when no follow-up event was observed within the
+  attribution window.
+- **`plan_revision_index`** — set when the outcome produced a new
+  revision.
+- **`severity`** — for drift-sourced rows, drives timeline ring
+  (see [ADR 0025](../adr/0025-intervention-timeline-viz.md)).
+- **`annotation_id`** — populated for annotation-backed rows. Used by
+  the aggregator (and the frontend deriver) to deduplicate rows that
+  share a source annotation (see
+  [ADR 0023](../adr/0023-intervention-dedup-by-annotation-id.md)).
+- **`drift_kind`** — raw lowercase drift kind name, kept separate
+  from `kind` so the renderer stays tree-agnostic.
 
-See [`control-stream.md`](control-stream.md) for the full lifecycle.
+Exposed via `ListInterventions(session_id)` on
+`frontend.proto` and re-derived live from `WatchSession` deltas by
+`frontend/src/lib/interventions.ts`.
+
+## Types imported from goldfive
+
+Harmonograf no longer declares its own control or orchestration
+types. Everything on the wire that crosses the agent / server
+boundary for plan / task / drift / control flows comes from
+goldfive's protos, imported where they appear:
+
+| Message | Lives in | Used by harmonograf |
+|---|---|---|
+| `goldfive.v1.ControlEvent` | `goldfive/v1/control.proto` | `SubscribeControl` stream, `SendControl` request |
+| `goldfive.v1.ControlAck` | `goldfive/v1/control.proto` | `TelemetryUp.control_ack` (field 7) |
+| `goldfive.v1.ControlKind` | `goldfive/v1/control.proto` | `ControlEvent.kind` |
+| `goldfive.v1.ControlAckResult` | `goldfive/v1/control.proto` | `ControlAck.result`, `SendControlResponse.result`, `PostAnnotationResponse.delivery` |
+| `goldfive.v1.ControlTarget` | `goldfive/v1/control.proto` | `ControlEvent.target` |
+| `goldfive.v1.SteerPayload` / `RewindPayload` / `ApprovePayload` / `RejectPayload` / `InjectMessagePayload` | `goldfive/v1/control.proto` | Typed oneof on `ControlEvent` |
+| `goldfive.v1.Event` | `goldfive/v1/events.proto` | `TelemetryUp.goldfive_event` (field 11), `SessionUpdate.goldfive_event` (field 19) |
+| `goldfive.v1.Plan` / `Task` / `TaskEdge` / `TaskStatus` / `DriftKind` / `DriftSeverity` | `goldfive/v1/types.proto` + `events.proto` | Carried inside `goldfive.v1.Event` payload variants |
+
+See `goldfive/v1/events.proto` for the full set of Event payload
+variants (RunStarted / GoalDerived / PlanSubmitted / PlanRevised /
+TaskStarted / TaskProgress / TaskCompleted / TaskFailed / TaskBlocked
+/ TaskCancelled / DriftDetected / RunCompleted / RunAborted /
+ConversationStarted / ConversationEnded / ApprovalRequested /
+ApprovalGranted / ApprovalRejected / AgentInvocationStarted /
+AgentInvocationCompleted / DelegationObserved).
+
+### New fields flagged (2026-04)
+
+- `goldfive.v1.Event.session_id` (field 5) — added in goldfive #155 /
+  PR #157. The Runner / Steerer / Executors stamp it on every
+  emitted event so one transport stream can multiplex events across
+  sessions. Empty = fall back to the Hello session.
+- `goldfive.v1.SteerPayload.author` (field 3) — operator identity,
+  propagated from `Annotation.author` (goldfive #171).
+- `goldfive.v1.SteerPayload.annotation_id` (field 4) — source
+  annotation id; used by goldfive for STEER idempotency and by
+  harmonograf's intervention aggregator for dedup
+  (goldfive #171 / harmonograf #75).
+- `goldfive.v1.DriftDetected.annotation_id` (field 6) — propagated
+  through to drift records so the server-side aggregator can
+  collapse annotation + drift + plan-revision rows into one card
+  (goldfive #176 / #177, harmonograf #75).

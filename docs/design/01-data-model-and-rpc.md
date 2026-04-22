@@ -1,9 +1,40 @@
 # 01 — Data Model & RPC Protocol
 
-Status: **ACCEPTED** (open questions resolved 2026-04-10)
-Scope: the wire. Shared primitives used by all three components, plus the gRPC service that connects agents to the server.
+Status: **ACCEPTED** (open questions resolved 2026-04-10; goldfive migration reflected below).
 
-This is the most load-bearing document in the set: the span abstraction and the RPC contract constrain what every other component can do.
+Scope: the wire. Shared primitives used by all three components, plus
+the gRPC service that connects agents to the server.
+
+This is the most load-bearing document in the set: the span abstraction
+and the RPC contract constrain what every other component can do.
+
+> **Migration note (2026-04).** Orchestration types
+> (`Task` / `TaskPlan` / `TaskEdge` / `UpdatedTaskStatus` /
+> `TaskStatus`) and control types
+> (`ControlKind` / `ControlEvent` / `ControlAck` / `ControlTarget` /
+> per-kind payloads) moved out of `harmonograf/v1/types.proto`
+> and into `goldfive/v1/{types,control,events}.proto` during Phase A
+> of the goldfive migration. Harmonograf imports them wherever they
+> cross the wire. The `TelemetryUp` `task_plan = 9` and
+> `task_status_update = 10` variants are **reserved** — plan / task
+> state now rides inside `TelemetryUp.goldfive_event = 11`.
+>
+> See [`../protocol/data-model.md`](../protocol/data-model.md) for the
+> current wire-level detail and
+> [`../goldfive-integration.md`](../goldfive-integration.md) for the
+> integration seam.
+>
+> Newer design decisions that postdate this doc:
+>
+> - [ADR 0021 — Session id pinning](../adr/0021-session-id-pinning.md)
+>   — one adk-web run = one harmonograf session.
+> - [ADR 0022 — Lazy Hello](../adr/0022-lazy-hello.md) — defer the
+>   `Hello` RPC until first emit to eliminate ghost session rows.
+> - [ADR 0023 — Intervention dedup by `annotation_id`](../adr/0023-intervention-dedup-by-annotation-id.md).
+> - [ADR 0024 — Per-ADK-agent Gantt rows with auto-registration](../adr/0024-per-adk-agent-gantt-rows.md)
+>   — `hgraf.agent.*` hint attributes on the first span drive
+>   server-side auto-register.
+> - [ADR 0025 — Intervention timeline viz](../adr/0025-intervention-timeline-viz.md).
 
 ---
 

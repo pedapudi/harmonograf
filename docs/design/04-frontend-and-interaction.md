@@ -1,9 +1,35 @@
 # 04 — Frontend & Human Interaction Model
 
-Status: **DRAFT — awaiting review**
+Status: **DRAFT — reflects 2026-04 state**
 Scope: the Gantt console. What the user sees, how they interact, how it renders fast, what colors mean.
 
 This doc presupposes the span/session/control model defined in `01-data-model-and-rpc.md`. If that model changes, this doc changes with it.
+
+> **Companion docs.**
+>
+> - Architecture: [10-frontend-architecture.md](10-frontend-architecture.md).
+> - Interaction model: [13-human-interaction-model.md](13-human-interaction-model.md)
+>   has the up-to-date STEER / intervention / timeline semantics.
+> - Renderer internals: [../internals/renderer-pipeline.md](../internals/renderer-pipeline.md).
+>
+> **Post-migration deltas (2026-04).**
+>
+> - Per-ADK-agent rows: the Gantt renders one row per ADK agent in
+>   the tree (coordinator, specialists, `AgentTool` wrappers)
+>   rather than one row per client process
+>   ([ADR 0024](../adr/0024-per-adk-agent-gantt-rows.md)).
+> - Synthetic actor rows: `__user__` and `__goldfive__` rows
+>   materialize lazily from `DriftDetected` events, so operator
+>   interventions and goldfive autonomous escalations render on
+>   their own rows. See
+>   [10-frontend-architecture.md §7](10-frontend-architecture.md#7-actor-attribution-and-span-synthesis).
+> - Intervention timeline strip above the Gantt: unified
+>   chronological view of user STEER / CANCEL, drift detections,
+>   and plan revisions, deduplicated by `annotation_id`
+>   ([ADR 0023](../adr/0023-intervention-dedup-by-annotation-id.md),
+>   [ADR 0025](../adr/0025-intervention-timeline-viz.md)).
+> - Delegation edges: dashed cross-agent beziers from
+>   `DelegationObserved` events make `AgentTool` handoffs visible.
 
 ---
 
