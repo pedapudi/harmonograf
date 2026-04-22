@@ -264,6 +264,17 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         # span's non-partial finalize.
         self._model_spans: dict[str, deque[_ModelSpanSlot]] = {}
         self._tool_spans: dict[int, str] = {}
+        # Parallel map from ``id(tool_context)`` -> ``invocation_id`` used
+        # only by the cancellation cleanup path
+        # (:meth:`_close_stale_spans_for_invocation`). Lets us flush tool
+        # spans belonging to the cancelled invocation while leaving any
+        # concurrent sibling invocation's tool spans intact. Kept as a
+        # separate dict so the hot ``before_tool`` / ``after_tool`` path
+        # pays a single extra dict write and nothing else. Entries are
+        # removed by ``after_tool_callback`` / ``on_tool_error_callback``
+        # on the normal path and by the cancellation helper on the
+        # error path.
+        self._tool_span_invocations: dict[int, str] = {}
 
     @property
     def client(self) -> Client:
@@ -301,6 +312,150 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         if adk_sid:
             return adk_sid
         return str(self._client.session_id or "")
+
+    # ------------------------------------------------------------------
+    # Cancellation cleanup
+    # ------------------------------------------------------------------
+
+    def _close_stale_spans_for_invocation(
+        self,
+        invocation_id: str,
+        *,
+        status: SpanStatus = SpanStatus.CANCELLED,
+    ) -> None:
+        """Close any open spans whose invocation context matches ``invocation_id``.
+
+        Called when an ADK invocation is cancelled mid-flight (the asyncio
+        task driving ``runner.run_async`` raises ``CancelledError``). In
+        that path ADK's ``after_run_callback`` — and the
+        ``after_model_callback`` / ``after_tool_callback`` for any
+        in-flight sub-call — does not fire, because ADK places those
+        plugin hooks after the ``async with Aclosing(execute_fn(...))``
+        block in :meth:`google.adk.runners.Runner._exec_with_plugin`, not
+        inside a ``finally``. Spans the plugin already ``emit_span_start``-ed
+        for this invocation would otherwise stay ``status=RUNNING`` in the
+        harmonograf DB forever (goldfive#167).
+
+        Idempotent: safe to call after normal completion (the usual
+        ``after_*`` callbacks already pop their entries, so this is a
+        no-op in that case) and safe to call multiple times for the same
+        ``invocation_id``.
+
+        Scoped to a single invocation id — concurrent invocations running
+        on other asyncio tasks are not touched. Tool-span cleanup is
+        limited to tool spans opened *during* this invocation; ADK's
+        ``ToolContext`` carries the ``invocation_id`` so we only pop the
+        entries that actually belong to the cancelled invocation.
+
+        Never raises: observability must not corrupt the main cancel
+        path. Any per-emit failure is swallowed with a debug log.
+        """
+        if not invocation_id:
+            return
+
+        # Close model-call spans for this invocation.
+        leftover = self._model_spans.pop(invocation_id, None)
+        if leftover:
+            for slot in leftover:
+                reasoning = _join_reasoning(slot.reasoning_chunks)
+                attributes = (
+                    {"has_reasoning": True, "llm.reasoning": reasoning}
+                    if reasoning
+                    and len(reasoning.encode("utf-8")) <= REASONING_INLINE_MAX_BYTES
+                    else ({"has_reasoning": True} if reasoning else None)
+                )
+                try:
+                    self._client.emit_span_end(
+                        slot.span_id,
+                        status=status,
+                        attributes=attributes,
+                    )
+                except Exception:  # noqa: BLE001 — defensive: telemetry must not raise
+                    log.debug(
+                        "telemetry_plugin: emit_span_end for model span %s raised",
+                        slot.span_id,
+                        exc_info=True,
+                    )
+
+        # Close tool-call spans opened by this invocation. ``_tool_spans``
+        # is keyed by ``id(tool_context)``; we track the invocation id
+        # alongside in ``_tool_span_invocations`` so cancellation can
+        # filter to just the cancelled invocation's entries without
+        # disturbing tool spans from a concurrent sibling invocation.
+        stale_tool_keys = [
+            key
+            for key, inv in self._tool_span_invocations.items()
+            if inv == invocation_id
+        ]
+        for key in stale_tool_keys:
+            sid = self._tool_spans.pop(key, None)
+            self._tool_span_invocations.pop(key, None)
+            if sid is None:
+                continue
+            try:
+                self._client.emit_span_end(sid, status=status)
+            except Exception:  # noqa: BLE001 — defensive
+                log.debug(
+                    "telemetry_plugin: emit_span_end for tool span %s raised",
+                    sid,
+                    exc_info=True,
+                )
+
+        # Close the run span itself.
+        sid = self._invocation_spans.pop(invocation_id, None)
+        if sid is not None:
+            try:
+                self._client.emit_span_end(sid, status=status)
+            except Exception:  # noqa: BLE001 — defensive
+                log.debug(
+                    "telemetry_plugin: emit_span_end for run span %s raised",
+                    sid,
+                    exc_info=True,
+                )
+
+        # If the cancelled invocation was the cached ROOT, release the
+        # root-session cache and tear down the per-session control sub.
+        # Without this, a subsequent run after a user cancel would still
+        # stamp spans onto the prior root's session id.
+        if (
+            self._root_invocation_id is not None
+            and invocation_id == self._root_invocation_id
+        ):
+            cached = self._root_session_id
+            self._root_session_id = None
+            self._root_invocation_id = None
+            close_sub = getattr(
+                self._client, "close_additional_control_subscription", None
+            )
+            if callable(close_sub) and cached:
+                try:
+                    close_sub(cached)
+                except Exception:  # noqa: BLE001 — defensive
+                    log.debug(
+                        "telemetry_plugin: close_additional_control_subscription "
+                        "raised for %s during cancel",
+                        cached,
+                        exc_info=True,
+                    )
+
+    def on_cancellation(self, invocation_id: str) -> None:
+        """Public hook invoked by goldfive's ADKAdapter on cancel.
+
+        When :class:`goldfive.adapters.adk.ADKAdapter.invoke` catches
+        ``asyncio.CancelledError`` (USER_STEER / USER_CANCEL /
+        upstream cancel), it iterates the caller-supplied plugin list
+        and calls ``plugin.on_cancellation(invocation_id)`` on every
+        plugin that defines one. This plugin delegates to
+        :meth:`_close_stale_spans_for_invocation` so any still-open
+        run / LLM / tool spans are flushed with
+        ``status=CANCELLED`` instead of leaking as
+        ``status=RUNNING`` forever (goldfive#167).
+
+        Safe to call from any context — never raises.
+        """
+        self._close_stale_spans_for_invocation(
+            invocation_id, status=SpanStatus.CANCELLED
+        )
 
     # ------------------------------------------------------------------
     # Invocation lifecycle
@@ -546,7 +701,17 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
             payload_role="input",
             session_id=self._stamp_session_id(tool_context),
         )
-        self._tool_spans[id(tool_context)] = sid
+        key = id(tool_context)
+        self._tool_spans[key] = sid
+        # Track the invocation id so
+        # :meth:`_close_stale_spans_for_invocation` can scope its cleanup
+        # to just the cancelled invocation's open tool spans. Empty
+        # invocation ids are skipped — the cancellation path is a
+        # no-op for those and the normal after-tool cleanup path pops
+        # on object-id, not invocation-id.
+        inv_id = str(_safe_attr(tool_context, "invocation_id", "") or "")
+        if inv_id:
+            self._tool_span_invocations[key] = inv_id
 
     async def after_tool_callback(
         self,
@@ -556,7 +721,9 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         tool_context: Any,
         result: Any,
     ) -> None:
-        sid = self._tool_spans.pop(id(tool_context), None)
+        key = id(tool_context)
+        sid = self._tool_spans.pop(key, None)
+        self._tool_span_invocations.pop(key, None)
         if sid is None:
             return
         payload = _serialize_args(result)
@@ -575,7 +742,9 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         tool_context: Any,
         error: Any,
     ) -> None:
-        sid = self._tool_spans.pop(id(tool_context), None)
+        key = id(tool_context)
+        sid = self._tool_spans.pop(key, None)
+        self._tool_span_invocations.pop(key, None)
         if sid is None:
             return
         self._client.emit_span_end(
