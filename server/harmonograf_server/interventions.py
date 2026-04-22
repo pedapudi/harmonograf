@@ -113,6 +113,15 @@ async def list_interventions(
     (the IngestPipeline in prod; a stub in tests). Kept as a duck-type
     boundary so tests can drive the aggregator without spinning a full
     ingest stack.
+
+    Dedup contract (harmonograf#75): when an annotation_id is present on
+    a row, it becomes the canonical join key. Rows from other sources
+    that share that annotation_id merge their outcome/severity onto the
+    annotation row rather than producing their own card. The practical
+    case is a single user STEER that currently surfaces as three
+    records (annotation, USER_STEER drift, plan_revised:rN) — the
+    deduper collapses them into one user-authored intervention card
+    whose outcome reflects the plan revision.
     """
 
     annotations = await store.list_annotations(session_id=session_id)
@@ -135,6 +144,7 @@ async def list_interventions(
 
     records.sort(key=lambda r: r.at)
     _attribute_outcomes(records, plans)
+    records = _merge_by_annotation_id(records)
     return records
 
 
@@ -179,6 +189,11 @@ def _project_drifts(drifts: Iterable[dict[str, Any]]) -> list[InterventionRecord
     because goldfive emits those kinds when an operator intervention caused
     the plan revision; every other drift is ``source="drift"`` (model- or
     runtime-initiated).
+
+    ``annotation_id`` (goldfive#176) is carried through when present so
+    the downstream deduper can collapse the drift row into the source
+    annotation row. Autonomous drifts (no backing ControlMessage) emit
+    with an empty ``annotation_id`` and keep their own card.
     """
 
     out: list[InterventionRecord] = []
@@ -209,6 +224,7 @@ def _project_drifts(drifts: Iterable[dict[str, Any]]) -> list[InterventionRecord
                 body_or_reason=dr.get("detail") or "",
                 severity=dr.get("severity") or "",
                 drift_kind=drift_kind,
+                annotation_id=str(dr.get("annotation_id") or ""),
             )
         )
     return out
@@ -224,6 +240,15 @@ def _project_plans(
     within the attribution window are skipped — the drift itself already
     represents the intervention and will own the ``plan_revised:rN``
     outcome attribution in the next pass.
+
+    When the matching drift carries an ``annotation_id`` (goldfive#176),
+    we propagate that id onto the plan record too so the final dedup
+    pass (:func:`_merge_by_annotation_id`) can fold the plan outcome
+    into the annotation row. Without this, a user STEER whose drift +
+    plan revision land strictly within the 5s window gets its drift row
+    suppressed here (good) but the plan row rolls through with no id —
+    then the final merge can't fold it onto the annotation and the user
+    sees a STEER annotation card plus a bonus STEER plan card.
     """
 
     out: list[InterventionRecord] = []
@@ -239,15 +264,18 @@ def _project_plans(
         # plan here. Otherwise this is an autonomous goldfive revision
         # (cascade_cancel, refine_retry) or a drift we never ingested,
         # and we record it directly.
-        has_preceding_drift = any(
-            (dr.get("kind") or "").lower() == rev_kind
-            and isinstance(dr.get("recorded_at"), (int, float))
-            and 0.0
-            <= float(plan.created_at) - float(dr["recorded_at"])
-            <= _OUTCOME_WINDOW_S
-            for dr in drift_list
-        )
-        if has_preceding_drift:
+        preceding_drift: dict[str, Any] | None = None
+        for dr in drift_list:
+            if (dr.get("kind") or "").lower() != rev_kind:
+                continue
+            ra = dr.get("recorded_at")
+            if not isinstance(ra, (int, float)):
+                continue
+            delta = float(plan.created_at) - float(ra)
+            if 0.0 <= delta <= _OUTCOME_WINDOW_S:
+                preceding_drift = dr
+                break
+        if preceding_drift is not None:
             continue
         if rev_kind in _GOLDFIVE_REVISION_KINDS:
             source = "goldfive"
@@ -349,6 +377,128 @@ def _find_matching_revision(
             best_delta = delta
             best = plan
     return best
+
+
+def _merge_by_annotation_id(
+    records: list[InterventionRecord],
+) -> list[InterventionRecord]:
+    """Collapse rows that share an ``annotation_id`` into a single card.
+
+    Rule (harmonograf#75):
+
+      * Rows with ``annotation_id`` populated (annotation rows, user-control
+        drift rows tagged by goldfive#176) are grouped by that id.
+      * Each group keeps exactly one row — the annotation row when present,
+        otherwise the earliest surviving row in the group.
+      * The kept row absorbs non-empty fields from the others — ``outcome``
+        and ``plan_revision_index`` in particular, since the drift / plan
+        path is usually the one that attributed a ``plan_revised:rN``.
+        ``severity`` is also promoted so user-authored cards inherit the
+        drift severity (WARNING for STEER, CRITICAL for CANCEL).
+
+    Rows without ``annotation_id`` pass through untouched — autonomous
+    drifts (LOOPING_REASONING, TOOL_ERROR, …) keep their own cards as
+    the user directive requires.
+
+    Additionally, when a group has an annotation row, any plan-sourced
+    row whose ``at`` falls inside the attribution window after the
+    annotation AND whose ``drift_kind`` matches the group's user-control
+    kind gets folded in too. This catches the common case where the
+    plan row made it through :func:`_project_plans` because the matching
+    drift was suppressed but the plan row itself has no annotation_id
+    to join on (plans don't currently carry an annotation_id field).
+    """
+
+    # Partition: rows keyed by annotation_id (the merge candidates), and
+    # everything else that flows through unchanged.
+    grouped: dict[str, list[InterventionRecord]] = {}
+    passthrough: list[InterventionRecord] = []
+    for rec in records:
+        if rec.annotation_id:
+            grouped.setdefault(rec.annotation_id, []).append(rec)
+        else:
+            passthrough.append(rec)
+
+    if not grouped:
+        return records
+
+    merged: list[InterventionRecord] = list(passthrough)
+    for ann_id, group in grouped.items():
+        # Prefer the annotation row as the survivor; it carries the user's
+        # text / author / wall-clock timestamp authoritatively.
+        annotation_row: InterventionRecord | None = None
+        others: list[InterventionRecord] = []
+        for rec in group:
+            # ``_project_annotations`` produces the only rows with
+            # source="user" AND kind in {"STEER", "CANCEL", ...} AND
+            # ``author`` set AND empty ``drift_kind``. That combination is
+            # unique to annotation rows — drift rows tagged with the same
+            # annotation_id carry ``drift_kind`` (e.g. "user_steer") and
+            # have no author. Using drift_kind as the discriminator keeps
+            # the logic robust to future annotation-source additions.
+            if not rec.drift_kind and rec.source == "user":
+                annotation_row = rec
+            else:
+                others.append(rec)
+        if annotation_row is None:
+            # No annotation row in the group (shouldn't happen in prod
+            # — goldfive only stamps annotation_id on drifts minted from
+            # a user annotation — but stay defensive). Keep the earliest
+            # row and merge the rest onto it.
+            group.sort(key=lambda r: r.at)
+            annotation_row = group[0]
+            others = group[1:]
+        # Promote non-empty fields from ``others`` onto the survivor.
+        for other in others:
+            if other.outcome and not annotation_row.outcome:
+                annotation_row.outcome = other.outcome
+            if (
+                other.plan_revision_index
+                and not annotation_row.plan_revision_index
+            ):
+                annotation_row.plan_revision_index = other.plan_revision_index
+            if other.severity and not annotation_row.severity:
+                annotation_row.severity = other.severity
+            if other.drift_kind and not annotation_row.drift_kind:
+                annotation_row.drift_kind = other.drift_kind
+        merged.append(annotation_row)
+
+    # Also fold in plan-sourced rows whose drift_kind matches a merged
+    # annotation row's promoted drift_kind and whose ``at`` lands inside
+    # the attribution window — covers the case where _project_plans
+    # emitted a row because its matching drift was deduped at the
+    # suppress step, leaving no carrier for annotation_id.
+    def _find_merge_target(plan_row: InterventionRecord) -> InterventionRecord | None:
+        for rec in merged:
+            if not rec.annotation_id or not rec.drift_kind:
+                continue
+            if rec.drift_kind != plan_row.drift_kind:
+                continue
+            delta = plan_row.at - rec.at
+            if 0.0 <= delta <= _OUTCOME_WINDOW_S:
+                return rec
+        return None
+
+    survivors: list[InterventionRecord] = []
+    for rec in merged:
+        # Plan-sourced rows (no annotation_id, carries drift_kind + outcome,
+        # user-control kind) are merge candidates.
+        if (
+            not rec.annotation_id
+            and rec.drift_kind in _USER_DRIFT_KINDS
+            and rec.outcome.startswith("plan_revised:")
+        ):
+            target = _find_merge_target(rec)
+            if target is not None:
+                if not target.outcome:
+                    target.outcome = rec.outcome
+                if not target.plan_revision_index:
+                    target.plan_revision_index = rec.plan_revision_index
+                continue
+        survivors.append(rec)
+
+    survivors.sort(key=lambda r: r.at)
+    return survivors
 
 
 def _count_cascade_cancels(

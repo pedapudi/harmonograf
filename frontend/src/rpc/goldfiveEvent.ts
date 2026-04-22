@@ -267,6 +267,10 @@ export function applyGoldfiveEvent(
         taskId: d.currentTaskId,
         agentId: d.currentAgentId,
         recordedAtMs: emittedMs,
+        // goldfive#176: user-control drifts carry the source annotation_id
+        // so harmonograf#75's deduper can merge them into the annotation
+        // row. Empty string for autonomous drifts.
+        annotationId: d.annotationId || '',
       });
       // Attribute the drift to an actor row so it shows up in gantt / graph /
       // trajectory without those views having to special-case drift events.

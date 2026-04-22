@@ -123,7 +123,10 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
       outcome: '',
       planRevisionIndex: 0,
       severity: dr.severity || '',
-      annotationId: '',
+      // Thread annotation_id through (goldfive#176). Present on
+      // user-control drifts; empty on autonomous ones. The post-sort
+      // dedup pass uses this to fold the drift into the annotation row.
+      annotationId: dr.annotationId || '',
       driftKind,
     });
   }
@@ -224,7 +227,93 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
     row.outcome = 'recorded';
   }
 
-  return rows;
+  return mergeByAnnotationId(rows);
+}
+
+// harmonograf#75: collapse rows that share an annotation_id into a single
+// card. Rule: annotation row wins as the survivor; drift + plan rows
+// with the same annotation_id merge their outcome / severity /
+// planRevisionIndex / driftKind onto it. Rows with no annotation_id
+// (autonomous drifts, goldfive-autonomous plan revisions) pass through
+// unchanged — they keep their own cards per the user directive
+// ("steering due to drift IS a steering").
+//
+// A final post-pass folds plan-sourced rows whose driftKind matches a
+// merged annotation's driftKind AND whose atMs lands inside the 5s
+// attribution window — catches the case where _project_plans had to
+// emit a plan row because its matching drift was suppressed by the
+// dedup step but the plan itself has no annotation_id to join on.
+function mergeByAnnotationId(rows: InterventionRow[]): InterventionRow[] {
+  const groups = new Map<string, InterventionRow[]>();
+  const passthrough: InterventionRow[] = [];
+  for (const row of rows) {
+    if (row.annotationId) {
+      const g = groups.get(row.annotationId);
+      if (g) g.push(row);
+      else groups.set(row.annotationId, [row]);
+    } else {
+      passthrough.push(row);
+    }
+  }
+  if (groups.size === 0) return rows;
+
+  const merged: InterventionRow[] = [...passthrough];
+  for (const group of groups.values()) {
+    // Prefer the annotation row as the survivor; it carries user text +
+    // author + wall-clock-correct timestamp. Annotation rows are the only
+    // ones with source="user" AND no driftKind (drift rows set driftKind).
+    let survivor: InterventionRow | undefined;
+    const others: InterventionRow[] = [];
+    for (const row of group) {
+      if (!row.driftKind && row.source === 'user') survivor = row;
+      else others.push(row);
+    }
+    if (!survivor) {
+      group.sort((a, b) => a.atMs - b.atMs);
+      survivor = group[0];
+      others.splice(0, others.length, ...group.slice(1));
+    }
+    for (const other of others) {
+      if (other.outcome && !survivor.outcome) survivor.outcome = other.outcome;
+      if (other.planRevisionIndex && !survivor.planRevisionIndex) {
+        survivor.planRevisionIndex = other.planRevisionIndex;
+      }
+      if (other.severity && !survivor.severity) survivor.severity = other.severity;
+      if (other.driftKind && !survivor.driftKind) survivor.driftKind = other.driftKind;
+    }
+    merged.push(survivor);
+  }
+
+  // Fold in plan-sourced rows (no annotation_id, driftKind = user_*,
+  // outcome starts with plan_revised:) whose driftKind matches a merged
+  // annotation row inside the attribution window.
+  const findMergeTarget = (planRow: InterventionRow): InterventionRow | null => {
+    for (const row of merged) {
+      if (!row.annotationId || !row.driftKind) continue;
+      if (row.driftKind !== planRow.driftKind) continue;
+      const delta = planRow.atMs - row.atMs;
+      if (delta >= 0 && delta <= OUTCOME_WINDOW_MS) return row;
+    }
+    return null;
+  };
+  const survivors: InterventionRow[] = [];
+  for (const row of merged) {
+    if (
+      !row.annotationId &&
+      USER_DRIFT_KINDS.has(row.driftKind) &&
+      row.outcome.startsWith('plan_revised:')
+    ) {
+      const target = findMergeTarget(row);
+      if (target) {
+        if (!target.outcome) target.outcome = row.outcome;
+        if (!target.planRevisionIndex) target.planRevisionIndex = row.planRevisionIndex;
+        continue;
+      }
+    }
+    survivors.push(row);
+  }
+  survivors.sort((a, b) => a.atMs - b.atMs);
+  return survivors;
 }
 
 // Convenience adapter: pull the three inputs from a live SessionStore +

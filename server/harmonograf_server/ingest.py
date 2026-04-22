@@ -1000,6 +1000,13 @@ class IngestPipeline:
     def _on_drift_detected(
         self, ctx: StreamContext, payload: Any, run_id: str
     ) -> None:
+        # ``annotation_id`` is populated by goldfive for USER_STEER /
+        # USER_CANCEL drifts minted from a ControlMessage that carried a
+        # bridge-supplied annotation id (goldfive#176). Empty string for
+        # drifts goldfive produced itself (loop detection, tool error,
+        # etc). Used by the intervention aggregator (#75) to dedup the
+        # drift row against the source annotation so a single user STEER
+        # no longer surfaces as three separate cards.
         record: dict[str, Any] = {
             "run_id": run_id,
             "kind": _drift_kind_pb_to_string(payload.kind),
@@ -1007,6 +1014,7 @@ class IngestPipeline:
             "detail": payload.detail,
             "current_task_id": payload.current_task_id,
             "current_agent_id": payload.current_agent_id,
+            "annotation_id": getattr(payload, "annotation_id", "") or "",
             "recorded_at": self._now(),
         }
         ring = self._drifts_by_session.setdefault(ctx.session_id, [])
@@ -1021,6 +1029,8 @@ class IngestPipeline:
             detail=record["detail"],
             current_task_id=record["current_task_id"],
             current_agent_id=record["current_agent_id"],
+            annotation_id=record["annotation_id"],
+            recorded_at=record["recorded_at"],
         )
 
     def drifts_for_session(self, session_id: str) -> list[dict[str, Any]]:

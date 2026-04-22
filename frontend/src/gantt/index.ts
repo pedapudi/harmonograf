@@ -520,6 +520,12 @@ export interface DriftRecord {
   taskId: string;
   agentId: string;
   recordedAtMs: number;   // session-relative
+  // Non-empty for USER_STEER / USER_CANCEL drifts minted by goldfive
+  // from a ControlMessage carrying a bridge-supplied annotation_id
+  // (goldfive#176). Used by the intervention deriver (harmonograf#75)
+  // to collapse the drift row into the source annotation row so a
+  // single user STEER renders as one card, not three.
+  annotationId: string;
 }
 
 // Drift registry — in-memory list of DriftDetected events received during
