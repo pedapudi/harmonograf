@@ -33,18 +33,16 @@ class SessionSummary(_message.Message):
     def __init__(self, id: _Optional[str] = ..., title: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., ended_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., status: _Optional[_Union[_types_pb2.SessionStatus, str]] = ..., agent_count: _Optional[int] = ..., attention_count: _Optional[int] = ..., last_activity: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class ListSessionsRequest(_message.Message):
-    __slots__ = ("status_filter", "search", "limit", "offset", "include_empty")
+    __slots__ = ("status_filter", "search", "limit", "offset")
     STATUS_FILTER_FIELD_NUMBER: _ClassVar[int]
     SEARCH_FIELD_NUMBER: _ClassVar[int]
     LIMIT_FIELD_NUMBER: _ClassVar[int]
     OFFSET_FIELD_NUMBER: _ClassVar[int]
-    INCLUDE_EMPTY_FIELD_NUMBER: _ClassVar[int]
     status_filter: _types_pb2.SessionStatus
     search: str
     limit: int
     offset: int
-    include_empty: bool
-    def __init__(self, status_filter: _Optional[_Union[_types_pb2.SessionStatus, str]] = ..., search: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ..., include_empty: bool = ...) -> None: ...
+    def __init__(self, status_filter: _Optional[_Union[_types_pb2.SessionStatus, str]] = ..., search: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ...) -> None: ...
 
 class ListSessionsResponse(_message.Message):
     __slots__ = ("sessions", "total_count")
