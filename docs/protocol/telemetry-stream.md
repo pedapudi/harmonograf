@@ -203,7 +203,8 @@ message PayloadUpload {
 
 - Chunks for distinct digests may interleave freely.
 - Chunk size ≤ 256 KiB (recommended; server accepts larger).
-- Hard ceiling: **64 MiB per digest** (`ingest.PAYLOAD_MAX_BYTES`).
+- Hard ceiling: **64 MiB per digest** by default
+  (`ServerConfig.payload_max_bytes`, CLI `--payload-max-bytes`).
   Exceeding it aborts the assembler with `ValueError`.
 - On `last=true`, server recomputes sha256 over the reassembled bytes
   and **rejects the whole payload on mismatch** (`_handle_payload`
@@ -214,8 +215,9 @@ message PayloadUpload {
 ### `Heartbeat` (oneof tag 6)
 
 Periodic liveness + health report. Default cadence is 5s; the server
-declares the stream dead after `HEARTBEAT_TIMEOUT_S = 15s` of silence
-and closes it.
+declares the stream dead after `ServerConfig.heartbeat_timeout_seconds`
+(default 15s, CLI `--heartbeat-timeout-seconds`) of silence and closes
+it.
 
 ```proto
 message Heartbeat {
@@ -237,10 +239,10 @@ Server behaviour:
 
 - `last_heartbeat` updated on the agent row.
 - **Stuckness detection:** `progress_counter` must advance across
-  heartbeats. If the same counter is seen for `STUCK_THRESHOLD_BEATS = 3`
-  consecutive heartbeats (≈15 s) **while an INVOCATION span is
-  RUNNING**, the server flips `is_stuck` true and publishes an
-  `AgentStatusChanged` delta.
+  heartbeats. If the same counter is seen for
+  `ServerConfig.stuck_threshold_beats` (default 3, ≈15 s) consecutive
+  heartbeats **while an INVOCATION span is RUNNING**, the server
+  flips `is_stuck` true and publishes an `AgentStatusChanged` delta.
 - `current_activity` is echoed into `AgentStatusChanged.current_activity`
   so the UI updates without waiting for a span update.
 - `context_window_tokens` / `context_window_limit_tokens = 0` is treated
@@ -248,7 +250,9 @@ Server behaviour:
   writing them. Non-zero samples are persisted and fan out as
   `ContextWindowSample` deltas on `WatchSession`.
 
-Heartbeat handling and the stuck-detection state machine — `progress_counter` must change between beats or the server escalates after `STUCK_THRESHOLD_BEATS` consecutive identical values:
+Heartbeat handling and the stuck-detection state machine —
+`progress_counter` must change between beats or the server escalates
+after `stuck_threshold_beats` consecutive identical values:
 
 ```mermaid
 stateDiagram-v2
@@ -257,11 +261,11 @@ stateDiagram-v2
     Healthy --> Watching: heartbeat<br/>counter unchanged<br/>(count = 1)
     Watching --> Watching: heartbeat<br/>counter unchanged<br/>(count++)
     Watching --> Healthy: heartbeat<br/>counter advanced
-    Watching --> Stuck: count >= STUCK_THRESHOLD_BEATS (3)
+    Watching --> Stuck: count >= stuck_threshold_beats (3)
     Stuck --> Healthy: heartbeat<br/>counter advanced
-    Healthy --> Disconnected: no heartbeat for<br/>HEARTBEAT_TIMEOUT_S (15s)
-    Watching --> Disconnected: no heartbeat for<br/>HEARTBEAT_TIMEOUT_S
-    Stuck --> Disconnected: no heartbeat for<br/>HEARTBEAT_TIMEOUT_S
+    Healthy --> Disconnected: no heartbeat for<br/>heartbeat_timeout_seconds (15s)
+    Watching --> Disconnected: no heartbeat for<br/>heartbeat_timeout_seconds
+    Stuck --> Disconnected: no heartbeat for<br/>heartbeat_timeout_seconds
 ```
 
 ### `ControlAck` (oneof tag 7)

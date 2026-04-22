@@ -87,7 +87,14 @@ class Harmonograf:
 
         bus = SessionBus()
         router = ControlRouter()
-        ingest = IngestPipeline(store, bus, control_sink=router)
+        ingest = IngestPipeline(
+            store,
+            bus,
+            control_sink=router,
+            heartbeat_timeout_s=cfg.heartbeat_timeout_seconds,
+            stuck_threshold_beats=cfg.stuck_threshold_beats,
+            payload_max_bytes=cfg.payload_max_bytes,
+        )
 
         async def _on_status_query(session_id: str, agent_id: str, span_id: str, report: str) -> None:
             bus.publish_task_report(session_id, agent_id, report, invocation_span_id=span_id)
@@ -123,7 +130,11 @@ class Harmonograf:
 
         # Background sweep for heartbeat timeouts.
         self._sweeper_task = asyncio.create_task(
-            heartbeat_sweeper(self.ingest), name="heartbeat_sweeper"
+            heartbeat_sweeper(
+                self.ingest,
+                interval_s=self.cfg.heartbeat_check_interval_seconds,
+            ),
+            name="heartbeat_sweeper",
         )
 
         # Retention sweeper (no-op when retention_hours == 0).

@@ -49,10 +49,13 @@ class TelemetryServicer(
         self._store = store if store is not None else ingest.store
         self._bus = bus if bus is not None else ingest.bus
         self._data_dir = data_dir
-        # Held by reference so RPC handlers can read opt-in config fields
-        # (e.g. legacy_plan_attribution_window_ms) without a separate
-        # plumb through each call site. Defaults keep test construction
-        # zero-arg friendly.
+        # ``_config`` is held by reference so RPC handlers and the
+        # FrontendServicerMixin can read both opt-in fields (e.g.
+        # ``legacy_plan_attribution_window_ms``) and the harmonograf#102
+        # RPC tunables (watch window, span-tree limit, payload chunk
+        # size, control-ack timeout) without threading each knob through
+        # every call site. Tests and ad-hoc callers that omit ``config``
+        # get ``ServerConfig()`` defaults.
         self._config = config if config is not None else ServerConfig()
 
     async def StreamTelemetry(

@@ -20,7 +20,6 @@ import grpc
 from google.protobuf.timestamp_pb2 import Timestamp
 from google.protobuf import timestamp_pb2
 
-from harmonograf_server.config import ServerConfig
 from harmonograf_server.bus import (
     DELTA_AGENT_INVOCATION_COMPLETED,
     DELTA_AGENT_INVOCATION_STARTED,
@@ -47,6 +46,7 @@ from harmonograf_server.bus import (
     Delta,
     SessionBus,
 )
+from harmonograf_server.config import ServerConfig
 from harmonograf_server.control_router import ControlRouter, DeliveryResult
 from harmonograf_server.convert import (
     _AGENT_STATUS_TO_PB,
@@ -83,10 +83,8 @@ from harmonograf_server.storage import (
 logger = logging.getLogger(__name__)
 
 
-PAYLOAD_CHUNK_BYTES = 256 * 1024
-DEFAULT_WATCH_WINDOW_S = 3600.0
-DEFAULT_SPAN_TREE_LIMIT = 10_000
-DEFAULT_SEND_CONTROL_TIMEOUT_S = 5.0
+# Module-level tunables were moved to ``ServerConfig`` in
+# harmonograf#102; the mixin reads ``self._config.rpc_*`` below.
 
 
 def _now_ts() -> Timestamp:
@@ -145,8 +143,10 @@ class FrontendServicerMixin:
       self._ingest:  IngestPipeline
       self._router:  ControlRouter
       self._data_dir: str   (for GetStats reporting)
-      self._config:  ServerConfig (read-only; ListInterventions reads the
-                     legacy_plan_attribution_window_ms field)
+      self._config:  ServerConfig — RPC tunables (watch window,
+                     span-tree limit, payload chunk size, ack timeout)
+                     plus ``legacy_plan_attribution_window_ms`` read by
+                     ListInterventions.
     """
 
     _store: Store
@@ -257,8 +257,11 @@ class FrontendServicerMixin:
             if request.HasField("window_end"):
                 window_end = ts_to_float(request.window_end)
             if window_start is None and window_end is None:
-                # default: last hour (or all, whichever smaller)
-                window_start = max(0.0, time.time() - DEFAULT_WATCH_WINDOW_S)
+                # default: last ``rpc_watch_window_seconds`` (or all,
+                # whichever smaller)
+                window_start = max(
+                    0.0, time.time() - self._config.rpc_watch_window_seconds
+                )
 
             spans = await self._store.get_spans(
                 session_id, time_start=window_start, time_end=window_end
@@ -390,6 +393,7 @@ class FrontendServicerMixin:
             return
 
         meta = record.meta
+        chunk_bytes_limit = self._config.rpc_payload_chunk_bytes
         # First chunk carries the summary metadata. If summary_only, that is
         # also the last chunk.
         first = frontend_pb2.PayloadChunk(
@@ -399,7 +403,7 @@ class FrontendServicerMixin:
             summary=meta.summary,
             last=request.summary_only or len(record.bytes_) == 0,
         )
-        if not request.summary_only and len(record.bytes_) <= PAYLOAD_CHUNK_BYTES:
+        if not request.summary_only and len(record.bytes_) <= chunk_bytes_limit:
             first.chunk = record.bytes_
             first.last = True
         yield first
@@ -407,9 +411,9 @@ class FrontendServicerMixin:
             return
 
         data = record.bytes_
-        for offset in range(0, len(data), PAYLOAD_CHUNK_BYTES):
-            chunk_bytes = data[offset : offset + PAYLOAD_CHUNK_BYTES]
-            is_last = offset + PAYLOAD_CHUNK_BYTES >= len(data)
+        for offset in range(0, len(data), chunk_bytes_limit):
+            chunk_bytes = data[offset : offset + chunk_bytes_limit]
+            is_last = offset + chunk_bytes_limit >= len(data)
             yield frontend_pb2.PayloadChunk(
                 digest=meta.digest, chunk=chunk_bytes, last=is_last
             )
@@ -431,7 +435,7 @@ class FrontendServicerMixin:
         window_end = (
             ts_to_float(request.window_end) if request.HasField("window_end") else None
         )
-        limit = request.limit or DEFAULT_SPAN_TREE_LIMIT
+        limit = request.limit or self._config.rpc_span_tree_limit
 
         agent_ids = list(request.agent_ids) or [None]
         collected: list[Span] = []
@@ -525,7 +529,11 @@ class FrontendServicerMixin:
         else:
             event.kind = gf_control_pb2.CONTROL_KIND_INJECT_MESSAGE
             event.inject_message.text = request.body
-        timeout = (request.ack_timeout_ms / 1000.0) if request.ack_timeout_ms else DEFAULT_SEND_CONTROL_TIMEOUT_S
+        timeout = (
+            (request.ack_timeout_ms / 1000.0)
+            if request.ack_timeout_ms
+            else self._config.rpc_send_control_timeout_seconds
+        )
         outcome = await self._router.deliver(
             session_id=request.session_id,
             agent_id=target_agent,
@@ -572,7 +580,11 @@ class FrontendServicerMixin:
             )
             return frontend_pb2.SendControlResponse()
 
-        timeout = (request.ack_timeout_ms / 1000.0) if request.ack_timeout_ms else DEFAULT_SEND_CONTROL_TIMEOUT_S
+        timeout = (
+            (request.ack_timeout_ms / 1000.0)
+            if request.ack_timeout_ms
+            else self._config.rpc_send_control_timeout_seconds
+        )
         # Copy so the router can stamp ``id``/``issued_at`` without mutating
         # the caller's request message.
         event = gf_control_pb2.ControlEvent()

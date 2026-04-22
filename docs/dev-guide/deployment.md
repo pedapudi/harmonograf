@@ -209,6 +209,82 @@ uv run python -m harmonograf_server \
 The Makefile `server-run` target uses the defaults
 (`Makefile:87-88`).
 
+## Operational tunables
+
+Everything the server can be tuned with lives on
+`ServerConfig` (`server/harmonograf_server/config.py`). As of
+harmonograf#102 there are **no module-level constants** — every knob
+is either a `ServerConfig` field or a CLI flag (which in turn sets a
+field). This means you can configure the server from three places
+that all resolve to the same object:
+
+1. `harmonograf-server --flag value ...` on the command line.
+2. `ServerConfig(field=value, ...)` programmatically from a test or
+   embedder.
+3. A thin wrapper that parses your own config format and constructs a
+   `ServerConfig` before calling `Harmonograf.from_config(cfg)`.
+
+### CLI flags → ServerConfig map
+
+| CLI flag | ServerConfig field | Default | Purpose |
+|---|---|---|---|
+| `--host` | `host` | `127.0.0.1` | Bind address for both listeners |
+| `--port` | `grpc_port` | `7531` | Native gRPC port |
+| `--web-port` | `web_port` | `7532` | gRPC-Web + health port |
+| `--store` | `store_backend` | `sqlite` | `sqlite` or `memory` |
+| `--data-dir` | `data_dir` | `~/.harmonograf/data` | sqlite file + payload tree |
+| `--log-level` | `log_level` | `INFO` | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
+| `--log-format` | `log_format` | `text` | `text` or `json` |
+| `--grace` | `grace_seconds` | `5.0` | Shutdown grace period |
+| `--retention-hours` | `retention_hours` | `0.0` | Purge terminal sessions older than N hours (0 = disabled) |
+| `--retention-interval-seconds` | `retention_interval_seconds` | `300.0` | Retention sweep cadence |
+| `--metrics-interval-seconds` | `metrics_interval_seconds` | `30.0` | Periodic metrics snapshot (0 = disabled) |
+| `--auth-token` | `auth_token` | `""` | Shared bearer-token secret (empty = disabled) |
+| `--heartbeat-timeout-seconds` | `heartbeat_timeout_seconds` | `15.0` | Declare a stream `DISCONNECTED` after this many seconds of silence (harmonograf#102) |
+| `--payload-max-bytes` | `payload_max_bytes` | `67108864` (64 MiB) | DoS guard — per-digest payload ceiling (harmonograf#102) |
+| `--rpc-watch-window-seconds` | `rpc_watch_window_seconds` | `3600.0` | Default `WatchSession` replay window when the client does not supply one (harmonograf#102) |
+| `--rpc-span-tree-limit` | `rpc_span_tree_limit` | `10000` | Cap on `GetSpanTree` responses when the client does not supply a limit (harmonograf#102) |
+
+### Constructor-only fields (no CLI surface)
+
+Four tunables are programmatic-only because operators essentially
+never change them — they are stable defaults that tests and embedders
+can still override via `ServerConfig(...)`:
+
+| ServerConfig field | Default | Purpose |
+|---|---|---|
+| `heartbeat_check_interval_seconds` | `5.0` | How often the heartbeat sweeper runs. Lower is more responsive but burns more CPU; must stay `<= heartbeat_timeout_seconds` |
+| `stuck_threshold_beats` | `3` | Consecutive identical `progress_counter` heartbeats before the `is_stuck` flag flips on an agent |
+| `rpc_payload_chunk_bytes` | `262144` (256 KiB) | Chunk size on `GetPayload` stream replies |
+| `rpc_send_control_timeout_seconds` | `5.0` | Fallback timeout on `SendControl` / `PostAnnotation` delivery when the request does not supply `ack_timeout_ms` |
+
+### Programmatic usage
+
+For tests or embedders that bypass the CLI:
+
+```python
+from harmonograf_server.config import ServerConfig
+from harmonograf_server.main import Harmonograf
+
+cfg = ServerConfig(
+    host="127.0.0.1",
+    grpc_port=7531,
+    web_port=7532,
+    # Long-running ETL deployment — raise the watch window + tighten
+    # the heartbeat timeout for a flakier upstream network.
+    heartbeat_timeout_seconds=30.0,
+    rpc_watch_window_seconds=86400.0,  # 24h
+    rpc_span_tree_limit=50_000,
+    payload_max_bytes=256 * 1024 * 1024,  # 256 MiB
+)
+app = await Harmonograf.from_config(cfg)
+await app.run()
+```
+
+See the operational-tuning guidance in
+[`performance-tuning.md`](performance-tuning.md) for when and why
+to move each knob.
+
 ## TLS and auth — what's built in
 
 **Nothing built in for TLS.** The native gRPC listener is opened

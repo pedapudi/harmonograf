@@ -99,6 +99,48 @@ def build_parser() -> argparse.ArgumentParser:
             "disables. See docs/runbooks/plan-revision-dedup.md."
         ),
     )
+    # ---- heartbeat + payload (harmonograf#102) ----------------------
+    p.add_argument(
+        "--heartbeat-timeout-seconds",
+        type=float,
+        default=15.0,
+        help=(
+            "declare a telemetry stream DISCONNECTED if no heartbeat has "
+            "arrived within this many seconds; raise on flaky networks "
+            "(default: 15.0)"
+        ),
+    )
+    p.add_argument(
+        "--payload-max-bytes",
+        type=int,
+        default=64 * 1024 * 1024,
+        help=(
+            "reject any single payload whose assembled chunks exceed this "
+            "many bytes; DoS guard + ops knob for large-artifact "
+            "deployments (default: 67108864 = 64 MiB)"
+        ),
+    )
+    # ---- RPC behavior (harmonograf#102) -----------------------------
+    p.add_argument(
+        "--rpc-watch-window-seconds",
+        type=float,
+        default=3600.0,
+        help=(
+            "default WatchSession replay window in seconds when the "
+            "client does not supply window_start/window_end; raise for "
+            "long-running sessions (default: 3600)"
+        ),
+    )
+    p.add_argument(
+        "--rpc-span-tree-limit",
+        type=int,
+        default=10_000,
+        help=(
+            "cap the number of spans returned per GetSpanTree request "
+            "when the client does not supply an explicit limit; lower "
+            "for security-minded deployments (default: 10000)"
+        ),
+    )
     return p
 
 
@@ -118,6 +160,10 @@ def config_from_args(argv: list[str] | None = None) -> ServerConfig:
         metrics_interval_seconds=args.metrics_interval_seconds,
         auth_token=args.auth_token,
         legacy_plan_attribution_window_ms=args.legacy_plan_attribution_window_ms,
+        heartbeat_timeout_seconds=args.heartbeat_timeout_seconds,
+        payload_max_bytes=args.payload_max_bytes,
+        rpc_watch_window_seconds=args.rpc_watch_window_seconds,
+        rpc_span_tree_limit=args.rpc_span_tree_limit,
     )
 
 

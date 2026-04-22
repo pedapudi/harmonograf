@@ -64,10 +64,14 @@ _TASK_BINDING_SPAN_KINDS = frozenset({SpanKind.LLM_CALL, SpanKind.TOOL_CALL})
 logger = logging.getLogger(__name__)
 
 
-HEARTBEAT_TIMEOUT_S = 15.0
-HEARTBEAT_CHECK_INTERVAL_S = 5.0
-STUCK_THRESHOLD_BEATS = 3  # 3 consecutive unchanged heartbeats ≈ 15s
-PAYLOAD_MAX_BYTES = 64 * 1024 * 1024  # hard ceiling per digest — guards against runaway uploads
+# Default tunables for constructor kwargs. Production callers pass
+# values from ``ServerConfig`` (harmonograf#102 moved these off
+# module-level state); these literals are only the fallback used by
+# tests and ad-hoc consumers that construct an ``IngestPipeline``
+# without a config object.
+_DEFAULT_HEARTBEAT_TIMEOUT_S = 15.0
+_DEFAULT_STUCK_THRESHOLD_BEATS = 3
+_DEFAULT_PAYLOAD_MAX_BYTES = 64 * 1024 * 1024
 
 _SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
 
@@ -97,14 +101,17 @@ class _PayloadAssembler:
     digest: str
     mime: str
     total_size: int
+    max_bytes: int = _DEFAULT_PAYLOAD_MAX_BYTES
     chunks: list[bytes] = field(default_factory=list)
     received_bytes: int = 0
     evicted: bool = False
 
     def add(self, chunk: bytes) -> None:
         self.received_bytes += len(chunk)
-        if self.received_bytes > PAYLOAD_MAX_BYTES:
-            raise ValueError(f"payload {self.digest} exceeds {PAYLOAD_MAX_BYTES} bytes")
+        if self.received_bytes > self.max_bytes:
+            raise ValueError(
+                f"payload {self.digest} exceeds {self.max_bytes} bytes"
+            )
         self.chunks.append(chunk)
 
     def finalize(self) -> bytes:
@@ -184,13 +191,17 @@ class IngestPipeline:
         *,
         control_sink: Optional[ControlAckSink] = None,
         now_fn: Callable[[], float] = time.time,
-        heartbeat_timeout_s: float = HEARTBEAT_TIMEOUT_S,
+        heartbeat_timeout_s: float = _DEFAULT_HEARTBEAT_TIMEOUT_S,
+        stuck_threshold_beats: int = _DEFAULT_STUCK_THRESHOLD_BEATS,
+        payload_max_bytes: int = _DEFAULT_PAYLOAD_MAX_BYTES,
     ) -> None:
         self._store = store
         self._bus = bus
         self._control_sink = control_sink or _NullControlAckSink()
         self._now = now_fn
         self._heartbeat_timeout_s = heartbeat_timeout_s
+        self._stuck_threshold_beats = stuck_threshold_beats
+        self._payload_max_bytes = payload_max_bytes
 
         # per-agent connection registry: agent_id -> {stream_id: StreamContext}
         self._streams_by_agent: dict[str, dict[str, StreamContext]] = {}
@@ -617,7 +628,10 @@ class IngestPipeline:
         assembler = ctx.payloads.get(msg.digest)
         if assembler is None:
             assembler = _PayloadAssembler(
-                digest=msg.digest, mime=msg.mime, total_size=msg.total_size
+                digest=msg.digest,
+                mime=msg.mime,
+                total_size=msg.total_size,
+                max_bytes=self._payload_max_bytes,
             )
             ctx.payloads[msg.digest] = assembler
         if msg.chunk:
@@ -657,7 +671,7 @@ class IngestPipeline:
             ctx.stuck_heartbeat_count = 0
             ctx.last_progress_counter = msg.progress_counter
         ctx.current_activity = msg.current_activity
-        now_stuck = ctx.stuck_heartbeat_count >= STUCK_THRESHOLD_BEATS
+        now_stuck = ctx.stuck_heartbeat_count >= self._stuck_threshold_beats
         if now_stuck != ctx.is_stuck:
             ctx.is_stuck = now_stuck
             self._bus.publish_agent_status(
