@@ -26,9 +26,14 @@ uv sync --extra orchestration
 | Session-state protocol (`SessionContext` on ADK state) | goldfive | `goldfive.adapters.adk` |
 | Orchestration modes (sequential, parallel DAG walker, delegated) | goldfive | `goldfive.executors`, `goldfive.runner` |
 | Span timeline, session, storage | harmonograf | `server/`, `client/harmonograf_client/client.py` |
-| Gantt / graph / inspector / plan-diff UI | harmonograf | `frontend/` |
+| Per-ADK-agent attribution on spans | harmonograf | `client/harmonograf_client/telemetry_plugin.py` (plugin) + `server/harmonograf_server/ingest.py::_ensure_route` (auto-register) |
+| Intervention history aggregation | harmonograf | `server/harmonograf_server/interventions.py`, `ListInterventions` RPC |
+| Gantt / Graph / Trajectory / Notes / Settings UI | harmonograf | `frontend/` |
 | Control routing (pause, resume, steer, cancel, annotate) | harmonograf | `proto/harmonograf/v1/control.proto`, `server/harmonograf_server/control_router.py` |
+| STEER body validation + author stamping | harmonograf | `client/harmonograf_client/_control_bridge.py`, server `SteerPayload` handler |
 | `goldfive.EventSink` adapter | harmonograf | `client/harmonograf_client/sink.py` |
+| `observe(runner)` one-line sink attach | harmonograf | `client/harmonograf_client/observe.py` |
+| ADK telemetry plugin | harmonograf | `client/harmonograf_client/telemetry_plugin.py` |
 
 ## Wire shape
 
@@ -201,6 +206,66 @@ app = App(
 
 The plugin is pure observability — it makes no orchestration decisions and
 composes cleanly with goldfive's own ADK adapter.
+
+### Per-ADK-agent Gantt rows (harmonograf#74 / #80)
+
+A single `goldfive.wrap` run drives a tree of ADK agents — coordinator,
+specialists, `AgentTool` wrappers, `SequentialAgent` / `ParallelAgent` /
+`LoopAgent` containers. The plugin stamps every span with a per-agent id
+derived from the client's root agent id and the ADK agent's name
+(`per_agent_id = "{client_agent_id}:{adk_name}"`) via
+`before_agent_callback` / `after_agent_callback`, so the Activity view
+renders **one Gantt row per ADK agent** instead of collapsing the whole
+tree onto the root.
+
+Each ADK agent's **first** span carries `hgraf.agent.*` attribute hints
+— `name`, `parent`, `kind`, `branch`, `framework`. The server's
+`_ensure_route` harvests them into the agent's `metadata` the first
+time it auto-registers the agent row. Subsequent spans just reference
+the already-registered agent id.
+
+Nothing about this requires user code to opt in — the plugin handles it
+transparently whenever you install it, whether via `observe()` or by
+adding it to `App.plugins=[...]`.
+
+### Plugin dedup (harmonograf#68)
+
+Under `goldfive.wrap` + `adk web`, it is easy to end up with two
+`HarmonografTelemetryPlugin` instances on the same ADK `PluginManager`
+(one from `App.plugins`, one from `observe()` or `add_plugin`). The
+later-installed instance detects the earlier one on its first callback
+and silently disables itself — span emission is not doubled and no
+error is raised. See also goldfive#166.
+
+### Session unification (harmonograf#63 / #66)
+
+Under ADK, the outer `adk-web` session id is pinned on
+`goldfive.Session.id`. Spans route to the server by `ctx.session.id`;
+goldfive events route by per-event `session_id`. The result: one outer
+ADK chat lane + its goldfive run + its span stream all collapse onto a
+single harmonograf session. The session picker shows one row for the
+whole run, not one per component.
+
+### Lazy Hello (harmonograf#85)
+
+The transport defers its Hello RPC until the first real emit. For ADK
+runs this means the ADK session id is known at Hello time, so there's no
+need for the server to auto-create a placeholder `sess_2026-…` row that
+later has to merge with the real session. Idle Client instances never
+open a stream at all.
+
+### Intervention emission
+
+Goldfive events flowing through `HarmonografSink` include the user-control
+drift kinds (`user_steer`, `user_cancel`) that goldfive emits when a
+control event is consumed. Those events land on the server's ingest drift
+ring, which the **intervention aggregator** (`server/harmonograf_server/
+interventions.py`) joins against annotations and `task_plans.revision_kind`
+to produce the chronological view the Trajectory frontend renders.
+
+`ListInterventions(session_id)` exposes the aggregate over a unary RPC;
+the frontend has a live deriver that mirrors the shape for in-flight
+deltas during a running session.
 
 ## Running the reference demo
 

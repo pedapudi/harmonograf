@@ -1,23 +1,31 @@
 # Harmonograf
 
-**The observability console for multi-agent workflows.**
+**The observability + HCI companion to [goldfive](https://github.com/pedapudi/goldfive)
+for multi-agent orchestration.**
 
-Harmonograf renders agent activity as a Gantt-style timeline, lets humans
-intervene with control events on the same connection it observes them on, and
-works two ways:
+Harmonograf renders agent activity as a Gantt-style timeline, surfaces the
+plan / task / drift story goldfive emits, tracks every human intervention
+chronologically in a dedicated Trajectory view, and lets operators push back —
+pause, resume, steer, cancel — on the same connection it observes runs on.
 
-- **Standalone** — emit spans from any agent, from any framework, via the
-  `harmonograf_client.Client`. No orchestration. The Gantt, inspector, and
-  control surfaces light up; the Tasks panel stays empty. See
-  [`docs/standalone-observability.md`](docs/standalone-observability.md).
-- **With [goldfive](https://github.com/pedapudi/goldfive)** — opt in to the
-  orchestration extra (`uv sync --extra orchestration`) and harmonograf also
-  shows plans, tasks, and drift. Goldfive owns the plan / task state machine /
-  drift taxonomy / reporting tools; harmonograf is the screen you watch it on.
-  See [`docs/goldfive-integration.md`](docs/goldfive-integration.md).
+Three integration modes, same server, same UI:
 
-Both modes target the same server, the same wire format, and the same UI —
-the difference is purely which panels populate.
+- **`goldfive.wrap` + `HarmonografTelemetryPlugin`** — full orchestration
+  observability + steering. Plans, tasks, drift, per-ADK-agent Gantt rows,
+  and the full intervention history all light up. See
+  [`docs/goldfive-integration.md`](docs/goldfive-integration.md).
+- **Observation-only via `HarmonografTelemetryPlugin` on a bare ADK App** —
+  no orchestration, no plans/tasks, just per-invocation / per-model-call /
+  per-tool-call spans on the Gantt. Useful when you already have your own
+  orchestrator and just want the console.
+- **Standalone (non-ADK)** — construct a `harmonograf_client.Client` directly
+  from any Python process and call `emit_span_start/update/end`. The home
+  session auto-creates on first emit; no ADK, no goldfive usage surface.
+  See [`docs/standalone-observability.md`](docs/standalone-observability.md).
+
+Goldfive owns the plan / task state machine / drift taxonomy / reporting
+tools. Harmonograf is the screen you watch those run on — and the keyboard
+you reach back through.
 
 ---
 
@@ -38,16 +46,41 @@ screen you watch that story on:
 - **One canonical timeline.** The server terminates goldfive event streams from
   every participating agent and fans them out to any number of frontend
   subscribers. One server, many agents, many viewers.
-- **Plan-aware UI.** The Gantt, the inspector, and the plan-diff drawer all
-  render goldfive's plan / task / drift semantics directly. When goldfive fires
-  a `PlanRevised` event, the frontend shows the diff with the old plan side by
-  side.
+- **Plan-aware UI.** The Gantt, the inspector, the task strip, and the
+  Trajectory view all render goldfive's plan / task / drift semantics
+  directly. When goldfive fires a `PlanRevised` event, the frontend shows the
+  diff side-by-side and logs it in the intervention timeline.
+- **Per-ADK-agent rows.** Under `goldfive.wrap`, every ADK agent in the tree
+  (coordinator, specialists, AgentTool wrappers, sequential/parallel
+  containers) gets its own Gantt row, auto-registered the first time it
+  emits. You see the tree, not a collapsed root (harmonograf#74 / #80).
+- **Intervention history, first class.** The Trajectory view lists every
+  point where the plan changed direction — STEER / CANCEL / PAUSE from the
+  UI, autonomous drift, plan revisions — on one merged chronological ribbon
+  (harmonograf#69 / #71 / #76).
 - **Bidirectional by default.** The same connection that streams telemetry up
   also streams control down — pause, resume, steer, cancel, annotate — so the
   UI is a coordination surface, not a read-only dashboard.
+- **Lazy Hello, unified sessions.** Under ADK, the client defers its Hello
+  until the first real emit, so there are no ghost `sess_…` rows in the
+  session picker. Goldfive events and spans route together onto the ADK
+  session id the user sees in `adk web` (harmonograf#66 / #85).
 
-Integration is a single-line install: construct a `goldfive.Runner`, attach a
-`HarmonografSink`, and the run's events start materialising in the UI.
+Integration is a two-line install: `runner = harmonograf_client.observe(goldfive.wrap(root_agent))`
+and the run's plans, tasks, drift, spans, and steering wire all light up at once.
+
+### Views
+
+Harmonograf has six views in the nav rail:
+
+| View | What it shows |
+|---|---|
+| **Sessions** | Session picker — one row per session (post-lazy-Hello) with agent counts, attention badges, time-ago labels. |
+| **Activity** (Gantt) | Per-ADK-agent rows, time on X, bars for every LLM call / tool call / transfer / invocation. The task strip at the bottom shows current stages with per-task status chips. Minimap, live-tail cursor, transport bar. |
+| **Graph** | Agent topology — nodes are agents, edges are transfers and tool invocations. Minimap in the corner. |
+| **Trajectory** | Intervention history ribbon (harmonograf#69 / #76) — one marker per intervention (STEER, CANCEL, drift, plan revision), glyph-by-kind, color-by-source (user vs. autonomous), severity ring, density clustering. Click any marker to see who, when, why, and what happened next. |
+| **Notes** | Session-wide annotation stream. |
+| **Settings** | Server URL, theme, keyboard shortcuts reference. |
 
 ### Screenshots
 
@@ -59,7 +92,7 @@ Integration is a single-line install: construct a `goldfive.Runner`, attach a
 
 ![Agent topology graph view](docs/images/06-graph-view.png)
 
-**Session picker** — browse all sessions with agent counts, attention badges, and time-ago labels.
+**Session picker** — browse all sessions with agent counts, attention badges, and time-ago labels. One row per session post-lazy-Hello (harmonograf#85).
 
 ![Session picker overlay](docs/images/11-session-picker.png)
 
@@ -75,36 +108,46 @@ Integration is a single-line install: construct a `goldfive.Runner`, attach a
 
 ## Get running in 10 minutes
 
-### Standalone (no goldfive)
+### Hello world — `make demo`
 
-The shortest path: boot the server + frontend, and emit synthetic spans
-from a plain Python script. Nothing else.
+The fastest path to a live multi-agent rollout on screen: boot the
+server + frontend + `adk web` and drive the `presentation_agent_orchestrated`
+reference agent.
 
 ```bash
 git clone https://github.com/pedapudi/harmonograf
 cd harmonograf
-git submodule update --init --recursive
 git clone --depth 1 https://github.com/google/adk-python.git third_party/adk-python
-uv sync
+make install
+make demo                        # server + frontend + adk web
+```
+
+Then open:
+- Harmonograf UI at <http://127.0.0.1:5173>
+- `adk web` at <http://127.0.0.1:8080>
+- Pick `presentation_agent_orchestrated` in the ADK picker and drive a prompt.
+
+The agent tree + goldfive wrap come from the `presentation_agent_orchestrated`
+reference (see [`tests/reference_agents/presentation_agent_orchestrated/`](tests/reference_agents/presentation_agent_orchestrated/README.md)).
+Plans, tasks, drift, per-ADK-agent rows, and intervention markers all light
+up live. Set `$OPENAI_API_KEY` / `$GOOGLE_API_KEY` for live LLM use; leave
+them unset and the orchestrated agent falls back to a canned mock plan.
+
+### Standalone (no goldfive, no ADK)
+
+Emit synthetic spans from a plain Python script:
+
+```bash
 make demo-standalone    # server + frontend + spans_only.py
 ```
 
 The frontend renders a session with a Gantt; Tasks panel stays empty.
 Full walkthrough: [`docs/standalone-observability.md`](docs/standalone-observability.md).
 
-### With goldfive orchestration
+### Observation-only (bare ADK, no goldfive.wrap)
 
-The fastest path to see plans + tasks + drift is the goldfive
-observability quickstart. It installs goldfive + harmonograf, boots this
-stack via `make demo`, runs a CallableAdapter agent in a second shell,
-and shows the events flowing into the UI — no LLM credentials required.
-
-1. `make install` in this repo (see the full [quickstart](docs/quickstart.md) for prereqs).
-2. `uv sync --extra orchestration` to opt in to the goldfive API.
-3. `make demo` to bring up the server + frontend + ADK web.
-4. In a second shell run `examples/harmonograf_observed/agent.py` from the goldfive repo.
-
-Full walkthrough (lives in the goldfive repo): **[observability-with-harmonograf.md](https://github.com/pedapudi/goldfive/blob/main/docs/guides/observability-with-harmonograf.md)**.
+Attach a `HarmonografTelemetryPlugin` to an `App`'s `plugins=[…]`. See
+[`examples/standalone_observability/adk_telemetry.py`](examples/standalone_observability/adk_telemetry.py).
 
 ---
 
@@ -129,9 +172,9 @@ flowchart TD
 
 | Component | Path | Language | Role |
 |---|---|---|---|
-| **Frontend** | `frontend/` | TypeScript / React / Vite | Gantt timeline, agent topology graph, plan-diff drawer, inspector, transport bar. Talks gRPC-Web to the server. |
-| **Server** | `server/` | Python / asyncio / grpcio | Terminates connections from every client, owns the canonical timeline, stores it (SQLite or in-memory), and fans out live updates to any number of frontend subscribers. Also the control bridge. |
-| **Client library** | `client/` | Python | Embedded inside each agent. Provides `Client` (span transport, payload upload, control handlers) and `HarmonografSink` — a `goldfive.EventSink` that forwards goldfive plan / task / drift events into the harmonograf telemetry stream. |
+| **Frontend** | `frontend/` | TypeScript / React / Vite | Sessions list, Activity (Gantt), Graph, Trajectory (intervention history), Notes, Settings. Talks gRPC-Web to the server. |
+| **Server** | `server/` | Python / asyncio / grpcio | Terminates connections from every client, owns the canonical timeline, stores it (SQLite or in-memory), fans out live updates to any number of frontend subscribers, aggregates interventions, and routes control. |
+| **Client library** | `client/` | Python | Embedded inside each agent. Provides `Client` (span transport, payload upload, control handlers), `HarmonografSink` (a `goldfive.EventSink` that forwards plan / task / drift events), and `HarmonografTelemetryPlugin` (ADK `BasePlugin` emitting per-callback spans with per-ADK-agent attribution). |
 
 Orchestration semantics — plans, tasks, drift kinds, reporting tools, refine
 pipeline, session-state protocol — live in [goldfive](https://github.com/pedapudi/goldfive).
@@ -177,9 +220,10 @@ make demo
 on `127.0.0.1:7531` (gRPC) + `:7532` (gRPC-Web), the Vite frontend on
 `http://127.0.0.1:5173`, and `adk web` hosting two reference-agent variants on
 `http://127.0.0.1:8080` — `presentation_agent` (observation; plain ADK +
-telemetry plugin) and `presentation_agent_orchestrated` (the same tree wrapped
-with `goldfive.wrap(...)` so you see the full plan / dispatch / drift stream).
-Pick a variant in the ADK picker, drive a rollout, and watch the timeline
+`HarmonografTelemetryPlugin`) and `presentation_agent_orchestrated` (the same
+tree wrapped with `goldfive.wrap(...)` so you see the full plan / dispatch /
+drift stream, per-ADK-agent Gantt rows, and intervention history). Pick a
+variant in the ADK picker, drive a rollout, and watch the timeline
 materialise live in the harmonograf tab. Ctrl-C tears all three down.
 
 ---
@@ -188,16 +232,21 @@ materialise live in the harmonograf tab. Ctrl-C tears all three down.
 
 | Doc | Purpose |
 |---|---|
-| [docs/overview.md](docs/overview.md) | Longer-form writeup: motivation, design principles, current features, non-goals, roadmap. Start here after this README. |
+| [docs/tour/](docs/tour/index.md) | Start-here tour: three doors, 15-minute walkthrough, mental model, terminology map. |
 | [docs/quickstart.md](docs/quickstart.md) | Step-by-step from clone to running demo, with troubleshooting and local-LLM wiring. |
-| [docs/goldfive-integration.md](docs/goldfive-integration.md) | How harmonograf consumes goldfive: `HarmonografSink`, the `goldfive_event` envelope, the split of responsibilities. |
-| [docs/goldfive-migration-plan.md](docs/goldfive-migration-plan.md) | The design record for the harmonograf → goldfive migration; what moved, what stayed, what was deleted. |
-| [docs/operator-quickstart.md](docs/operator-quickstart.md) | Flags, retention, health probes, bearer-token auth — the ops-facing reference. |
-| [docs/user-guide/](docs/user-guide/) | Navigating the UI: Gantt, graph, inspector, diff drawer, transport bar, keyboard shortcuts. |
+| [docs/overview.md](docs/overview.md) | Longer-form writeup: motivation, design principles, current features, non-goals, roadmap. |
+| [docs/goldfive-integration.md](docs/goldfive-integration.md) | How harmonograf consumes goldfive: `HarmonografTelemetryPlugin`, `HarmonografSink`, `observe()`, `goldfive_event` envelope, per-ADK-agent rows, session unification. |
+| [docs/standalone-observability.md](docs/standalone-observability.md) | Non-ADK flow: emit spans from any Python process with `harmonograf_client.Client`. |
+| [docs/operator-quickstart.md](docs/operator-quickstart.md) | Flags, retention, health probes, bearer-token auth, STEER from the UI — the ops-facing reference. |
+| [docs/reporting-tools.md](docs/reporting-tools.md) | Redirect to goldfive's reporting-tool reference (owned there post-migration). |
+| [docs/user-guide/](docs/user-guide/) | Navigating the UI: Gantt, graph, trajectory, inspector, transport bar, keyboard shortcuts. |
 | [docs/dev-guide/](docs/dev-guide/) | Building from source, adding a storage backend, wiring a new framework adapter, writing tests. |
 | [docs/protocol/](docs/protocol/) | Wire protocol, proto reference, span lifecycle, control stream. |
 | [docs/design/](docs/design/) | Per-component design notes — data model, client library, server, frontend, human-interaction model, information flow. |
-| [docs/milestones.md](docs/milestones.md) | Incremental delivery plan. |
+| [docs/runbooks/](docs/runbooks/) | Triage for common failures — drift not firing, task stuck, demo-wont-start, etc. |
+| [docs/internals/](docs/internals/) | Annotated tours of hot paths (ingest bus, sqlite, session store, renderer, drift catalog). |
+| [docs/milestones.md](docs/milestones.md) | Shipped + in-flight incremental delivery. |
+| [docs/goldfive-migration-plan.md](docs/goldfive-migration-plan.md) | Design record for the harmonograf → goldfive migration. COMPLETED 2026-04-18. |
 
 Orchestration references (reporting tools, drift taxonomy, task state machine,
 session-state protocol) now live in the [goldfive](https://github.com/pedapudi/goldfive)

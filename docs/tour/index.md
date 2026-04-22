@@ -4,19 +4,24 @@ This is the front door. If you just landed in this repository and have no idea
 what harmonograf is, or why it exists, or where the documentation lives — start
 here.
 
-Harmonograf is a **console for observing, understanding, and coordinating
-multi-agent systems.** Think of it as what you'd want if you were trying to run
-a fleet of LLM agents that cooperate on real work: a live Gantt chart of what
-every agent is doing, a plan of what they're *supposed* to be doing, a visible
-diff whenever reality and plan drift apart, and a bidirectional channel so you
-can actually steer the run instead of just watching it.
+Harmonograf is the **observability + HCI companion to
+[goldfive](https://github.com/pedapudi/goldfive)** for multi-agent
+systems. Think of it as what you'd want if you were trying to run a
+fleet of LLM agents that cooperate on real work: a live Gantt chart of
+what every agent is doing, a plan of what they're *supposed* to be
+doing, a visible diff whenever reality and the plan drift apart, a
+chronological log of every intervention (yours or autonomous), and a
+bidirectional channel so you can actually steer the run instead of just
+watching it.
 
-The headline screen looks like a Gantt chart — one row per agent, time on the
-horizontal axis, a colored bar for every LLM call, tool call, transfer, or task.
-But the interesting bits are underneath: an explicit task state machine, a
-drift taxonomy, a refine pipeline that re-plans live, and a protocol designed
-so that the frontend can talk back to the agents on the same connection the
-telemetry came up on.
+Six views in the nav rail: **Sessions**, **Activity** (Gantt, one row
+per ADK agent), **Graph** (agent topology), **Trajectory**
+(intervention history ribbon), **Notes**, **Settings**. The headline
+screen is Activity — time on the horizontal axis, a colored bar for
+every LLM call, tool call, transfer, or task. Underneath it:
+goldfive's explicit task state machine, drift taxonomy, and refine
+pipeline, with a protocol designed so the frontend can talk back to the
+agents on the same connection the telemetry came up on.
 
 ## Three doors
 

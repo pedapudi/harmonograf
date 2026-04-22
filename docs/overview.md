@@ -154,41 +154,75 @@ landing continuously.
 ### Client library (`client/`)
 
 - **`Client`** — non-blocking handle over a buffered gRPC transport
-  (`buffer.py`, `transport.py`) that survives server restarts and short network
-  blips without dropping telemetry; owns identity, heartbeat, control-handler
-  registration.
+  (`buffer.py`, `transport.py`) that survives server restarts and short
+  network blips without dropping telemetry; owns identity, heartbeat,
+  control-handler registration. **Lazy Hello** (harmonograf#85): no RPC is
+  made until the first real emit, so ADK runs don't create ghost
+  `sess_2026-…` sessions per app-build.
 - **`HarmonografSink`** — `goldfive.EventSink` adapter that ships every
   goldfive plan / task / drift event up the telemetry stream via a
   `TelemetryUp.goldfive_event` variant.
-- **`HarmonografTelemetryPlugin`** — optional ADK `BasePlugin` that emits
-  harmonograf spans for ADK lifecycle callbacks.
+- **`HarmonografTelemetryPlugin`** — ADK `BasePlugin` that emits harmonograf
+  spans for ADK lifecycle callbacks. Stamps `per_agent_id =
+  "{client_id}:{adk_name}"` via before/after_agent so the server renders one
+  Gantt row per ADK agent in the wrapped tree; dedups itself silently when
+  installed twice (harmonograf#68/#74/#80).
+- **`observe(runner)`** — one-line helper that attaches the sink + control
+  bridge to an existing `goldfive.Runner`. Pure observability — never
+  touches planning, steering, execution, or goal derivation (issue #22).
 - **Heartbeat + liveness tracking** so the UI can show stuck / slow agents.
 - **Agent identity on disk** so a restarted agent reclaims its Gantt row.
 
 ### Server (`server/`)
 
 - **gRPC + gRPC-Web** on separate listeners (`:7531` and `:7532`).
-- **Ingest pipeline** with fan-out bus for live subscribers.
-- **SQLite and in-memory stores** behind a common interface; retention sweeper for
-  terminal sessions.
-- **Control router** for frontend → agent messages.
-- **Health probes** (`/healthz`, `/readyz`) always open; optional bearer-token
-  auth via `--auth-token`.
+- **Ingest pipeline** with fan-out bus for live subscribers; routes spans by
+  `ctx.session.id` and goldfive events by per-event `session_id` so the outer
+  adk-web session gathers everything the user drove (harmonograf#63/#66).
+- **Auto-registration of ADK agents** from first-span hints — the plugin
+  rides `hgraf.agent.*` attrs (name, parent, kind, branch, framework) and
+  `_ensure_route` harvests them on first contact (harmonograf#74/#80).
+- **Intervention aggregator** (`interventions.py`) merging annotations +
+  drift ring + `task_plans.revision_kind` into one chronological list;
+  `ListInterventions(session_id)` unary RPC exposes it; user-control kinds
+  merge inside a 5-minute window (harmonograf#69/#71/#81/#87).
+- **SQLite and in-memory stores** behind a common interface; retention sweeper
+  for terminal sessions.
+- **Control router** for frontend → agent messages. `ControlBridge` on the
+  client validates STEER body and the server stamps author +
+  annotation_id (harmonograf#72).
+- **Health probes** (`/healthz`, `/readyz`) always open; optional
+  bearer-token auth via `--auth-token`.
 - **Stats RPC** (`make stats`) for "how is the server doing right now".
 - **Metrics snapshots** emitted periodically to logs.
 
 ### Frontend (`frontend/`)
 
-- **Gantt canvas** — per-agent rows, interactive blocks, zoom + pan, minimap,
-  live-tail cursor.
-- **Agent topology graph view** — nodes = agents, edges = transfers and tool
-  invocations.
-- **Span inspector drawer** — arguments, return values, errors, payloads.
-- **Plan-diff banner + drawer** — shows added/removed/reordered tasks after a
+The shell has six views, switched via the nav rail on the left:
+
+- **Sessions picker** — one row per ADK session post-lazy-Hello
+  (harmonograf#85), with agent counts, attention badges, time-ago labels.
+- **Activity (Gantt)** — per-ADK-agent rows (auto-registered from
+  first-span hints per harmonograf#74/#80), interactive blocks, zoom + pan,
+  minimap, live-tail cursor, context-window badges, task plan strip,
+  transport bar.
+- **Graph** — agent topology view: nodes = ADK agents, edges = transfers
+  and tool invocations.
+- **Trajectory** — intervention history ribbon (harmonograf#69/#76): one
+  marker per drift / user-control event / plan revision, glyph-by-kind,
+  color-by-source, severity ring, density clustering, deterministic
+  popover, axis ticks.
+- **Notes** — session-wide annotation stream.
+- **Settings** — server URL, theme, keyboard shortcuts reference.
+
+Cross-cutting UI:
+
+- **Inspector drawer** — arguments, return values, errors, payloads;
+  Control tab for pause/resume/STEER/cancel.
+- **Plan-revision banner** — shows added/removed/reordered tasks after a
   refine.
-- **Transport bar** — play/pause/scrub for session playback.
-- **Session picker** with auto-select of the newest live session.
-- **App shell** — drawer nav, view switcher, keyboard shortcuts.
+- **Current task strip** — live title/status chip for the task currently
+  bound to the focused agent.
 
 ### Protocol (`proto/harmonograf/v1/`)
 
@@ -225,25 +259,47 @@ defensible product position, not a TODO.
 
 ---
 
+## Recently shipped
+
+Highlights from the post-migration era (2026-04):
+
+- Per-ADK-agent Gantt rows via first-span hints and server auto-register
+  (harmonograf#74, #80).
+- Intervention history data model + `ListInterventions` RPC + Trajectory
+  view + intervention timeline redesign (harmonograf#69, #71, #76).
+- Intervention card dedup: user-control kinds merge within a 5-minute
+  window; autonomous drifts keep a tight window and their own cards
+  (harmonograf#81 / #87, closed #75 / #73 / #86).
+- Lazy Hello: ADK runs no longer create ghost `sess_…` rows (harmonograf#85).
+- Session unification: outer adk-web session id pinned on
+  `goldfive.Session.id`; spans route by `ctx.session.id`, events by
+  per-event `session_id` (harmonograf#63, #66).
+- STEER body validation + author/annotation_id stamping (harmonograf#72).
+- Plugin dedup: second `HarmonografTelemetryPlugin` is silently a no-op
+  (harmonograf#68).
+
 ## Roadmap
 
-These are directions, not commitments. See [docs/milestones.md](milestones.md) for
-the live milestone plan.
+These are directions, not commitments. See
+[docs/milestones.md](milestones.md) for the live milestone plan.
 
-- **Richer coordination surface.** Today the UI can pause, resume, and send notes;
-  next is structured steering — pinning tasks, forcing re-plans from a particular
-  point, rewinding.
-- **Second framework adapter.** Strands or OpenAI Agents SDK is the likely second
-  target. The client library's core is already framework-agnostic; the work is
-  mostly wiring and deciding which framework-specific features to expose.
-- **Persistent session archive + playback.** Replay a completed session the way
-  you would scrub through a video, including stepping through every tool call.
-- **Cross-session analytics.** "How often does this agent hit `tool_error` on
-  task X?" — the data is already there, the frontend surface isn't.
+- **Gantt viewport UX on completed sessions** (harmonograf#89, in flight)
+  — session opens at last-span frame instead of past it.
+- **Richer coordination surface.** Structured steering: pinning tasks,
+  forcing re-plans from a particular point, rewinding.
+- **Second framework adapter.** Strands or OpenAI Agents SDK is the likely
+  second target. Goldfive's core is already framework-agnostic; the work
+  is mostly wiring and deciding which framework-specific features to
+  expose.
+- **Persistent session archive + playback.** Replay a completed session
+  the way you would scrub through a video, including stepping through
+  every tool call.
+- **Cross-session analytics.** "How often does this agent hit `tool_error`
+  on task X?" — the data is already there, the frontend surface isn't.
 - **Auth v1.** At minimum, per-session tokens and a path to SSO for shared
   deployments. Not a v0 concern.
-- **Structured eval hooks.** Not an evaluation harness itself, but a clean seam
-  for plugging one in.
+- **Structured eval hooks.** Not an evaluation harness itself, but a clean
+  seam for plugging one in.
 
 ---
 

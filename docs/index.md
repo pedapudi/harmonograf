@@ -55,18 +55,23 @@ to observe and steer them.
 | File | What it is |
 |---|---|
 | [quickstart.md](quickstart.md) | Step-by-step from clone to running demo, with troubleshooting and local-LLM wiring. |
-| [operator-quickstart.md](operator-quickstart.md) | Server flags, retention, health probes, bearer-token auth — the ops-facing reference. |
+| [operator-quickstart.md](operator-quickstart.md) | Server flags, retention, health probes, bearer-token auth, operator workflow (watch a run, steer it, read intervention cards). |
 | [overview.md](overview.md) | Longer-form motivation and design principles; what ships today and what's deliberately out of scope. |
-| [reporting-tools.md](reporting-tools.md) | The seven `report_*` tools your agents use to communicate task state; when to call each one. |
+| [goldfive-integration.md](goldfive-integration.md) | The `goldfive.wrap` + `observe()` contract: per-ADK-agent rows, session unification, intervention emission. |
+| [standalone-observability.md](standalone-observability.md) | The non-ADK path: emit spans from any Python process with `harmonograf_client.Client`. |
+| [reporting-tools.md](reporting-tools.md) | Redirect to the goldfive reporting-tool reference (the tools live in goldfive post-migration). |
 | [user-guide/index.md](user-guide/index.md) | UI reference hub — overview of regions of the shell and the contents list below. |
 | [user-guide/sessions.md](user-guide/sessions.md) | Session picker, filters, attention badges. |
+| [user-guide/actors.md](user-guide/actors.md) | Actor attribution model — per-ADK-agent rows, goldfive-actor row for drift/steer events. |
 | [user-guide/gantt-view.md](user-guide/gantt-view.md) | Reading the Gantt: bars, colors, status glyphs, cross-agent edges. |
 | [user-guide/graph-view.md](user-guide/graph-view.md) | The agent topology / sequence diagram view. |
+| [user-guide/trajectory-view.md](user-guide/trajectory-view.md) | Intervention history ribbon — markers, clusters, popovers, plan-rev links. |
 | [user-guide/drawer.md](user-guide/drawer.md) | Inspector drawer: summary, task, payload, timeline, links, annotations, control tabs. |
 | [user-guide/tasks-and-plans.md](user-guide/tasks-and-plans.md) | Current task strip, task panel, plan revisions. |
 | [user-guide/control-actions.md](user-guide/control-actions.md) | Pause, resume, steer, rewind, approve — every way the UI talks back to agents. |
 | [user-guide/annotations.md](user-guide/annotations.md) | Human notes on spans, tasks, agents; deliver-to-agent mode. |
 | [user-guide/keyboard-shortcuts.md](user-guide/keyboard-shortcuts.md) | Keyboard map; source of truth is `frontend/src/lib/shortcuts.ts`. |
+| [user-guide/glossary.md](user-guide/glossary.md) | Quick-reference term map. |
 | [user-guide/troubleshooting.md](user-guide/troubleshooting.md) | Common UI failure modes and how to recover. |
 | [user-guide/cookbook.md](user-guide/cookbook.md) | Recipes for common user tasks. |
 | [user-guide/faq.md](user-guide/faq.md) | Frequently asked questions. |
@@ -101,12 +106,12 @@ the server, or debugging a wire-level issue.
 |---|---|
 | [protocol/index.md](protocol/index.md) | Protocol reference hub and reading order by role. |
 | [protocol/overview.md](protocol/overview.md) | The three RPC tiers (telemetry / control / frontend RPCs), the first-connect flow, and versioning. |
-| [protocol/telemetry-stream.md](protocol/telemetry-stream.md) | `StreamTelemetry` bidirectional stream, `Hello`/`Welcome`, resume tokens, goodbye. |
+| [protocol/telemetry-stream.md](protocol/telemetry-stream.md) | `StreamTelemetry` bidirectional stream, lazy `Hello` / `Welcome`, resume tokens, goodbye. |
 | [protocol/control-stream.md](protocol/control-stream.md) | `SubscribeControl` server-streaming RPC; control event / ack lifecycle; capability negotiation. |
-| [protocol/frontend-rpcs.md](protocol/frontend-rpcs.md) | `ListSessions`, `WatchSession`, `GetPayload`, `GetSpanTree`, `PostAnnotation`, `SendControl`, `DeleteSession`, `GetStats`. |
-| [protocol/data-model.md](protocol/data-model.md) | Harmonograf-owned `types.proto` messages (Session, Agent, Span, PayloadRef, ErrorInfo, Annotation, ControlEvent, ControlAck). Plan / Task / TaskEdge / DriftKind are imported from `goldfive/v1/types.proto`. |
+| [protocol/frontend-rpcs.md](protocol/frontend-rpcs.md) | `ListSessions`, `WatchSession`, `GetPayload`, `GetSpanTree`, `PostAnnotation`, `SendControl`, `DeleteSession`, `ListInterventions`, `GetStats`. |
+| [protocol/data-model.md](protocol/data-model.md) | Harmonograf-owned `types.proto` messages (Session, Agent, Span, PayloadRef, ErrorInfo, Annotation, Intervention, ControlEvent, ControlAck). Plan / Task / TaskEdge / DriftKind are imported from `goldfive/v1/types.proto`. |
 | [protocol/task-state-machine.md](protocol/task-state-machine.md) | Redirect — plan / task / drift / reporting tools / invariant validator all live in goldfive after the migration. |
-| [protocol/span-lifecycle.md](protocol/span-lifecycle.md) | SpanStart / SpanUpdate / SpanEnd, attribute merging, `hgraf.task_id` binding, cross-agent links. |
+| [protocol/span-lifecycle.md](protocol/span-lifecycle.md) | SpanStart / SpanUpdate / SpanEnd, attribute merging, `hgraf.task_id` + `hgraf.agent.*` binding, cross-agent links. |
 | [protocol/payload-flow.md](protocol/payload-flow.md) | Content-addressed payload uploads, chunked transport, eviction, server-side re-request. |
 | [protocol/wire-ordering.md](protocol/wire-ordering.md) | Happens-before guarantees, control-ack colocation, duplicate span dedup on reconnect, resume_token semantics. |
 
@@ -121,11 +126,11 @@ shape matters.
 | File | What it is |
 |---|---|
 | [internals/index.md](internals/index.md) | Reading order, per-hot-path guide, source-reference conventions. |
-
-Individual tours (per the reading order in `internals/index.md`):
-`server-ingest-bus.md`, `storage-sqlite.md`,
-`session-store-task-registry.md`, `renderer-pipeline.md`,
-`drift-taxonomy-catalog.md`.
+| [internals/server-ingest-bus.md](internals/server-ingest-bus.md) | Ingest pipeline + per-session bus fan-out. |
+| [internals/storage-sqlite.md](internals/storage-sqlite.md) | SQLite schema + WAL semantics. |
+| [internals/session-store-task-registry.md](internals/session-store-task-registry.md) | Frontend session store + task registry. |
+| [internals/renderer-pipeline.md](internals/renderer-pipeline.md) | Canvas Gantt renderer pipeline. |
+| [internals/drift-taxonomy-catalog.md](internals/drift-taxonomy-catalog.md) | Drift-kind → UI mapping. |
 
 Tours of the pre-goldfive orchestration layer (HarmonografAgent, the
 ADK state machine, invariants) were removed with the goldfive migration;
@@ -175,6 +180,32 @@ when you want to understand why a given design choice exists.
 | [adr/0011a-span-lifecycle-inference-superseded.md](adr/0011a-span-lifecycle-inference-superseded.md) | Retirement record for the old span-lifecycle-inference approach. |
 | [adr/0012-three-orchestration-modes.md](adr/0012-three-orchestration-modes.md) | Why sequential / parallel / delegated, and not one unified path. |
 | [adr/0013-drift-as-first-class.md](adr/0013-drift-as-first-class.md) | Why drift is a first-class event with its own taxonomy and refine pipeline. |
+
+---
+
+## Runbooks
+
+Triage guides for recurring failure modes. Start here when something is
+broken end-to-end.
+
+| File | What it is |
+|---|---|
+| [runbooks/index.md](runbooks/index.md) | Runbook index. |
+| [runbooks/agent-not-connecting.md](runbooks/agent-not-connecting.md) | Agent can't reach the server. |
+| [runbooks/agent-disconnects-repeatedly.md](runbooks/agent-disconnects-repeatedly.md) | Flapping transport. |
+| [runbooks/demo-wont-start.md](runbooks/demo-wont-start.md) | `make demo` failures. |
+| [runbooks/drift-not-firing.md](runbooks/drift-not-firing.md) | Expected drift never appears on the Trajectory view. |
+| [runbooks/task-stuck-in-pending.md](runbooks/task-stuck-in-pending.md) | A task never transitions from PENDING. |
+| [runbooks/task-stuck-in-running.md](runbooks/task-stuck-in-running.md) | A task stays RUNNING forever. |
+| [runbooks/context-window-exceeded.md](runbooks/context-window-exceeded.md) | Model ran out of context mid-run. |
+| [runbooks/frontend-shows-stale-data.md](runbooks/frontend-shows-stale-data.md) | UI isn't updating. |
+| [runbooks/high-latency-callbacks.md](runbooks/high-latency-callbacks.md) | Callbacks taking too long. |
+| [runbooks/minimap-desync.md](runbooks/minimap-desync.md) | Minimap offsets. |
+| [runbooks/payloads-missing.md](runbooks/payloads-missing.md) | Payload body unavailable. |
+| [runbooks/post-crash-recovery.md](runbooks/post-crash-recovery.md) | After a server crash. |
+| [runbooks/span-tree-looks-wrong.md](runbooks/span-tree-looks-wrong.md) | Span parent/child looks off. |
+| [runbooks/sqlite-errors.md](runbooks/sqlite-errors.md) | SQLite WAL / locking failures. |
+| [runbooks/thinking-not-visible.md](runbooks/thinking-not-visible.md) | Model's thinking section isn't rendering. |
 
 ---
 

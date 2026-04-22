@@ -104,19 +104,27 @@ flowchart TD
   current plan and the drift context. The planner returns a revised plan.
   The frontend renders the diff as a banner with added / removed / reordered
   tasks.
-- **Reporting tools.** The protocol agents use to tell harmonograf what
+- **Reporting tools.** The protocol agents use to tell goldfive what
   they're doing. `report_task_started`, `report_task_progress`,
   `report_task_completed`, `report_task_failed`, `report_task_blocked`,
-  `report_new_work_discovered`, `report_plan_divergence`. Every sub-agent
-  gets these tools injected automatically.
-- **session.state.** ADK's shared mutable dict. Harmonograf writes the
-  current task (`harmonograf.current_task_id`, `...title`, `...description`)
-  before every model call, and reads back progress, outcomes, notes, and the
-  divergence flag. This is how agents and the orchestrator exchange context
-  without passing it through prompts.
+  `report_new_work_discovered`, `report_plan_divergence`. Every
+  sub-agent under `goldfive.wrap(...)` gets these tools injected
+  automatically by goldfive's ADK adapter. Goldfive owns them; see
+  [docs/reporting-tools.md](../reporting-tools.md) for the redirect.
+- **session.state / SessionContext.** ADK's shared mutable dict.
+  Goldfive's `SessionContext` carries the current task (and the rest of
+  the plan-execution state) on `session.state`. Harmonograf does not
+  write it — post-migration that's goldfive's job.
 - **Control events.** Out-of-band instructions from the frontend to the
-  agents: pause, resume, steer, status query. They ride down a separate gRPC
-  stream and are acknowledged upstream on the telemetry stream.
+  agents: pause, resume, steer, cancel. They ride down a separate gRPC
+  stream and are acknowledged upstream on the telemetry stream. The
+  server records every control event as an **Intervention** on the
+  session, surfaced in the Trajectory view.
+- **Interventions.** Harmonograf's unified chronological log of every
+  point the plan changed direction — user-driven (STEER / CANCEL /
+  PAUSE) or autonomous (drift). Rendered on the Trajectory view as a
+  horizontal marker ribbon with glyph-by-kind, color-by-source, and
+  severity rings (harmonograf#69 / #76).
 
 That's it. Nine primitives. Everything else in harmonograf is plumbing
 around these.
@@ -141,24 +149,30 @@ flowchart TD
 ```
 
 **Client library** (`client/`). Embedded inside each agent process. Exposes
-`Client` for span transport, `HarmonografSink` (a `goldfive.EventSink`) to
-ship plan/task/drift events up the telemetry stream, and an optional
-`HarmonografTelemetryPlugin` ADK `BasePlugin` that emits spans on lifecycle
-callbacks. The orchestration logic — task state machine, drift taxonomy,
-refine pipeline, planner — lives in
+`Client` for span transport (with lazy Hello so no ghost sessions are
+created under ADK), `HarmonografSink` (a `goldfive.EventSink`) to ship
+plan/task/drift events up the telemetry stream, `HarmonografTelemetryPlugin`
+(ADK `BasePlugin`) that emits spans on lifecycle callbacks and stacks
+per-ADK-agent ids so the tree renders one row per agent, and an
+`observe(runner)` helper that attaches both in one line. The
+orchestration logic — task state machine, drift taxonomy, refine
+pipeline, planner — lives in
 [goldfive](https://github.com/pedapudi/goldfive); the harmonograf client
 is the observability tap on top of it.
 
 **Server** (`server/`). Terminates every client connection. Owns the
 canonical timeline. Persists it to SQLite (or in-memory for tests). Fans out
 live updates to any number of frontend subscribers. Routes control messages
-from the frontend to the correct agent. It is the fan-in point: many clients,
-one server, one UI.
+from the frontend to the correct agent. Aggregates intervention history
+across annotations, drift ring, and plan revisions. It is the fan-in
+point: many clients, one server, one UI.
 
-**Frontend** (`frontend/`). A React/Vite app. Talks gRPC-Web to the server.
-Renders the Gantt canvas, the agent topology graph, the plan-diff banner and
-drawer, the inspector drawer, the transport bar. Live-subscribes to every
-session update; no refresh needed.
+**Frontend** (`frontend/`). A React/Vite app. Talks gRPC-Web to the
+server. Six views: Sessions picker, Activity (Gantt), Graph, Trajectory,
+Notes, Settings. Renders the Gantt canvas, the agent topology graph, the
+intervention timeline, the plan-revision banner and drawer, the inspector
+drawer, the transport bar. Live-subscribes to every session update; no
+refresh needed.
 
 All three components share one data model, defined in
 `proto/harmonograf/v1/*.proto` and regenerated via `make proto`. See
@@ -201,26 +215,30 @@ sequenceDiagram
 Now in detail, at a level you can see in the harmonograf UI:
 
 **Step 1 — the coordinator plans.** ADK routes your prompt to
-`presentation_agent`. `goldfive.Runner` owns the outer loop and asks the
-coordinator LLM to produce a plan via `goldfive.LLMPlanner`. It emits a structured plan with
-tasks like `research_python`, `design_outline`, `build_slides`, `review`.
-Harmonograf's client library sees the plan and calls `TaskRegistry.upsertPlan`
-on the server, which stores it and pushes it out to any subscribed frontend.
+`presentation_agent_orchestrated`. Under `goldfive.wrap(...)`, goldfive's
+`Runner` owns the outer loop and asks `LLMGoalDeriver` + `LLMPlanner`
+to derive a goal and emit a plan with tasks like `research_python`,
+`design_outline`, `build_slides`, `review`. Goldfive fires
+`PlanSubmitted`; `HarmonografSink` ships it up as a
+`TelemetryUp.goldfive_event`; the server stores it and pushes a
+`DELTA_TASK_PLAN` to every subscribed frontend.
 
 **Step 2 — the frontend learns about the session.** The harmonograf UI's
-session picker auto-selects the newest live session. The Gantt view renders
-one row per agent that has connected so far (initially just
-`coordinator_agent`). The task panel under the Gantt shows the plan as a
-flat list. The plan-revision banner briefly flashes that a new plan arrived.
+session picker auto-selects the newest live session. Under lazy Hello
+(harmonograf#85), the session id pinned on the row is the outer `adk-web`
+session id, not a synthetic `sess_…` placeholder. The Activity (Gantt)
+view renders one row per ADK agent as each agent emits its first span —
+the coordinator appears first, then the specialists as goldfive
+dispatches them. The task panel under the Gantt shows the plan; the
+plan-revision banner briefly flashes that a new plan arrived.
 
-**Step 3 — the first task starts.** The coordinator picks
-`research_python`, writes `harmonograf.current_task_id = "t1"` into
-`session.state`, and transfers to `research_agent`. The `research_agent`
-row appears on the Gantt. Its first action is to call
-`report_task_started(task_id="t1")` — a no-op-looking tool call that
-harmonograf's `before_tool_callback` intercepts and turns into a
-`PENDING → RUNNING` transition on task `t1`. The task panel recolors; the
-Gantt shows a new bar.
+**Step 3 — the first task starts.** Goldfive picks `research_python` and
+dispatches `research_agent` via its ADK adapter. The `research_agent` row
+appears on the Gantt the moment the plugin sees `before_agent_callback`.
+Its first model turn produces a `report_task_started(task_id="t1")` call;
+goldfive's `DefaultSteerer` intercepts it, transitions the task PENDING
+→ RUNNING, and fires a `TaskStarted` event. The sink ships it, the
+server updates its index, and the frontend repaints the bar.
 
 **Step 4 — tool calls stream in.** `research_agent` makes a few tool calls:
 a web search, a summarize call, maybe a payload-producing call that returns
@@ -234,43 +252,49 @@ vocabulary.
 
 **Step 5 — the task completes, the next one starts.** `research_agent`
 calls `report_task_completed(task_id="t1", summary="Python is a...")`.
-Harmonograf's interception marks the task `COMPLETED` and writes the summary
-into `harmonograf.completed_task_results` so downstream tasks see it as
-context. Control returns to the coordinator, which picks the next task and
-transfers to `web_developer_agent`. You see a new row appear on the Gantt,
-and a bezier curve — a cross-agent edge — connecting the transfer span to
+Goldfive's steerer transitions the task RUNNING → COMPLETED and fires
+`TaskCompleted`. Goldfive dispatches the next task (`build_slides`) to
+`web_developer_agent`. That agent's row auto-registers on its first span,
+and a bezier curve — a cross-agent edge — connects the transfer span to
 the new invocation.
 
 **Step 6 — something drifts.** The `reviewer_agent` runs and finds an
 issue with the generated HTML. It calls
 `report_new_work_discovered(parent_task_id="t3", title="fix HTML bug",
-assignee="debugger_agent")`. Harmonograf's interception fires a *refine* —
-a deferential call back into the planner with the current plan and the
-drift context (drift kind: `new_work_discovered`). The planner returns a
-revised plan with a new task spliced in. `TaskRegistry.upsertPlan` diffs the
-old and new plans and stores the result. The frontend renders the diff as a
-banner: "plan revised: +1 task". You can open the plan-diff drawer to see
-the added task highlighted in green, or switch to the **Trajectory** view
-(`↪ Trajectory` in the nav rail) to see the full rev-by-rev history as a
-horizontal ribbon with one segment per rev and drift markers on each
-segment. Clicking a drift marker shows the kind, severity, and detail that
-caused the refine. See
-[docs/user-guide/trajectory-view.md](../user-guide/trajectory-view.md) for
-the vocabulary. In the Gantt itself, the drift also materializes a
-`goldfive` actor row at the top of the plot with a bar at the time of the
-refine — that row is part of the actor attribution model
-([docs/user-guide/actors.md](../user-guide/actors.md)). This is drift as a
-first-class event. Full mechanism:
-[docs/protocol/task-state-machine.md](../protocol/task-state-machine.md).
+assignee="debugger_agent")`. Goldfive emits a `DriftDetected` event with
+kind `new_work_discovered`, fires a *refine* — a deferential call back
+into the planner with the current plan and the drift context — and the
+planner returns a revised plan with a new task spliced in. Goldfive
+emits `PlanRevised`. Harmonograf stores the new revision, diffs it
+against the previous plan, and the frontend renders the diff as a banner
+("plan revised: +1 task"). Open the plan-diff drawer to see the added
+task highlighted, or switch to **Trajectory** (↪ in the nav rail) to see
+the whole intervention history — every drift, every plan revision,
+every user-control event — as a horizontal marker ribbon. Click the new
+marker to see drift kind, severity, body, author, and outcome
+(`plan_revised:r2`). See
+[docs/user-guide/trajectory-view.md](../user-guide/trajectory-view.md).
+In the Gantt itself the drift also materializes a `goldfive` actor row
+at the top of the plot — part of the actor attribution model
+([docs/user-guide/actors.md](../user-guide/actors.md)). Full mechanism:
+[docs/protocol/task-state-machine.md](../protocol/task-state-machine.md)
+(which redirects to goldfive for the authoritative protocol).
 
 **Step 7 — you intervene.** Say you notice `debugger_agent` is taking too
-long. You press Space to pause all agents, or click a specific row to pause
-just that agent. The frontend sends a `SendControl` RPC to the server, which
-fans it out over `SubscribeControl` to the right agents. The agents
-acknowledge upstream on the telemetry stream. The frontend renders the
-acknowledgments. Then you unpause by pressing Space again. See
-[docs/user-guide/control-actions.md](../user-guide/control-actions.md) for
-every handle you have.
+long. You press Space to pause all agents, or click a specific row to
+pause just that agent. Alternatively, open the inspector drawer's
+Control tab on the stuck span and type a STEER ("ignore the HTML
+validator warnings and ship"). The frontend sends a `SendControl` RPC
+to the server; the client's `ControlBridge` validates the STEER body
+(harmonograf#72) and delivers it to goldfive's `ControlChannel`. The
+server stamps `author` + `annotation_id` and records it on the session
+as an Intervention. A new marker appears on the Trajectory view. If you
+STEER the same target twice inside five minutes, the two interventions
+**merge** into one card (harmonograf#81 / #87 user-control dedup).
+Acknowledgments ride upstream on the telemetry stream so the Gantt
+shows "paused at span X" in the right position. See
+[docs/user-guide/control-actions.md](../user-guide/control-actions.md)
+for every handle you have.
 
 **Step 8 — completion.** The coordinator calls `report_task_completed` on
 the root task. The session's status flips to `COMPLETED`. The Gantt shows a

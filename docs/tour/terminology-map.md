@@ -15,7 +15,7 @@ read [mental-model.md](mental-model.md) instead.
 
 ```mermaid
 graph TD
-    Session[Session<br/>one agent rollout] --> Agent[Agent<br/>one actor]
+    Session[Session<br/>one agent rollout] --> Agent[Agent<br/>one ADK agent = one row]
     Session --> Plan[Plan<br/>DAG of tasks]
     Agent --> Span[Span<br/>event with duration]
     Plan --> Task[Task<br/>unit of work]
@@ -25,10 +25,13 @@ graph TD
     Plan -.refine on drift.-> Plan
     Session --> Annotation[Annotation<br/>human note]
     Session --> ControlEvent[ControlEvent<br/>frontend->agent]
-    Session --> SessionState[session.state<br/>harmonograf.* keys]
-    SessionState -.read by.-> Agent
+    Session --> Intervention[Intervention<br/>every plan-change event]
+    Session --> SessionCtx[goldfive.SessionContext<br/>on session.state]
+    SessionCtx -.read by.-> Agent
     Agent -.reporting tools.-> Task
     ControlEvent -.ack upstream.-> Span
+    ControlEvent -.becomes.-> Intervention
+    Plan -.drift/revision.-> Intervention
 ```
 
 Read the diagram as "these are the nouns and how they reference each
@@ -78,15 +81,21 @@ In prose:
   harmonograf agent row on the Gantt.
 - **ADK callbacks → harmonograf spans.** Every
   `before_model_callback` / `after_model_callback` / `before_tool_callback`
-  fires a span emission. Harmonograf attaches to these callbacks via
-  `HarmonografAdkPlugin`.
-- **ADK function tools → harmonograf reporting tools.** The seven
-  `report_*` tools are ordinary ADK function tools; harmonograf
-  intercepts them in `before_tool_callback` to apply state transitions.
-  An agent calls them just like any other tool.
-- **ADK `session.state` dict → harmonograf `session.state` with
-  `harmonograf.*` keys.** Harmonograf reserves the `harmonograf.`
-  prefix; everything else is untouched.
+  / `before_agent_callback` / `after_agent_callback` fires a span
+  emission. Harmonograf attaches to these callbacks via
+  `HarmonografTelemetryPlugin`. Agent callbacks also stack
+  `per_agent_id` so the Gantt renders one row per ADK agent
+  (harmonograf#74 / #80).
+- **ADK function tools → goldfive reporting tools.** The seven
+  `report_*` tools are ordinary ADK function tools, injected by
+  `goldfive.adapters.adk.ADKAdapter`. Goldfive's `DefaultSteerer`
+  intercepts them in `before_tool_callback` to apply state transitions
+  and fire events. Harmonograf observes those events via
+  `HarmonografSink`, it does not intercept the tools.
+- **ADK `session.state` dict → goldfive's `SessionContext` on `session.state`.**
+  Goldfive owns the session-state protocol post-migration. The old
+  `harmonograf.*` keys are retired; see
+  `goldfive.adapters._adk_plugin.SESSION_CONTEXT_STATE_KEY`.
 - **ADK events → harmonograf drift signals.** `on_event_callback`
   watches for `transfer`, `escalate`, and `state_delta` events as
   belt-and-suspenders drift signals.
@@ -257,15 +266,22 @@ one-to-one. Here are the ones that trip people up:
 
 | UI term | Backend primitive | Notes |
 |---|---|---|
-| **Sessions view** | the Gantt view | The nav rail calls the main view "Sessions"; everywhere else it's called "Gantt". Same page. |
-| **Row** | an `Agent` | One row per agent. |
+| **Sessions view** | the session picker | One row per ADK session post-lazy-Hello (harmonograf#85). |
+| **Activity view** | the Gantt view | The main timeline. Selected from the nav rail under the `!` icon. |
+| **Graph view** | agent topology graph | Nodes = ADK agents, edges = transfers / tool invocations. |
+| **Trajectory view** | the intervention history ribbon (#69 / #76) | One marker per Intervention; glyph-by-kind, color-by-source, severity ring. |
+| **Notes view** | session-wide annotation stream | Every annotation posted on the session. |
+| **Row** | an `Agent` | One row per ADK agent — auto-registered from first-span hints (harmonograf#74 / #80). |
+| **goldfive row** | the synthetic actor row for goldfive events | Drift and user-steer events materialise bars here. |
 | **Bar** | a `Span` | Color = span kind, fill pattern = status. |
 | **Ghost bar** | a predicted span from a `Task` (dashed, 30% opacity) | The planner's prediction; replaced by a real bar once the task actually runs. |
 | **Breathing bar** | a running span | 2-second pulse animation while `end_time` is null. |
 | **Cross-agent edge** | a `SpanLink` of kind transfer | Bezier curve between two bars on different rows. |
 | **Plan-revision banner** | a refine result | Appears when a new plan revision arrives. |
 | **Plan-diff drawer** | the diff against the previous revision | Shows added / removed / reordered / re-parented / re-assigned tasks. |
-| **Current task strip** | the task currently bound to the active span in the focused agent | Reads `harmonograf.current_task_id` from `session.state`. |
+| **Intervention marker** | one `Intervention` | On Trajectory; clickable popover with author, body, outcome. |
+| **Intervention card dedup** | user-control merging within 5 min | Second STEER/CANCEL/PAUSE on the same target collapses into the first card (harmonograf#81 / #87). |
+| **Current task strip** | the task currently bound to the active span | Post-migration the source is goldfive's `SessionContext`, not `harmonograf.*` keys. |
 | **Live-tail cursor** | server's `latest_span_time` per session | The right-edge follower on the Gantt. |
 | **Transport bar** | frontend control emitting `SendControl` events | Pause / resume / follow-live / zoom. |
 | **Inspector drawer** | the `GetSpanTree` or task-specific data for the selection | Tabs: Summary, Task, Payload, Timeline, Links, Annotations, Control. |

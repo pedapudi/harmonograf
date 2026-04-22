@@ -185,15 +185,30 @@ child = client.emit_span_start(
 ## Sessions
 
 A session is the top-level scope that groups spans from one or more
-agents collaborating on one task. The Client auto-creates a session on
-first emission; the server assigns a canonical `sess_YYYY-MM-DD_NNNN`
-id and broadcasts it back. Access via `client.session_id`.
+agents collaborating on one task. For standalone (non-ADK) clients, the
+Client auto-creates a home session on first emit: the server stamps a
+canonical `sess_YYYY-MM-DD_NNNN` id and broadcasts it back. Access via
+`client.session_id`.
 
 Pass `session_id=` to the `Client(...)` constructor to join an existing
 session — useful when multiple agents collaborate on the same workflow
 and you want one row per agent on the same Gantt.
 
 `session_title` is a friendly label shown in the session picker.
+
+### Lazy Hello (harmonograf#85)
+
+Under ADK — i.e. when you pair this client with `HarmonografTelemetryPlugin`
+inside an `App` — the Hello is **deferred** until the first real emit, and
+the ADK session id (whatever `adk web` passes through) is stamped on that
+Hello. That collapses `adk-web` session, ADK run, and harmonograf session
+into one row in the session picker (see [goldfive-integration.md](goldfive-integration.md)
+for the full session-unification picture).
+
+For the pure-standalone path documented on this page — no ADK, direct
+`emit_span_*` calls — the behavior is unchanged from before: the Client
+auto-creates a home session on its first emit. No ghost sessions either
+way.
 
 ## Agents
 
@@ -253,20 +268,27 @@ orchestration — they do not interfere.
 
 The standalone case leaves some panels empty:
 
-| Panel | Standalone | With goldfive |
+| Panel | Standalone | With goldfive.wrap |
 | --- | --- | --- |
-| Gantt (one row per agent) | populated | populated |
+| Sessions picker | populated | populated |
+| Activity (Gantt, per-agent rows) | populated | populated |
 | Span inspector drawer | populated | populated |
 | Messages panel | populated | populated |
 | Payload viewer | populated | populated |
-| Session picker | populated | populated |
-| Tasks panel | **empty** | populated |
-| Plan-diff drawer | **empty** | populated |
-| Drift banner | **empty** | populated |
+| Graph view | populated | populated |
+| Task panel / plan-revision banner | **empty** | populated |
+| Trajectory (intervention history) | **empty** | populated |
+| Drift markers / plan-diff drawer | **empty** | populated |
 
 The empty states are intentional and well-handled: no spinners, no
-error toasts. The panels show "No plan submitted for this session" and
-similar.
+error toasts. The Trajectory view renders "No interventions recorded"
+when there's nothing to show; the task panel shows "No plan submitted
+for this session".
+
+For standalone non-ADK clients, each Client gets its own Gantt row
+unless you explicitly share a `session_id`. One process = one agent =
+one row (unlike the `goldfive.wrap` path where one process drives many
+ADK agents across many rows per harmonograf#74/#80).
 
 ## Running the examples
 
