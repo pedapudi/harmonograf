@@ -503,6 +503,11 @@ class FrontendServicerMixin:
         if kind == AnnotationKind.STEERING:
             event.kind = gf_control_pb2.CONTROL_KIND_STEER
             event.steer.note = request.body
+            # goldfive#171: propagate author + source annotation id so the
+            # goldfive-side steerer can attribute the drift + dedupe
+            # delivery retries / UI double-fires of the same annotation.
+            event.steer.author = ann.author
+            event.steer.annotation_id = ann.id
         else:
             event.kind = gf_control_pb2.CONTROL_KIND_INJECT_MESSAGE
             event.inject_message.text = request.body

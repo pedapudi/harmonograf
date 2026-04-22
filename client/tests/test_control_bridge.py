@@ -58,13 +58,26 @@ def _make_event(
     *,
     control_id: str = "c-1",
     steer_note: str | None = None,
+    steer_author: str = "",
+    steer_annotation_id: str = "",
     rewind_task_id: str | None = None,
 ) -> gf_control_pb2.ControlEvent:
-    """Build a goldfive ``ControlEvent`` proto with the requested kind."""
+    """Build a goldfive ``ControlEvent`` proto with the requested kind.
+
+    STEER gets a non-empty default note so bridge-level body validation
+    (goldfive#171) doesn't reject it; tests that want to exercise the
+    reject path pass ``steer_note`` explicitly (e.g. ``""``).
+    """
     kind_enum = getattr(gf_control_pb2, f"CONTROL_KIND_{kind_name}")
     ev = gf_control_pb2.ControlEvent(id=control_id, kind=kind_enum)
+    if kind_name == "STEER" and steer_note is None:
+        steer_note = "nudge"
     if steer_note is not None:
         ev.steer.note = steer_note
+    if steer_author:
+        ev.steer.author = steer_author
+    if steer_annotation_id:
+        ev.steer.annotation_id = steer_annotation_id
     if rewind_task_id is not None:
         ev.rewind.task_id = rewind_task_id
     return ev
@@ -316,3 +329,205 @@ async def test_observe_attaches_bridge_inside_event_loop(
 
     await runner.close()
     assert bridge._closed is True
+
+
+# ----------------------------------------------------------------------
+# goldfive#171 — STEER body validation + author propagation
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_steer_empty_body_acked_failure_not_forwarded(
+    client: Client, made: list[FakeTransport]
+) -> None:
+    """Empty STEER body → FAILURE ack, no forward to runner."""
+    runner = _runner_with_channel()
+    bridge = ControlBridge(client, runner.control, asyncio.get_running_loop())
+    bridge.start()
+
+    made[0].deliver_control_event(
+        _make_event("STEER", control_id="s-empty", steer_note="")
+    )
+    await _drain()
+
+    # Ack bounced back as failure with the specific detail.
+    assert ("s-empty", "failure", "body empty") in made[0].sent_acks
+    # Runner must NOT have received the message.
+    msg = await asyncio.wait_for(
+        asyncio.shield(asyncio.ensure_future(runner.control.receive(timeout=0.05))),
+        timeout=1.0,
+    )
+    assert msg is None
+
+    await bridge.stop()
+
+
+@pytest.mark.asyncio
+async def test_steer_whitespace_body_acked_failure_not_forwarded(
+    client: Client, made: list[FakeTransport]
+) -> None:
+    runner = _runner_with_channel()
+    bridge = ControlBridge(client, runner.control, asyncio.get_running_loop())
+    bridge.start()
+
+    made[0].deliver_control_event(
+        _make_event("STEER", control_id="s-ws", steer_note="   \t\n  ")
+    )
+    await _drain()
+
+    assert ("s-ws", "failure", "body empty") in made[0].sent_acks
+    msg = await runner.control.receive(timeout=0.05)
+    assert msg is None
+
+    await bridge.stop()
+
+
+@pytest.mark.asyncio
+async def test_steer_oversized_body_acked_failure_not_forwarded(
+    client: Client, made: list[FakeTransport]
+) -> None:
+    """A 12KB body is rejected with the exact length in the detail string."""
+    from harmonograf_client._control_bridge import STEER_BODY_MAX_BYTES
+
+    runner = _runner_with_channel()
+    bridge = ControlBridge(client, runner.control, asyncio.get_running_loop())
+    bridge.start()
+
+    # 12KB body — well above the 8KB cap.
+    oversized = "x" * (12 * 1024)
+    made[0].deliver_control_event(
+        _make_event("STEER", control_id="s-big", steer_note=oversized)
+    )
+    await _drain()
+
+    # Find the ack and assert shape + len in detail.
+    matching = [
+        (cid, res, det)
+        for cid, res, det in made[0].sent_acks
+        if cid == "s-big"
+    ]
+    assert len(matching) == 1
+    cid, res, det = matching[0]
+    assert res == "failure"
+    assert det.startswith("body too long")
+    assert str(len(oversized.encode("utf-8"))) in det
+    # Runner saw nothing.
+    msg = await runner.control.receive(timeout=0.05)
+    assert msg is None
+    assert len(oversized) > STEER_BODY_MAX_BYTES  # sanity
+
+    await bridge.stop()
+
+
+@pytest.mark.asyncio
+async def test_steer_body_at_cap_forwards_successfully(
+    client: Client, made: list[FakeTransport]
+) -> None:
+    """Exactly-at-cap body passes validation and reaches the runner."""
+    from harmonograf_client._control_bridge import STEER_BODY_MAX_BYTES
+
+    runner = _runner_with_channel()
+    bridge = ControlBridge(client, runner.control, asyncio.get_running_loop())
+    bridge.start()
+
+    at_cap = "a" * STEER_BODY_MAX_BYTES
+    made[0].deliver_control_event(
+        _make_event("STEER", control_id="s-cap", steer_note=at_cap)
+    )
+
+    msg = await asyncio.wait_for(runner.control.receive(), timeout=1.0)
+    assert msg is not None
+    assert msg.kind is ControlKind.STEER
+    assert msg.payload["note"] == at_cap
+
+    await bridge.stop()
+
+
+@pytest.mark.asyncio
+async def test_steer_body_control_chars_stripped_before_forward(
+    client: Client, made: list[FakeTransport]
+) -> None:
+    """ASCII control chars (except tab/newline) are removed from the body."""
+    runner = _runner_with_channel()
+    bridge = ControlBridge(client, runner.control, asyncio.get_running_loop())
+    bridge.start()
+
+    # Bel, backspace, escape, DEL(127 — printable-ish, kept), plus kept tab + newline.
+    raw = "hello\x07\x08world\x1b\nmore\tend"
+    made[0].deliver_control_event(
+        _make_event("STEER", control_id="s-scrub", steer_note=raw)
+    )
+
+    msg = await asyncio.wait_for(runner.control.receive(), timeout=1.0)
+    assert msg is not None
+    # Bel (7), backspace (8), escape (27) stripped; tab (9), newline (10) preserved.
+    assert msg.payload["note"] == "helloworld\nmore\tend"
+
+    await bridge.stop()
+
+
+@pytest.mark.asyncio
+async def test_steer_author_and_annotation_id_forwarded_to_channel(
+    client: Client, made: list[FakeTransport]
+) -> None:
+    """``author`` and ``annotation_id`` on SteerPayload land in ControlMessage.payload."""
+    runner = _runner_with_channel()
+    bridge = ControlBridge(client, runner.control, asyncio.get_running_loop())
+    bridge.start()
+
+    made[0].deliver_control_event(
+        _make_event(
+            "STEER",
+            control_id="s-auth",
+            steer_note="pivot",
+            steer_author="alice",
+            steer_annotation_id="ann_xyz",
+        )
+    )
+
+    msg = await asyncio.wait_for(runner.control.receive(), timeout=1.0)
+    assert msg is not None
+    assert msg.payload["note"] == "pivot"
+    assert msg.payload["author"] == "alice"
+    assert msg.payload["annotation_id"] == "ann_xyz"
+
+    await bridge.stop()
+
+
+def test_validate_steer_body_unit() -> None:
+    """Unit test the validation helper directly."""
+    from harmonograf_client._control_bridge import (
+        STEER_BODY_MAX_BYTES,
+        _validate_steer_body,
+    )
+
+    assert _validate_steer_body("") == (False, "body empty")
+    assert _validate_steer_body("   ") == (False, "body empty")
+    assert _validate_steer_body("\t\n ") == (False, "body empty")
+    assert _validate_steer_body("ok") == (True, "")
+    too_long = "x" * (STEER_BODY_MAX_BYTES + 1)
+    ok, detail = _validate_steer_body(too_long)
+    assert ok is False
+    assert detail.startswith("body too long")
+    # Multibyte: 3-byte char × 3000 > 8192 bytes.
+    big_unicode = "☃" * 3000
+    ok, detail = _validate_steer_body(big_unicode)
+    assert ok is False
+    assert detail.startswith("body too long")
+
+
+def test_sanitise_steer_body_unit() -> None:
+    """Unit test the scrub helper directly."""
+    from harmonograf_client._control_bridge import _sanitise_steer_body
+
+    # Empty passes through.
+    assert _sanitise_steer_body("") == ""
+    # Bell, backspace, escape dropped; tab + newline kept.
+    assert _sanitise_steer_body("a\x07b\x08c\x1bd") == "abcd"
+    assert _sanitise_steer_body("a\tb\nc") == "a\tb\nc"
+    # \r dropped.
+    assert _sanitise_steer_body("a\r\nb") == "a\nb"
+    # Non-ASCII passes through unchanged.
+    assert _sanitise_steer_body("héllo☃") == "héllo☃"
+    # Printable ASCII unchanged.
+    assert _sanitise_steer_body("regular text!") == "regular text!"

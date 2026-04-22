@@ -316,8 +316,11 @@ async def test_post_annotation_steering_target_span_resolves_agent(harness, stub
     # Subscribe so steering has a path.
     sub = await router.subscribe("sess_stee", "a", "str-1")
 
+    captured: dict = {}
+
     async def ack_agent():
         event = await asyncio.wait_for(sub.queue.get(), timeout=1)
+        captured["event"] = event
         router.record_ack(
             gf_control_pb2.ControlAck(
                 control_id=event.id,
@@ -333,11 +336,19 @@ async def test_post_annotation_steering_target_span_resolves_agent(harness, stub
             target=types_pb2.AnnotationTarget(span_id="sp_sess_stee_0"),
             kind=types_pb2.ANNOTATION_KIND_STEERING,
             body="refocus",
+            author="alice",
             ack_timeout_ms=2000,
         )
     )
     await agent_task
     assert resp.delivery == gf_control_pb2.CONTROL_ACK_RESULT_SUCCESS
+    # goldfive#171: the author + annotation id travel on SteerPayload so
+    # goldfive can attribute the drift + dedupe delivery retries.
+    event = captured["event"]
+    assert event.steer.note == "refocus"
+    assert event.steer.author == "alice"
+    assert event.steer.annotation_id == resp.annotation.id
+    assert event.steer.annotation_id.startswith("ann_")
 
 
 async def test_post_annotation_requires_session_id(harness, stub):
