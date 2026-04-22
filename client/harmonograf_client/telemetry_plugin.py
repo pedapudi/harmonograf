@@ -124,6 +124,34 @@ def _serialize_args(args: Any) -> bytes | None:
 REASONING_INLINE_MAX_BYTES: int = 2048
 
 
+# The ``llm.reasoning_trail`` aggregate on an INVOCATION span concatenates
+# reasoning from every LLM_CALL child. We cap the inline version at 16 KiB
+# — the UI collapses anything longer into a payload_ref role="reasoning".
+# A coordinator that burned 100 LLM turns (e.g. a tight tool-loop) would
+# otherwise shove tens of KiB onto one span attribute, which inflates every
+# span-stream frame that carries the INVOCATION's SpanEnd.
+REASONING_TRAIL_INLINE_MAX_BYTES: int = 16 * 1024
+
+
+def _format_reasoning_trail(chunks: list[str]) -> str:
+    """Concatenate per-LLM-call reasoning fragments with clear separators.
+
+    Returns a single string suitable for the ``llm.reasoning_trail``
+    attribute on an INVOCATION span. Empty input returns ``""``. Each
+    chunk gets a ``[LLM call N]`` header so a reader scanning the
+    aggregate can tell where one model turn ends and the next begins;
+    separators make the trail scannable even when reasoning is
+    paragraph-dense. Callers pass only *non-empty* chunks — the plugin
+    filters empties before appending.
+    """
+    if not chunks:
+        return ""
+    parts: list[str] = []
+    for i, chunk in enumerate(chunks, start=1):
+        parts.append(f"[LLM call {i}]\n{chunk}")
+    return "\n\n---\n\n".join(parts)
+
+
 def _extract_reasoning(llm_response: Any) -> str:
     """Best-effort per-provider reasoning-content extraction.
 
@@ -342,6 +370,27 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         # negligible.
         self._agent_stash: dict[str, list[str]] = {}
         self._seen_agents: set[tuple[str, str]] = set()
+        # Reasoning aggregation for the INVOCATION span (harmonograf#108).
+        #
+        # Every LLM_CALL finalize inside an invocation appends its
+        # reasoning to ``_reasoning_trails[invocation_id]``. When the
+        # invocation's ``after_run_callback`` fires (or the on-cancel
+        # cleanup / on_run_end sweep runs), the buffered chunks are
+        # formatted into a single ``llm.reasoning_trail`` attribute and
+        # stamped onto the INVOCATION span's ``SpanEnd`` alongside
+        # ``has_reasoning=True`` and ``reasoning_call_count=N``.
+        #
+        # Why this matters: the Drawer opens on an INVOCATION span when
+        # a user clicks an agent row on the Gantt. Before the aggregate,
+        # reasoning only lived on LLM_CALL children so a click on
+        # ``coordinator_agent`` surfaced no reasoning at all — users had
+        # to hunt each LLM_CALL child separately. The aggregate lets the
+        # Drawer render the full agent-level chain-of-thought from the
+        # span the user actually selected.
+        #
+        # Cleared on ``after_run_callback`` / cancel / on_run_end so the
+        # buffer doesn't leak across concurrent or sequential runs.
+        self._reasoning_trails: dict[str, list[str]] = {}
         # Lookup: per_agent_id -> (adk_name, parent_agent_id, kind, branch)
         # so we can re-stamp metadata attributes on the first span after
         # an ``after_agent_callback`` clears the stash but a span from
@@ -541,6 +590,63 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         return merged
 
     # ------------------------------------------------------------------
+    # Reasoning-trail aggregation (harmonograf#108)
+    # ------------------------------------------------------------------
+
+    def _build_reasoning_trail_attrs(
+        self, invocation_id: str
+    ) -> tuple[dict[str, Any] | None, bytes | None, str, str]:
+        """Drain the per-invocation reasoning buffer into span attributes.
+
+        Returns ``(attributes, payload, payload_mime, payload_role)``
+        ready to merge into a ``client.emit_span_end`` call. Attributes
+        are ``None`` when no reasoning was captured during the
+        invocation (the hot path for short tool-call runs that never
+        surface chain-of-thought).
+
+        When the aggregated trail fits within
+        :data:`REASONING_TRAIL_INLINE_MAX_BYTES`, it rides inline as
+        ``llm.reasoning_trail`` so the Drawer renders on open without a
+        blob round-trip. Larger aggregates spill to a payload_ref with
+        ``role="reasoning"`` — the Drawer already handles this shape for
+        per-LLM_CALL reasoning, so no UI change is needed to surface
+        jumbo trails.
+
+        Always attaches ``has_reasoning=True`` and
+        ``reasoning_call_count=N`` so the Drawer's toggle renders with a
+        call count even when the trail itself is off-heap.
+
+        Invocation ids without buffered reasoning are popped and return
+        ``(None, None, ...)`` so the cleanup paths can call this
+        unconditionally.
+        """
+        chunks = self._reasoning_trails.pop(invocation_id, None)
+        if not chunks:
+            return None, None, "application/json", "output"
+        trail = _format_reasoning_trail(chunks)
+        if not trail:
+            return None, None, "application/json", "output"
+        attrs: dict[str, Any] = {
+            "has_reasoning": True,
+            "reasoning_call_count": len(chunks),
+        }
+        encoded = trail.encode("utf-8")
+        payload: bytes | None = None
+        payload_mime = "application/json"
+        payload_role = "output"
+        if len(encoded) <= REASONING_TRAIL_INLINE_MAX_BYTES:
+            attrs["llm.reasoning_trail"] = trail
+        else:
+            # Large trail: spill to a payload_ref. The Drawer's
+            # ReasoningSection already resolves payload_refs with
+            # role="reasoning" on open, so the wire shape matches the
+            # per-LLM_CALL fallback path already in place.
+            payload = encoded
+            payload_mime = "text/plain"
+            payload_role = "reasoning"
+        return attrs, payload, payload_mime, payload_role
+
+    # ------------------------------------------------------------------
     # Duplicate-install detection
     # ------------------------------------------------------------------
 
@@ -714,11 +820,33 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
                     exc_info=True,
                 )
 
-        # Close the run span itself.
+        # Close the run span itself. Stamp any buffered reasoning trail
+        # (harmonograf#108) so a user-cancelled invocation still shows
+        # whatever chain-of-thought the coordinator produced up to the
+        # cancel point — same Drawer surface as a normal completion.
         sid = self._invocation_spans.pop(invocation_id, None)
         if sid is not None:
+            trail_attrs, trail_payload, trail_mime, trail_role = (
+                self._build_reasoning_trail_attrs(invocation_id)
+            )
             try:
-                self._client.emit_span_end(sid, status=status)
+                if trail_attrs is None:
+                    self._client.emit_span_end(sid, status=status)
+                elif trail_payload is not None:
+                    self._client.emit_span_end(
+                        sid,
+                        status=status,
+                        attributes=trail_attrs,
+                        payload=trail_payload,
+                        payload_mime=trail_mime,
+                        payload_role=trail_role,
+                    )
+                else:
+                    self._client.emit_span_end(
+                        sid,
+                        status=status,
+                        attributes=trail_attrs,
+                    )
             except Exception:  # noqa: BLE001 — defensive
                 log.debug(
                     "telemetry_plugin: emit_span_end for run span %s raised",
@@ -814,13 +942,34 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         # Close every open INVOCATION span. We don't want to filter to
         # "just the root" — sub-Runner invocations keyed by their own
         # ids are exactly the spans that leak through ADK's callback gap.
+        # Stamp any buffered reasoning trail (harmonograf#108) on each —
+        # same rationale as the normal ``after_run_callback`` path.
         stale_inv_ids = list(self._invocation_spans.keys())
         for inv_key in stale_inv_ids:
             sid = self._invocation_spans.pop(inv_key, None)
             if sid is None:
                 continue
+            trail_attrs, trail_payload, trail_mime, trail_role = (
+                self._build_reasoning_trail_attrs(inv_key)
+            )
             try:
-                self._client.emit_span_end(sid, status=SpanStatus.COMPLETED)
+                if trail_attrs is None:
+                    self._client.emit_span_end(sid, status=SpanStatus.COMPLETED)
+                elif trail_payload is not None:
+                    self._client.emit_span_end(
+                        sid,
+                        status=SpanStatus.COMPLETED,
+                        attributes=trail_attrs,
+                        payload=trail_payload,
+                        payload_mime=trail_mime,
+                        payload_role=trail_role,
+                    )
+                else:
+                    self._client.emit_span_end(
+                        sid,
+                        status=SpanStatus.COMPLETED,
+                        attributes=trail_attrs,
+                    )
             except Exception:  # noqa: BLE001 — defensive: telemetry must not raise
                 log.debug(
                     "telemetry_plugin: on_run_end emit_span_end for "
@@ -862,6 +1011,15 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
                     sid,
                     exc_info=True,
                 )
+
+        # Drop any orphan reasoning-trail buffers. Normal path drained
+        # these via ``_build_reasoning_trail_attrs`` during the
+        # INVOCATION span_end above; anything left here came from an
+        # after_model_callback that fired without a matching
+        # before_run_callback (unit-test harnesses, partial ADK
+        # contexts). Clearing prevents cross-run bleed on long-lived
+        # plugin instances.
+        self._reasoning_trails.clear()
 
     # ------------------------------------------------------------------
     # Invocation lifecycle
@@ -962,7 +1120,35 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         )
         sid = self._invocation_spans.pop(key, None)
         if sid is not None:
-            self._client.emit_span_end(sid, status=SpanStatus.COMPLETED)
+            # Stamp the aggregated reasoning trail (harmonograf#108) on
+            # the INVOCATION span's SpanEnd so clicking an agent row in
+            # the Gantt surfaces the agent's full chain-of-thought. The
+            # trail attributes ride on the same frame as the status
+            # transition — one SpanEnd, no extra SpanUpdate needed.
+            trail_attrs, trail_payload, trail_mime, trail_role = (
+                self._build_reasoning_trail_attrs(inv_id) if inv_id else (None, None, "application/json", "output")
+            )
+            if trail_attrs is None:
+                self._client.emit_span_end(sid, status=SpanStatus.COMPLETED)
+            elif trail_payload is not None:
+                # Large aggregate: spill to a payload_ref with
+                # role="reasoning". The Drawer's ReasoningSection
+                # already handles this shape for per-LLM_CALL reasoning.
+                self._client.emit_span_end(
+                    sid,
+                    status=SpanStatus.COMPLETED,
+                    attributes=trail_attrs,
+                    payload=trail_payload,
+                    payload_mime=trail_mime,
+                    payload_role=trail_role,
+                )
+            else:
+                # Small aggregate: inline as llm.reasoning_trail attr.
+                self._client.emit_span_end(
+                    sid,
+                    status=SpanStatus.COMPLETED,
+                    attributes=trail_attrs,
+                )
 
         # Clear the cached root when the ROOT invocation ends so the
         # next adk-web invocation picks up its own root session id.
@@ -1161,6 +1347,22 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
                 payload = encoded
                 payload_mime = "text/plain"
                 payload_role = "reasoning"
+
+            # Append to the per-invocation aggregate (harmonograf#108).
+            # The INVOCATION span's SpanEnd will stamp the concatenated
+            # trail so a click on an agent row surfaces the agent's
+            # full chain-of-thought, not an empty section with reasoning
+            # hidden on LLM_CALL children. We append the full text
+            # regardless of inline-vs-payload_ref routing on the
+            # per-call span — the trail itself makes the same
+            # inline-or-spill decision at invocation close.
+            inv_id_for_trail = str(
+                _safe_attr(callback_context, "invocation_id", "") or ""
+            )
+            if inv_id_for_trail:
+                self._reasoning_trails.setdefault(inv_id_for_trail, []).append(
+                    reasoning
+                )
 
         self._client.emit_span_end(
             slot.span_id,

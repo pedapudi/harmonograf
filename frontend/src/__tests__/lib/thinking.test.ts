@@ -33,38 +33,37 @@ const str = (v: string): AttributeValue => ({ kind: 'string', value: v });
 const bool = (v: boolean): AttributeValue => ({ kind: 'bool', value: v });
 
 describe('extractThinkingText', () => {
-  it('prefers llm.thought over other carriers', () => {
+  it('prefers the INVOCATION reasoning_trail aggregate over a single LLM_CALL reasoning', () => {
     const s = span('s1', {
-      'llm.thought': str('primary'),
-      thinking_text: str('secondary'),
-      thinking_preview: str('preview'),
+      'llm.reasoning_trail': str('full agent trail'),
+      'llm.reasoning': str('single call'),
     });
-    expect(extractThinkingText(s)).toBe('primary');
+    expect(extractThinkingText(s)).toBe('full agent trail');
   });
 
-  it('falls back to thinking_text when llm.thought missing', () => {
-    const s = span('s1', { thinking_text: str('fallback') });
-    expect(extractThinkingText(s)).toBe('fallback');
+  it('falls back to llm.reasoning when no aggregate is present', () => {
+    const s = span('s1', { 'llm.reasoning': str('only-per-call') });
+    expect(extractThinkingText(s)).toBe('only-per-call');
   });
 
-  it('falls back to thinking_preview last', () => {
-    const s = span('s1', { thinking_preview: str('tail') });
-    expect(extractThinkingText(s)).toBe('tail');
-  });
-
-  it('returns null when no carrier present', () => {
+  it('returns null when no reasoning carrier is present', () => {
     expect(extractThinkingText(span('s1'))).toBeNull();
   });
 });
 
 describe('hasThinking', () => {
-  it('returns true when has_thinking=true even without text yet', () => {
-    const s = span('s1', { has_thinking: bool(true) });
+  it('returns true when has_reasoning=true even without inline text', () => {
+    const s = span('s1', { has_reasoning: bool(true) });
     expect(hasThinking(s)).toBe(true);
   });
 
-  it('returns true when any thinking text is present', () => {
-    const s = span('s1', { 'llm.thought': str('thinking') });
+  it('returns true when any reasoning text is present', () => {
+    const s = span('s1', { 'llm.reasoning': str('thinking') });
+    expect(hasThinking(s)).toBe(true);
+  });
+
+  it('returns true when the INVOCATION aggregate is present', () => {
+    const s = span('s1', { 'llm.reasoning_trail': str('agent trail') });
     expect(hasThinking(s)).toBe(true);
   });
 
@@ -104,15 +103,15 @@ describe('formatThinkingInline', () => {
 
 describe('collectThinkingEntries', () => {
   it('orders entries ascending by startMs', () => {
-    const s1 = { ...span('a', { 'llm.thought': str('one') }), startMs: 200 };
-    const s2 = { ...span('b', { 'llm.thought': str('two') }), startMs: 100 };
+    const s1 = { ...span('a', { 'llm.reasoning': str('one') }), startMs: 200 };
+    const s2 = { ...span('b', { 'llm.reasoning': str('two') }), startMs: 100 };
     const entries = collectThinkingEntries([s1, s2]);
     expect(entries.map((e) => e.spanId)).toEqual(['b', 'a']);
   });
 
   it('marks running spans as live', () => {
     const s = {
-      ...span('live', { 'llm.thought': str('thinking') }),
+      ...span('live', { 'llm.reasoning': str('thinking') }),
       endMs: null,
     };
     const entries = collectThinkingEntries([s]);
@@ -123,19 +122,26 @@ describe('collectThinkingEntries', () => {
     const s = span('no-think');
     expect(collectThinkingEntries([s])).toEqual([]);
   });
+
+  it('picks up the INVOCATION aggregate on INVOCATION spans', () => {
+    const s = span('inv', { 'llm.reasoning_trail': str('aggregate') });
+    const entries = collectThinkingEntries([s]);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].text).toBe('aggregate');
+  });
 });
 
 describe('collectThinkingForTask', () => {
   it('returns only entries whose hgraf.task_id attribute matches', () => {
     const inTask = span('in', {
-      'llm.thought': str('inside'),
+      'llm.reasoning': str('inside'),
       'hgraf.task_id': str('task-1'),
     });
     const outTask = span('out', {
-      'llm.thought': str('outside'),
+      'llm.reasoning': str('outside'),
       'hgraf.task_id': str('task-2'),
     });
-    const unbound = span('unbound', { 'llm.thought': str('nomatch') });
+    const unbound = span('unbound', { 'llm.reasoning': str('nomatch') });
     const entries = collectThinkingForTask([inTask, outTask, unbound], 'task-1');
     expect(entries).toHaveLength(1);
     expect(entries[0].spanId).toBe('in');

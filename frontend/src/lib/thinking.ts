@@ -1,25 +1,30 @@
-// Thinking/reasoning extraction helpers. The client library records model
-// reasoning tokens on LLM_CALL spans via a small zoo of attributes, depending
-// on which model backend is in play and how recent the capture path is:
+// Reasoning/thinking extraction helpers. The client library records model
+// chain-of-thought on two span kinds via a small set of attributes emitted
+// by ``HarmonografTelemetryPlugin``:
 //
-//   - ``llm.thought``       — full aggregate from HarmonografAgent's
-//                             _run_async_impl (handles ADK-style thought parts
-//                             and OpenAI-style reasoning_content blocks).
-//   - ``thinking_text``     — full text captured by the plugin on span end.
-//   - ``thinking_preview``  — first 300 chars (set as a fallback).
-//   - ``has_thinking``      — bool flag set as soon as any reasoning lands.
-//   - ``llm.reasoning``     — per-response reasoning_content / thinking-block
-//                             capture emitted by
-//                             ``HarmonografTelemetryPlugin.after_model_callback``.
-//                             Small reasoning rides as a string attribute;
-//                             large reasoning lives in a payload_ref with
-//                             ``role="reasoning"`` (rendered by the Drawer's
-//                             ReasoningSection, not this helper).
-//   - ``has_reasoning``     — bool flag for the Drawer's Reasoning toggle.
+//   - ``llm.reasoning``       — per-LLM_CALL reasoning captured on span end
+//                               by ``after_model_callback``. Small reasoning
+//                               rides as a string attribute; large reasoning
+//                               lives in a ``payload_ref`` with
+//                               ``role="reasoning"`` (rendered by the
+//                               Drawer's ReasoningSection, not this helper).
+//   - ``llm.reasoning_trail`` — per-INVOCATION aggregate stamped by the
+//                               plugin's ``after_run_callback``. Concatenates
+//                               every child LLM_CALL's reasoning with
+//                               ``[LLM call N]`` headers so clicking an
+//                               agent row in the Gantt surfaces the full
+//                               agent-level chain-of-thought without the
+//                               user having to dig into each child span.
+//                               See harmonograf#108.
+//   - ``has_reasoning``       — bool flag set alongside either attribute so
+//                               consumers can render a disclosure / badge
+//                               before the full text is decoded.
+//   - ``reasoning_call_count``— integer attached to the trail telling the
+//                               drawer how many LLM turns contributed.
 //
-// Every reader in the app (SpanPopover, Drawer, renderer, timeline, etc.)
-// routes through the functions here so that fallbacks are consistent and we
-// have one place to update when a new carrier appears.
+// Every reader in the app (SpanPopover, Drawer, timeline, LiveActivity)
+// routes through the functions here so that fallbacks are consistent and
+// we have one place to update when a new carrier appears.
 import type { AttributeValue, Span, SpanKind } from '../gantt/types';
 
 function attrString(attr: AttributeValue | undefined): string | null {
@@ -34,24 +39,25 @@ function attrBool(attr: AttributeValue | undefined): boolean {
   return false;
 }
 
-// Return the full thinking text attached to a span, or null if no reasoning
-// carrier is present. Priority order: llm.thought > thinking_text >
-// thinking_preview. The preview fallback is intentionally last so that when
-// the full text exists we never truncate it prematurely.
+// Return the reasoning text attached to a span, or null when no reasoning
+// carrier is present. Priority order: llm.reasoning_trail (INVOCATION
+// aggregate) > llm.reasoning (single LLM_CALL). The aggregate is preferred
+// so that selecting an agent's INVOCATION span surfaces the full trail
+// instead of just the first call's text.
 export function extractThinkingText(span: Span): string | null {
   const attrs = span.attributes;
   const full =
-    attrString(attrs['llm.thought']) ||
-    attrString(attrs['thinking_text']) ||
-    attrString(attrs['thinking_preview']);
+    attrString(attrs['llm.reasoning_trail']) ||
+    attrString(attrs['llm.reasoning']);
   return full && full.length > 0 ? full : null;
 }
 
-// True when the span carries reasoning — either an explicit has_thinking=true
-// flag (set the moment the first thought part arrives, even before text
-// accumulates) or any thinking-text attribute.
+// True when the span carries reasoning — either the has_reasoning flag
+// (set the moment any reasoning is captured) or any reasoning-text
+// attribute. Used by the Drawer / popover / live panel to decide whether
+// to render a reasoning section / badge.
 export function hasThinking(span: Span): boolean {
-  if (attrBool(span.attributes['has_thinking'])) return true;
+  if (attrBool(span.attributes['has_reasoning'])) return true;
   return extractThinkingText(span) !== null;
 }
 

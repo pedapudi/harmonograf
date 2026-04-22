@@ -328,16 +328,33 @@ function TaskSubtabButton({
 
 function TaskOverviewPanel({ span, sessionId }: { span: Span; sessionId: string | null }) {
   const taskReport = (span.attributes['task_report']?.kind === 'string' ? span.attributes['task_report'].value : undefined);
-  const llmThought = (span.attributes['llm.thought']?.kind === 'string' ? span.attributes['llm.thought'].value : undefined);
-  const thinkingText = (span.attributes['thinking_text']?.kind === 'string' ? span.attributes['thinking_text'].value : undefined);
-  const thinkingPreview = (span.attributes['thinking_preview']?.kind === 'string' ? span.attributes['thinking_preview'].value : undefined);
-  const hasThinking = span.attributes['has_thinking']?.kind === 'bool' && span.attributes['has_thinking'].value;
   const isRunning = span.endMs == null;
   const agentDesc = (span.attributes['agent_description']?.kind === 'string' ? span.attributes['agent_description'].value : undefined);
+  // Per-LLM_CALL reasoning inline carrier (set by
+  // ``after_model_callback`` finalize for small reasoning).
   const reasoningInline = (span.attributes['llm.reasoning']?.kind === 'string' ? span.attributes['llm.reasoning'].value : undefined);
+  // INVOCATION aggregate carrier (harmonograf#108). When the drawer opens
+  // on an agent row's INVOCATION span, this is the attribute that holds
+  // the concatenated chain-of-thought from every LLM_CALL child — the
+  // section was empty before the plugin started emitting this on
+  // after_run_callback.
+  const reasoningTrail = (span.attributes['llm.reasoning_trail']?.kind === 'string' ? span.attributes['llm.reasoning_trail'].value : undefined);
+  // Attribute rides as proto int64 → bigint on the wire. Narrow to number
+  // for the props; call counts in the hundreds-of-turns range fit easily
+  // inside a JS safe integer so Number() conversion is loss-less here.
+  const reasoningCallCountAttr = span.attributes['reasoning_call_count'];
+  const reasoningCallCount =
+    reasoningCallCountAttr?.kind === 'int'
+      ? Number(reasoningCallCountAttr.value)
+      : undefined;
   const hasReasoningAttr = span.attributes['has_reasoning']?.kind === 'bool' && span.attributes['has_reasoning'].value;
   const reasoningRef = (span.payloadRefs ?? []).find((r) => r.role === 'reasoning');
-  const showReasoning = Boolean(reasoningInline || reasoningRef || hasReasoningAttr);
+  const showReasoning = Boolean(reasoningInline || reasoningTrail || reasoningRef || hasReasoningAttr);
+  // The inline text to hand to <ReasoningSection /> — prefer the
+  // INVOCATION-level trail (agent-wide context) over a single LLM_CALL's
+  // reasoning. Both paths fall back to a payload_ref when the text is
+  // large enough to spill off the span attribute.
+  const reasoningInlineText = reasoningTrail ?? reasoningInline;
 
   return (
     <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -346,7 +363,7 @@ function TaskOverviewPanel({ span, sessionId }: { span: Span; sessionId: string 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#a8c8ff' }}>
           <span className="hg-transport__live-dot" style={{ display: 'inline-block' }} />
           <span>Running</span>
-          {hasThinking && <span style={{ marginLeft: 4 }}>· 💭 Thinking</span>}
+          {hasReasoningAttr && <span style={{ marginLeft: 4 }}>· 💭 Thinking</span>}
         </div>
       )}
 
@@ -360,35 +377,6 @@ function TaskOverviewPanel({ span, sessionId }: { span: Span; sessionId: string 
         </section>
       )}
 
-      {/* Model thinking — prefers HarmonografAgent's llm.thought aggregate
-          when present, falls back to the plugin's streaming thinking_text /
-          thinking_preview capture. Both paths put Gemini 2.5 reasoning
-          tokens in front of the user. */}
-      {(llmThought || thinkingText || thinkingPreview) && (
-        <section data-testid="drawer-model-thinking">
-          <div style={{ fontSize: 10, opacity: 0.6, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Model thinking {isRunning && hasThinking ? '(live)' : ''}
-          </div>
-          <div
-            style={{
-              fontSize: 11,
-              lineHeight: 1.6,
-              background: 'rgba(168,200,255,0.05)',
-              borderRadius: 6,
-              padding: '8px 10px',
-              fontFamily: "ui-monospace, 'SF Mono', Consolas, 'Liberation Mono', monospace",
-              color: 'rgba(226,226,233,0.85)',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              maxHeight: 300,
-              overflow: 'auto',
-            }}
-          >
-            {llmThought || thinkingText || thinkingPreview}
-          </div>
-        </section>
-      )}
-
       {/* Agent description */}
       {agentDesc && (
         <section>
@@ -398,17 +386,21 @@ function TaskOverviewPanel({ span, sessionId }: { span: Span; sessionId: string 
       )}
 
       {/* Reasoning — chain-of-thought captured by the telemetry plugin.
-          Small reasoning rides as the ``llm.reasoning`` span attribute;
-          large reasoning lives in a payload_ref (role="reasoning") and
-          is fetched on-demand. */}
+          INVOCATION spans carry the ``llm.reasoning_trail`` aggregate
+          stamped by ``after_run_callback`` (harmonograf#108); LLM_CALL
+          spans carry a per-call ``llm.reasoning``. Large reasoning in
+          either shape lives in a payload_ref (role="reasoning") and is
+          fetched on-demand. */}
       {showReasoning && (
         <ReasoningSection
-          inline={reasoningInline}
+          inline={reasoningInlineText}
           payloadRef={reasoningRef}
+          callCount={reasoningCallCount}
+          isAggregate={Boolean(reasoningTrail) || reasoningCallCount != null}
         />
       )}
 
-      {(!taskReport && !llmThought && !thinkingText && !thinkingPreview && !agentDesc && !showReasoning) && (
+      {(!taskReport && !agentDesc && !showReasoning) && (
         <div style={{ fontSize: 12, opacity: 0.5, textAlign: 'center', padding: '24px 0' }}>
           No task information available.
         </div>
@@ -426,18 +418,30 @@ function TaskOverviewPanel({ span, sessionId }: { span: Span; sessionId: string 
   );
 }
 
-// Reasoning section: surfaces `llm.reasoning` inline (small) or a
-// payload_ref with role="reasoning" (large, fetched on click). Collapsed
-// by default — reasoning traces can be long, and users usually only want
-// them when investigating a surprising decision.
+// Reasoning section: surfaces reasoning inline (small) or a payload_ref
+// with role="reasoning" (large, fetched on click). Collapsed by default —
+// reasoning traces can be long, and users usually only want them when
+// investigating a surprising decision.
+//
+// Carries two variants:
+//   * Per-LLM_CALL reasoning → ``llm.reasoning`` attribute. Short label
+//     "Reasoning" since a single call contributed.
+//   * Per-INVOCATION aggregate (harmonograf#108) → ``llm.reasoning_trail``
+//     attribute with ``reasoning_call_count`` sibling. Label widens to
+//     "Agent reasoning trail · N turns" so users know the text is the
+//     agent's full trajectory, not one snapshot.
 const REASONING_PREVIEW_CHARS = 5000;
 
 export function ReasoningSection({
   inline,
   payloadRef,
+  callCount,
+  isAggregate = false,
 }: {
   inline: string | undefined;
   payloadRef: PayloadRef | undefined;
+  callCount?: number;
+  isAggregate?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   // When the reasoning rides inline we don't need to fetch; when it comes
@@ -487,7 +491,23 @@ export function ReasoningSection({
         }}
       >
         <span style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.1s' }}>▸</span>
-        <span>Reasoning</span>
+        <span>{isAggregate ? 'Agent reasoning trail' : 'Reasoning'}</span>
+        {callCount != null && callCount > 0 && (
+          <span
+            data-testid="drawer-reasoning-call-count"
+            style={{
+              fontSize: 9,
+              opacity: 0.75,
+              padding: '1px 5px',
+              borderRadius: 8,
+              border: '1px solid currentColor',
+              textTransform: 'none',
+              letterSpacing: 0,
+            }}
+          >
+            {callCount} turn{callCount === 1 ? '' : 's'}
+          </span>
+        )}
         {payloadRef && !inline && (
           <span style={{ marginLeft: 'auto', fontSize: 9, opacity: 0.7 }}>
             {formatBytes(payloadRef.size)}
