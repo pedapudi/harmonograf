@@ -14,11 +14,19 @@ You are extending the wire format between client library, server, and frontend. 
 1. `make install` has been run at least once.
 2. Proto toolchain available: `grpcio-tools`, `mypy-protobuf` (`Makefile:proto-python`) and `frontend/buf.gen.yaml` + `@bufbuild/protoc-gen-es` (`Makefile:proto-ts`).
 3. You know which `.proto` file owns the message — see `proto/harmonograf/v1/`:
-   - `types.proto` — shared enums + core messages (Span, Task, TaskPlan, Agent, ContextWindowSample, etc.)
-   - `telemetry.proto` — client→server stream (Hello, SpanStart, SpanEnd, Heartbeat, etc.)
-   - `control.proto` — server→client control channel
-   - `frontend.proto` — server→frontend (SessionUpdate, NewSpan, TaskReport, etc.)
-   - `service.proto` — RPC definitions only
+   - `types.proto` — shared enums + core messages (`Span`, `Agent`, `Session`, `Annotation`, `Intervention`, `PayloadRef`). Task / Plan / Drift / Control moved to goldfive.
+   - `telemetry.proto` — client→server stream (`Hello`, `SpanStart`, `SpanEnd`, `Heartbeat`, `TelemetryUp.goldfive_event`).
+   - `control.proto` — `SubscribeControlRequest` (ControlEvent / Ack live in `goldfive/v1/`).
+   - `frontend.proto` — frontend RPCs (`SessionUpdate`, `NewSpan`, `TaskReport`, `ListInterventionsRequest`, `ContextWindowSample`, etc.)
+   - `service.proto` — RPC definitions only.
+
+Recent additions to know about when picking numbers:
+
+- `SubscribeControlRequest.session_id = 1` — per-session sub.
+- `SteerPayload.author`, `SteerPayload.annotation_id` — goldfive#171.
+- `DriftDetected.annotation_id` — goldfive#177.
+- `Heartbeat.context_window_tokens = 10`, `limit_tokens = 11`.
+- `TelemetryUp.goldfive_event = 11`; fields 9 + 10 reserved.
 
 ## Step-by-step
 

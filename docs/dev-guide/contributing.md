@@ -57,6 +57,10 @@ flowchart LR
 - **One logical change per commit.** If you can split it, split it.
 - **Reference issues** in the body, not the title: `Closes #42` or
   `Refs #123`.
+- **No Claude / AI co-author trailers.** Maintainers scrub them from
+  history, so don't add `Co-Authored-By: Claude …` to commits here
+  even when the commit was AI-assisted. If a tool adds one
+  automatically, amend it out before pushing.
 
 ## PR expectations
 

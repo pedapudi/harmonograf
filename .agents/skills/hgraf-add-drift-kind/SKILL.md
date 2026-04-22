@@ -1,122 +1,148 @@
 ---
 name: hgraf-add-drift-kind
-description: End-to-end checklist for introducing a new drift kind across client detection, throttling, frontend metadata, banner rendering, and regression tests.
+description: Add a new drift kind end-to-end. Goldfive owns the detector + enum; harmonograf reflects the kind through the intervention aggregator and the UI timeline.
 ---
 
 # hgraf-add-drift-kind
 
 ## When to use
 
-You are expanding the drift taxonomy that drives dynamic replanning. A new drift kind is warranted when there is a distinct *cause* the planner should see in its `refine()` prompt, distinct from all existing kinds in `client/harmonograf_client/adk.py:352-368`. Examples of valid new kinds: "tool took longer than predicted duration", "agent returned a disallowed mime type", "LLM emitted malformed function-call args that fell back to text". Examples of things that are **not** a new drift kind: a slight variation of an existing one (add a `detail` field instead), or a UI-only badge (add it in `driftKinds.ts` without touching the client).
+You're adding a new *cause* the planner should see as a distinct
+drift: a new tool-level detector, a new plan-coherence check, a new
+user-control surface. The drift kind is a wire-visible string that
+flows through goldfive into harmonograf and onto the intervention
+timeline.
 
-## Prerequisites
+Examples of valid new kinds: "agent called a tool with stale args"
+(new detector), "planner emitted a contradictory edge" (new validator
+drift), "external signal X" (user-control variant). Not a new kind:
+a slight variation of an existing detail (add a `detail` field to
+an existing drift instead).
 
-1. Read the existing taxonomy end to end:
-   - `client/harmonograf_client/adk.py:326-378` — `DriftReason` dataclass + all `DRIFT_KIND_*` constants + throttling constants.
-   - `frontend/src/gantt/driftKinds.ts:30-58` — `DRIFT_KIND_META` record (category, icon, severity, human label).
-   - `client/tests/test_drift_taxonomy.py` — the duck-typed unit tests that cover every kind.
-2. Skim [`docs/design/10-frontend-architecture.md`](../../../docs/design/10-frontend-architecture.md) and `AGENTS.md` → *Plan execution protocol* section to confirm the new kind fits the "callback-driven drift → refine → computePlanDiff → banner" pipeline.
+## Primary location: goldfive
 
-## Step-by-step
+Drift detection, the `DriftKind` enum, severity, and the classifier
+all live in [goldfive](https://github.com/pedapudi/goldfive). Follow
+goldfive's `how-to-add-a-drift-kind` guide first. The relevant
+goldfive touchpoints:
 
-### 1. Client: declare the kind constant
+- `proto/goldfive/v1/types.proto` — `DriftKind` enum.
+- `proto/goldfive/v1/events.proto` — `DriftDetected` event shape;
+  note `annotation_id` (#177) for user-control drifts.
+- `goldfive.detectors.*` — the detector classes. `ToolLoopTracker`
+  (#181/#186) for loops, the three-stage function_call gate (#178)
+  for PLAN_DIVERGENCE / CONFABULATION_RISK.
+- `goldfive.steerer` — user-control drift synthesis from incoming
+  STEER / CANCEL controls.
 
-Edit `client/harmonograf_client/adk.py`. Add a new constant alongside the existing `DRIFT_KIND_*` block (around line 352-368). Use the same naming shape — snake-case, no prefix, stable for wire compatibility:
+Goldfive is the source of truth. If you only add the enum on the
+goldfive side and ship, harmonograf will pick it up automatically
+via `goldfive_event.drift_detected` ingest. The UI renders unknown
+kinds generically; to make them first-class, continue with this
+skill.
 
-```python
-DRIFT_KIND_TASK_DURATION_EXCEEDED = "task_duration_exceeded"
-```
+## Harmonograf-side steps
 
-Decide **severity** (info | warn | error) and **recoverable** (True for most — only False when the planner cannot meaningfully refine, like hard tool failures). These live in the `DriftReason` instance you construct at the detection site, not on the constant.
+### 1. Server: intervention aggregator
 
-### 2. Client: add the detection path
+`server/harmonograf_server/interventions.py` derives interventions
+from annotations + drifts + plan revisions. Most of it is
+tree-agnostic — any kind name renders. The exceptions:
 
-There are three detection paths. Pick the one that matches the signal's origin:
+- `_USER_DRIFT_KINDS` — the set of lowercase drift kinds that flag
+  `source="user"` on the intervention row. If your new kind is a
+  *user-control* drift emitted by goldfive from a STEER-like
+  control, add its lowercase name here.
+- `_GOLDFIVE_REVISION_KINDS` — the set of lowercase *revision* kinds
+  (not drift kinds) that flag `source="goldfive"` autonomous
+  intervention. Add if relevant.
 
-- **Inside `detect_drift()`** (`adk.py:2917-3050`) — for drifts derived from span/event scanning. Append a new branch that appends `DriftReason(kind=DRIFT_KIND_..., detail=..., severity=..., recoverable=...)` to the returned list.
-- **Inside `after_model_callback()`** (`adk.py:1227-1276`) — for drifts the LLM expressed in prose (refusal, merge, split, reorder patterns).
-- **Inside `before_tool_callback()`** (`adk.py:1299-1316`) or a reporting-tool interceptor — for drifts raised by the agent via a reporting tool (e.g. `report_task_failed` → `task_failed_*`, `report_plan_divergence` → `plan_divergence`).
+### 2. Server: attribution window
 
-**Critical:** route every drift through the same exit point — the function that eventually calls `refine_plan_on_drift()` (`adk.py:3256-3350`). Do not call `planner.refine()` directly from your detection code; you will miss throttling and unrecoverable cascade logic.
+`_outcome_window_for(kind)` returns 300 s for user-control kinds
+(planner refine latency; #86) and 5 s for autonomous kinds. If your
+new kind can block on an LLM call in goldfive — like a STEER waits
+on the planner — route it through the user-control window path so
+its attribution doesn't strand.
 
-### 3. Client: respect throttling
+### 3. Frontend: deriver mirror
 
-`adk.py:373-378` defines:
-```python
-_STAMP_MISMATCH_THRESHOLD = 3
-_DRIFT_REFINE_THROTTLE_SECONDS = 2.0
-```
+`frontend/src/lib/interventions.ts` mirrors the server aggregator.
+Keep the two in lockstep:
 
-The refine loop coalesces repeated drifts within `_DRIFT_REFINE_THROTTLE_SECONDS`. If your new drift is noisy (fires many times per turn — e.g. repeated `failed_span` on retries), follow the `multiple_stamp_mismatches` pattern: count occurrences, only promote to a `DriftReason` once a threshold is crossed. Do **not** lower the global throttle; add a kind-local threshold constant next to `_STAMP_MISMATCH_THRESHOLD`.
+- `USER_DRIFT_KINDS` — must match `_USER_DRIFT_KINDS` on the server.
+- `GOLDFIVE_REVISION_KINDS` — must match `_GOLDFIVE_REVISION_KINDS`.
+- `outcomeWindowFor(driftKind)` — mirrors the server's
+  `_outcome_window_for`.
+- `normalizeDriftKind(raw)` — lowercase kind → display label. Only
+  the user-control kinds get pretty labels (`STEER`, `CANCEL`);
+  drift and goldfive kinds are upper-cased verbatim.
 
-### 4. Client: unit test in test_drift_taxonomy
+### 4. Frontend: intervention timeline glyph
 
-Add a test case to `client/tests/test_drift_taxonomy.py` following the existing pattern (duck-typed fakes; no real ADK import). The fixtures at the top of the file (`FakeClient`, `FakeFunctionCall`, `RecordingPlanner`, roughly lines 41-80) are reusable — construct whatever event sequence triggers your new kind, feed it through `detect_drift` (or the relevant callback), and assert:
-- The returned list contains exactly one `DriftReason` with your new `kind` string.
-- `severity` and `recoverable` match your design.
-- `detail` includes the span/event id that triggered it.
+`frontend/src/components/Interventions/InterventionsTimeline.tsx`'s
+`glyphFor(row)` picks marker shapes by source + kind. The default:
 
-Run:
-```bash
-cd client && uv run --with pytest --with pytest-asyncio python -m pytest tests/test_drift_taxonomy.py -q
-```
+- user → diamond / diamond-x
+- drift → circle or chevron (chevron when `outcome` is
+  `plan_revised:*`)
+- goldfive → square
 
-### 5. Client: end-to-end test in test_llm_agency_scenarios
+If your kind deserves a new glyph (rare — the source trichotomy is
+usually enough), extend the `Glyph` union and add a `<path>` branch
+to the `Marker` component.
 
-If the drift is LLM-agency-driven (callback path), add a second test to `client/tests/test_llm_agency_scenarios.py`. This file imports real `google.adk.Event` and `google.genai.types` payloads (see the skip guard at lines 29-37) and exercises `detect_drift → refine_plan_on_drift` through the real seam. Use the existing agency scenarios as templates.
+### 5. Tests
 
-### 6. Frontend: drift kind metadata
-
-Edit `frontend/src/gantt/driftKinds.ts:30-58`. Add an entry to the `DRIFT_KIND_META` record keyed by your `"task_duration_exceeded"` string (must match the client constant value exactly — this is the wire key):
-
-```ts
-task_duration_exceeded: {
-  label: "Task overran predicted duration",
-  category: "schedule",         // or: tool | plan | agency | user | system
-  icon: "clock-alert",          // MDI icon name, matches existing convention
-  severity: "warn",             // info | warn | error
-},
-```
-
-`parseRevisionReason()` at `driftKinds.ts:60-87` parses `"{kind}: {detail}"` format from `TaskPlan.revisionReason`, and `getDriftKindMeta()` at lines 89-92 does the lookup. Both will pick up your new entry automatically — no wiring required.
-
-### 7. Frontend: verify banner preview
-
-The `PlanRevisionBanner` component (`frontend/src/components/shell/PlanRevisionBanner.tsx`) reads from `TaskRegistry` revisions and renders using `getDriftKindMeta()`. After step 6, run:
-```bash
-cd frontend && pnpm lint && pnpm build
-```
-Then `make demo` and drive a scenario that actually emits the new drift. Visually confirm:
-- Banner shows your icon + label.
-- Banner category colour matches the rest of your category (see `driftKinds.ts` category → colour).
-- The diff drawer shows the added/removed/modified tasks that the planner returned in its `refine()` response.
-
-### 8. Plan diff integration (usually no-op)
-
-`computePlanDiff()` at `frontend/src/gantt/index.ts:129-181` is drift-kind-agnostic — it diffs task sets and edge sets. You do **not** need to touch it unless your drift kind changes the diff semantics (e.g. a "renamed task" drift that should match by semantic id not task id). That is a much larger change — open a design doc first.
+- `server/tests/test_interventions_aggregator.py` — add a case
+  covering the new kind's source classification, outcome attribution,
+  and dedup by annotation_id.
+- `frontend/src/__tests__/interventions.test.ts` — add the mirror
+  test for the client-side deriver.
+- If you extended `glyphFor`, add a render-snapshot test for the new
+  glyph.
 
 ## Verification
 
 ```bash
-# 1. client unit tests
-cd client && uv run --with pytest --with pytest-asyncio python -m pytest tests/test_drift_taxonomy.py tests/test_llm_agency_scenarios.py tests/test_invariants.py -q
+# Server unit
+cd server && uv run pytest tests/test_interventions_aggregator.py -q
 
-# 2. full client suite
-cd client && uv run --with pytest --with pytest-asyncio python -m pytest -q
+# Full server + client
+make test
 
-# 3. frontend type + lint
-cd frontend && pnpm lint && pnpm build
+# Frontend
+cd frontend && pnpm test -- --run intervention
 
-# 4. live smoke
+# Live smoke
 make demo
-# Drive a scenario that triggers the new drift; confirm banner renders.
+# Drive a scenario that emits the new drift; confirm marker renders
+# on the InterventionsTimeline strip with correct source + glyph.
 ```
 
 ## Common pitfalls
 
-- **Wire-key drift.** The client constant value (`"task_duration_exceeded"`) is the wire key. Changing it later breaks any persisted sqlite TaskPlan rows and any frontend that cached `DRIFT_KIND_META`. Pick a good name once.
-- **Forgetting throttling.** A new drift kind that fires on every span end will hammer the planner. `_DRIFT_REFINE_THROTTLE_SECONDS = 2.0` gives you coarse global protection but you still want per-kind thresholds for noisy signals.
-- **Routing around `refine_plan_on_drift`.** The function at `adk.py:3256-3350` applies the unrecoverable-cascade logic — if your drift is `recoverable=False` and you bypass it, child tasks stay RUNNING forever and the invariant checker (`client/harmonograf_client/invariants.py:78-100`) will complain on the next sweep.
-- **Skipping `driftKinds.ts`.** If you add the client constant but forget the frontend entry, `getDriftKindMeta()` returns `UNKNOWN_DRIFT_KIND_META` and the banner shows a generic icon. Lint will not catch this — it is a string lookup.
-- **Mutating state from detection code.** Detection returns `DriftReason` objects. Do not flip task status in `detect_drift()`. All state transitions go through `_set_task_status()` at `adk.py:242-280` — see `hgraf-safely-modify-adk-py`.
-- **Duplicate-constant naming collision.** If you pick a name already used in `DRIFT_KIND_META` (frontend) or `DRIFT_KIND_*` (client) but with different semantics, the type system will not catch it — the strings will silently merge. Grep both files first.
+- **Drift kind wire key drift.** The goldfive enum name (uppercased)
+  is the wire value. Lowercase-compare across tables. Don't change
+  it after ship — persisted sqlite `task_plans.revision_kind` rows
+  hold the string.
+- **Aggregator window mismatch.** Server and frontend both compute
+  attribution windows. If you add a user-control kind and only
+  update one side, the intervention dedup will be asymmetric and
+  produce bonus cards.
+- **annotation_id propagation.** User-control drifts must carry
+  `annotation_id` (goldfive#177) so the aggregator folds the drift
+  onto the source annotation. If a drift should be user-control but
+  doesn't surface its annotation id, the intervention timeline will
+  show duplicate cards.
+- **Routing through goldfive.** Don't add detectors to harmonograf.
+  Every drift path lives in goldfive post-migration.
+
+## Cross-links
+
+- `docs/user-guide/tasks-and-plans.md#drift-kinds` — user-facing
+  taxonomy; update when adding a new kind.
+- `docs/user-guide/trajectory-view.md` — how drifts surface on the
+  intervention timeline.
+- `docs/dev-guide/server.md#listinterventions-71` — aggregator
+  internals.

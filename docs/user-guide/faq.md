@@ -35,6 +35,27 @@ own `stream_id` from `Welcome`. This is the normal path when an agent
 forks worker processes that all share one identity. See
 [`docs/protocol/data-model.md`](../protocol/data-model.md) :: Agent.id.
 
+### Why does one `goldfive.wrap` run show N agent rows now?
+
+As of harmonograf#80, a single run drives a tree of ADK agents (a
+coordinator, its specialist sub-agents, AgentTool wrappers, workflow
+containers) and each renders on its own Gantt row with a derived id
+of the form `<client.agent_id>:<adk_agent_name>`. Old sessions
+recorded pre-#80 still collapse onto the client root — that's
+expected, they predate the fix. See
+[gantt-view.md → per-agent rows](gantt-view.md#per-agent-rows-80).
+
+### Why is there only one session per run now? (No more ghost sessions?)
+
+Lazy Hello (#84 / #85) deferred the `Hello` RPC until the client's
+first emitted envelope. Importing `harmonograf_client` in a launcher
+or interactive notebook no longer mints an empty session; the picker
+only shows sessions that actually had activity.
+
+One session per end-to-end `goldfive.wrap` call is now the contract —
+AgentTool sub-Runners inside the run land on the same session id as
+the root via the plugin's root-session rollup. Expected; not a bug.
+
 ### Why does my session say `0 agents`?
 
 The session was created (typically via a stale `ListSessions` row) but no
@@ -90,8 +111,9 @@ revision shows its drift kind, category, and a detailed diff. The
 [PlanRevisionBanner](tasks-and-plans.md#planrevisionbanner) you just
 saw is the transient version of the same data.
 
-Common drift kinds: `tool_error`, `new_work_discovered`,
-`context_pressure`, `user_steer`, `llm_refused`. See
+Common drift kinds: `TOOL_ERROR`, `USER_STEER`, `PLAN_DIVERGENCE`,
+`CONFABULATION_RISK`, `LOOPING_REASONING`, `AGENT_REFUSAL`,
+`HUMAN_INTERVENTION_REQUIRED`, `GOAL_DRIFT`. See
 [tasks-and-plans.md → drift kinds](tasks-and-plans.md#drift-kinds) for the
 complete table.
 
@@ -159,33 +181,60 @@ off for LLM_CALL spans.
 The Gantt renders a per-agent context-window overlay at the bottom of
 each agent row — see
 [gantt-view.md → context window overlay](gantt-view.md#context-window-overlay).
-The ratio also lands on the per-agent header chip for an at-a-glance read.
-For programmatic detection, the `context_pressure` drift kind fires when
-the planner sees the LLM hit `MAX_TOKENS` or `LENGTH` as its `finish_reason`
-and stamps the active
-INVOCATION and fires a `context_pressure` revision. Look for the `⚡
-Context limit` pill and revision row.
+The ratio also lands on the per-agent header chip for an at-a-glance
+read. For programmatic detection, goldfive's per-LLM-call metrics
+(goldfive#172) expose `goldfive.llm.request.chars` and
+`goldfive.llm.usage.*_tokens` — watch those approach `limit_tokens`.
 
-See [`docs/protocol/data-model.md`](../protocol/data-model.md) :: Span.attributes for the
-`finish_reason` key.
+See [runbooks/context-window-exceeded.md](../../runbooks/context-window-exceeded.md)
+for the full diagnosis flow.
 
-## Orchestration modes
+## Interventions
 
-### What are `SEQ`, `PAR`, and `OBS`?
+### Why does a single STEER show up as one card, not three?
 
-The three executor modes exposed by
-[goldfive](https://github.com/pedapudi/goldfive), rendered as chips on
-the current task strip and described in
-[tasks-and-plans.md → orchestration modes](tasks-and-plans.md#orchestration-modes):
+The intervention aggregator (server `interventions.py` + frontend
+`lib/interventions.ts`) deduplicates by `annotation_id`. A user STEER
+emits three wire events — the annotation itself, a `USER_STEER` drift
+goldfive mints from it, and a `PlanRevised` that follows once the
+planner refines — and the aggregator collapses all three onto the
+annotation row. See
+[trajectory-view.md → intervention cards dedup by annotation_id](trajectory-view.md#intervention-cards-dedup-by-annotation_id).
 
-- **`SEQ`** — `goldfive.SequentialExecutor`. Single-pass coordinator LLM
-  runs the whole plan; per-task lifecycle reported via reporting tools.
-- **`PAR`** — `goldfive.ParallelDAGExecutor`. A DAG batch walker drives
-  sub-agents directly, respecting plan edges as dependencies.
-- **`OBS`** — Delegated / observer mode. Inner agent owns its own task
-  sequencing; goldfive and harmonograf watch for drift.
+### Why does my STEER take 30-70 seconds to "apply"?
 
-Which mode a session is in is fixed at `Runner` construction time, not
+The steer is acknowledged by the agent within milliseconds; what
+takes 30-70 s is the *planner's refine call*. Goldfive's steerer
+observes the USER_STEER drift, calls its planner LLM with the full
+task state + the steer body, and emits `PlanRevised` only when the
+LLM returns. A local Qwen3.5-35B routinely takes 20-60 s for this.
+
+The intervention card's outcome chip flips from `pending` to
+`→ rev N` as soon as the revision lands, which can be a minute or two
+later. See
+[control-actions.md → why STEER sometimes takes 30-70 seconds to apply](control-actions.md#why-steer-sometimes-takes-30-70-seconds-to-apply).
+
+### Why does a completed session's Gantt open past the last span?
+
+Known UX rough edge tracked as harmonograf#89: the viewport opens to
+a window past the final span on completed sessions, and the LIVE
+badge may briefly show. Press **F** to fit the whole session, or drag
+the minimap to the spans region. A real fix is in flight.
+
+## Orchestration
+
+### What are the orchestration modes under the hood?
+
+Goldfive exposes three executor modes (`SequentialExecutor`,
+`ParallelDAGExecutor`, delegated/observer). Harmonograf renders them
+as chips on the current task strip. With the overlay refactor
+(goldfive#141-144) the per-task driving was replaced with an
+observation-driven overlay: tasks are driven by agent activity rather
+than pulled off a queue, and unassigned tasks transition from
+`PENDING → NOT_NEEDED` when the invocation ends. See
+[tasks-and-plans.md](tasks-and-plans.md).
+
+Which mode a session is in is fixed at `goldfive.wrap` call time, not
 toggleable from the UI.
 
 ### How do sub-agents know which task they are on in parallel mode?

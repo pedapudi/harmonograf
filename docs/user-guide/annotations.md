@@ -111,13 +111,40 @@ Once posted, annotations are visible in these places:
   of every annotation, sorted by time. Useful for a post-hoc walk-through
   of what was said where.
 
-## Who wrote what
+## Body constraints (#72)
+
+STEERING and HUMAN_RESPONSE annotations have a few practical limits
+enforced by the client-side bridge between harmonograf control
+delivery and goldfive:
+
+- **Empty bodies are rejected.** Whitespace-only bodies don't count.
+- **Bodies larger than 8 KiB are rejected.** The limit
+  (`STEER_BODY_MAX_BYTES = 8192`) protects the LLM context and the
+  wire from pathological payloads. If you need to pass more context,
+  attach a tool call or use a link inside the body.
+- **ASCII control characters are stripped** before the body reaches
+  the LLM, so attempts to smuggle escape sequences into a prompt via
+  the steer body are neutralised. Tabs and newlines are kept.
+
+Invalid bodies surface a rejection in the frontend and never reach the
+agent.
+
+## Who wrote what (#72)
 
 Each annotation stores an `author` field. The default author is `user`,
-set client-side when you post from the frontend. A deployment that
-authenticates multiple operators can override the author string
-server-side; the current release has no user-identity system in the
-frontend itself.
+set client-side when you post from the frontend. The author is
+propagated end-to-end:
+
+1. The UI posts the annotation via `PostAnnotation` with `author` set.
+2. The server synthesises a STEER `ControlEvent` and copies
+   `author` onto `event.steer.author` (goldfive#171), along with the
+   stored annotation's id on `event.steer.annotation_id`.
+3. Goldfive's steerer attributes the resulting drift back to that
+   author so the intervention history shows "who asked for this".
+
+A deployment that authenticates multiple operators can override the
+author string at the UI edge; the current release has no user-identity
+system in the frontend itself.
 
 ## Deleting / editing
 

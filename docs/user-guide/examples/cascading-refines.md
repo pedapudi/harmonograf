@@ -1,23 +1,21 @@
 # Scenario: long-running plan with multiple refines and drift cascades
 
-A large plan (twelve tasks) running over ~30 minutes. Four drift events
-fire, each producing a plan revision. The second drift discovers new
-work, the third hits a context pressure wall, the fourth is an operator
-steer. This scenario is about **reading the cascade** without losing the
-thread of what happened.
+A plan (twelve tasks) running over ~35 minutes on a local Qwen3.5-35B.
+Four drift events fire, each producing a plan revision after the
+planner's refine LLM returns. This scenario is about **reading the
+cascade** without losing the thread of what happened.
 
 Four drifts hit one long session, each producing a plan revision. Use this as a map for the timeline below.
 
 ```mermaid
 timeline
-    title Cascading refines over ~35 minutes
+    title Cascading refines over ~35 minutes (Qwen3.5-35B)
     t=0 : session picked : 12 tasks pending
-    t=4m : llm_refused (red) : +1 ~1 reframe
-    t=8m : new_work_discovered (green) : +2
-    t=16m : context_pressure (grey-blue) : split draft
-    t=27m : user_steer (blue) : operator redirect
+    t=4m : AGENT_REFUSAL (red) : +1 ~1 reframe
+    t=8m : TOOL_ERROR (red) : +2 retry tasks
+    t=16m : PLAN_DIVERGENCE (amber) : cross-layer tool call
+    t=22m-32m : USER_STEER (purple) : operator redirect · planner refine takes 9-10 min
     t=35m : COMPLETED
-```
 
 ## Set-up
 
@@ -35,50 +33,46 @@ Normal `SEQ` start. Current task strip reads
 `Currently: Outline · RUNNING · SEQ · writer-coordinator`. Task panel
 shows twelve rows, one RUNNING.
 
-### t=4 min — first drift: `llm_refused`
+### t=4 min — first drift: `AGENT_REFUSAL`
 
-The drafter calls an LLM that flat-out refuses the request (safety
-filter). The client catches this in `after_model_callback` and stamps
-`drift_kind = "llm_refused"` on the active INVOCATION. The planner
+The drafter's LLM refuses the request outright (safety filter). The
+goldfive drift detector catches the refusal, emits a
+`DriftDetected(kind=AGENT_REFUSAL, severity=critical)` event, and the
+planner refines.
+
+Intervention timeline strip marker: red critical ring around a chevron
+glyph. Popover:
+
+- Source: `drift`, kind `AGENT_REFUSAL`.
+- Body: `drafter refused: safety filter`.
+- Outcome: `→ rev 1` once the planner returns (typically 30-60 s on
+  Qwen3.5-35B).
+- Plan diff: `+1 ~1`. New `Reframe section 3` task plus a modified
+  `Draft section 3` description.
+
+### t=8 min — second drift: `TOOL_ERROR`
+
+The fact-checker calls a lookup tool that times out. Goldfive sees the
+tool-error span on its `after_tool_callback` and emits
+`DriftDetected(kind=TOOL_ERROR, severity=warning)`.
+
+Strip marker: amber dashed-ring circle.
+
+- Body: `lookup(dates) failed: timeout`.
+- Outcome: `→ rev 2`. The planner adds two retry tasks with different
+  tool arguments.
+
+### t=16 min — third drift: `PLAN_DIVERGENCE`
+
+The drafter tries to call the fact-checker's tool directly (wrong
+layer of the plan — the three-stage gate from goldfive#178). Goldfive
+fires `DriftDetected(kind=PLAN_DIVERGENCE, severity=warning)` and
 refines.
 
-UI:
+Strip marker: amber chevron.
 
-- Pill: red `🚫 Refused` with detail `LLM refused to draft section 3:
-  safety filter`. Diff counts `+1 ~1`.
-- Revision adds a `Reframe section 3` task, modifies the original
-  `Draft section 3` description to carry the refusal note.
-- Task panel grows by one row.
-
-### t=8 min — second drift: `new_work_discovered`
-
-The fact-checker finds two dates that need additional primary sources
-and calls `report_new_work_discovered` (see
-[`docs/reporting-tools.md`](../../reporting-tools.md)). The planner accepts and splits the
-check-sources work into two new tasks.
-
-UI:
-
-- Pill: green `✨ New work` with detail `discovered: 2 dates need
-  primary sources`. Diff counts `+2 ~0`.
-- Drawer → Task → Plan revisions now shows two entries. The banner
-  pill stack may have already popped the first off.
-
-### t=16 min — third drift: `context_pressure`
-
-The drafter's LLM context is filling up as the draft grows. The model
-returns with `finish_reason = "MAX_TOKENS"`. The harmonograf client
-stamps `drift_kind = "context_pressure"` on the INVOCATION and fires a
-refine that splits the long draft task into two shorter drafts.
-
-UI:
-
-- Pill: grey-blue `⚡ Context limit`.
-- Plan diff: `+1 ~1`. The splitter inserts a new task, shrinks the
-  original. Modified chip shows `Draft part 2 of 2`.
-- This is the in-this-release path for noticing context pressure until
-  the context window overlay task lands. See
-  [gantt-view.md → context window overlay](../gantt-view.md#context-window-overlay-in-this-release).
+- Body: `drafter called cross-layer tool check_source`.
+- Outcome: `→ rev 3`.
 
 ### t=20 min — drafter goes quiet
 
@@ -96,23 +90,30 @@ You might annotate the drafter span with a `COMMENT`:
 `"waiting on cross-agent, not hung"` (drawer → Annotations tab,
 [annotations.md → drawer annotations tab](../annotations.md#drawer--annotations-tab)).
 
-### t=22 min — fourth drift: `user_steer`
+### t=22 min — fourth drift: `USER_STEER` (the slow one)
 
 You decide the draft is going too long and push a steer. Hover the
 drafter's active INVOCATION on the Gantt, click **Steer** in the
-popover, pick **+ Add to queue** (you don't want to interrupt the
-current turn), type `"Cut section 4 to two paragraphs."`, `⌘↵`.
+popover, type `"Cut section 4 to two paragraphs."`, `⌘↵`.
 
-UI:
+The UI acks in ~1 second:
 
-- The popover closes.
-- Within a few seconds, the drafter's next LLM_CALL bar opens and
-  carries your steer text in its prompt payload (verify with the
-  [Payload tab](../drawer.md#payload-tab) → Load full payload).
-- Pill: blue `👆 User steered` with detail `Cut section 4 to two
-  paragraphs`. Diff counts `+0 ~1`.
+- The annotation lands on the strip as a purple diamond marker.
+- The agent's next LLM_CALL picks up the STEER body on its next turn.
 
-![TODO: screenshot of the PlanRevisionBanner with a User steered pill](_screenshots/example-cascade-steer.png)
+Then the slow path:
+
+- The planner observes the drift and calls its refine LLM with the
+  full task state + steer body.
+- On Qwen3.5-35B this refine routinely takes **9-10 minutes** on a
+  long-context task list. The intervention card's outcome chip stays
+  at `pending` the entire time.
+- Finally the planner returns a revised plan. The strip marker's
+  outcome chip flips to `→ rev 4`, and the drift + plan_revised
+  events fold into the annotation card via the 5-minute attribution
+  window (harmonograf#86 / the extended `_USER_OUTCOME_WINDOW_S`).
+
+Plan diff: `+0 ~1`. Section 4 task gets its description trimmed.
 
 ### t=34 min — plan completes
 
@@ -149,29 +150,19 @@ Reading order:
 
 ## Log lines / attributes
 
-Four `drift_kind` values appear on their respective INVOCATIONs:
-`llm_refused`, `new_work_discovered`, `context_pressure`, `user_steer`.
-Each `TaskPlan` revision carries matching `revision_kind` and
-`revision_severity`.
+Four `DriftDetected` events land in goldfive's event stream:
+`AGENT_REFUSAL`, `TOOL_ERROR`, `PLAN_DIVERGENCE`, `USER_STEER`. Each
+`TaskPlan` revision carries the matching `revision_kind` and
+`revision_severity`, and the intervention aggregator surfaces them as
+four cards on the strip.
 
-On the drafter's pre-split INVOCATION (just before `context_pressure`):
+The slow STEER can be spotted by reading `goldfive.llm.duration_ms`
+off the planner's LLM_CALL span that followed the STEER — expect
+300000+ (5+ minutes) on Qwen3.5-35B for a heavy plan refine.
 
-```
-finish_reason = "MAX_TOKENS"
-drift_kind    = "context_pressure"
-drift_detail  = "MAX_TOKENS at section 5"
-```
-
-On any LLM_CALL following the `user_steer`:
-
-```
-hgraf.task_id = "draft-4"
-steer.merged  = "Cut section 4 to two paragraphs."
-```
-
-Server-side logs show a `refine` call for each drift; the frontend
-does not drive refines — see
-[tasks-and-plans.md → plan revisions](../tasks-and-plans.md#plan-revisions--live-replans).
+If the STEER card's outcome chip is stuck at `pending` for more than
+a few minutes, the planner may be wedged — see
+[runbooks/high-latency-callbacks.md](../../../runbooks/high-latency-callbacks.md).
 
 ## Patterns to notice
 

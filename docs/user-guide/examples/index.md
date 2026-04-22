@@ -13,20 +13,22 @@ If you want runnable code examples, see the test suites under
 ## Scenarios
 
 1. [Single-agent research assistant with a tool error](research-tool-error.md) —
-   one agent, a search tool that fails, a `tool_error` drift kind firing a
+   one agent, a search tool that fails, a `TOOL_ERROR` drift firing a
    refine, and the replanned run.
 2. [Multi-agent team with escalation to human review](escalation.md) —
    coordinator plus two specialists; a specialist escalates to a human
    decision via `WAIT_FOR_HUMAN`; operator approves from the drawer.
 3. [Parallel map-reduce over a task plan](parallel-map-reduce.md) —
    parallel orchestration walking a DAG of independent tasks; how the
-   walker forces `task_id` and how the Gantt visualizes fan-out.
+   Gantt visualizes fan-out with one row per ADK agent (#80).
 4. [Delegated handoff with drift detection](delegated-handoff.md) —
    specialist agents hand off via AgentTool; drift detection fires on an
-   unexpected transfer.
+   unexpected transfer (now surfaces as `PLAN_DIVERGENCE` or
+   `CONFABULATION_RISK` from the three-stage gate in goldfive#178).
 5. [Long-running plan with cascading refines](cascading-refines.md) — a
-   plan that replans several times over tens of minutes; how to read the
-   cascade without getting lost in the revision history.
+   plan that replans several times over ~35 minutes on Qwen3.5-35B;
+   how to read the cascade (including a 9-10 min STEER refine) without
+   losing thread.
 
 ## How to read these
 

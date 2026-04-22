@@ -3,6 +3,19 @@
 The agent process is running but never appears in the session picker,
 or appears as "0 agents" and stays that way.
 
+## Lazy Hello is a real thing now (#84 / #85)
+
+As of 2026-04, constructing a `Client` does NOT open a stream — the
+transport waits for the first envelope on the ring buffer before
+sending `Hello`. If the agent imported `harmonograf_client` and even
+built a `Client(...)` but never emitted a span, there is nothing to
+register with the server.
+
+Quick test: if the agent process is alive but has never exercised an
+ADK callback or called `client.emit_span_start(...)` directly, the
+server will never see it. Send the agent a turn, or bypass lazy Hello
+by emitting a synthetic span during startup.
+
 **Triage decision tree** — symptom → check → most-likely cause → fix path.
 Walk top-to-bottom; the candidates are ordered by frequency.
 

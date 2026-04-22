@@ -59,9 +59,24 @@ Verify `git status` shows updated `*_pb2.py`, `*_pb2.pyi`, and `frontend/src/pb/
 
 Control dispatch in the client lives in `client/harmonograf_client/transport.py:649 _dispatch_control`. It resolves the enum name via `_control_kind_name` (`transport.py:700`) which strips the `CONTROL_KIND_` prefix — so your new kind dispatches under the key `"RETRY_LAST_TOOL"`.
 
-Handlers are registered via `HarmonografClient.register_control_handler(kind, cb)` — see `client/harmonograf_client/client.py:204` and the `on_control("STATUS_QUERY", ...)` precedent in `client/harmonograf_client/adk.py:1558`. The callback receives the `ControlEvent` and returns an optional `ControlAckSpec(result="success"|"failure"|"unsupported", detail="...")`.
+Handlers are registered via `Client.on_control(kind, cb)` — see
+`client/harmonograf_client/client.py :: on_control`. The callback
+receives a `ControlEvent` and returns an optional
+`ControlAckSpec(result="success"|"failure"|"unsupported", detail="...")`.
 
-For the ADK plugin, wire a default handler inside `make_adk_plugin` — follow the `_handle_status_query` template in `adk.py:1471`:
+For STEER / CANCEL / PAUSE-like kinds, goldfive's control bridge
+(`client/harmonograf_client/_control_bridge.py`) takes over via
+`Client.set_control_forward(...)` and handles dispatch through to
+goldfive's steerer. When adding a new user-control kind, make sure:
+
+- The server's `PostAnnotation` fan-out (rpc/frontend.py) propagates
+  the annotation's `author` and `id` onto the control event — STEER
+  does this via `event.steer.author` / `event.steer.annotation_id`
+  (goldfive#171).
+- Goldfive emits a matching drift kind so the intervention
+  aggregator surfaces it on the timeline. See `hgraf-add-drift-kind`.
+
+Example callback body (for non-STEER/CANCEL kinds handled directly):
 
 ```python
 def _handle_retry_last_tool(event):

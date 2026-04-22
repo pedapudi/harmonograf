@@ -43,10 +43,13 @@ The server is built by `Harmonograf.from_config()` at
 `server/harmonograf_server/main.py:74`. It runs two listeners
 concurrently (`main.py:107-183`):
 
-| Listener | Default port | Transport | Audience |
-|---|---|---|---|
-| native gRPC | `cfg.grpc_port` = `7531` | grpc.aio | Agent clients (Python) |
-| gRPC-Web + health | `cfg.web_port` = `7532` | hypercorn + sonora | Browsers, health probes |
+| Listener | Default port | Env | Transport | Audience |
+|---|---|---|---|---|
+| native gRPC | `7531` | `SERVER_PORT`, `HARMONOGRAF_SERVER` | grpc.aio | Agent clients (Python) |
+| gRPC-Web + health | `5174` | `FRONTEND_PORT` | hypercorn + sonora | Browsers, health probes |
+
+The Vite dev server (`pnpm dev`) listens on `5173` and talks to the
+gRPC-Web listener on `5174` — do not confuse the two.
 
 Both listeners share the same `TelemetryServicer` instance, so
 sessions are visible from either side. The port numbers are

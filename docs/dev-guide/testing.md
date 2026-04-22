@@ -47,30 +47,34 @@ flowchart TB
 
 ```bash
 # Python, one file
-cd client && uv run pytest tests/test_orchestration_modes.py -q
+cd client && uv run pytest tests/test_telemetry_plugin.py -q
 
 # Python, one test
-cd client && uv run pytest tests/test_orchestration_modes.py::test_parallel_mode_walker -q
+cd client && uv run pytest tests/test_telemetry_plugin_per_agent.py::test_per_agent_stamping -q
 
 # Python, match by substring
-cd client && uv run pytest -k "parallel_mode" -q
+cd client && uv run pytest -k "per_agent" -q
 
 # Frontend, one file
-cd frontend && pnpm test -- src/__tests__/computePlanDiff.test.ts
+cd frontend && pnpm test -- src/__tests__/interventions.test.ts
 ```
 
 ## Writing client-side unit tests
 
-Use `client/tests/test_orchestration_modes.py` as your reference. It shows:
+Use `client/tests/test_telemetry_plugin.py` and its siblings
+(`_cancel`, `_dedup`, `_per_agent`, `_session_id`) as reference.
+They show:
 
 - How to skip if `google-adk` isn't installed (`pytest.importorskip` at the
   top of the file).
-- The `FakeClient` pattern: duck-type the `Client` interface instead of
-  mocking the transport. Lets you assert exactly which envelopes would be
-  emitted without spinning up a gRPC server.
-- The scripted `FakeLlm` pattern: pre-bake a queue of `LlmResponse`s so
-  each model call returns a deterministic response. Crucial for testing
-  the callback dispatch path without real LLM nondeterminism.
+- The `FakeClient` pattern (in `_fixtures.py`): duck-type the
+  `Client` interface instead of mocking the transport. Lets you
+  assert exactly which envelopes would be emitted without spinning
+  up a gRPC server.
+- The scripted `FakeLlm` pattern: pre-bake a queue of `LlmResponse`s
+  so each model call returns a deterministic response. Crucial for
+  testing the callback dispatch path without real LLM
+  nondeterminism.
 
 ### Fake LLM
 
@@ -230,24 +234,27 @@ goldfive test suite is the place to add new plan-state checks.
 | Storage schema in `sqlite.py` | Server unit against `SqliteStore` | Only sqlite-specific behavior. |
 | `computePlanDiff` or `SessionStore` | Frontend vitest unit | Pure TS. |
 | A new RPC on the wire | Server unit via servicer + frontend mock | Both sides of the contract matter. |
-| Plan state machine | Integration (real ADK + scripted LLM) + invariant checker | Multiple channels to test. |
-| Drift taxonomy | `test_drift_taxonomy.py` unit | Table-driven. |
+| Plan state machine | Goldfive's tests; harmonograf no longer owns it | Plans / drift live in goldfive post-migration. |
+| Intervention aggregator | `server/tests/test_interventions*.py` + `frontend/src/__tests__/interventions.test.ts` | Mirror test — both sides need to agree. |
 | UI render | vitest component test (if no canvas) or Playwright (if canvas) | — |
 | Full pipeline regression | e2e scenario | Last-resort safety net. |
 
 ## Performance tests
 
-Two perf tools exist:
+One perf tool ships:
 
-1. **`client/tests/test_callback_perf.py`** — asserts that the ADK
-   callback hot path stays below a per-callback time budget. If this test
-   gets slower, the cost-to-observe ratio is slipping.
-2. **`server/harmonograf_server/stress.py`** — synthetic load generator.
+1. **`server/harmonograf_server/stress.py`** — synthetic load generator.
    Run manually:
    ```bash
    cd server && uv run python -m harmonograf_server.stress --agents 10 --spans-per-sec 100
    ```
    Not wired into CI.
+
+For callback-level profiling use `py-spy`; see
+[`performance-tuning.md`](performance-tuning.md) and
+[`runbooks/high-latency-callbacks.md`](../runbooks/high-latency-callbacks.md).
+The per-LLM-call metrics (`goldfive.llm.duration_ms` + friends from
+goldfive#172) are the primary latency telemetry.
 
 ## How a pytest invocation reaches CI
 

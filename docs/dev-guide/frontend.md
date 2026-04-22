@@ -31,13 +31,21 @@ frontend/src/
 │   ├── hooks.ts              #   React hooks wrapping each RPC
 │   ├── convert.ts            #   proto ↔ frontend types
 ├── state/
-│   └── uiStore.ts            # Zustand store for UI state (selection, drawer, viewport)
+│   ├── uiStore.ts            # Zustand store for UI state (selection, drawer, viewport)
+│   ├── sessionsStore.ts      # Zustand store for session list / picker state
+│   ├── annotationStore.ts    # Zustand store for annotations (synced from WatchSession)
+│   ├── approvalsStore.ts     # Zustand store for pending human-response approvals
+│   └── popoverStore.ts       # Zustand store for popover position/visibility
 ├── lib/
-│   └── shortcuts.ts          # Keyboard shortcuts
+│   ├── shortcuts.ts          # Keyboard shortcuts
+│   └── interventions.ts      # Client-side intervention deriver mirroring server aggregator
 ├── components/
 │   ├── shell/                # Shell, AppBar, NavRail, Drawer
-│   ├── Gantt/                # Minimap, in-chart overlays
+│   ├── Gantt/                # Minimap, in-chart overlays, context-window badges
+│   ├── Interactions/         # (legacy) span interaction bits
 │   ├── Interaction/          # SpanPopover, steering controls
+│   ├── Interventions/        # InterventionsTimeline (unified timeline strip, #71 / #76)
+│   ├── DelegationTooltip/    # Delegation edge tooltips
 │   ├── TransportBar/         # Transport state indicator
 │   ├── LiveActivity/         # "What is the agent doing right now"
 │   ├── OrchestrationTimeline/# Task-stage timeline (secondary view)
@@ -161,6 +169,26 @@ flowchart LR
     canvas -. reads .-> spans
 ```
 
+### Per-agent Gantt rows (#80)
+
+The Gantt draws one row per harmonograf `Agent`. With the per-agent
+attribution shipped in the client (#80), a single `goldfive.wrap` run
+drives a tree of ADK agents — coordinator, specialists, AgentTool
+wrappers — and each gets its own row.
+
+From the frontend's perspective this is transparent: `agent_joined`
+deltas land in `AgentRegistry` with ids shaped like
+`<client.agent_id>:<adk_agent_name>` and `Agent.metadata` populated
+with `hgraf.agent.*` hints the server harvested from the first span.
+The renderer uses `metadata["hgraf.agent.name"]` for the row label
+when present; otherwise it falls back to the name the client set.
+
+`AgentRegistry` receives one `agent_joined` per sub-agent the server
+auto-registered, so the renderer does not need to parse the id shape.
+The parent relationship in `metadata["hgraf.agent.parent_id"]` is
+available for future tree-shaped renderings but is not used by the
+default flat Gantt.
+
 ### Mutation entry points
 
 Everything that changes the store funnels through mutator methods:
@@ -251,14 +279,15 @@ The transport is gRPC-Web under the hood. It connects to
 
 `frontend/src/rpc/hooks.ts` wraps each RPC in a React hook:
 
-| Hook | Line | Purpose | RPC |
-|---|---|---|---|
-| `useSessions` | 87 | Poll `ListSessions` with a configurable interval | `ListSessions` (unary) |
-| `useAgentLive` | 162 | Subscribe to an agent's heartbeat + activity deltas | Via `useSessionWatch` |
-| `useSessionWatch` | 173 | Stream session deltas, push into `SessionStore` | `WatchSession` (server-stream) |
-| `usePayload` | 452 | Lazy fetch a payload by digest | `GetPayload` (unary) |
-| `useSendControl` | 531 | Send a control event; await ack | `SendControl` (unary) |
-| `usePostAnnotation` | 570 | Post an annotation; await ack | `PostAnnotation` (unary) |
+| Hook | Purpose | RPC |
+|---|---|---|
+| `useSessions` | Poll `ListSessions` with a configurable interval | `ListSessions` (unary) |
+| `useAgentLive` | Subscribe to an agent's heartbeat + activity deltas | Via `useSessionWatch` |
+| `useSessionWatch` | Stream session deltas, push into `SessionStore` | `WatchSession` (server-stream) |
+| `usePayload` | Lazy fetch a payload by digest | `GetPayload` (unary) |
+| `useSendControl` | Send a control event; await ack | `SendControl` (unary) |
+| `usePostAnnotation` | Post an annotation; await ack | `PostAnnotation` (unary) |
+| `useListInterventions` | Fetch merged intervention history once on session open; the `lib/interventions.ts` deriver keeps it live from `WatchSession` deltas | `ListInterventions` (unary) |
 
 Helper functions in the same file:
 
@@ -366,6 +395,48 @@ in production builds.
 `components/Gantt/Minimap.tsx`. Overview strip under the main canvas; drag
 to navigate the viewport. Reads directly from `SessionStore` so it stays
 in sync with the main canvas without a separate subscription.
+
+### `Gantt/ContextWindowBadge` + `ContextWindowBadgeStrip`
+
+Display the LLM context-window fill for each agent, fed by
+`ContextWindowSample` messages delivered via `WatchSession`. The badge
+shows `tokens / limit_tokens` and trips a warning color when the fill
+approaches the limit.
+
+### `Interventions/InterventionsTimeline` (#71 / #76)
+
+The unified intervention timeline strip that sits above the Gantt in
+planning view. It's the centerpiece of the Trajectory view and the
+intervention drawer tab. Core properties:
+
+- **Stable X anchor.** Marker X positions are captured on mount via
+  `useStableSpanEnd` and only advance on a coarse 1 s tick — not on
+  every re-render. Fixes the "markers jump on hover" pathology where
+  the parent's `endMs` recomputed each frame on a live session.
+- **Glyph/color/ring tri-channel.** `source` (`user` / `drift` /
+  `goldfive`) drives the fill color; `kind` drives the glyph (diamond /
+  diamond-x / chevron / circle / square); `severity ≥ warning` draws a
+  ring around the glyph. No taxonomy knowledge is baked into rendering —
+  new drift kinds work without a frontend change.
+- **Density clustering.** Markers whose centers land within ~2 % of
+  the strip width collapse into a single badge; the badge's popover
+  enumerates the group. Threshold is `max(14 px, width * 0.02)`.
+- **Deterministic popover.** Anchored to the marker's x position in
+  strip coordinates, not the cursor. Pinning (click) survives
+  re-renders; hover-only shows while the cursor is over the marker.
+- **Axis ticks.** 4-8 evenly spaced session-relative time labels
+  (`10s` / `30s` / `1m` / `5m` / `10m` / `30m` steps depending on the
+  span).
+- **Fade-only entrance.** Newly arrived rows fade in once via
+  `useSeenKeys`; the seen-set only grows, never shrinks, so subsequent
+  renders don't replay the entrance.
+- **Intervention cards dedup by annotation_id.** The server's
+  `list_interventions` + `lib/interventions.ts` deriver collapse
+  annotation + USER_STEER drift + plan_revised:rN into one card.
+
+The deriver in `lib/interventions.ts` mirrors the server's
+`interventions.py` aggregator so the frontend doesn't need a fresh RPC
+on every `WatchSession` delta.
 
 ## Keyboard shortcuts
 

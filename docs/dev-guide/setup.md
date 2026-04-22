@@ -298,8 +298,10 @@ are **checked into git**. Commit them alongside the `.proto` edit. See
 | `SERVER_PORT` | `7531` | Native gRPC listener |
 | `FRONTEND_PORT` | `5174` | gRPC-Web listener (sonora) — **not** the Vite dev server port |
 | `ADK_WEB_PORT` | `8080` | `make demo-presentation` |
-| `KIKUCHI_LLM_URL` | — | Shared LLM endpoint used by e2e suite (see `testing.md`) |
-| `GOOGLE_API_KEY` / `GEMINI_API_KEY` | — | For real-LLM tests; not required for unit tests |
+| `KIKUCHI_LLM_URL` | — | OpenAI-compatible LLM endpoint (e.g. local vLLM / Ollama gateway). Required for real-LLM demos and e2e. |
+| `USER_MODEL_NAME` | `openai/qwen3.5-35b` | Model string passed to goldfive's `ADKAdapter` for the primary user-facing agent. |
+| `GOLDFIVE_EXAMPLE_PLANNER_MODEL` | same as `USER_MODEL_NAME` | Overrides the planner model independently of the worker model. Useful for running a small planner against a larger worker. |
+| `GOOGLE_API_KEY` / `GEMINI_API_KEY` | — | For Gemini-backed demos; not required with `KIKUCHI_LLM_URL`. |
 
 The Vite dev server itself listens on port 5173 and proxies nothing — it
 reaches the backend via gRPC-Web on `FRONTEND_PORT`. If you see CORS errors in

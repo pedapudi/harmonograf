@@ -7,30 +7,32 @@ it, so read this chapter before touching anything under `server/`.
 
 ## Anatomy
 
-| File | Lines | Purpose |
-|---|---|---|
-| `main.py` | ~237 | Composition root. `Harmonograf.from_config()` + `Harmonograf.start()`. Wires everything and runs two listeners. |
-| `cli.py` | ~132 | CLI entry point; parses flags and calls `Harmonograf.from_config()`. Exposed via the `harmonograf-server` script. |
-| `config.py` | ~25 | `ServerConfig` dataclass. |
-| `ingest.py` | ~752 | `IngestPipeline` — consumes telemetry and drives store + bus + router. |
-| `bus.py` | ~205 | `SessionBus` — in-process pub/sub for WatchSession fan-out. |
-| `control_router.py` | ~349 | `ControlRouter` — routes control events, collects acks. |
-| `convert.py` | ~454 | Proto ↔ storage dataclass converters. |
-| `storage/base.py` | ~396 | `Storage` ABC + domain dataclasses + enums. |
-| `storage/sqlite.py` | ~1,066 | Default backend (aiosqlite + WAL). |
-| `storage/memory.py` | ~431 | In-memory backend (tests only). |
-| `storage/factory.py` | ~18 | `make_store(kind, …)` helper. |
-| `rpc/telemetry.py` | — | `TelemetryServicer` implementing `StreamTelemetry` + mixins. |
-| `rpc/control.py` | — | `SubscribeControl` handler (mixin). |
-| `rpc/frontend.py` | — | Frontend RPCs (mixin): `ListSessions`, `WatchSession`, `GetPayload`, `GetSpanTree`, `PostAnnotation`, `SendControl`, `DeleteSession`, `GetStats`. |
-| `auth.py` | ~119 | Bearer-token auth for gRPC channels (optional). |
-| `health.py` | ~64 | `grpc.health.v1.Health` implementation. |
-| `_cors.py` | ~98 | CORS allow list for the gRPC-Web listener. |
-| `_sonora_shim.py` | ~76 | Shim over sonora's ASGI app to attach the servicer. |
-| `logging_setup.py` | ~57 | Rich-backed structured logger. |
-| `metrics.py` | ~60 | In-process counters. |
-| `retention.py` | ~72 | Background sweeper for old sessions. |
-| `stress.py` | ~371 | Synthetic load generator (not wired into production). |
+| File | Purpose |
+|---|---|
+| `main.py` | Composition root. `Harmonograf.from_config()` + `Harmonograf.start()`. Wires everything and runs two listeners. |
+| `cli.py` | CLI entry point; parses flags and calls `Harmonograf.from_config()`. Exposed via the `harmonograf-server` script. |
+| `config.py` | `ServerConfig` dataclass. |
+| `ingest.py` | `IngestPipeline` — consumes telemetry and drives store + bus + router. Auto-registers per-ADK-agent rows on span ingest. |
+| `bus.py` | `SessionBus` — in-process pub/sub for WatchSession fan-out. |
+| `control_router.py` | `ControlRouter` — routes control events, collects acks; prefers per-session subs when present. |
+| `convert.py` | Proto ↔ storage dataclass converters. |
+| `interventions.py` | Intervention history aggregator — joins annotations, drifts, plan revisions into a unified chronological list. |
+| `storage/base.py` | `Storage` ABC + domain dataclasses + enums. |
+| `storage/sqlite.py` | Default backend (aiosqlite + WAL). |
+| `storage/memory.py` | In-memory backend (tests only). |
+| `storage/postgres.py` | Experimental PostgreSQL backend. |
+| `storage/factory.py` | `make_store(kind, …)` helper. |
+| `rpc/telemetry.py` | `TelemetryServicer` implementing `StreamTelemetry` + mixins. |
+| `rpc/control.py` | `SubscribeControl` handler (mixin). |
+| `rpc/frontend.py` | Frontend RPCs (mixin): `ListSessions`, `WatchSession`, `GetPayload`, `GetSpanTree`, `PostAnnotation`, `SendControl`, `DeleteSession`, `GetStats`, `ListInterventions`. |
+| `auth.py` | Bearer-token auth for gRPC channels (optional; off by default). |
+| `health.py` | `grpc.health.v1.Health` implementation. |
+| `_cors.py` | CORS allow list for the gRPC-Web listener. |
+| `_sonora_shim.py` | Shim over sonora's ASGI app to attach the servicer. |
+| `logging_setup.py` | Rich-backed structured logger. |
+| `metrics.py` | In-process counters. |
+| `retention.py` | Background sweeper for old sessions. |
+| `stress.py` | Synthetic load generator (not wired into production). |
 
 ## Composition root
 
@@ -124,15 +126,40 @@ main entry. It inspects the oneof and dispatches:
 | `TelemetryUp` variant | Handler | What happens |
 |---|---|---|
 | `hello` | `_handle_hello` | Validate, allocate session/stream IDs (or honor resume token), upsert `Agent`, send `Welcome` response. |
-| `span_start` | `_handle_span_start` | Convert via `pb_span_to_storage` (`convert.py:251`), `store.upsert_span`, `bus.publish_span`. |
+| `span_start` | `_handle_span_start` | Convert via `pb_span_to_storage`, auto-register any per-ADK-agent id seen on `Span.agent_id` that has no matching row yet (reads `hgraf.agent.*` attrs for the metadata payload), `store.upsert_span`, `bus.publish_span`. |
 | `span_update` | `_handle_span_update` | Fetch existing span, apply delta attributes + optional status, upsert, publish. |
 | `span_end` | `_handle_span_end` | Finalize span, upsert, publish (end delta marks span as terminal so renderer can stop watching). |
 | `payload_upload` | `_handle_payload_upload` | Append chunk to assembler; on `last=true`, digest-check and store. |
 | `heartbeat` | `_handle_heartbeat` | Update agent's `last_heartbeat`, `buffer stats`, `current_activity`, `progress_counter`, `context_window_*`; publish agent delta. |
 | `goodbye` | `_handle_goodbye` | Mark agent `DISCONNECTED`; do not close stream (client may reconnect with resume token). |
 | `control_ack` | `_handle_control_ack` | Forward to `ControlRouter` so the waiting frontend RPC can return. |
-| `task_plan` | `_handle_task_plan` | Upsert `TaskPlan`; publish `plan_delta` via the bus. |
-| `updated_task_status` | `_handle_updated_task_status` | Upsert `Task`; publish `task_delta`. |
+| `goldfive_event` | `_handle_goldfive_event` | Dispatch on the inner `payload` oneof: `run_started` / `goal_derived` / `plan_submitted` / `plan_revised` / `task_*` / `drift_detected` / `run_completed` / `run_aborted`. Plans and task state live here post-goldfive-migration (issue #2); the old `task_plan` / `updated_task_status` variants are gone. |
+
+The old `task_plan` (field 9) and `updated_task_status` (field 10)
+variants are reserved in `TelemetryUp` — plan + task state now ride
+inside `goldfive_event` so the wire matches whatever the orchestrator
+emitted byte-for-byte.
+
+### Per-agent row auto-registration (#80)
+
+A single client process often drives a tree of ADK agents
+(coordinator + specialists + AgentTool wrappers). The client-side
+plugin (`HarmonografTelemetryPlugin`) stamps a per-ADK-agent id on
+every span via `Span.agent_id`, and four `hgraf.agent.*` attributes on
+the first span each agent emits:
+
+- `hgraf.agent.name`
+- `hgraf.agent.kind` (`llm` / `workflow` / `tool_wrapped` / `unknown`)
+- `hgraf.agent.parent_id`
+- `hgraf.agent.branch` (forensic ADK ancestry)
+
+`_handle_span_start` checks whether the span's `agent_id` has a row in
+`agents`. If not, it synthesises an `Agent` record using the client's
+framework/version, stamps the `hgraf.agent.*` attrs into the
+`Agent.metadata` map, and publishes an `agent_joined` delta. Subsequent
+spans from the same agent skip the attrs (the client tracks first-sight
+locally), so the cost is paid exactly once per `(session_id, agent_id)`
+pair.
 
 Ingest fans each `TelemetryUp` variant into the store and the bus:
 
@@ -363,7 +390,7 @@ composes three mixins:
 |---|---|---|
 | Telemetry | `rpc/telemetry.py` | `StreamTelemetry` (bidi) |
 | Control | `rpc/control.py` | `SubscribeControl` (server-streaming) |
-| Frontend | `rpc/frontend.py` | `ListSessions`, `WatchSession`, `GetPayload`, `GetSpanTree`, `PostAnnotation`, `SendControl`, `DeleteSession`, `GetStats` |
+| Frontend | `rpc/frontend.py` | `ListSessions`, `WatchSession`, `GetPayload`, `GetSpanTree`, `PostAnnotation`, `SendControl`, `DeleteSession`, `GetStats`, `ListInterventions` |
 
 ### `StreamTelemetry`
 
@@ -423,6 +450,45 @@ return value includes the annotation ID.
 Unary wrapper around `ControlRouter.send_control()`. Used by the frontend
 for direct control events (pause, cancel, status query) that don't involve
 a body annotation.
+
+### `ListInterventions` (#71)
+
+Unary. Returns the chronological merge of user-initiated, drift-triggered,
+and goldfive-autonomous interventions for one session. Backed by
+`interventions.list_interventions()` which derives the list from three
+sources that already live in the store + ingest ring:
+
+- **annotations** (STEERING / HUMAN_RESPONSE) — user rows.
+- **drift ring** (goldfive `DriftDetected` events) — `user_steer` and
+  `user_cancel` kinds flag `source="user"`, everything else is
+  `source="drift"`.
+- **plan revisions** (`task_plans.revision_kind`) — when the revision
+  kind has no matching drift in the attribution window, goldfive
+  minted it autonomously (`cascade_cancel`, `refine_retry`,
+  `human_intervention_required`).
+
+The aggregator then runs a dedup pass
+(`_merge_by_annotation_id`, harmonograf#75, #86, #87): rows that share
+an `annotation_id` (propagated through STEER drifts via goldfive#176)
+collapse onto the annotation row — one card per operator intervention,
+even when the wire emits three events (annotation + USER_STEER drift +
+plan_revised).
+
+The attribution window is kind-dependent (`_outcome_window_for`):
+
+- Autonomous drifts use a tight 5 s window — looping-reasoning /
+  tool-error heuristics fire immediately, no LLM roundtrip.
+- User-control drifts (`user_steer`, `user_cancel`) use 300 s — a STEER
+  flows through the planner's LLM which routinely takes 30-70 s on a
+  local Qwen3.5-35B (issue #86). The narrow default stranded drift
+  rows outside the window and leaked a second card.
+
+Live updates: `WatchSession` still streams the underlying deltas
+(`initial_annotation`, `new_annotation`, `goldfive_event.drift_detected`,
+`goldfive_event.plan_revised`), so the frontend recomputes the merged
+list incrementally via `lib/interventions.ts` — no second subscribe.
+This RPC is used once on session open (late-joining frontend) and the
+deriver keeps it live from there.
 
 ## Reading the code
 

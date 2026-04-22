@@ -37,14 +37,15 @@ flowchart TD
 - **UI**: Gantt shows LLM_CALL spans but no accompanying thinking
   stripes; drawer Thinking tab is empty or shows "no thought
   captured".
-- **Client log**:
-  - `INFO harmonograf_client.adk: emit_thinking_as_task_report inv=<id> report=<repr>`
-    (`adk.py:4923`) — this is the canonical emit path.
-  - Absence of the above means the emit path never ran.
-  - `DEBUG harmonograf_client.agent: HarmonografAgent: record_llm_thought failed: <exc>`
-    (`agent.py:1829`).
-  - `DEBUG harmonograf_client.agent: HarmonografAgent: emit_span_update(llm.thought) failed: <exc>`
-    (`agent.py:1838`).
+- **Client log** (`harmonograf_client.telemetry_plugin` at DEBUG):
+  - Successful reasoning capture shows up as `has_reasoning=true` on
+    an `LLM_CALL` span and (for large bodies) a payload upload with
+    `payload_role="reasoning"`, `mime="text/plain"`.
+  - Absence means no `llm_response.content.parts[*].thought` /
+    `choices[0].message.reasoning_content` / `content[*].type=="thinking"`
+    was extracted — check the provider and the
+    `_extract_reasoning` function in
+    `client/harmonograf_client/telemetry_plugin.py`.
 - **sqlite**: no rows in `spans` with a `llm.thought` attribute or
   similar.
 

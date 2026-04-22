@@ -470,6 +470,46 @@ order — do not skip steps.
 
 ---
 
+## Per-LLM-call metrics (goldfive#172)
+
+Goldfive emits per-LLM-call metrics as log events and observation
+metadata every time it invokes a model. The fields you care about when
+hunting latency:
+
+| Metric | Source | What it measures |
+|---|---|---|
+| `goldfive.llm.duration_ms` | log event | Wall-clock time the LLM call took, incl. network. Consistent >60 s points at a stuck provider or a runaway prompt. |
+| `goldfive.llm.request.chars` | log event | Total chars in the request. Balloons post-STEER when the steerer injects the drift body + task state. Pair with `context_window_tokens` in the Gantt header. |
+| `goldfive.llm.request.messages` | log event | Number of messages in the request. Sudden jumps flag loop accumulation. |
+| `goldfive.llm.usage.*_tokens` | log event | Provider-reported prompt / completion / total token counts. |
+
+When a STEER seems to "take 30-70 s to apply", inspect the planner's
+refine call in the Gantt and read `goldfive.llm.duration_ms` off the
+span — almost always the LLM, not harmonograf, that's slow.
+
+## Intervention aggregator cost
+
+`list_interventions` joins annotations + drifts + plan revisions in
+memory and runs a dedup pass keyed on `annotation_id`. Cost is
+O((A + D + P) log (A + D + P)) in the sort plus O((A + D) * P) for the
+attribution window scan.
+
+Expected bounds:
+
+- A (annotations) rarely exceeds a few hundred per session.
+- D (drifts) scales with drift detector sensitivity; most sessions run
+  at < 50.
+- P (plan revisions) scales with the number of refines; 10-30 is
+  typical even on a heavily-steered run.
+
+So even a pathological session is a fraction of a millisecond. The
+heavy lifting is on the frontend side (`lib/interventions.ts`) which
+re-derives on every WatchSession delta — that's still cheap but if
+your session grows unbounded, add a reactive cache keyed on
+`(annotations.length, drifts.length, plans.length)`.
+
+---
+
 ## Cross-links
 
 - [`architecture.md`](architecture.md) — the end-to-end walk-through

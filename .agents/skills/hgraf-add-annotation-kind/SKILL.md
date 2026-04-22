@@ -57,13 +57,28 @@ The `annotations` table in `sqlite.py:105` stores `kind TEXT NOT NULL`. Existing
 
 ```python
 if kind == ANNOTATION_KIND_STEERING:
-    await control_router.deliver(... CONTROL_KIND_STEER ...)
+    event.kind = CONTROL_KIND_STEER
+    event.steer.note = request.body
+    event.steer.author = ann.author                # goldfive#171
+    event.steer.annotation_id = ann.id             # goldfive#171
+    await control_router.deliver(event)
 elif kind == ANNOTATION_KIND_HUMAN_RESPONSE:
-    # resolve the awaiting span
-    ...
+    event.kind = CONTROL_KIND_INJECT_MESSAGE
+    event.inject_message.text = request.body
+    await control_router.deliver(event)
 ```
 
-Add a branch for your new kind. If the semantics map to a control event, issue it through `control_router.deliver(...)` and set `annotation.delivered_at` when the ack arrives (see `types.proto:336`). If semantics are UI-only, just store and broadcast — no control event.
+Add a branch for your new kind. If the semantics map to a control event:
+
+- Propagate `author` and `annotation_id` onto the event payload so
+  goldfive can attribute the drift back to the source annotation and
+  dedupe retries (mirrors goldfive#171 for STEER).
+- Issue it through `control_router.deliver(...)` and set
+  `annotation.delivered_at` when the ack arrives.
+- If the kind represents user control, goldfive should also emit a
+  matching drift kind so the intervention aggregator picks it up.
+
+If semantics are UI-only, just store and broadcast — no control event.
 
 ### 6. Watch delta
 
