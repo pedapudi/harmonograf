@@ -6,6 +6,7 @@ import { useSessionWatch, sendStatusQuery } from '../../../rpc/hooks';
 import { colorForAgent } from '../../../theme/agentColors';
 import type { Span, Task, TaskPlan } from '../../../gantt/types';
 import type { SessionStore } from '../../../gantt/index';
+import { hasThinking } from '../../../lib/thinking';
 import {
   DEFAULT_VIEWPORT,
   MIN_SCALE,
@@ -64,7 +65,9 @@ interface ActivationBox {
   endMs: number | null; // null = still running
   isRunning: boolean;
   spanId: string;      // for span lookup
-  thinking: boolean;   // true if has_thinking attribute set
+  thinking: boolean;   // true if lib/thinking.hasThinking(span) — honors
+                       // the has_reasoning bool flag stamped by the plugin
+                       // plus any reasoning text carrier (see #107).
 }
 
 interface SeqLayout {
@@ -307,10 +310,9 @@ function computeSequence(store: SessionStore): SeqLayout {
     if (s.kind !== 'INVOCATION') continue;
     const idx = colIdx.get(s.agentId);
     if (idx === undefined) continue;
-    const thinkingAttr = s.attributes?.['has_thinking'];
-    const thinking = thinkingAttr !== undefined && thinkingAttr !== null &&
-      (thinkingAttr.kind === 'bool' ? thinkingAttr.value === true :
-       thinkingAttr.kind === 'string' ? thinkingAttr.value === 'true' : false);
+    // Route through lib/thinking.hasThinking() so we honor both the
+    // has_reasoning bool flag and any reasoning text carrier (#107).
+    const thinking = hasThinking(s);
     activations.push({
       agentIdx: idx,
       startMs: s.startMs,

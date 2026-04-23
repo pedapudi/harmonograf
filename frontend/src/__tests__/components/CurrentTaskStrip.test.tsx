@@ -186,14 +186,14 @@ describe('<CurrentTaskStrip />', () => {
     ).toBeNull();
   });
 
-  it('renders the thinking dot when an LLM_CALL has has_thinking=true', () => {
+  it('renders the thinking dot when an LLM_CALL has has_reasoning=true', () => {
     mockStore!.tasks.upsertPlan(
       plan('p1', [task('t1', 'RUNNING', 'Analyze logs', 'worker-7')]),
     );
     mockStore!.spans.append(
       span('s-llm', 'worker-7', 'LLM_CALL', 'gpt', {
         startMs: 100,
-        attributes: { has_thinking: { kind: 'bool', value: true } },
+        attributes: { has_reasoning: { kind: 'bool', value: true } },
       }),
     );
     render(<CurrentTaskStrip />);
@@ -202,14 +202,14 @@ describe('<CurrentTaskStrip />', () => {
     ).toBeTruthy();
   });
 
-  it('omits the thinking dot when has_thinking is false or absent', () => {
+  it('omits the thinking dot when has_reasoning is false or absent', () => {
     mockStore!.tasks.upsertPlan(
       plan('p1', [task('t1', 'RUNNING', 'Analyze logs', 'worker-7')]),
     );
     mockStore!.spans.append(
       span('s-llm', 'worker-7', 'LLM_CALL', 'gpt', {
         startMs: 100,
-        attributes: { has_thinking: { kind: 'bool', value: false } },
+        attributes: { has_reasoning: { kind: 'bool', value: false } },
       }),
     );
     render(<CurrentTaskStrip />);

@@ -24,6 +24,7 @@ import {
 import type { DelegationRecord, SessionStore } from './index';
 import type { SpanIndex, DirtyRect } from './spatialIndex';
 import type { Agent, ContextWindowSample, Span, SpanKind, Task, TaskStatus } from './types';
+import { hasThinking } from '../lib/thinking';
 import {
   GUTTER_WIDTH_PX,
   ROW_HEIGHT_FOCUSED_PX,
@@ -925,14 +926,13 @@ export class GanttRenderer {
           }
         }
         // Brain badge: any LLM_CALL with reasoning content (live or done).
-        // Gate on has_thinking=true to keep the test cheap (no string attr
-        // parse in the hot path) and skip narrow blocks where the badge
-        // would collide with the kind icon label.
-        if (s.kind === 'LLM_CALL' && width >= 14) {
-          const ht = s.attributes['has_thinking'];
-          if (ht && ht.kind === 'bool' && ht.value) {
-            brainBadges.push({ x: x1, y: laneTop, w: width, h: rectH });
-          }
+        // Route through lib/thinking.hasThinking() so we honor both the
+        // has_reasoning bool flag and any reasoning text carrier — the
+        // plugin stamps has_reasoning alongside llm.reasoning / trail
+        // (see harmonograf#107). Skip narrow blocks where the badge would
+        // collide with the kind icon label.
+        if (s.kind === 'LLM_CALL' && width >= 14 && hasThinking(s)) {
+          brainBadges.push({ x: x1, y: laneTop, w: width, h: rectH });
         }
         visibleCount++;
       }
