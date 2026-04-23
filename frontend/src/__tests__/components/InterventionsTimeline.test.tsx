@@ -1,9 +1,17 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InterventionsTimeline } from '../../components/Interventions/InterventionsTimeline';
 import type { InterventionRow } from '../../lib/interventions';
 
 vi.mock('../../components/Interventions/InterventionsTimeline.css', () => ({}));
+
+// Parse SVG transform="translate(x, y)" and return cx.
+function cxOf(el: Element): number {
+  const t = el.getAttribute('transform') || '';
+  const m = t.match(/translate\(([-\d.]+),\s*([-\d.]+)\)/);
+  if (!m) throw new Error(`no translate in ${t}`);
+  return parseFloat(m[1]);
+}
 
 function row(over: Partial<InterventionRow>): InterventionRow {
   return {
@@ -232,5 +240,145 @@ describe('<InterventionsTimeline />', () => {
     const wrapper = screen.getByTestId('interventions-timeline');
     expect(wrapper.style.width).toBe('800px');
     expect(wrapper.style.maxWidth).toBe('800px');
+  });
+
+  // --- accurate placement + dynamic axis scaling -------------------------
+  //
+  // Regression coverage for the user-reported bug: a drift/steer that
+  // fired 7 minutes into a 10-minute session was rendering at the 0m
+  // end of the strip because the caller passed a per-plan window where
+  // row.atMs == startMs. The strip now receives a session-wide axis
+  // (startMs=0, endMs=session_now) so markers land at their real
+  // session-relative fraction across the strip.
+
+  it('places a 10-minute-in marker at ~70% of a 10-minute strip', () => {
+    // startMs=0, endMs=10m, drift at 7m → cx should be ~70% across the
+    // usable strip (minus STRIP_PAD_X padding on each side).
+    const width = 400;
+    render(
+      <InterventionsTimeline
+        rows={[
+          row({ key: 'd', atMs: 7 * 60_000, source: 'drift', kind: 'LOOPING' }),
+        ]}
+        startMs={0}
+        endMs={10 * 60_000}
+        width={width}
+        _liveTickMs={0}
+      />,
+    );
+    const marker = screen.getByTestId('intervention-marker-d');
+    const cx = cxOf(marker);
+    // With STRIP_PAD_X=14 on each side: cx = 14 + 0.7 * (400 - 28) = 14 + 260.4 = 274.4
+    // Allow ±2px slack for rounding / future minor spacing tweaks.
+    expect(cx).toBeGreaterThan(272);
+    expect(cx).toBeLessThan(277);
+    // Crucially: NOT at the 0m end.
+    expect(cx).toBeGreaterThan(width * 0.5);
+  });
+
+  it('places a 30-minute-in marker at ~50% of a 1-hour strip', () => {
+    const width = 600;
+    render(
+      <InterventionsTimeline
+        rows={[
+          row({ key: 's', atMs: 30 * 60_000, source: 'user', kind: 'STEER' }),
+        ]}
+        startMs={0}
+        endMs={60 * 60_000}
+        width={width}
+        _liveTickMs={0}
+      />,
+    );
+    const marker = screen.getByTestId('intervention-marker-s');
+    const cx = cxOf(marker);
+    // 14 + 0.5 * (600 - 28) = 14 + 286 = 300
+    expect(cx).toBeGreaterThan(298);
+    expect(cx).toBeLessThan(302);
+  });
+
+  // --- axis tick scaling -------------------------------------------------
+
+  it('generates minute-step axis ticks across a 5-minute span', () => {
+    render(
+      <InterventionsTimeline
+        rows={[]}
+        startMs={0}
+        endMs={5 * 60_000}
+        width={500}
+        _liveTickMs={0}
+      />,
+    );
+    // pickTickStepMs picks 60s for spans ≤ 10m → 6 ticks at 0, 1, 2, 3, 4, 5 min.
+    const labels = screen
+      .getAllByTestId(/^axis-tick-\d+$/)
+      .map((g) => g.textContent);
+    expect(labels).toContain('0m');
+    expect(labels).toContain('1m');
+    expect(labels).toContain('2m');
+    expect(labels).toContain('5m');
+  });
+
+  // --- live axis tracking ------------------------------------------------
+  //
+  // A live session has session.ended_at == null and the parent advances
+  // endMs to track "now". With fake timers we can verify the snapshot
+  // advances on the coarse live tick so markers re-place against the
+  // growing span.
+
+  describe('live axis (fake timers)', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('advances the strip span when the live tick fires, re-placing markers', () => {
+      const rows = [
+        row({ key: 'u', atMs: 5 * 60_000, source: 'user', kind: 'STEER' }),
+      ];
+      const width = 400;
+      // Start: session only 10 minutes in. Marker at 5m → 50%.
+      const { rerender } = render(
+        <InterventionsTimeline
+          rows={rows}
+          startMs={0}
+          endMs={10 * 60_000}
+          width={width}
+          _liveTickMs={1000}
+        />,
+      );
+      const beforeCx = cxOf(screen.getByTestId('intervention-marker-u'));
+      // Expect ~ center.
+      expect(beforeCx).toBeGreaterThan(width * 0.45);
+      expect(beforeCx).toBeLessThan(width * 0.55);
+
+      // Session grows to 20 minutes — parent re-renders with a wider
+      // endMs. Before the live tick fires the snapshot is still 10m,
+      // so marker x hasn't moved yet (stable-anchor invariant).
+      rerender(
+        <InterventionsTimeline
+          rows={rows}
+          startMs={0}
+          endMs={20 * 60_000}
+          width={width}
+          _liveTickMs={1000}
+        />,
+      );
+      expect(cxOf(screen.getByTestId('intervention-marker-u'))).toBeCloseTo(
+        beforeCx,
+        0,
+      );
+
+      // Now advance the timer past the 1s tick. The snapshot pulls in
+      // the new endMs (20m), and the 5m marker slides to ~25%.
+      act(() => {
+        vi.advanceTimersByTime(1500);
+      });
+      const afterCx = cxOf(screen.getByTestId('intervention-marker-u'));
+      expect(afterCx).toBeLessThan(beforeCx); // moved left as span grew
+      expect(afterCx).toBeGreaterThan(width * 0.2);
+      expect(afterCx).toBeLessThan(width * 0.3);
+    });
   });
 });
