@@ -11,11 +11,14 @@ the attribute lands on at most 1/19 spans in a representative run
 
 The new design correlates by agent id at ingest time: when
 ``task_started(task_id=T)`` arrives, the server reads the task's
-``assignee_agent_id`` (already resolved to the canonical per-ADK-agent
-id at plan ingest — harmonograf#113), finds an INVOCATION span owned
-by that agent, and stamps ``bound_span_id`` on the task. If the span
-hasn't arrived yet (stream ordering), a pending-binding intent queues
-up and ``_handle_span_start`` fulfills it when the span lands.
+``assignee_agent_id`` (already in the canonical compound
+``<client_id>:<adk_name>`` form thanks to HarmonografSink's
+sink-side canonicalization — harmonograf#125, replacing the server-
+side ``find_agent_id_by_name`` rewrite from #113), finds an
+INVOCATION span owned by that agent, and stamps ``bound_span_id`` on
+the task. If the span hasn't arrived yet (stream ordering), a
+pending-binding intent queues up and ``_handle_span_start`` fulfills
+it when the span lands.
 
 These tests drive the ingest pipeline with synthetic
 ``TelemetryUp.span_start`` + ``TelemetryUp.goldfive_event`` messages
@@ -129,10 +132,16 @@ def _plan_event(
     *,
     plan_id: str,
     task_id: str,
-    assignee_bare_name: str,
+    assignee_agent_id: str,
     sequence: int = 0,
     event_id: str = "e-plan",
 ) -> ge.Event:
+    """Build a PlanSubmitted event with one task.
+
+    ``assignee_agent_id`` is the compound ``<client_id>:<adk_name>`` form
+    that HarmonografSink stamps on the wire (harmonograf#125). Ingest
+    stores it verbatim; task→span binding looks it up by equality.
+    """
     evt = _make_event(event_id=event_id, sequence=sequence)
     plan = evt.plan_submitted.plan
     plan.id = plan_id
@@ -141,7 +150,7 @@ def _plan_event(
     t = plan.tasks.add()
     t.id = task_id
     t.title = task_id
-    t.assignee_agent_id = assignee_bare_name
+    t.assignee_agent_id = assignee_agent_id
     t.status = gt.TASK_STATUS_PENDING
     return evt
 
@@ -197,15 +206,16 @@ async def test_span_then_task_started_binds_immediately(pipeline, store):
     canonical = "client-xyz:research_agent"
     await _register_agent(store, canonical_id=canonical, name="research_agent")
 
-    # Plan assigns t1 to research_agent (bare name — matches what
-    # goldfive's planner emits; ingest rewrites to canonical).
+    # Plan assigns t1 to the canonical compound id — HarmonografSink
+    # canonicalizes bare → compound before the event hits the wire
+    # (harmonograf#125), so ingest sees compound values verbatim.
     await pipe.handle_message(
         _stream_ctx(),
         _wrap_gf(
             _plan_event(
                 plan_id="p1",
                 task_id="t1",
-                assignee_bare_name="research_agent",
+                assignee_agent_id=canonical,
             )
         ),
     )
@@ -245,7 +255,7 @@ async def test_task_started_then_span_binds_on_span_arrival(pipeline, store):
             _plan_event(
                 plan_id="p1",
                 task_id="t1",
-                assignee_bare_name="research_agent",
+                assignee_agent_id=canonical,
             )
         ),
     )
@@ -294,12 +304,12 @@ async def test_multi_agent_tasks_do_not_cross_bind(pipeline, store):
     t1 = plan.tasks.add()
     t1.id = "t1"
     t1.title = "research"
-    t1.assignee_agent_id = "research_agent"
+    t1.assignee_agent_id = agent_a
     t1.status = gt.TASK_STATUS_PENDING
     t2 = plan.tasks.add()
     t2.id = "t2"
     t2.title = "summarize"
-    t2.assignee_agent_id = "summarizer_agent"
+    t2.assignee_agent_id = agent_b
     t2.status = gt.TASK_STATUS_PENDING
     await pipe.handle_message(_stream_ctx(), _wrap_gf(plan_evt))
 
@@ -350,7 +360,7 @@ async def test_leaf_spans_do_not_satisfy_invocation_binding(pipeline, store):
             _plan_event(
                 plan_id="p1",
                 task_id="t1",
-                assignee_bare_name="research_agent",
+                assignee_agent_id=canonical,
             )
         ),
     )
@@ -390,12 +400,11 @@ async def test_leaf_spans_do_not_satisfy_invocation_binding(pipeline, store):
 
 
 @pytest.mark.asyncio
-async def test_binding_resolves_bare_name_via_find_agent_id_by_name(
-    pipeline, store
-):
-    """The plan's ``assignee_agent_id`` is rewritten from the bare ADK
-    name to the canonical compound id at plan ingest (harmonograf#113).
-    The binding path must agree with that resolution."""
+async def test_plan_ingest_stores_compound_assignee_verbatim(pipeline, store):
+    """Post-harmonograf#125 ingest does NOT rewrite ``assignee_agent_id``
+    — HarmonografSink canonicalizes to compound at the sink boundary, so
+    the field arrives compound and is stored verbatim. This test pins
+    that invariant: the value on the wire equals the value on disk."""
     pipe, _bus, _ = pipeline
     await _ensure_session(store)
     canonical = "client-xyz:research_agent"
@@ -407,7 +416,7 @@ async def test_binding_resolves_bare_name_via_find_agent_id_by_name(
             _plan_event(
                 plan_id="p1",
                 task_id="t1",
-                assignee_bare_name="research_agent",
+                assignee_agent_id=canonical,
             )
         ),
     )
@@ -415,7 +424,7 @@ async def test_binding_resolves_bare_name_via_find_agent_id_by_name(
     plan = await store.get_task_plan("p1")
     t1 = next(t for t in plan.tasks if t.id == "t1")
     assert t1.assignee_agent_id == canonical, (
-        "plan ingest should resolve bare ADK name → canonical id"
+        "ingest must store the compound assignee_agent_id verbatim"
     )
 
     await pipe.handle_message(
@@ -450,7 +459,7 @@ async def test_binding_preserves_existing_status_on_late_span(pipeline, store):
             _plan_event(
                 plan_id="p1",
                 task_id="t1",
-                assignee_bare_name="research_agent",
+                assignee_agent_id=canonical,
             )
         ),
     )

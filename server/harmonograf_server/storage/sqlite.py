@@ -1266,54 +1266,6 @@ class SqliteStore(Store):
             for r in rows
         ]
 
-    # agent lookup helpers ----------------------------------------------
-    async def find_agent_id_by_name(
-        self, session_id: str, name: str
-    ) -> Optional[str]:
-        """Lookup (session, ADK name) → canonical agent_id.
-
-        Match precedence:
-          1. Exact ``agents.id`` match (caller already has the canonical id).
-          2. Exact ``agents.name`` match — the harmonograf#74 plugin
-             stamps ``name = <adk_agent_name>`` on per-ADK-agent rows.
-          3. Suffix match on ``agents.id`` (``...:<name>``) — tolerates
-             adk.agent.name cases where ``name`` got overwritten but the
-             id still encodes the ADK-agent-name suffix.
-
-        Returns None when no row matches. Single-row SELECT keyed on
-        ``session_id`` so the cost is bounded by the agent-registry
-        size (a few dozen rows in the worst case).
-        """
-        if not name or not session_id:
-            return None
-        async with self._lock:
-            # 1. exact id match
-            async with self.db.execute(
-                "SELECT id FROM agents WHERE session_id = ? AND id = ? LIMIT 1",
-                (session_id, name),
-            ) as cur:
-                row = await cur.fetchone()
-            if row is not None:
-                return row["id"]
-            # 2. exact name match
-            async with self.db.execute(
-                "SELECT id FROM agents WHERE session_id = ? AND name = ? LIMIT 1",
-                (session_id, name),
-            ) as cur:
-                row = await cur.fetchone()
-            if row is not None:
-                return row["id"]
-            # 3. suffix match on id
-            like = f"%:{name}"
-            async with self.db.execute(
-                "SELECT id FROM agents WHERE session_id = ? AND id LIKE ? LIMIT 1",
-                (session_id, like),
-            ) as cur:
-                row = await cur.fetchone()
-            if row is not None:
-                return row["id"]
-        return None
-
     # stats ---------------------------------------------------------------
     async def stats(self) -> Stats:
         async with self._lock:
