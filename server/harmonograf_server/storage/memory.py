@@ -493,28 +493,6 @@ class InMemoryStore(Store):
             out = out[: int(limit)]
         return out
 
-    async def find_agent_id_by_name(
-        self, session_id: str, name: str
-    ) -> Optional[str]:
-        if not name or not session_id:
-            return None
-        async with self._lock:
-            # 1. exact id
-            if (session_id, name) in self._agents:
-                return name
-            # 2. exact name match
-            for (sid, aid), agent in self._agents.items():
-                if sid != session_id:
-                    continue
-                if agent.name == name:
-                    return aid
-            # 3. suffix match
-            suffix = f":{name}"
-            for (sid, aid), _ in self._agents.items():
-                if sid == session_id and aid.endswith(suffix):
-                    return aid
-        return None
-
     async def stats(self) -> Stats:
         async with self._lock:
             payload_bytes = sum(rec.meta.size for rec in self._payloads.values())

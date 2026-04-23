@@ -227,10 +227,5 @@ class PostgresStore(Store):
     ) -> list[GoldfiveEventRecord]:
         raise NotImplementedError(_NOT_IMPLEMENTED)
 
-    async def find_agent_id_by_name(
-        self, session_id: str, name: str
-    ) -> Optional[str]:
-        raise NotImplementedError(_NOT_IMPLEMENTED)
-
     async def stats(self) -> Stats:
         raise NotImplementedError(_NOT_IMPLEMENTED)

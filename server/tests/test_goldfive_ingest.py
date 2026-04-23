@@ -1075,22 +1075,17 @@ async def test_goldfive_event_persist_is_idempotent(pipeline, store):
 
 
 @pytest.mark.asyncio
-async def test_plan_assignee_agent_id_resolves_from_bare_name(pipeline, store):
-    """A plan whose task.assignee is a bare ADK name resolves to the canonical id.
+async def test_plan_assignee_agent_id_stored_verbatim(pipeline, store):
+    """Plan ingest stores ``assignee_agent_id`` verbatim.
 
-    Under the harmonograf#74 per-agent attribution scheme, the
-    telemetry plugin registers agent rows with a compound id
-    (``<client_id>:<adk_name>``). Goldfive's planner emits
-    ``assignee_agent_id`` with the bare ADK name. The ingest pipeline
-    rewrites the bare name onto the canonical row id so the frontend
-    pre-strip / Plans overlay can resolve the task-to-agent link via
-    ordinary equality.
+    Post-harmonograf#125, HarmonografSink canonicalizes bare → compound
+    at the sink boundary before the event leaves the client process.
+    Ingest no longer rewrites assignees — the wire is authoritative.
     """
     from harmonograf_server.storage import Agent, AgentStatus, Framework
 
     pipe, _bus, _ = pipeline
     await _ensure_session(store)
-    # Register an agent with the compound-id format the plugin uses.
     canonical_id = "client-xyz:coordinator_agent"
     await store.register_agent(
         Agent(
@@ -1104,7 +1099,7 @@ async def test_plan_assignee_agent_id_resolves_from_bare_name(pipeline, store):
         )
     )
 
-    # Plan carries the bare ADK name on the task assignee field.
+    # Plan carries the compound agent id (what the sink produces).
     plan_pb = gt.Plan()
     plan_pb.id = "p-assign"
     plan_pb.run_id = "run-1"
@@ -1112,7 +1107,7 @@ async def test_plan_assignee_agent_id_resolves_from_bare_name(pipeline, store):
     t = plan_pb.tasks.add()
     t.id = "t1"
     t.title = "first"
-    t.assignee_agent_id = "coordinator_agent"
+    t.assignee_agent_id = canonical_id
     t.status = gt.TASK_STATUS_PENDING
 
     evt = _make_event()
@@ -1125,8 +1120,14 @@ async def test_plan_assignee_agent_id_resolves_from_bare_name(pipeline, store):
 
 
 @pytest.mark.asyncio
-async def test_delegation_observed_resolves_endpoint_agent_ids(pipeline, store):
-    """Bare from/to ADK names on DelegationObserved resolve to canonical ids."""
+async def test_delegation_observed_stored_verbatim(pipeline, store):
+    """DelegationObserved endpoints flow through ingest verbatim.
+
+    Post-harmonograf#125, the HarmonografSink emits compound ids on
+    the wire; ingest publishes them to the bus without rewriting.
+    Regression guard against a server-side resolver sneaking back in
+    and re-introducing the #111 / #117 race surface.
+    """
     from harmonograf_server.storage import Agent, AgentStatus, Framework
 
     pipe, bus, _ = pipeline
@@ -1146,8 +1147,8 @@ async def test_delegation_observed_resolves_endpoint_agent_ids(pipeline, store):
 
     sub = await bus.subscribe("sess_gf")
     evt = _make_event()
-    evt.delegation_observed.from_agent = "coordinator_agent"
-    evt.delegation_observed.to_agent = "research_agent"
+    evt.delegation_observed.from_agent = "client-abc:coordinator_agent"
+    evt.delegation_observed.to_agent = "client-abc:research_agent"
     evt.delegation_observed.task_id = "t1"
     await pipe.handle_message(_stream_ctx(), _wrap(evt))
 

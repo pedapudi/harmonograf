@@ -988,37 +988,12 @@ class IngestPipeline:
             created_at=created_at,
             planner_agent_id=ctx.agent_id,
         )
-        # Resolve each task's ``assignee_agent_id`` to a canonical
-        # agent-row id registered on this session (harmonograf#113).
-        # Goldfive planners emit the bare ADK agent name
-        # (``"coordinator_agent"``) while the harmonograf telemetry
-        # plugin registers per-ADK-agent rows with a compound id
-        # (``"<client_agent_id>:coordinator_agent"`` per harmonograf#74).
-        # Frontend surfaces that match task.assigneeAgentId against
-        # the registered agents list (GraphView pre-strip / ghost,
-        # Gantt task→agent lookup) silently fail under that mismatch,
-        # leaving the Plans checkbox toggling a no-op overlay and the
-        # Gantt pre-strip column empty despite valid plan data being
-        # in the DB. Resolving here lets downstream consumers keep
-        # their straightforward equality checks.
-        for task in stored.tasks:
-            bare = task.assignee_agent_id
-            if not bare:
-                continue
-            resolved = await self._store.find_agent_id_by_name(
-                ctx.session_id, bare
-            )
-            if resolved and resolved != bare:
-                task.assignee_agent_id = resolved
-        # Similarly resolve the planner_agent_id off the plan itself
-        # so the PlanRevisionBanner's "planner: X" attribution lands
-        # on a known agent row.
-        if stored.planner_agent_id:
-            resolved_planner = await self._store.find_agent_id_by_name(
-                ctx.session_id, stored.planner_agent_id
-            )
-            if resolved_planner and resolved_planner != stored.planner_agent_id:
-                stored.planner_agent_id = resolved_planner
+        # Task ``assignee_agent_id`` fields arrive already-compound from the
+        # client-side sink (harmonograf#125). The bare→compound resolve loop
+        # that used to live here is no longer needed — wire is authoritative.
+        # ``planner_agent_id`` is ``ctx.agent_id`` (set in
+        # ``goldfive_pb_plan_to_storage`` above), which is the stream's Hello
+        # agent_id — always the compound client-root id. No rewrite needed.
         stored = await self._store.put_task_plan(stored)
         # Refresh the task index for span-to-task binding lookups on the
         # hot path. A re-emitted plan with the same id replaces previous
@@ -1384,41 +1359,20 @@ class IngestPipeline:
         observed_at: Optional[float] = None
         if payload.HasField("observed_at"):
             observed_at = ts_to_float(payload.observed_at)
-        # Resolve from/to bare ADK names onto canonical agent-row ids
-        # (harmonograf#113). DelegationObserved events are emitted by
-        # goldfive's registry dispatch with the ADK agent.name strings,
-        # but the frontend's delegation arrow path matches fromAgentId
-        # / toAgentId against the registered agents list, which carries
-        # the telemetry-plugin's compound id format
-        # ``<client_id>:<adk_name>``. Without resolution the arrow's
-        # endpoint rows can't be found on the Gantt and the edge
-        # silently drops to nothing. Fall back to the raw name when no
-        # row is registered yet (rare race: DelegationObserved landing
-        # before the delegating agent's first span).
-        resolved_from = payload.from_agent
-        resolved_to = payload.to_agent
-        try:
-            f_id = await self._store.find_agent_id_by_name(
-                ctx.session_id, payload.from_agent
-            )
-            if f_id:
-                resolved_from = f_id
-            t_id = await self._store.find_agent_id_by_name(
-                ctx.session_id, payload.to_agent
-            )
-            if t_id:
-                resolved_to = t_id
-        except Exception as exc:  # noqa: BLE001 — defensive
-            logger.debug(
-                "delegation agent resolve failed session_id=%s: %s",
-                ctx.session_id,
-                exc,
-            )
+        # Compound agent ids are canonicalized at the client-side sink
+        # boundary (harmonograf#125 / HarmonografSink._canonicalize_agent_ids),
+        # so ``payload.from_agent`` / ``.to_agent`` arrive already in the
+        # ``<client_id>:<adk_name>`` form the frontend indexes against.
+        # The old bare→compound rewrite that used to live here (#111 / #113)
+        # was race-prone — ``find_agent_id_by_name`` returned the bare name
+        # verbatim when DelegationObserved landed before the target agent's
+        # first span registered, leaking bare names onto live subscribers.
+        # Store and publish verbatim now; the wire is authoritative.
         self._bus.publish_delegation_observed(
             ctx.session_id,
             run_id,
-            from_agent=resolved_from,
-            to_agent=resolved_to,
+            from_agent=payload.from_agent,
+            to_agent=payload.to_agent,
             task_id=payload.task_id,
             invocation_id=payload.invocation_id,
             observed_at=observed_at,
@@ -1429,11 +1383,10 @@ class IngestPipeline:
     ) -> Optional[str]:
         """Return the span id of the INVOCATION that should bind to ``task_id``.
 
-        harmonograf#122: looks up the task's ``assignee_agent_id``,
-        resolves it to the canonical agent-row id
-        (``find_agent_id_by_name`` — bare ADK name → compound id per
-        harmonograf#111 / #113), and scans stored spans for an
-        INVOCATION owned by that agent. Preference order:
+        harmonograf#122: looks up the task's ``assignee_agent_id`` (now
+        sink-canonicalized to compound id per harmonograf#125) and scans
+        stored spans for an INVOCATION owned by that agent. Preference
+        order:
 
           1. RUNNING INVOCATION with the latest ``start_time`` (the
              agent is actively executing — the usual case).
@@ -1455,9 +1408,9 @@ class IngestPipeline:
         task = await self._lookup_task(session_id, task_id)
         if task is None or not task.assignee_agent_id:
             return None
-        canonical = await self._store.find_agent_id_by_name(
-            session_id, task.assignee_agent_id
-        ) or task.assignee_agent_id
+        # assignee_agent_id is already compound (sink-canonicalized per
+        # harmonograf#125); no bare→compound resolve needed here.
+        canonical = task.assignee_agent_id
         span_id = await self._find_invocation_span_for_agent(
             session_id, canonical
         )

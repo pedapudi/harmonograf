@@ -456,24 +456,6 @@ class Store(ABC):
         limit: Optional[int] = None,
     ) -> list[GoldfiveEventRecord]: ...
 
-    # agent lookup helpers ------------------------------------------------
-    @abstractmethod
-    async def find_agent_id_by_name(
-        self, session_id: str, name: str
-    ) -> Optional[str]:
-        """Return the stored ``agents.id`` for the given (session, ADK name) or None.
-
-        Supports bug #113 — plans emit ``assignee_agent_id`` using the
-        bare ADK agent name (e.g. ``"coordinator_agent"``), but the
-        telemetry plugin registers agents with a per-ADK-agent id
-        (e.g. ``"<client_id>:coordinator_agent"``). Ingest calls this
-        to rewrite the plan's ``assignee_agent_id`` onto the canonical
-        per-ADK-agent id before storage so the frontend's agent-id
-        equality checks resolve. Returns None when no agent row
-        matches — caller keeps the bare name (degraded path).
-        """
-        ...
-
     # stats ----------------------------------------------------------------
     @abstractmethod
     async def stats(self) -> Stats: ...

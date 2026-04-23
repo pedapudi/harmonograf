@@ -366,11 +366,14 @@ class FrontendServicerMixin:
             # that joins late sees the agent lifelines (from span replay)
             # but no arrows between them.
             #
-            # The persisted payload_bytes carry the *raw* bare ADK agent
-            # names (ingest persists verbatim before resolving), so we
-            # re-run find_agent_id_by_name here to rewrite bare → compound
-            # ids. This matches the live path in
-            # IngestPipeline._on_delegation_observed.
+            # Post-harmonograf#125, persisted payloads carry compound
+            # agent ids verbatim — the HarmonografSink canonicalizes on
+            # emit, so ingest stores already-compound strings. No
+            # bare→compound rewrite runs here. For forward-compat with
+            # any stored rows we may have forgotten to wipe, unknown
+            # bare-name rows remain readable but render on whichever
+            # lifeline happens to match — a legacy-data hazard the user
+            # has accepted (wipe DB between runs).
             try:
                 delegation_events = await self._store.list_goldfive_events(
                     session_id, kind="delegation_observed"
@@ -391,27 +394,6 @@ class FrontendServicerMixin:
                     )
                     continue
                 d = ev.delegation_observed
-                resolved_from = d.from_agent
-                resolved_to = d.to_agent
-                try:
-                    f_id = await self._store.find_agent_id_by_name(
-                        session_id, d.from_agent
-                    )
-                    if f_id:
-                        resolved_from = f_id
-                    t_id = await self._store.find_agent_id_by_name(
-                        session_id, d.to_agent
-                    )
-                    if t_id:
-                        resolved_to = t_id
-                except Exception as exc:  # noqa: BLE001 — defensive
-                    logger.debug(
-                        "delegation_observed replay resolve failed session_id=%s: %s",
-                        session_id,
-                        exc,
-                    )
-                ev.delegation_observed.from_agent = resolved_from
-                ev.delegation_observed.to_agent = resolved_to
                 # Stamp emitted_at from observed_at so the frontend's
                 # observedAtMs calculation (which reads Event.emitted_at)
                 # lines up with the Gantt timeline — same invariant as

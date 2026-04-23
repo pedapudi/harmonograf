@@ -345,12 +345,16 @@ async def test_watch_session_replays_persisted_plan_as_goldfive_events(
 
 @pytest.mark.asyncio
 async def test_watch_session_replays_persisted_delegation_observed(harness, stub):
-    """Initial burst must replay persisted delegation_observed events with
-    bare ADK names rewritten to canonical compound agent ids so the Agent
-    Graph view draws arrows on reconnect. Regression: persist path stored
-    events verbatim (bare names), but WatchSession never re-emitted them
-    — only live bus subscribers ever saw delegations, so any client that
-    opened the view late got lifelines with no arrows between them."""
+    """Initial burst must replay persisted delegation_observed events so
+    the Agent Graph view draws arrows on reconnect. Regression: persist
+    path stored events but WatchSession never re-emitted them — only live
+    bus subscribers ever saw delegations, so any client that opened the
+    view late got lifelines with no arrows between them.
+
+    Post-harmonograf#125, HarmonografSink canonicalizes bare → compound
+    ids at the sink boundary before events leave the client, so stored
+    payloads already carry compound ids. Replay forwards them verbatim
+    with no bare → compound rewrite in the burst path."""
 
     from goldfive.v1 import events_pb2 as goldfive_events_pb2
     from harmonograf_server.storage import GoldfiveEventRecord
@@ -360,8 +364,8 @@ async def test_watch_session_replays_persisted_delegation_observed(harness, stub
     await _seed_session(
         store, session_id="sess_gf_d", n_spans=0, start=now - 10
     )
-    # Register the two ADK agents under compound ids so bare → compound
-    # resolution on replay has targets.
+    # Register the two ADK agents under compound ids. (Not required for
+    # replay correctness post-#125 — included for realism.)
     for adk_name in ("coordinator_agent", "research_agent"):
         await store.register_agent(
             Agent(
@@ -375,11 +379,11 @@ async def test_watch_session_replays_persisted_delegation_observed(harness, stub
             )
         )
 
-    # Persist a delegation_observed event exactly as the ingest pipeline
-    # would — raw proto bytes, bare ADK names in the payload.
+    # Persist a delegation_observed event with the already-compound
+    # agent ids the sink produces.
     ev = goldfive_events_pb2.Event(run_id="run-d")
-    ev.delegation_observed.from_agent = "coordinator_agent"
-    ev.delegation_observed.to_agent = "research_agent"
+    ev.delegation_observed.from_agent = "client-xyz:coordinator_agent"
+    ev.delegation_observed.to_agent = "client-xyz:research_agent"
     ev.delegation_observed.task_id = "t-del"
     ev.delegation_observed.invocation_id = "inv-del"
     ev.delegation_observed.observed_at.seconds = int(now - 5)
@@ -417,10 +421,10 @@ async def test_watch_session_replays_persisted_delegation_observed(harness, stub
     )
     replayed = delegations[0].delegation_observed
     assert replayed.from_agent == "client-xyz:coordinator_agent", (
-        f"expected bare → compound rewrite on from_agent, got {replayed.from_agent!r}"
+        f"expected verbatim replay of from_agent, got {replayed.from_agent!r}"
     )
     assert replayed.to_agent == "client-xyz:research_agent", (
-        f"expected bare → compound rewrite on to_agent, got {replayed.to_agent!r}"
+        f"expected verbatim replay of to_agent, got {replayed.to_agent!r}"
     )
     assert replayed.task_id == "t-del"
     assert replayed.invocation_id == "inv-del"
