@@ -117,6 +117,23 @@ interface FrameMetrics {
   sampleCount: number;
 }
 
+// Shared row/lane → Y math. Used by drawBlocks, drawLinks, and drawDelegations
+// so a span's rendered Y center matches the arrow anchors exactly. Keep in
+// sync with the inline `laneTop = row.top + 2 + lane * laneH` formula used by
+// the block draw pass.
+interface RowLayoutLite {
+  top: number;
+  height: number;
+}
+function laneCenterY(row: RowLayoutLite, lane: number): number {
+  const laneIdx = lane >= 0 ? lane : 0;
+  const laneH = Math.max(SUB_LANE_HEIGHT_PX, Math.floor(row.height / 3));
+  const laneTop = row.top + 2 + laneIdx * laneH;
+  const laneBot = Math.min(row.top + row.height - 2, laneTop + laneH - 2);
+  const rectH = Math.max(6, laneBot - laneTop);
+  return laneTop + rectH / 2;
+}
+
 // Icons drawn when a block is wide enough. Single-char glyphs keep the fast
 // path cheap — no font atlas needed at 11sp.
 const KIND_ICON: Record<SpanKind, string> = {
@@ -1076,13 +1093,8 @@ export class GanttRenderer {
       rowLayout.set(agent.id, { top: y, height: rowH, centerY: y + rowH / 2 });
       y += rowH;
     }
-    const spanCenterY = (s: Span, row: RowLayout): number => {
-      const laneH = Math.max(SUB_LANE_HEIGHT_PX, Math.floor(row.height / 3));
-      const laneTop = row.top + 2 + (s.lane >= 0 ? s.lane : 0) * laneH;
-      const laneBot = Math.min(row.top + row.height - 2, laneTop + laneH - 2);
-      const rectH = Math.max(6, laneBot - laneTop);
-      return laneTop + rectH / 2;
-    };
+    const spanCenterY = (s: Span, row: RowLayout): number =>
+      laneCenterY(row, s.lane);
 
     const dataLeft = GUTTER_WIDTH_PX + 10;
     const dataRight = w;
@@ -1175,15 +1187,50 @@ export class GanttRenderer {
     const agents = this.store.agents.list;
     if (agents.length === 0) return;
 
-    // Row-center lookup — delegation anchors are row-centered rather than
-    // lane-specific because there's no originating span bar to point at.
-    const rowCenterY = new Map<string, number>();
+    // Row layout lookup — we need top+height per agent so we can anchor the
+    // delegation endpoints to the INVOCATION bar's Y (sub-lane 0 math),
+    // NOT the row midline. On a 3-sub-lane row the INVOCATION bar sits at
+    // ~row.top+10 while the midline is at row.top+28, so anchoring to
+    // midline leaves the arrow floating below the bar (harmonograf#129).
+    type RowLayout = { top: number; height: number; centerY: number };
+    const rowLayout = new Map<string, RowLayout>();
     let y = TOP_MARGIN_PX;
     for (const agent of agents) {
       const rowH = this.rowHeight(agent.id);
-      rowCenterY.set(agent.id, y + rowH / 2);
+      rowLayout.set(agent.id, { top: y, height: rowH, centerY: y + rowH / 2 });
       y += rowH;
     }
+
+    // Finds the INVOCATION span to anchor the arrow endpoint to on a
+    // given agent row at `atMs`. Prefers a span active at `atMs`; falls
+    // back to the most recent INVOCATION that ended before `atMs`, and
+    // finally to lane-0 math (same visual position the INVOCATION bar
+    // will occupy once it arrives) so the arrow stays stable on the live
+    // path even before the target row's INVOCATION span is reported.
+    const anchorY = (agentId: string, atMs: number): number | undefined => {
+      const row = rowLayout.get(agentId);
+      if (!row) return undefined;
+      const pad = Math.max(this.viewport.windowMs * 0.5, 1);
+      const scratch: Span[] = [];
+      this.store.spans.queryAgent(agentId, atMs - pad, atMs + pad, scratch);
+      let active: Span | undefined;
+      let mostRecentCompleted: Span | undefined;
+      for (const s of scratch) {
+        if (s.kind !== 'INVOCATION') continue;
+        if (s.startMs > atMs) continue;
+        const end = s.endMs ?? Number.POSITIVE_INFINITY;
+        if (end >= atMs) {
+          // Active at atMs — strongest match, prefer the latest-started
+          // one if multiple overlap (rare: invocation spans usually don't
+          // stack on a single row).
+          if (!active || s.startMs > active.startMs) active = s;
+        } else if (!mostRecentCompleted || s.startMs > mostRecentCompleted.startMs) {
+          mostRecentCompleted = s;
+        }
+      }
+      const chosen = active ?? mostRecentCompleted;
+      return laneCenterY(row, chosen ? chosen.lane : 0);
+    };
 
     const dataLeft = GUTTER_WIDTH_PX + 10;
     const dataRight = w;
@@ -1199,8 +1246,8 @@ export class GanttRenderer {
       if (d.observedAtMs < vs - margin || d.observedAtMs > ve + margin) {
         continue;
       }
-      const srcY = rowCenterY.get(d.fromAgentId);
-      const tgtY = rowCenterY.get(d.toAgentId);
+      const srcY = anchorY(d.fromAgentId, d.observedAtMs);
+      const tgtY = anchorY(d.toAgentId, d.observedAtMs);
       if (srcY === undefined || tgtY === undefined) continue;
       const x = msToPx(this.viewport, w, d.observedAtMs);
       if (x < dataLeft || x > dataRight) continue;
