@@ -643,27 +643,48 @@ export function GraphView() {
     [watch.store, selectSpan],
   );
 
-  // Auto-poll STATUS_QUERY for agents with running activations
+  // Auto-poll STATUS_QUERY for agents with running activations.
+  //
+  // The list of running agent ids is derived fresh on every store tick
+  // (because `layout` churns with `tick`), so we can't depend on
+  // `layout.agentIds` / `layout.activations` directly — their array
+  // identities change every render and would re-run this effect at
+  // ~60Hz during a busy run, firing sendStatusQuery() once per tick
+  // (see harmonograf GraphView status-query thrash: ~222 downstream
+  // events/sec observed in production). Instead, derive a stable
+  // scalar signature from the *set* of running agent ids and depend on
+  // that: the effect only re-runs when the set actually changes, and
+  // the polling loop ticks on its own 8s schedule in between.
+  const runningAgentIds = useMemo(
+    () =>
+      layout.agentIds.filter((_agentId, idx) =>
+        layout.activations.some((a) => a.agentIdx === idx && a.isRunning),
+      ),
+    [layout],
+  );
+  const runningAgentSig = useMemo(
+    () => [...runningAgentIds].sort().join('|'),
+    [runningAgentIds],
+  );
+  const runningAgentIdsRef = useRef<string[]>(runningAgentIds);
+  runningAgentIdsRef.current = runningAgentIds;
+
   useEffect(() => {
-    if (!sessionId || layout.agentIds.length === 0) return;
-
-    const runningAgentIds = layout.agentIds.filter((_agentId, idx) =>
-      layout.activations.some((a) => a.agentIdx === idx && a.isRunning)
-    );
-
-    if (runningAgentIds.length === 0) return;
+    if (!sessionId || runningAgentSig === '') return;
 
     const poll = () => {
-      for (const agentId of runningAgentIds) {
+      const ids = runningAgentIdsRef.current;
+      for (const agentId of ids) {
         sendStatusQuery(sessionId, agentId).catch(() => {});
       }
     };
 
-    // Fire once immediately, then every 8 seconds
+    // Fire once immediately on mount / whenever the running-agent set
+    // actually changes, then every 8 seconds.
     poll();
     const interval = setInterval(poll, 8000);
     return () => clearInterval(interval);
-  }, [sessionId, layout.agentIds, layout.activations]);
+  }, [sessionId, runningAgentSig]);
 
   if (!sessionId) {
     return (
