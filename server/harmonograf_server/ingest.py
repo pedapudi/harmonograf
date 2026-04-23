@@ -217,6 +217,17 @@ class IngestPipeline:
         # attributes without a full table scan on every span start.
         self._task_index: dict[str, dict[str, str]] = {}
 
+        # Pending task→span binding intents (harmonograf#122). Keyed by
+        # (session_id, canonical_agent_id) so a ``task_started`` that
+        # arrives before the INVOCATION span for its assignee can be
+        # fulfilled when the span lands. Each entry is a list of
+        # (plan_id, task_id) waiting on an INVOCATION span for that
+        # agent. Drained as soon as a matching span starts; bounded in
+        # practice by concurrent-tasks-per-agent which is tiny.
+        self._pending_task_bindings: dict[
+            tuple[str, str], list[tuple[str, str]]
+        ] = {}
+
         # Per-session ring of recent DriftDetected events. Frontend
         # replays these on WatchSession initial burst so synthetic-actor
         # rows (user / goldfive) and trajectory drift markers survive
@@ -416,6 +427,18 @@ class IngestPipeline:
         )
         stored = await self._store.append_span(span)
         self._bus.publish_span_start(stored)
+
+        # harmonograf#122: server-side task→span binding. When an
+        # INVOCATION span starts, fulfill any pending binding intents
+        # for its (session, agent) pair so tasks whose ``task_started``
+        # arrived before their agent's span land on the right
+        # ``bound_span_id``. The attribute-based path below stays as a
+        # secondary signal on leaf spans — it binds correctly on the
+        # narrow timing window where the client's state mirror wins,
+        # but the PRIMARY binding is now agent-id correlation at
+        # ingest (see ``_on_task_started``).
+        if stored.kind == SpanKind.INVOCATION:
+            await self._drain_pending_bindings_for_span(stored)
 
         # Proactive task report via span attribute.
         if pb_span.attributes:
@@ -999,8 +1022,27 @@ class IngestPipeline:
     async def _on_task_started(
         self, ctx: StreamContext, payload: Any, run_id: str
     ) -> None:
+        # harmonograf#122: correlate task→INVOCATION span at ingest
+        # time. Resolve the task's ``assignee_agent_id`` to the
+        # canonical (per-ADK-agent) id registered on this session,
+        # then find a RUNNING INVOCATION span for that agent. If the
+        # span hasn't arrived yet (possible under stream ordering),
+        # stash a pending binding intent so ``_handle_span_start``
+        # can fulfill it when the span lands. This replaces the
+        # fragile client-side ``hgraf.task_id`` attribute path, which
+        # mis-binds under the AgentTool sub-Runner state-handoff bug
+        # (harmonograf#119): only 1/19 spans carry the attribute in a
+        # fresh run, so the attribute path is kept as a fallback but
+        # cannot be the sole source of truth.
+        bound_span_id = await self._resolve_invocation_span_for_task(
+            ctx.session_id, payload.task_id
+        )
         await self._apply_goldfive_task_status(
-            ctx, payload.task_id, TaskStatus.RUNNING, run_id=run_id
+            ctx,
+            payload.task_id,
+            TaskStatus.RUNNING,
+            run_id=run_id,
+            bound_span_id=bound_span_id,
         )
 
     def _on_task_progress(
@@ -1070,6 +1112,7 @@ class IngestPipeline:
         *,
         run_id: str,
         cancel_reason: str = "",
+        bound_span_id: Optional[str] = None,
     ) -> None:
         if not task_id:
             logger.debug(
@@ -1101,7 +1144,11 @@ class IngestPipeline:
             )
             return
         updated = await self._store.update_task_status(
-            plan_id, task_id, status, cancel_reason=cancel_reason
+            plan_id,
+            task_id,
+            status,
+            bound_span_id=bound_span_id,
+            cancel_reason=cancel_reason,
         )
         if updated is not None:
             self._bus.publish_task_status(ctx.session_id, plan_id, updated)
@@ -1363,6 +1410,148 @@ class IngestPipeline:
             invocation_id=payload.invocation_id,
             observed_at=observed_at,
         )
+
+    async def _resolve_invocation_span_for_task(
+        self, session_id: str, task_id: str
+    ) -> Optional[str]:
+        """Return the span id of the INVOCATION that should bind to ``task_id``.
+
+        harmonograf#122: looks up the task's ``assignee_agent_id``,
+        resolves it to the canonical agent-row id
+        (``find_agent_id_by_name`` — bare ADK name → compound id per
+        harmonograf#111 / #113), and scans stored spans for an
+        INVOCATION owned by that agent. Preference order:
+
+          1. RUNNING INVOCATION with the latest ``start_time`` (the
+             agent is actively executing — the usual case).
+          2. Most recently started INVOCATION regardless of status.
+             Covers late-arriving ``task_started`` after the
+             invocation already closed (rare, but observed when the
+             coordinator reports task deltas out of band).
+
+        Returns None if the plan/task is unknown, the assignee is
+        missing, or no matching span has been ingested yet. In that
+        case ``_on_task_started`` stashes a pending binding intent
+        that ``_handle_span_start`` fulfills when the span lands.
+        Returning None also covers the pre-#122 behavior where
+        ``_on_task_started`` did not set ``bound_span_id`` at all, so
+        this is strictly additive.
+        """
+        if not task_id:
+            return None
+        task = await self._lookup_task(session_id, task_id)
+        if task is None or not task.assignee_agent_id:
+            return None
+        canonical = await self._store.find_agent_id_by_name(
+            session_id, task.assignee_agent_id
+        ) or task.assignee_agent_id
+        span_id = await self._find_invocation_span_for_agent(
+            session_id, canonical
+        )
+        if span_id is None:
+            # Stash a pending binding intent keyed by the canonical
+            # agent id so ``_handle_span_start`` can fulfill it when
+            # the INVOCATION span arrives.
+            plan_id = self._task_index.get(session_id, {}).get(task_id)
+            if plan_id is not None:
+                self._pending_task_bindings.setdefault(
+                    (session_id, canonical), []
+                ).append((plan_id, task_id))
+        return span_id
+
+    async def _lookup_task(
+        self, session_id: str, task_id: str
+    ) -> Optional[Any]:
+        """Fetch the ``Task`` row for ``(session_id, task_id)`` or None.
+
+        Uses the in-memory ``_task_index`` to find the owning plan and
+        falls back to a storage scan if the index is cold (pipeline
+        restart mid-session).
+        """
+        plan_id = self._task_index.get(session_id, {}).get(task_id)
+        if plan_id is None:
+            plans = await self._store.list_task_plans_for_session(session_id)
+            for p in plans:
+                for t in p.tasks:
+                    if t.id == task_id:
+                        self._task_index.setdefault(session_id, {})[
+                            task_id
+                        ] = p.id
+                        return t
+            return None
+        plan = await self._store.get_task_plan(plan_id)
+        if plan is None:
+            return None
+        for t in plan.tasks:
+            if t.id == task_id:
+                return t
+        return None
+
+    async def _find_invocation_span_for_agent(
+        self, session_id: str, agent_id: str
+    ) -> Optional[str]:
+        """Return the id of the INVOCATION span to bind to this agent.
+
+        Scans spans for ``(session_id, agent_id)`` and picks the best
+        INVOCATION candidate: RUNNING with the latest ``start_time``,
+        else the most recently started INVOCATION (any status). Only
+        INVOCATION spans are considered — the UI renders task boxes on
+        agent lifelines which live on INVOCATION spans; binding a
+        TOOL_CALL / LLM_CALL here would fight the attribute-based leaf
+        binding on the same task row.
+        """
+        if not session_id or not agent_id:
+            return None
+        spans = await self._store.get_spans(session_id, agent_id=agent_id)
+        running: list[Span] = []
+        any_invocation: list[Span] = []
+        for sp in spans:
+            if sp.kind != SpanKind.INVOCATION:
+                continue
+            any_invocation.append(sp)
+            if sp.status == SpanStatus.RUNNING:
+                running.append(sp)
+        pool = running or any_invocation
+        if not pool:
+            return None
+        pool.sort(key=lambda s: s.start_time, reverse=True)
+        return pool[0].id
+
+    async def _drain_pending_bindings_for_span(self, span: Span) -> None:
+        """Fulfill any task-binding intents waiting on ``span``'s agent.
+
+        harmonograf#122: called from ``_handle_span_start`` after an
+        INVOCATION span is persisted. Any ``task_started`` event that
+        fired BEFORE this span landed left a pending-binding record
+        keyed by ``(session_id, canonical_agent_id)``; we drain the
+        list and stamp ``bound_span_id`` on each task. Runs under the
+        same lock-free regime as the rest of the ingest hot path
+        because the entries are append-only from one ingest thread
+        and each drain pops its key.
+        """
+        key = (span.session_id, span.agent_id)
+        pending = self._pending_task_bindings.pop(key, None)
+        if not pending:
+            return
+        for plan_id, task_id in pending:
+            # Preserve whatever status the task currently holds — the
+            # span might land after the task already transitioned
+            # terminal (task_completed can arrive before the
+            # INVOCATION's span_start under odd stream orderings).
+            # We only want to set bound_span_id; use the task's own
+            # status as the "no-op" value for update_task_status.
+            current = await self._lookup_task(span.session_id, task_id)
+            status = current.status if current is not None else TaskStatus.RUNNING
+            updated = await self._store.update_task_status(
+                plan_id,
+                task_id,
+                status,
+                bound_span_id=span.id,
+            )
+            if updated is not None:
+                self._bus.publish_task_status(
+                    span.session_id, plan_id, updated
+                )
 
     async def _bind_task_to_span(
         self,
