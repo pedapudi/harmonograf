@@ -216,6 +216,61 @@ async def test_span_end_for_unknown_span_is_noop(pipeline):
     await pipeline.handle_message(ctx, _span_end("ghost"))
 
 
+async def test_span_end_with_attributes_publishes_update_before_end(pipeline, store):
+    """SpanEnd messages may carry terminal attributes (e.g. the telemetry
+    plugin's ``after_model_callback`` stamps ``has_reasoning`` +
+    ``llm.reasoning`` alongside the SpanEnd). The frontend-facing
+    ``EndedSpan`` proto omits attributes, so the live stream would drop them
+    unless we also publish a SPAN_UPDATE so the client's updatedSpan handler
+    can merge them in place. Regression for the brain-badge-not-rendering
+    bug (harmonograf#[this PR])."""
+    ctx, _ = await pipeline.handle_hello(_hello(session_id="sess_end_attrs"))
+    sub = await pipeline.bus.subscribe("sess_end_attrs")
+    await pipeline.handle_message(
+        ctx, _span_msg("sp1", session_id="sess_end_attrs", kind=types_pb2.SPAN_KIND_LLM_CALL)
+    )
+
+    # SpanEnd carrying reasoning attributes — mirrors what the client
+    # telemetry plugin emits when after_model_callback fires.
+    se = telemetry_pb2.SpanEnd(span_id="sp1", status=types_pb2.SPAN_STATUS_COMPLETED)
+    se.end_time.CopyFrom(_ts(110.0))
+    se.attributes["has_reasoning"].bool_value = True
+    se.attributes["llm.reasoning"].string_value = "i thought about it"
+    await pipeline.handle_message(ctx, telemetry_pb2.TelemetryUp(span_end=se))
+
+    # Attributes persisted.
+    stored = await store.get_span("sp1")
+    assert stored.attributes.get("has_reasoning") is True
+    assert stored.attributes.get("llm.reasoning") == "i thought about it"
+
+    # Bus deltas include both SPAN_UPDATE and SPAN_END, in that order.
+    delta_kinds: list[str] = []
+    while not sub.queue.empty():
+        delta_kinds.append(sub.queue.get_nowait().kind)
+    update_idx = delta_kinds.index(DELTA_SPAN_UPDATE)
+    end_idx = delta_kinds.index(DELTA_SPAN_END)
+    assert update_idx < end_idx, (
+        f"SPAN_UPDATE must precede SPAN_END so the frontend can merge "
+        f"terminal attributes before status flips; got deltas={delta_kinds}"
+    )
+
+
+async def test_span_end_without_attributes_only_publishes_end(pipeline, store):
+    """The SPAN_UPDATE-before-SPAN_END path is only required when SpanEnd
+    carries attributes. A bare SpanEnd (no attrs, no payload_refs) must
+    continue to publish a single SPAN_END delta."""
+    ctx, _ = await pipeline.handle_hello(_hello(session_id="sess_bare_end"))
+    sub = await pipeline.bus.subscribe("sess_bare_end")
+    await pipeline.handle_message(ctx, _span_msg("sp1", session_id="sess_bare_end"))
+    await pipeline.handle_message(ctx, _span_end("sp1", end=110.0))
+
+    delta_kinds: list[str] = []
+    while not sub.queue.empty():
+        delta_kinds.append(sub.queue.get_nowait().kind)
+    assert delta_kinds.count(DELTA_SPAN_END) == 1
+    assert DELTA_SPAN_UPDATE not in delta_kinds
+
+
 async def test_span_update_status_and_attributes(pipeline, store):
     ctx, _ = await pipeline.handle_hello(_hello(session_id="sess_upd"))
     await pipeline.handle_message(ctx, _span_msg("sp1"))
