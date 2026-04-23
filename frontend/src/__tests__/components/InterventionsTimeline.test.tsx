@@ -242,6 +242,60 @@ describe('<InterventionsTimeline />', () => {
     expect(wrapper.style.maxWidth).toBe('800px');
   });
 
+  // --- width-footprint regression (follow-up to #125) -------------------
+  //
+  // #125 raised the CSS max-width cap from 480px → 1600px so the axis
+  // could span a session-wide window honestly. That fix blew up the
+  // strip's horizontal footprint on wide panes when content was sparse
+  // (one diamond floating 1400px off to the right of an otherwise
+  // empty strip). The cap is now tightened back to ~960px — wide
+  // enough for a typical 6-stage DAG (~864px), narrow enough to feel
+  // intentional on a 1600px page. Callers that know an exact desired
+  // width (e.g. GanttView flowing the DAG width down) still override
+  // via the `width` prop.
+  it('explicit width prop is reasonable for a typical session (≤ 1000px)', () => {
+    // This is the footprint a caller gets when flowing plan-DAG width
+    // down. 6 stages × 140 COLUMN_WIDTH + 24 padding = 864px.
+    render(
+      <InterventionsTimeline
+        rows={[row({ key: 'a', atMs: 5 * 60_000, source: 'user', kind: 'STEER' })]}
+        startMs={0}
+        endMs={10 * 60_000}
+        width={864}
+        _liveTickMs={0}
+      />,
+    );
+    const wrapper = screen.getByTestId('interventions-timeline');
+    // Footprint matches the DAG — not 1600px, not 100% of page.
+    expect(wrapper.style.width).toBe('864px');
+    expect(wrapper.style.maxWidth).toBe('864px');
+    const widthPx = parseInt(wrapper.style.width, 10);
+    expect(widthPx).toBeLessThanOrEqual(1000);
+  });
+
+  it('places markers correctly regardless of sparse content (one marker, wide strip)', () => {
+    // Sparse-content regression: a single diamond 3 minutes into a
+    // 3-minute session should land near the right edge, not at 0m.
+    // The #125 time-accuracy invariant still holds after the width
+    // cap is tightened.
+    const width = 864;
+    render(
+      <InterventionsTimeline
+        rows={[
+          row({ key: 'd', atMs: 3 * 60_000, source: 'user', kind: 'STEER' }),
+        ]}
+        startMs={0}
+        endMs={3 * 60_000}
+        width={width}
+        _liveTickMs={0}
+      />,
+    );
+    const marker = screen.getByTestId('intervention-marker-d');
+    const cx = cxOf(marker);
+    // tNorm = 1.0 (clamped): cx = STRIP_PAD_X + 1.0 * (864 - 28) = 850
+    expect(cx).toBeGreaterThan(width * 0.9);
+  });
+
   // --- accurate placement + dynamic axis scaling -------------------------
   //
   // Regression coverage for the user-reported bug: a drift/steer that

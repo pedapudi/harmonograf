@@ -8,15 +8,17 @@
   flex-direction: column;
   gap: 4px;
   padding: 0;
-  /* Let the strip fill its container — the axis now spans the whole
-     session (GanttView passes session-relative startMs/endMs), so
-     honest horizontal scaling matters more than capping width. A
-     generous cap remains so pathologically wide panes don't produce
-     vast empty space between sparse markers; it's much larger than
-     the old 480px so typical Gantt widths get full horizontal range.
-     Parents that want an exact width still pass the `width` prop,
-     which overrides this cap via inline style. */
-  max-width: 1600px;
+  /* Cap the strip width so it stays visually proportional to the
+     plan DAG above it rather than stretching to the full page. The
+     960px cap covers a typical ~6-stage DAG (SIDE_PADDING*2 +
+     stages*COLUMN_WIDTH ≈ 864px) plus slack for wider plans. The
+     earlier #125 fix switched to a session-wide axis so markers land
+     at the correct (atMs - startMs)/elapsedMs fraction; that math is
+     preserved — only the strip's horizontal footprint is bounded.
+     Parents that want an exact width pass the `width` prop, which
+     overrides this cap via inline style (e.g. GanttView flows the
+     measured plan-DAG width down so the strip and DAG line up). */
+  max-width: 960px;
   font:
     11px/1.3 var(--md-sys-typescale-body-small-font, system-ui, sans-serif);
   color: var(--md-sys-color-on-surface-variant, #9da3b4);
