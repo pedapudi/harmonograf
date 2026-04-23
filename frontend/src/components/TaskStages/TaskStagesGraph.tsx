@@ -31,16 +31,6 @@ const COL_PADDING = 10;
 const SIDE_PADDING = 12;
 const AGENT_STRIPE_W = 4;
 
-// Intrinsic DAG SVG width for a given plan. Kept around for callers that
-// want to align siblings to the DAG without introducing DOM refs /
-// ResizeObservers. Returns 0 for empty plans so callers can fall back to
-// their own defaults.
-export function computePlanDagWidth(plan: TaskPlan): number {
-  const stages = computeStages(plan);
-  if (stages.length === 0) return 0;
-  return SIDE_PADDING * 2 + stages.length * COLUMN_WIDTH;
-}
-
 interface LaidOutCard {
   task: Task;
   x: number;
