@@ -150,6 +150,35 @@ export function GanttView() {
   const interventions = store
     ? deriveInterventionsFromStore(store, allAnnotations)
     : [];
+
+  // Session-wide axis for the InterventionsTimeline strips. Every
+  // intervention's `atMs` is session-relative (see lib/interventions.ts),
+  // so the strip's window must run from 0 (session start) to the
+  // effective "now" for the session — otherwise markers that fired well
+  // into the session land at the 0m end of a narrow per-plan window
+  // (user report: diamond pinned to 0m despite event ~7m in).
+  //
+  // For a live session we track `store.nowMs`; for a completed/aborted
+  // one we fall back to the max observed activity time across
+  // interventions, plans, and nowMs so the axis doesn't collapse if
+  // nowMs wasn't advanced past the final event.
+  const MIN_SESSION_SPAN_MS = 60_000; // 1 minute floor so a brand-new strip still has axis room
+  const sessionStartMs = 0;
+  const isLive =
+    watch?.sessionStatus === 'LIVE' || watch?.sessionStatus === 'UNKNOWN';
+  const observedMaxMs = store
+    ? Math.max(
+        0,
+        store.nowMs || 0,
+        ...interventions.map((r) => r.atMs),
+        ...plans.map((p) => p.createdAtMs),
+      )
+    : 0;
+  const sessionEndMs = Math.max(
+    isLive && store ? store.nowMs || observedMaxMs : observedMaxMs,
+    MIN_SESSION_SPAN_MS,
+  );
+
   const agentNameFor = (id: string): string =>
     store?.agents.get(id)?.name ?? id;
   // Resolve the assignee's canonical color only if the agent is registered on
@@ -358,13 +387,11 @@ export function GanttView() {
                         ? (plan.revisionIndex ?? 0) === row.planRevisionIndex
                         : (plan.revisionIndex ?? 0) === 0,
                   )}
-                  startMs={plan.createdAtMs}
-                  endMs={Math.max(
-                    plan.createdAtMs + 1,
-                    ...plan.tasks.map(
-                      (t) => plan.createdAtMs + (t.predictedDurationMs || 0),
-                    ),
-                  )}
+                  // Session-wide axis, not per-plan. All row.atMs values
+                  // are session-relative so the strip must span the
+                  // whole session for marker placement to be honest.
+                  startMs={sessionStartMs}
+                  endMs={sessionEndMs}
                   revs={plans}
                   onJumpToRevision={undefined}
                 />
