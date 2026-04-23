@@ -358,6 +358,68 @@ class FrontendServicerMixin:
                     pb_sample.recorded_at.CopyFrom(ra)
                 yield frontend_pb2.SessionUpdate(context_window_sample=pb_sample)
 
+            # 4d. DelegationObserved — replay persisted delegation events so
+            # the Agent Graph / Gantt delegation arrows reappear on
+            # reconnect or for clients that open the view after the
+            # orchestrator already emitted the events. Without this,
+            # delegations only land on live bus subscribers — a viewer
+            # that joins late sees the agent lifelines (from span replay)
+            # but no arrows between them.
+            #
+            # The persisted payload_bytes carry the *raw* bare ADK agent
+            # names (ingest persists verbatim before resolving), so we
+            # re-run find_agent_id_by_name here to rewrite bare → compound
+            # ids. This matches the live path in
+            # IngestPipeline._on_delegation_observed.
+            try:
+                delegation_events = await self._store.list_goldfive_events(
+                    session_id, kind="delegation_observed"
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("list_goldfive_events(delegation_observed) failed: %s", exc)
+                delegation_events = []
+            for rec in delegation_events:
+                try:
+                    ev = goldfive_events_pb2.Event()
+                    ev.ParseFromString(rec.payload_bytes)
+                except Exception as exc:  # noqa: BLE001 — proto edge cases
+                    logger.debug(
+                        "delegation_observed replay parse failed session_id=%s seq=%s: %s",
+                        session_id,
+                        rec.sequence,
+                        exc,
+                    )
+                    continue
+                d = ev.delegation_observed
+                resolved_from = d.from_agent
+                resolved_to = d.to_agent
+                try:
+                    f_id = await self._store.find_agent_id_by_name(
+                        session_id, d.from_agent
+                    )
+                    if f_id:
+                        resolved_from = f_id
+                    t_id = await self._store.find_agent_id_by_name(
+                        session_id, d.to_agent
+                    )
+                    if t_id:
+                        resolved_to = t_id
+                except Exception as exc:  # noqa: BLE001 — defensive
+                    logger.debug(
+                        "delegation_observed replay resolve failed session_id=%s: %s",
+                        session_id,
+                        exc,
+                    )
+                ev.delegation_observed.from_agent = resolved_from
+                ev.delegation_observed.to_agent = resolved_to
+                # Stamp emitted_at from observed_at so the frontend's
+                # observedAtMs calculation (which reads Event.emitted_at)
+                # lines up with the Gantt timeline — same invariant as
+                # the live delta path in _delta_to_session_update.
+                if d.HasField("observed_at"):
+                    ev.emitted_at.CopyFrom(d.observed_at)
+                yield frontend_pb2.SessionUpdate(goldfive_event=ev)
+
             # 5. Burst complete marker
             yield frontend_pb2.SessionUpdate(
                 burst_complete=frontend_pb2.InitialBurstComplete(

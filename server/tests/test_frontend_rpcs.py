@@ -343,6 +343,92 @@ async def test_watch_session_replays_persisted_plan_as_goldfive_events(
     assert live_run_completed == "done"
 
 
+@pytest.mark.asyncio
+async def test_watch_session_replays_persisted_delegation_observed(harness, stub):
+    """Initial burst must replay persisted delegation_observed events with
+    bare ADK names rewritten to canonical compound agent ids so the Agent
+    Graph view draws arrows on reconnect. Regression: persist path stored
+    events verbatim (bare names), but WatchSession never re-emitted them
+    — only live bus subscribers ever saw delegations, so any client that
+    opened the view late got lifelines with no arrows between them."""
+
+    from goldfive.v1 import events_pb2 as goldfive_events_pb2
+    from harmonograf_server.storage import GoldfiveEventRecord
+
+    store = harness["store"]
+    now = time.time()
+    await _seed_session(
+        store, session_id="sess_gf_d", n_spans=0, start=now - 10
+    )
+    # Register the two ADK agents under compound ids so bare → compound
+    # resolution on replay has targets.
+    for adk_name in ("coordinator_agent", "research_agent"):
+        await store.register_agent(
+            Agent(
+                id=f"client-xyz:{adk_name}",
+                session_id="sess_gf_d",
+                name=adk_name,
+                framework=Framework.ADK,
+                connected_at=now - 9,
+                last_heartbeat=now - 9,
+                status=AgentStatus.CONNECTED,
+            )
+        )
+
+    # Persist a delegation_observed event exactly as the ingest pipeline
+    # would — raw proto bytes, bare ADK names in the payload.
+    ev = goldfive_events_pb2.Event(run_id="run-d")
+    ev.delegation_observed.from_agent = "coordinator_agent"
+    ev.delegation_observed.to_agent = "research_agent"
+    ev.delegation_observed.task_id = "t-del"
+    ev.delegation_observed.invocation_id = "inv-del"
+    ev.delegation_observed.observed_at.seconds = int(now - 5)
+    await store.append_goldfive_event(
+        GoldfiveEventRecord(
+            session_id="sess_gf_d",
+            run_id="run-d",
+            sequence=1,
+            kind="delegation_observed",
+            recorded_at=now - 5,
+            payload_bytes=ev.SerializeToString(),
+        )
+    )
+
+    req = frontend_pb2.WatchSessionRequest(session_id="sess_gf_d")
+    call = stub.WatchSession(req)
+
+    delegations: list = []
+
+    async def consumer():
+        async for upd in call:
+            which = upd.WhichOneof("kind")
+            if which == "goldfive_event":
+                payload = upd.goldfive_event.WhichOneof("payload")
+                if payload == "delegation_observed":
+                    delegations.append(upd.goldfive_event)
+            elif which == "burst_complete":
+                break
+
+    await asyncio.wait_for(consumer(), timeout=5.0)
+    call.cancel()
+
+    assert len(delegations) == 1, (
+        f"expected one replayed delegation_observed event, got {len(delegations)}"
+    )
+    replayed = delegations[0].delegation_observed
+    assert replayed.from_agent == "client-xyz:coordinator_agent", (
+        f"expected bare → compound rewrite on from_agent, got {replayed.from_agent!r}"
+    )
+    assert replayed.to_agent == "client-xyz:research_agent", (
+        f"expected bare → compound rewrite on to_agent, got {replayed.to_agent!r}"
+    )
+    assert replayed.task_id == "t-del"
+    assert replayed.invocation_id == "inv-del"
+    # emitted_at must be stamped from observed_at so the frontend's
+    # observedAtMs calculation lines up with the Gantt timeline.
+    assert delegations[0].emitted_at.seconds == int(now - 5)
+
+
 # ---- GetPayload -----------------------------------------------------------
 
 
