@@ -4,6 +4,7 @@ import { useSessionWatch, sessionIsInactive } from '../../rpc/hooks';
 import { colorForAgent } from '../../theme/agentColors';
 import { formatDuration } from '../../lib/format';
 import type { Span, AttributeValue } from '../../gantt/types';
+import { hasThinking as spanHasThinking } from '../../lib/thinking';
 import './LiveActivity.css';
 
 interface ActiveItem {
@@ -30,13 +31,6 @@ function attrToString(v: AttributeValue | undefined): string {
     default:
       return '';
   }
-}
-
-function attrToBool(v: AttributeValue | undefined): boolean {
-  if (!v) return false;
-  if (v.kind === 'bool') return v.value;
-  if (v.kind === 'string') return v.value.length > 0;
-  return false;
 }
 
 export function LiveActivityPanel() {
@@ -124,8 +118,7 @@ export function LiveActivityPanel() {
     const attrReport = attrToString(span.attributes['task_report']);
     const taskReport = attrReport || agent.taskReport || '';
     const hasThinking =
-      attrToBool(span.attributes['has_thinking']) ||
-      taskReport.startsWith('Thinking');
+      spanHasThinking(span) || taskReport.startsWith('Thinking');
     const elapsedMs = Math.max(0, nowRel - span.startMs);
     items.push({
       agentId,

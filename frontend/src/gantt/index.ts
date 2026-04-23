@@ -4,6 +4,7 @@
 
 import type { Agent, ContextWindowSample, Task, TaskPlan, TaskStatus } from './types';
 import { SpanIndex, type DirtyRect } from './spatialIndex';
+import { hasThinking } from '../lib/thinking';
 
 export type { DirtyRect } from './spatialIndex';
 export { SpanIndex } from './spatialIndex';
@@ -691,7 +692,8 @@ export class SessionStore {
   //
   // When the task is RUNNING, the result is enriched with live context from
   // the span index: the most recent in-flight TOOL_CALL on the assignee agent
-  // and whether any in-flight LLM_CALL on that agent has `has_thinking=true`.
+  // and whether any in-flight LLM_CALL on that agent carries reasoning
+  // (per lib/thinking.hasThinking — has_reasoning flag or inline text).
   // These fields let the CurrentTaskStrip surface a tool badge and thinking
   // dot without the component having to crawl the span index itself.
   getCurrentTask(): {
@@ -743,8 +745,9 @@ export class SessionStore {
           inFlightTool = { name: span.name, startedAtMs: span.startMs };
         }
       } else if (span.kind === 'LLM_CALL') {
-        const attr = span.attributes['has_thinking'];
-        if (attr && attr.kind === 'bool' && attr.value) {
+        // Route through lib/thinking.hasThinking() so we honor both the
+        // has_reasoning bool flag and any reasoning text carrier (#107).
+        if (hasThinking(span)) {
           isThinking = true;
         }
       }
