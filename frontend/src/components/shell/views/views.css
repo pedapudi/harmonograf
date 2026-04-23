@@ -385,6 +385,23 @@ a.hg-settings__value:hover {
   background: rgba(255, 255, 255, 0.06);
   border-color: currentColor;
 }
+.hg-traj__marker--more {
+  /* +N summary chip — informational only, never a button. Sits inline with
+     the real markers so a trimmed ribbon still reads as one row instead of
+     wrapping into a grid. */
+  color: #8d9199;
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  white-space: nowrap;
+  cursor: default;
+}
+.hg-traj__marker--more:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: transparent;
+}
 
 /* Split layout: DAG on the left, detail on the right */
 

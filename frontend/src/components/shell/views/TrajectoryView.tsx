@@ -42,6 +42,55 @@ const SEVERITY_COLOR: Record<string, string> = {
 // model-authored drifts.
 const STEER_KINDS = new Set(['user_steer', 'user_cancel', 'user_pause']);
 
+// Upper bound on how many drift markers a single rev can render in the ribbon.
+// goldfive can emit thousands of DRIFT_KIND_UNSPECIFIED drifts in a single
+// session from misbehaving status-query paths; rendering a button per drift
+// (flex-wrap) produces a wall of dots that pushes the DAG off-screen and
+// freezes the browser. We keep the first N by severity+recency and render a
+// "+M more" summary chip for the remainder. Empty-kind drifts are dropped
+// entirely — goldfiveEvent.ts maps DRIFT_KIND_UNSPECIFIED → ''.
+const RIBBON_MAX_MARKERS_PER_REV = 24;
+
+// Filter out drifts whose kind is unknown/unspecified. These are inherently
+// noise for the trajectory ribbon — the upstream taxonomy mapper already
+// folds DRIFT_KIND_UNSPECIFIED to empty string (rpc/goldfiveEvent.ts
+// driftKindToString). Keeps a single filter site so a future "show raw"
+// affordance can flip it per-view.
+function isRenderableDrift(d: DriftRecord): boolean {
+  return !!(d.kind && d.kind.length > 0);
+}
+
+// Severity rank used when we have to trim a long drift list down to a
+// bounded window: critical > warning > info > unspec. Within a rank we
+// keep the most recent by recordedAtMs so the operator still sees the
+// trailing activity of a dense session.
+const SEVERITY_RANK: Record<string, number> = {
+  critical: 3,
+  warning: 2,
+  info: 1,
+  '': 0,
+};
+
+function selectTopDrifts(
+  drifts: readonly DriftRecord[],
+  max: number,
+): { shown: DriftRecord[]; hidden: number } {
+  if (drifts.length <= max) {
+    return { shown: [...drifts], hidden: 0 };
+  }
+  const ranked = [...drifts].sort((a, b) => {
+    const sa = SEVERITY_RANK[a.severity] ?? 0;
+    const sb = SEVERITY_RANK[b.severity] ?? 0;
+    if (sa !== sb) return sb - sa;
+    return b.recordedAtMs - a.recordedAtMs;
+  });
+  const shown = ranked.slice(0, max);
+  // Present in chronological order so the ribbon still reads left-to-right
+  // even after we trimmed by severity.
+  shown.sort((a, b) => a.recordedAtMs - b.recordedAtMs);
+  return { shown, hidden: drifts.length - max };
+}
+
 // ── View model ─────────────────────────────────────────────────────────────
 
 interface TrajectoryViewModel {
@@ -83,7 +132,12 @@ function buildViewModel(store: SessionStore | null): TrajectoryViewModel {
   // for labeling / compare affordances; the trajectory view itself treats
   // every rev uniformly regardless of its plan_id.
   const primaryId = combined[0]?.id ?? plans[0].id;
-  const drifts = [...store.drifts.list()];
+  // Drop UNSPECIFIED-kind drifts up-front. Goldfive emits tens of thousands
+  // of these from a misbehaving status-query path; rendering them in the
+  // ribbon buries the DAG under a wall of dots and freezes the browser.
+  // They carry no actionable information (no kind, no severity → the
+  // ribbon marker would have no color or tooltip anyway).
+  const drifts = store.drifts.list().filter(isRenderableDrift);
   const driftsByRev: DriftRecord[][] = combined.map(() => []);
   for (const d of drifts) {
     let idx = 0;
@@ -491,26 +545,51 @@ function Ribbon(props: RibbonProps) {
               </span>
             </button>
             <div className="hg-traj__markers">
-              {drifts.map((d) => {
-                const isSteer = STEER_KINDS.has(d.kind);
-                return (
-                  <button
-                    key={`drift-${d.seq}`}
-                    className="hg-traj__marker"
-                    type="button"
-                    data-steer={isSteer}
-                    data-severity={d.severity || undefined}
-                    title={`${d.kind}${d.severity ? ` (${d.severity})` : ''}${d.detail ? `: ${d.detail}` : ''}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      props.onSelectDrift(d.seq);
-                    }}
-                    data-testid={`drift-marker-${d.seq}`}
-                  >
-                    {isSteer ? '★' : '●'}
-                  </button>
+              {(() => {
+                // Cap markers per rev so a pathological drift storm (goldfive
+                // can emit thousands in one session) can't overflow the ribbon
+                // and push the DAG off-screen. UNSPECIFIED-kind drifts are
+                // already dropped in buildViewModel — this cap only kicks in
+                // when there are still more legitimate drifts than the ribbon
+                // can readably display.
+                const { shown, hidden } = selectTopDrifts(
+                  drifts,
+                  RIBBON_MAX_MARKERS_PER_REV,
                 );
-              })}
+                return (
+                  <>
+                    {shown.map((d) => {
+                      const isSteer = STEER_KINDS.has(d.kind);
+                      return (
+                        <button
+                          key={`drift-${d.seq}`}
+                          className="hg-traj__marker"
+                          type="button"
+                          data-steer={isSteer}
+                          data-severity={d.severity || undefined}
+                          title={`${d.kind}${d.severity ? ` (${d.severity})` : ''}${d.detail ? `: ${d.detail}` : ''}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            props.onSelectDrift(d.seq);
+                          }}
+                          data-testid={`drift-marker-${d.seq}`}
+                        >
+                          {isSteer ? '★' : '●'}
+                        </button>
+                      );
+                    })}
+                    {hidden > 0 && (
+                      <span
+                        className="hg-traj__marker--more"
+                        data-testid={`drift-more-${i}`}
+                        title={`${hidden} more drift${hidden === 1 ? '' : 's'} not shown (ranked by severity + recency)`}
+                      >
+                        +{hidden}
+                      </span>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
         );
