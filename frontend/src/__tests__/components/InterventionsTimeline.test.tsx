@@ -52,9 +52,29 @@ describe('<InterventionsTimeline />', () => {
     expect(gold.getAttribute('data-source')).toBe('goldfive');
   });
 
-  it('shows the empty-state hint when there are no rows', () => {
+  it('collapses to a single toggle when there are no rows, and reveals the hint on click', () => {
     render(<InterventionsTimeline rows={[]} startMs={0} endMs={10} />);
+    // Collapsed by default — the empty hint is NOT in the DOM.
+    expect(screen.queryByText(/No interventions recorded/i)).toBeNull();
+    const toggle = screen.getByTestId('interventions-timeline-toggle');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.textContent).toMatch(/Interventions \(0\)/);
+    // Expand — hint + axis become visible.
+    fireEvent.click(toggle);
     expect(screen.getByText(/No interventions recorded/i)).toBeTruthy();
+    expect(screen.getByTestId('interventions-timeline-toggle').getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('renders the axis inline (no toggle) when there is at least one row', () => {
+    render(
+      <InterventionsTimeline
+        rows={[row({ key: 'u1', atMs: 100, source: 'user', kind: 'STEER' })]}
+        startMs={0}
+        endMs={60_000}
+      />,
+    );
+    expect(screen.queryByTestId('interventions-timeline-toggle')).toBeNull();
+    expect(screen.getByTestId('intervention-marker-u1')).toBeTruthy();
   });
 
   it('opens an expandable card with outcome + body when a marker is clicked', () => {
@@ -362,6 +382,8 @@ describe('<InterventionsTimeline />', () => {
         _liveTickMs={0}
       />,
     );
+    // Empty-row strip collapses by default — expand before checking axis.
+    fireEvent.click(screen.getByTestId('interventions-timeline-toggle'));
     // pickTickStepMs picks 60s for spans ≤ 10m → 6 ticks at 0, 1, 2, 3, 4, 5 min.
     const labels = screen
       .getAllByTestId(/^axis-tick-\d+$/)

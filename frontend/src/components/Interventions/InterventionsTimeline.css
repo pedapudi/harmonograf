@@ -8,17 +8,16 @@
   flex-direction: column;
   gap: 4px;
   padding: 0;
-  /* Cap the strip width so it stays visually proportional to the
-     plan DAG above it rather than stretching to the full page. The
-     960px cap covers a typical ~6-stage DAG (SIDE_PADDING*2 +
-     stages*COLUMN_WIDTH ≈ 864px) plus slack for wider plans. The
-     earlier #125 fix switched to a session-wide axis so markers land
-     at the correct (atMs - startMs)/elapsedMs fraction; that math is
-     preserved — only the strip's horizontal footprint is bounded.
-     Parents that want an exact width pass the `width` prop, which
-     overrides this cap via inline style (e.g. GanttView flows the
-     measured plan-DAG width down so the strip and DAG line up). */
-  max-width: 960px;
+  /* Act as a session-wide time axis shared with the Gantt canvas above,
+     not column-aligned to a single plan's DAG. Stretches to the
+     container width but caps at 1280px so it doesn't sprawl across
+     ultrawide monitors — the strip's content (a few tick labels +
+     small glyphs) reads as empty when smeared across 2500+px.
+     Parents that want an exact width can still pass the `width` prop,
+     which overrides via inline style (tests pin a deterministic
+     viewBox that way). */
+  width: 100%;
+  max-width: 1280px;
   font:
     11px/1.3 var(--md-sys-typescale-body-small-font, system-ui, sans-serif);
   color: var(--md-sys-color-on-surface-variant, #9da3b4);
@@ -128,6 +127,39 @@
   font-size: 10px;
   font-style: italic;
   color: var(--md-sys-color-on-surface-variant, #9da3b4);
+}
+
+/* --- Collapse toggle (empty-state) -------------------------------------- */
+/* Shown only when rows.length === 0. Lets the user un-collapse the strip so
+   they can still see the axis for the currently-loaded time window. Sized
+   to occupy one text line so an empty strip costs ~18px instead of ~62px. */
+
+.hg-interventions-strip__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  background: transparent;
+  border: 0;
+  color: var(--md-sys-color-on-surface-variant, #9da3b4);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.2px;
+  opacity: 0.75;
+  align-self: flex-start;
+}
+
+.hg-interventions-strip__toggle:hover {
+  opacity: 1;
+  color: var(--md-sys-color-on-surface, #e2e2e9);
+}
+
+.hg-interventions-strip__toggle-caret {
+  display: inline-block;
+  width: 10px;
+  text-align: center;
+  font-size: 10px;
 }
 
 /* --- Popover (hover + pinned) ------------------------------------------ */

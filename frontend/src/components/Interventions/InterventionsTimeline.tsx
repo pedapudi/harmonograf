@@ -303,6 +303,15 @@ export function InterventionsTimeline({
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const [pinnedKey, setPinnedKey] = useState<string | null>(null);
 
+  // Empty-state collapse. When no interventions have been recorded the
+  // strip folds down to a single-line caret to avoid wasting ~50px of
+  // vertical space per plan on an axis with nothing on it. The user can
+  // still un-collapse to see the axis if they want to sanity-check the
+  // time window. Once rows arrive the strip always renders.
+  const isEmpty = rows.length === 0;
+  const [userExpandedWhenEmpty, setUserExpandedWhenEmpty] = useState(false);
+  const isExpanded = !isEmpty || userExpandedWhenEmpty;
+
   // Default width for the SVG viewBox + marker math when no explicit
   // `width` prop is passed. Matches the CSS max-width cap (960px) so
   // cluster thresholds (a fraction of actualWidth) are consistent with
@@ -388,6 +397,8 @@ export function InterventionsTimeline({
       ref={rootRef}
       className="hg-interventions-strip"
       data-testid="interventions-timeline"
+      data-empty={isEmpty ? 'true' : 'false'}
+      data-expanded={isExpanded ? 'true' : 'false'}
       style={
         width
           ? // Explicit width overrides the CSS max-width cap so callers that
@@ -396,135 +407,153 @@ export function InterventionsTimeline({
           : { width: '100%' }
       }
     >
-      <svg
-        className="hg-interventions-strip__svg"
-        width="100%"
-        height={STRIP_HEIGHT}
-        viewBox={`0 0 ${actualWidth} ${STRIP_HEIGHT}`}
-        preserveAspectRatio="none"
-      >
-        {/* Rule */}
-        <line
-          className="hg-interventions-strip__rule"
-          x1={STRIP_PAD_X}
-          y1={MARKER_Y}
-          x2={actualWidth - STRIP_PAD_X}
-          y2={MARKER_Y}
-        />
-
-        {/* Axis ticks */}
-        {axisTicks.map((tick, i) => {
-          const tNorm = Math.min(1, Math.max(0, (tick.atMs - startMs) / span));
-          const x = STRIP_PAD_X + tNorm * (actualWidth - STRIP_PAD_X * 2);
-          return (
-            <g
-              key={`tick-${i}`}
-              className="hg-interventions-strip__tick"
-              data-testid={`axis-tick-${i}`}
-            >
-              <line
-                className="hg-interventions-strip__tick-mark"
-                x1={x}
-                y1={MARKER_Y - 2}
-                x2={x}
-                y2={MARKER_Y + 2}
-              />
-              <text
-                className="hg-interventions-strip__tick-label"
-                x={x}
-                y={AXIS_Y + 6}
-                textAnchor="middle"
-              >
-                {tick.label}
-              </text>
-            </g>
-          );
-        })}
-
-        {/* Markers / clusters */}
-        {clusters.map((cluster) => {
-          if (cluster.rows.length === 1) {
-            const row = cluster.rows[0];
-            const isActive = activeKey === row.key;
-            const isNew = newlyAdded.has(row.key);
-            return (
-              <Marker
-                key={row.key}
-                row={row}
-                cx={cluster.cx}
-                cy={MARKER_Y}
-                selected={isActive}
-                isNew={isNew}
-                onMouseEnter={() => {
-                  if (!pinnedKey) setHoverKey(row.key);
-                }}
-                onMouseLeave={() => {
-                  if (!pinnedKey) setHoverKey(null);
-                }}
-                onClick={() =>
-                  setPinnedKey((k) => (k === row.key ? null : row.key))
-                }
-              />
-            );
-          }
-          // Cluster badge
-          const representativeKey = cluster.rows[0].key;
-          const isActive = cluster.rows.some((r) => r.key === activeKey);
-          return (
-            <ClusterBadge
-              key={`cluster:${representativeKey}`}
-              cluster={cluster}
-              cx={cluster.cx}
-              cy={MARKER_Y}
-              selected={isActive}
-              onMouseEnter={() => {
-                if (!pinnedKey) setHoverKey(representativeKey);
-              }}
-              onMouseLeave={() => {
-                if (!pinnedKey) setHoverKey(null);
-              }}
-              onClick={() =>
-                setPinnedKey((k) =>
-                  cluster.rows.some((r) => r.key === k)
-                    ? null
-                    : representativeKey,
-                )
-              }
+      {isEmpty && (
+        <button
+          type="button"
+          className="hg-interventions-strip__toggle"
+          data-testid="interventions-timeline-toggle"
+          aria-expanded={isExpanded}
+          onClick={() => setUserExpandedWhenEmpty((v) => !v)}
+        >
+          <span className="hg-interventions-strip__toggle-caret" aria-hidden="true">
+            {isExpanded ? '▾' : '▸'}
+          </span>
+          <span>Interventions (0)</span>
+        </button>
+      )}
+      {isExpanded && (
+        <>
+          <svg
+            className="hg-interventions-strip__svg"
+            width="100%"
+            height={STRIP_HEIGHT}
+            viewBox={`0 0 ${actualWidth} ${STRIP_HEIGHT}`}
+            preserveAspectRatio="none"
+          >
+            {/* Rule */}
+            <line
+              className="hg-interventions-strip__rule"
+              x1={STRIP_PAD_X}
+              y1={MARKER_Y}
+              x2={actualWidth - STRIP_PAD_X}
+              y2={MARKER_Y}
             />
-          );
-        })}
-      </svg>
 
-      {/* Deterministic popover — positioned relative to the marker's cx in
-          the strip's coord space (not the cursor). */}
-      {activeCluster && activeRow && activeCluster.rows.length === 1 && (
-        <InterventionPopover
-          row={activeRow}
-          revs={revs}
-          anchorXPct={(activeCluster.cx / actualWidth) * 100}
-          pinned={pinnedKey !== null}
-          onClose={closePopover}
-          onJumpToRevision={onJumpToRevision}
-        />
-      )}
-      {activeCluster && activeCluster.rows.length > 1 && (
-        <ClusterPopover
-          cluster={activeCluster}
-          anchorXPct={(activeCluster.cx / actualWidth) * 100}
-          pinned={pinnedKey !== null}
-          revs={revs}
-          onClose={closePopover}
-          onJumpToRevision={onJumpToRevision}
-          onRowSelect={(key) => {
-            setPinnedKey(key);
-            setHoverKey(key);
-          }}
-        />
-      )}
-      {rows.length === 0 && (
-        <div className="hg-interventions-strip__empty">
-          No interventions recorded.
-        </div>
+            {/* Axis ticks */}
+            {axisTicks.map((tick, i) => {
+              const tNorm = Math.min(1, Math.max(0, (tick.atMs - startMs) / span));
+              const x = STRIP_PAD_X + tNorm * (actualWidth - STRIP_PAD_X * 2);
+              return (
+                <g
+                  key={`tick-${i}`}
+                  className="hg-interventions-strip__tick"
+                  data-testid={`axis-tick-${i}`}
+                >
+                  <line
+                    className="hg-interventions-strip__tick-mark"
+                    x1={x}
+                    y1={MARKER_Y - 2}
+                    x2={x}
+                    y2={MARKER_Y + 2}
+                  />
+                  <text
+                    className="hg-interventions-strip__tick-label"
+                    x={x}
+                    y={AXIS_Y + 6}
+                    textAnchor="middle"
+                  >
+                    {tick.label}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Markers / clusters */}
+            {clusters.map((cluster) => {
+              if (cluster.rows.length === 1) {
+                const row = cluster.rows[0];
+                const isActive = activeKey === row.key;
+                const isNew = newlyAdded.has(row.key);
+                return (
+                  <Marker
+                    key={row.key}
+                    row={row}
+                    cx={cluster.cx}
+                    cy={MARKER_Y}
+                    selected={isActive}
+                    isNew={isNew}
+                    onMouseEnter={() => {
+                      if (!pinnedKey) setHoverKey(row.key);
+                    }}
+                    onMouseLeave={() => {
+                      if (!pinnedKey) setHoverKey(null);
+                    }}
+                    onClick={() =>
+                      setPinnedKey((k) => (k === row.key ? null : row.key))
+                    }
+                  />
+                );
+              }
+              // Cluster badge
+              const representativeKey = cluster.rows[0].key;
+              const isActive = cluster.rows.some((r) => r.key === activeKey);
+              return (
+                <ClusterBadge
+                  key={`cluster:${representativeKey}`}
+                  cluster={cluster}
+                  cx={cluster.cx}
+                  cy={MARKER_Y}
+                  selected={isActive}
+                  onMouseEnter={() => {
+                    if (!pinnedKey) setHoverKey(representativeKey);
+                  }}
+                  onMouseLeave={() => {
+                    if (!pinnedKey) setHoverKey(null);
+                  }}
+                  onClick={() =>
+                    setPinnedKey((k) =>
+                      cluster.rows.some((r) => r.key === k)
+                        ? null
+                        : representativeKey,
+                    )
+                  }
+                />
+              );
+            })}
+          </svg>
+
+          {/* Deterministic popover — positioned relative to the marker's cx
+              in the strip's coord space (not the cursor). */}
+          {activeCluster && activeRow && activeCluster.rows.length === 1 && (
+            <InterventionPopover
+              row={activeRow}
+              revs={revs}
+              anchorXPct={(activeCluster.cx / actualWidth) * 100}
+              pinned={pinnedKey !== null}
+              onClose={closePopover}
+              onJumpToRevision={onJumpToRevision}
+            />
+          )}
+          {activeCluster && activeCluster.rows.length > 1 && (
+            <ClusterPopover
+              cluster={activeCluster}
+              anchorXPct={(activeCluster.cx / actualWidth) * 100}
+              pinned={pinnedKey !== null}
+              revs={revs}
+              onClose={closePopover}
+              onJumpToRevision={onJumpToRevision}
+              onRowSelect={(key) => {
+                setPinnedKey(key);
+                setHoverKey(key);
+              }}
+            />
+          )}
+          {isEmpty && (
+            <div className="hg-interventions-strip__empty">
+              No interventions recorded.
+            </div>
+          )}
+        </>
       )}
     </div>
   );
