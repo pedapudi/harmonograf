@@ -11,6 +11,7 @@ function mkRecord(overrides: Partial<DelegationRecord> = {}): DelegationRecord {
     taskId: 't-research-weather-bologna',
     invocationId: 'inv-abc12345-def67890-0000',
     observedAtMs: 185_000, // 3:05
+    observedAtAbsoluteMs: 185_000,
     ...overrides,
   };
 }

@@ -666,7 +666,7 @@ describe('applyGoldfiveEvent', () => {
           payload: {
             case: 'driftDetected',
             value: create(DriftDetectedSchema, {
-              kind: DriftKind.BLOCKER,
+              kind: DriftKind.BLOCKED,
               severity: DriftSeverity.WARNING,
               detail: 'race',
               currentTaskId: 't-1',
