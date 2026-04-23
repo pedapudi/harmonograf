@@ -608,12 +608,25 @@ class IngestPipeline:
         ended = await self._store.end_span(msg.span_id, end_time, status, error=error)
         if ended is None:
             return
-        if msg.attributes or len(msg.payload_refs):
+        had_end_attrs = bool(msg.attributes) or bool(len(msg.payload_refs))
+        if had_end_attrs:
             attrs = attr_map_to_dict(msg.attributes) if msg.attributes else None
             payload_kwargs = _payload_ref_kwargs(msg.payload_refs)
             ended = await self._store.update_span(
                 msg.span_id, attributes=attrs, **payload_kwargs
             ) or ended
+            # The frontend-facing EndedSpan proto does not carry attributes
+            # (it only carries span_id/end_time/status/error/payload_refs).
+            # When the client stamps reasoning/tooling attributes on the
+            # same SpanEnd message (e.g. HarmonografTelemetryPlugin's
+            # after_model_callback adding ``has_reasoning`` + ``llm.reasoning``
+            # on top of the terminal transition), the renderer would never
+            # see those attrs on the live stream — only on a page reload that
+            # refetches from storage. Publish a SPAN_UPDATE delta first so
+            # the frontend's updatedSpan handler merges the attributes in
+            # place before the EndedSpan arrives and flips status to terminal.
+            # See harmonograf#[this PR].
+            self._bus.publish_span_update(ended)
         self._bus.publish_span_end(ended)
 
         # Task completion is driven EXCLUSIVELY by explicit client
