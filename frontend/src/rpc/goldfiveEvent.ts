@@ -270,11 +270,14 @@ export function applyGoldfiveEvent(
     }
     case 'driftDetected': {
       const d = payload.value;
-      const emittedMs = event.emittedAt
-        ? Number(event.emittedAt.seconds) * 1000 +
-          Math.floor(event.emittedAt.nanos / 1_000_000) -
-          sessionStartMs
-        : 0;
+      // Store the authoritative wall-clock ms alongside the relative form.
+      // If the live-path delivery races the 'session' SessionUpdate that
+      // seeds `sessionStartMs`, the relative value here will be wall-clock
+      // scale (garbage) — SessionStore.rebaseRelativeTimestamps is called
+      // from the 'session' handler to rewrite it once the start is known.
+      // See DriftRecord.recordedAtAbsoluteMs and harmonograf#127.
+      const emittedAbsMs = tsToMsAbs(event.emittedAt);
+      const emittedMs = emittedAbsMs ? emittedAbsMs - sessionStartMs : 0;
       const kindStr = driftKindToString(d.kind as unknown as number);
       const sevStr = driftSeverityToString(d.severity as unknown as number);
       store.drifts.append({
@@ -284,6 +287,7 @@ export function applyGoldfiveEvent(
         taskId: d.currentTaskId,
         agentId: d.currentAgentId,
         recordedAtMs: emittedMs,
+        recordedAtAbsoluteMs: emittedAbsMs,
         // goldfive#176: user-control drifts carry the source annotation_id
         // so harmonograf#75's deduper can merge them into the annotation
         // row. Empty string for autonomous drifts.
@@ -333,18 +337,27 @@ export function applyGoldfiveEvent(
       // telemetry plugin only records as a generic TOOL_CALL span on the
       // coordinator row. Feed the registry; the Gantt renderer's delegation
       // edge pass synthesizes a cross-agent curve from each record.
+      //
+      // Store both the authoritative wall-clock ms and the relative form.
+      // harmonograf#127: on the live path, this event can arrive BEFORE the
+      // 'session' SessionUpdate has set `store.wallClockStartMs`, so
+      // `sessionStartMs` here is 0 and the naive subtract stamps the
+      // record with wall-clock-scale observedAtMs — which made the Gantt
+      // / Graph arrows land miles off-axis. The refresh path worked only
+      // because the server's initial burst orders 'session' first. When
+      // the 'session' case fires, hooks.ts now calls
+      // `store.rebaseRelativeTimestamps(startMs)` which walks the
+      // delegation registry and rewrites observedAtMs from the absolute.
       const d = payload.value;
-      const observedMs = event.emittedAt
-        ? Number(event.emittedAt.seconds) * 1000 +
-          Math.floor(event.emittedAt.nanos / 1_000_000) -
-          sessionStartMs
-        : 0;
+      const observedAbsMs = tsToMsAbs(event.emittedAt);
+      const observedMs = observedAbsMs ? observedAbsMs - sessionStartMs : 0;
       store.delegations.append({
         fromAgentId: d.fromAgent,
         toAgentId: d.toAgent,
         taskId: d.taskId,
         invocationId: d.invocationId,
         observedAtMs: observedMs,
+        observedAtAbsoluteMs: observedAbsMs,
       });
       return;
     }

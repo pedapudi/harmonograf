@@ -526,7 +526,17 @@ export interface DriftRecord {
   detail: string;
   taskId: string;
   agentId: string;
-  recordedAtMs: number;   // session-relative
+  // Session-relative ms — derived from recordedAtAbsoluteMs on ingest and
+  // refreshed by DriftRegistry.rebase(sessionStartMs) once the session's
+  // wall-clock start lands on the frontend. Readers consume this directly.
+  recordedAtMs: number;
+  // Authoritative wall-clock timestamp in ms (from Event.emitted_at).
+  // Stored separately so that if the 'session' update races the first
+  // drift event on the live path, we can recompute recordedAtMs correctly
+  // once the session start is known (harmonograf#127 — kills a whole
+  // class of session-relative-at-ingest races that would otherwise
+  // misalign drift markers on the Gantt / Trajectory timelines).
+  recordedAtAbsoluteMs: number;
   // Non-empty for USER_STEER / USER_CANCEL drifts minted by goldfive
   // from a ControlMessage carrying a bridge-supplied annotation_id
   // (goldfive#176). Used by the intervention deriver (harmonograf#75)
@@ -553,9 +563,46 @@ export class DriftRegistry {
     return this.drifts;
   }
 
-  append(d: Omit<DriftRecord, 'seq'>): void {
-    this.drifts.push({ ...d, seq: this.nextSeq++ });
+  append(
+    d: Omit<DriftRecord, 'seq' | 'recordedAtAbsoluteMs'> &
+      Partial<Pick<DriftRecord, 'recordedAtAbsoluteMs'>>,
+  ): void {
+    // Default absolute to relative for callers that haven't been migrated
+    // (older tests, synthetic fixtures). Rebase is a no-op when
+    // wallClockStartMs is 0, so these records retain their original
+    // recordedAtMs — matching pre-#127 semantics.
+    const recordedAtAbsoluteMs = d.recordedAtAbsoluteMs ?? d.recordedAtMs;
+    this.drifts.push({
+      ...d,
+      recordedAtAbsoluteMs,
+      seq: this.nextSeq++,
+    });
     this.emit();
+  }
+
+  // Recompute every drift's session-relative `recordedAtMs` from its
+  // authoritative `recordedAtAbsoluteMs` using the newly-known session
+  // start. Called from SessionStore.rebaseRelativeTimestamps when the
+  // 'session' SessionUpdate finally delivers `created_at` to the
+  // frontend — previously, a live-delivered DriftDetected that landed
+  // before the session update was recorded with a bogus wall-clock-scale
+  // recordedAtMs (sessionStartMs was still 0 at ingest) and the marker
+  // rendered miles off-axis on the Gantt / Trajectory timelines.
+  rebase(sessionStartMs: number): void {
+    if (this.drifts.length === 0) return;
+    let changed = false;
+    for (const d of this.drifts) {
+      // Records ingested before this PR (or with no absolute ms) fall back
+      // to whatever was stored — don't mutate so we don't regress legacy
+      // paths that already stored a usable relative ms.
+      if (!d.recordedAtAbsoluteMs) continue;
+      const next = d.recordedAtAbsoluteMs - sessionStartMs;
+      if (d.recordedAtMs !== next) {
+        d.recordedAtMs = next;
+        changed = true;
+      }
+    }
+    if (changed) this.emit();
   }
 
   clear(): void {
@@ -587,7 +634,19 @@ export interface DelegationRecord {
   toAgentId: string;       // sub-agent the coordinator delegated to
   taskId: string;          // empty when the host agent has no bound task
   invocationId: string;    // ADK invocation id for the delegation
-  observedAtMs: number;    // session-relative
+  // Session-relative ms. Derived from observedAtAbsoluteMs on ingest and
+  // refreshed by DelegationRegistry.rebase(sessionStartMs) once the
+  // session's wall-clock start lands. All renderers (Gantt delegation
+  // edge pass, GraphView arrow projection) read this field directly.
+  observedAtMs: number;
+  // Authoritative wall-clock ms from Event.emitted_at. Kept alongside
+  // the relative field so that live-delivered DelegationObserved events
+  // that arrive before the 'session' SessionUpdate (sessionStartMs=0 at
+  // ingest) can be re-anchored once the session start is known — the
+  // refresh-path replay worked only because the burst ordered the
+  // 'session' frame first, which set sessionStartMs before the first
+  // delegation_observed event was replayed. harmonograf#127.
+  observedAtAbsoluteMs: number;
 }
 
 // Delegation registry — in-memory list of DelegationObserved events received
@@ -611,14 +670,55 @@ export class DelegationRegistry {
     return this.delegations;
   }
 
-  append(d: Omit<DelegationRecord, 'seq'>): void {
+  append(
+    d: Omit<DelegationRecord, 'seq' | 'observedAtAbsoluteMs'> &
+      Partial<Pick<DelegationRecord, 'observedAtAbsoluteMs'>>,
+  ): void {
+    // Default absolute to relative for callers that haven't been migrated
+    // (older tests, synthetic fixtures). Rebase is a no-op when
+    // wallClockStartMs is 0, so these records keep their original
+    // observedAtMs — which matches pre-#127 behavior.
+    const observedAtAbsoluteMs = d.observedAtAbsoluteMs ?? d.observedAtMs;
     const key = d.invocationId
       ? `${d.fromAgentId}|${d.toAgentId}|inv:${d.invocationId}`
-      : `${d.fromAgentId}|${d.toAgentId}|ts:${d.observedAtMs}`;
+      : `${d.fromAgentId}|${d.toAgentId}|ts:${
+          // Prefer the absolute ms for the dedup fallback key so a
+          // record ingested before `sessionStartMs` lands (relative
+          // would be ~wall-clock scale) and the rebased same record
+          // (relative much smaller) still dedup.
+          observedAtAbsoluteMs || d.observedAtMs
+        }`;
     if (this.seen.has(key)) return;
     this.seen.add(key);
-    this.delegations.push({ ...d, seq: this.nextSeq++ });
+    this.delegations.push({
+      ...d,
+      observedAtAbsoluteMs,
+      seq: this.nextSeq++,
+    });
     this.emit();
+  }
+
+  // Recompute every delegation's session-relative `observedAtMs` from its
+  // authoritative `observedAtAbsoluteMs` using the newly-known session
+  // start. See harmonograf#127: on the live path, the first
+  // delegation_observed event can race the 'session' SessionUpdate that
+  // seeds `store.wallClockStartMs`; without this rebase, the delegation
+  // is permanently stamped with a wall-clock-scale observedAtMs and
+  // renders miles off-axis on the Gantt and GraphView. The refresh path
+  // happened to work because the server's initial burst orders the
+  // 'session' frame before any replayed delegation_observed.
+  rebase(sessionStartMs: number): void {
+    if (this.delegations.length === 0) return;
+    let changed = false;
+    for (const d of this.delegations) {
+      if (!d.observedAtAbsoluteMs) continue;
+      const next = d.observedAtAbsoluteMs - sessionStartMs;
+      if (d.observedAtMs !== next) {
+        d.observedAtMs = next;
+        changed = true;
+      }
+    }
+    if (changed) this.emit();
   }
 
   clear(): void {
@@ -771,6 +871,23 @@ export class SessionStore {
   // Session start timestamp (wall clock ms). startMs/endMs in spans are
   // session-relative, so this only matters for display formatting.
   wallClockStartMs = 0;
+
+  // Refresh every session-relative timestamp cached on a child registry
+  // so that records whose `*AtAbsoluteMs` was captured before
+  // `wallClockStartMs` landed (live-path race, harmonograf#127) pick up
+  // the now-correct session start. Today, only DriftRegistry and
+  // DelegationRegistry participate — spans carry absolute times on the
+  // wire and are relativized at ingest by `convertSpan`, which reads
+  // `origin.startMs` that the transport layer (rpc/hooks.ts) guards
+  // against by defaulting to the cached origin before subscribing.
+  //
+  // Idempotent: safe to call whenever `wallClockStartMs` changes,
+  // including on re-delivery of a 'session' SessionUpdate. Each
+  // registry short-circuits when nothing moves.
+  rebaseRelativeTimestamps(sessionStartMs: number): void {
+    this.drifts.rebase(sessionStartMs);
+    this.delegations.rebase(sessionStartMs);
+  }
 
   // Current wall-clock "now" relative to session start. Advanced by the
   // renderer each frame (or by the transport when paused).

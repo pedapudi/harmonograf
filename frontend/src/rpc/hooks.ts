@@ -268,6 +268,20 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
               origin = { startMs };
               originCache.set(sessionId, origin);
               store.wallClockStartMs = startMs;
+              // harmonograf#127: any DriftDetected / DelegationObserved
+              // events that slipped in before this 'session' frame
+              // landed were stamped with a wall-clock-scale relative
+              // time (sessionStartMs was 0). Re-anchor them now that
+              // the session start is known so the Gantt / Graph
+              // delegation arrows and drift markers line up with the
+              // rest of the timeline (which converts span start/end on
+              // ingest via `origin`). Spans themselves don't need this
+              // pass because they never read a zero `origin` — the
+              // 'initialSpan' / 'newSpan' / 'endedSpan' arms all guard
+              // with `if (!origin) origin = { startMs: 0 }` then
+              // recompute, and the burst delivers the 'session' frame
+              // before any span frame.
+              store.rebaseRelativeTimestamps(startMs);
               const nextStatus = lifecycleFromPb(s.status);
               if (statusCache.get(sessionId) !== nextStatus) {
                 statusCache.set(sessionId, nextStatus);

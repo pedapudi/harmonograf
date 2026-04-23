@@ -570,6 +570,126 @@ describe('applyGoldfiveEvent', () => {
       expect(store.delegations.list()[0].observedAtMs).toBe(0);
     });
 
+    // harmonograf#127: live-path race — a delegation_observed dispatched
+    // BEFORE the 'session' SessionUpdate has seeded wallClockStartMs on
+    // the store. Ingest stamps observedAtAbsoluteMs from emitted_at but
+    // observedAtMs lands wall-clock-scale; when the session frame
+    // finally lands and rebaseRelativeTimestamps fires, observedAtMs
+    // must snap to the correct session-relative value so the Gantt /
+    // Graph delegation arrow lines up.
+    it('delegationObserved during the live-path race recovers after rebase', () => {
+      const store = new SessionStore();
+      // Pretend the session's wall-clock start is 2000ms epoch. The
+      // delegation fires at 5000ms epoch — expected relative = 3000.
+      // At ingest, though, wallClockStartMs hasn't been set, so the
+      // caller passes sessionStartMs=0 (mirroring hooks.ts when
+      // `origin` is still null).
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev-del-race',
+          runId: 'run-1',
+          sequence: 0n,
+          emittedAt: create(TimestampSchema, { seconds: 5n, nanos: 0 }),
+          payload: {
+            case: 'delegationObserved',
+            value: create(DelegationObservedSchema, {
+              fromAgent: 'coordinator',
+              toAgent: 'researcher',
+              taskId: 't-1',
+              invocationId: 'inv-race',
+            }),
+          },
+        }),
+        store,
+        0, // sessionStartMs not yet known on the frontend
+      );
+
+      const preRebase = store.delegations.list();
+      expect(preRebase).toHaveLength(1);
+      // Pre-rebase the relative value is wall-clock-scale (5000 - 0),
+      // which would render miles off-axis on the Gantt timeline.
+      expect(preRebase[0].observedAtMs).toBe(5000);
+      // But the authoritative absolute ms is preserved.
+      expect(preRebase[0].observedAtAbsoluteMs).toBe(5000);
+
+      // Session frame finally lands — hooks.ts calls this to re-anchor
+      // any pre-session events on the live path.
+      store.rebaseRelativeTimestamps(2000);
+
+      const postRebase = store.delegations.list();
+      expect(postRebase).toHaveLength(1);
+      expect(postRebase[0].observedAtMs).toBe(3000);
+      // Absolute is invariant across rebases.
+      expect(postRebase[0].observedAtAbsoluteMs).toBe(5000);
+    });
+
+    // Regression for the refresh path: when the session frame DOES
+    // land first (burst replay order), ingest computes the right
+    // relative value directly, and a subsequent (idempotent) rebase
+    // with the same startMs is a no-op.
+    it('delegationObserved on the refresh path yields the same observedAtMs as the rebased live path', () => {
+      const store = new SessionStore();
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev-del-refresh',
+          runId: 'run-1',
+          sequence: 0n,
+          emittedAt: create(TimestampSchema, { seconds: 5n, nanos: 0 }),
+          payload: {
+            case: 'delegationObserved',
+            value: create(DelegationObservedSchema, {
+              fromAgent: 'coordinator',
+              toAgent: 'researcher',
+              taskId: 't-1',
+              invocationId: 'inv-refresh',
+            }),
+          },
+        }),
+        store,
+        2000, // sessionStartMs already known (burst delivered session first)
+      );
+      expect(store.delegations.list()[0].observedAtMs).toBe(3000);
+
+      // Idempotent: rebasing with the same start must not shift anything.
+      store.rebaseRelativeTimestamps(2000);
+      expect(store.delegations.list()[0].observedAtMs).toBe(3000);
+    });
+
+    it('driftDetected during the live-path race recovers after rebase', () => {
+      const store = new SessionStore();
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev-drift-race',
+          runId: 'run-1',
+          sequence: 0n,
+          emittedAt: create(TimestampSchema, { seconds: 7n, nanos: 0 }),
+          payload: {
+            case: 'driftDetected',
+            value: create(DriftDetectedSchema, {
+              kind: DriftKind.BLOCKER,
+              severity: DriftSeverity.WARNING,
+              detail: 'race',
+              currentTaskId: 't-1',
+              currentAgentId: 'agent-a',
+              id: 'drift-race-1',
+            }),
+          },
+        }),
+        store,
+        0,
+      );
+
+      const pre = store.drifts.list();
+      expect(pre).toHaveLength(1);
+      expect(pre[0].recordedAtMs).toBe(7000);
+      expect(pre[0].recordedAtAbsoluteMs).toBe(7000);
+
+      store.rebaseRelativeTimestamps(3000);
+      const post = store.drifts.list();
+      expect(post[0].recordedAtMs).toBe(4000);
+      expect(post[0].recordedAtAbsoluteMs).toBe(7000);
+    });
+
     it('agentInvocationStarted is a no-op (telemetry plugin already emits INVOCATION spans)', () => {
       const store = new SessionStore();
       expect(() =>
