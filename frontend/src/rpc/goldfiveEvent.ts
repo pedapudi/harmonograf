@@ -10,6 +10,7 @@
 // existing gantt stores without introducing any new store concepts.
 
 import type { SessionStore } from '../gantt/index';
+import { bareAgentName } from '../gantt/index';
 import type { Span, SpanKind, TaskPlan, Task, TaskStatus } from '../gantt/types';
 import type {
   Plan as GoldfivePlan,
@@ -198,7 +199,20 @@ export function applyGoldfiveEvent(
     case 'planRevised': {
       const plan = payload.value.plan;
       if (plan) {
-        store.tasks.upsertPlan(convertGoldfivePlan(plan, sessionStartMs));
+        const converted = convertGoldfivePlan(plan, sessionStartMs);
+        store.tasks.upsertPlan(converted);
+        // harmonograf#133: seed the agent registry from plan content so
+        // tasks whose assignee hasn't emitted a span yet still resolve
+        // to a bare display name (e.g. `reviewer_agent`) instead of the
+        // raw compound id (`<client>:reviewer_agent`). The registry was
+        // previously populated only as spans arrived; agents listed in
+        // the plan but not yet invoked had no row, so every display
+        // resolver fell back to rendering the compound wire id.
+        for (const task of converted.tasks) {
+          const id = task.assigneeAgentId;
+          if (!id) continue;
+          store.agents.ensureAgent(id, bareAgentName(id));
+        }
       }
       return;
     }

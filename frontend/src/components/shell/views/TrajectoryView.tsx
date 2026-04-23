@@ -8,6 +8,7 @@ import type {
   DriftRecord,
   SessionStore,
 } from '../../../gantt/index';
+import { bareAgentName } from '../../../gantt/index';
 import { useAnnotationStore } from '../../../state/annotationStore';
 import {
   deriveInterventionsFromStore,
@@ -481,6 +482,7 @@ export function TrajectoryView() {
                   const task = currentRev.tasks.find((t) => t.id === taskId);
                   if (task?.boundSpanId) selectSpan(task.boundSpanId);
                 }}
+                store={store}
               />
               <DetailPane
                 selection={selection}
@@ -608,6 +610,10 @@ interface DagProps {
   delegations: DelegationRecord[];
   selection: Selection;
   onSelectTask: (taskId: string) => void;
+  // Optional session handle used only to resolve the assignee agent's
+  // bare display name. Passing null preserves the previous fallback
+  // (strip the compound prefix; else render the raw id).
+  store: SessionStore | null;
 }
 
 function buildDriftsByTaskId(
@@ -649,6 +655,7 @@ function DagPane(props: DagProps) {
     delegations,
     selection,
     onSelectTask,
+    store,
   } = props;
   const layout = plan ? layoutDag(plan) : null;
   const driftsByTaskId = buildDriftsByTaskId(driftsOnRev);
@@ -768,7 +775,14 @@ function DagPane(props: DagProps) {
                 </text>
                 <text className="hg-traj__node-sub" x={16} y={42}>
                   {t.status.toLowerCase()}
-                  {t.assigneeAgentId ? ` · ${truncate(t.assigneeAgentId, 14)}` : ''}
+                  {t.assigneeAgentId
+                    ? ` · ${truncate(
+                        store?.agents.get(t.assigneeAgentId)?.name ||
+                          bareAgentName(t.assigneeAgentId) ||
+                          t.assigneeAgentId,
+                        14,
+                      )}`
+                    : ''}
                 </text>
                 {drifts.length > 0 && (
                   <g transform={`translate(${n.w - 14}, 14)`}>
@@ -992,7 +1006,13 @@ function DetailPane(props: DetailPaneProps) {
         {t.description && <p className="hg-traj__detail-desc">{t.description}</p>}
         <dl className="hg-traj__detail-meta">
           <dt>assignee</dt>
-          <dd>{t.assigneeAgentId || '—'}</dd>
+          <dd title={t.assigneeAgentId || undefined}>
+            {t.assigneeAgentId
+              ? store?.agents.get(t.assigneeAgentId)?.name ||
+                bareAgentName(t.assigneeAgentId) ||
+                t.assigneeAgentId
+              : '—'}
+          </dd>
           <dt>bound span</dt>
           <dd>{t.boundSpanId ? t.boundSpanId.slice(0, 8) : '—'}</dd>
           {span && (

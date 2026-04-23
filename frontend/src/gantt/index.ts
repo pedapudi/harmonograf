@@ -22,6 +22,29 @@ export type {
   TaskStatus,
 } from './types';
 
+// Metadata key used to mark an agent row as a placeholder — seeded from
+// plan content (task.assignee_agent_id) before any real span has landed
+// for that agent. The renderer does NOT style placeholders differently
+// today, but consumers can branch on this marker if they need to (e.g.
+// a dimmer lane header, a "not yet active" tooltip).
+//
+// Value is "1" when the row originated from plan seeding and has never
+// been upgraded by a real telemetry upsert. As soon as a real agent row
+// (Hello / AgentsListed / span-emission path) lands, AgentRegistry.upsert
+// clobbers the placeholder and the flag is dropped.
+export const PLACEHOLDER_AGENT_FLAG = 'harmonograf.announced_only';
+
+// Strip a compound agent id (`<client>:<bare>`) down to its bare form
+// by lopping off everything up to and including the last `":"`. Matches
+// the inverse of `HarmonografSink._compound()` on the client side — a
+// bare id (no `:`) is returned unchanged, as is the empty string.
+export function bareAgentName(agentId: string): string {
+  if (!agentId) return agentId;
+  const idx = agentId.lastIndexOf(':');
+  if (idx < 0) return agentId;
+  return agentId.slice(idx + 1);
+}
+
 // Registry of agents in a session. Order is join time (stable) — doc 04 §5.1.
 export class AgentRegistry {
   private agents: Agent[] = [];
@@ -49,13 +72,73 @@ export class AgentRegistry {
   upsert(agent: Agent): void {
     const existing = this.byId.get(agent.id);
     if (existing) {
+      // A real upsert (span-emission / Hello / AgentsListed) always wins
+      // over a placeholder — drop the placeholder marker so downstream
+      // consumers stop treating this row as "announced but unobserved".
+      // Preserve metadata keys the caller didn't supply so metadata set
+      // by plan seeding (none today besides the flag) isn't silently
+      // dropped.
+      const prevMeta = existing.metadata ?? {};
+      const nextMeta = { ...prevMeta, ...(agent.metadata ?? {}) };
+      delete nextMeta[PLACEHOLDER_AGENT_FLAG];
       Object.assign(existing, agent);
+      existing.metadata = nextMeta;
     } else {
       this.byId.set(agent.id, agent);
       this.agents.push(agent);
       this.agents.sort((a, b) => a.connectedAtMs - b.connectedAtMs);
     }
     this.emit();
+  }
+
+  // Upsert a minimal placeholder row for an agent announced on the wire
+  // (today: via task.assignee_agent_id on a PlanSubmitted / PlanRevised)
+  // but not yet observed via any span, Hello, or AgentsListed frame.
+  //
+  // Idempotent: a second call with the same args is a no-op. When the
+  // row already exists and is NOT a placeholder (i.e. a real upsert has
+  // landed), this method leaves it entirely alone — plan seeding must
+  // never clobber authoritative agent metadata (connection status,
+  // framework, capabilities, task reports, …).
+  //
+  // Returns `true` when a new placeholder was inserted, `false` when a
+  // pre-existing row was left untouched. Callers typically ignore the
+  // return; it's exposed for tests.
+  ensureAgent(agentId: string, bareName: string): boolean {
+    if (!agentId) return false;
+    const existing = this.byId.get(agentId);
+    if (existing) {
+      // Leave real rows alone. Also leave existing placeholders alone —
+      // the name we'd derive is a pure function of the id, so re-seeding
+      // with the same inputs would be a no-op write anyway.
+      return false;
+    }
+    const placeholder: Agent = {
+      id: agentId,
+      name: bareName || agentId,
+      framework: 'UNKNOWN',
+      capabilities: [],
+      // DISCONNECTED is the cleanest existing status for "announced but
+      // not yet observed" — a real CONNECTED frame upgrades it via
+      // upsert() (which also strips the placeholder flag).
+      status: 'DISCONNECTED',
+      // connectedAtMs drives row ordering. 0 sorts to the top alongside
+      // any other placeholders; real agents with a real connect time
+      // will sort in below once they land.
+      connectedAtMs: 0,
+      currentActivity: '',
+      stuck: false,
+      taskReport: '',
+      taskReportAt: 0,
+      metadata: {
+        [PLACEHOLDER_AGENT_FLAG]: '1',
+      },
+    };
+    this.byId.set(agentId, placeholder);
+    this.agents.push(placeholder);
+    this.agents.sort((a, b) => a.connectedAtMs - b.connectedAtMs);
+    this.emit();
+    return true;
   }
 
   setStatus(id: string, status: Agent['status']): void {
