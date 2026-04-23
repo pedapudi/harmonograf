@@ -303,7 +303,13 @@ export function InterventionsTimeline({
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const [pinnedKey, setPinnedKey] = useState<string | null>(null);
 
-  const actualWidth = width ?? 480;
+  // Default width for the SVG viewBox + marker math when no explicit
+  // `width` prop is passed. Matches the CSS max-width cap (960px) so
+  // cluster thresholds (a fraction of actualWidth) are consistent with
+  // the widest the strip will render on screen. The SVG itself uses
+  // width="100%" + preserveAspectRatio="none" so the viewBox stretches
+  // to fill the CSS-bounded container regardless of this number.
+  const actualWidth = width ?? 960;
 
   // Snapshot endMs so hover re-renders don't shift markers (#74 issue #1).
   const spanEndMs = useStableSpanEnd(

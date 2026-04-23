@@ -6,7 +6,7 @@ import { useUiStore, type TaskPlanMode } from '../../../state/uiStore';
 import { useSessionWatch } from '../../../rpc/hooks';
 import { colorForAgent } from '../../../theme/agentColors';
 import type { Task, TaskPlan, TaskStatus } from '../../../gantt/types';
-import { TaskStagesGraph } from '../../TaskStages/TaskStagesGraph';
+import { TaskStagesGraph, computePlanDagWidth } from '../../TaskStages/TaskStagesGraph';
 import { InterventionsTimeline } from '../../Interventions/InterventionsTimeline';
 import { deriveInterventionsFromStore } from '../../../lib/interventions';
 import { useAnnotationStore } from '../../../state/annotationStore';
@@ -392,6 +392,14 @@ export function GanttView() {
                   // whole session for marker placement to be honest.
                   startMs={sessionStartMs}
                   endMs={sessionEndMs}
+                  // Visually align the strip to the plan DAG directly
+                  // above it. Without this, the strip would stretch to
+                  // the CSS max-width cap (~960px) on wide panes even
+                  // when the DAG itself is narrower (e.g. a 3-stage
+                  // plan at ~444px), leaving a lone marker floating
+                  // far right of an otherwise empty strip. Zero-width
+                  // plans (empty/loading) fall through to the CSS cap.
+                  width={computePlanDagWidth(plan) || undefined}
                   revs={plans}
                   onJumpToRevision={undefined}
                 />
