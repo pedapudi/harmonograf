@@ -62,6 +62,7 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
   const taskPlanMode = useUiStore((s) => s.taskPlanMode);
   const taskPlanVisible = useUiStore((s) => s.taskPlanVisible);
   const contextOverlayVisible = useUiStore((s) => s.contextOverlayVisible);
+  const interventionBandsVisible = useUiStore((s) => s.interventionBandsVisible);
   const selectedTaskId = useUiStore((s) => s.selectedTaskId);
   const themeBase = useThemeStore((s) => s.base);
   const colorBlind = useThemeStore((s) => s.colorBlind);
@@ -169,6 +170,9 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
   useEffect(() => {
     renderer.setContextOverlayVisible(contextOverlayVisible);
   }, [renderer, contextOverlayVisible]);
+  useEffect(() => {
+    renderer.setInterventionBandsVisible(interventionBandsVisible);
+  }, [renderer, interventionBandsVisible]);
 
   // Resolve the selected task id → its bound span id and push it into the
   // renderer so the overlay draws a halo around the matching bar. Also

@@ -20,6 +20,7 @@ const TASK_PLAN_MODE_KEY = 'harmonograf.taskPlanMode';
 const TASK_PLAN_VISIBLE_KEY = 'harmonograf.taskPlanVisible';
 const GRAPH_VIEWPORT_KEY = 'harmonograf.graphViewport';
 const CONTEXT_OVERLAY_VISIBLE_KEY = 'harmonograf.contextOverlayVisible';
+const INTERVENTION_BANDS_VISIBLE_KEY = 'harmonograf.interventionBandsVisible';
 
 function readGraphViewport(): GraphViewport | null {
   try {
@@ -109,6 +110,25 @@ function writeContextOverlayVisible(v: boolean): void {
   }
 }
 
+function readInterventionBandsVisible(): boolean {
+  try {
+    const v = localStorage.getItem(INTERVENTION_BANDS_VISIBLE_KEY);
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
+function writeInterventionBandsVisible(v: boolean): void {
+  try {
+    localStorage.setItem(INTERVENTION_BANDS_VISIBLE_KEY, v ? 'true' : 'false');
+  } catch {
+    /* ignore */
+  }
+}
+
 export type DrawerTabId =
   | 'summary'
   | 'task'
@@ -189,6 +209,12 @@ interface UiState {
   // Default on, persisted to localStorage.
   contextOverlayVisible: boolean;
   toggleContextOverlayVisible: () => void;
+
+  // Intervention bands overlay: translucent vertical columns on the Gantt
+  // canvas at each intervention's atMs (STEER / drift / goldfive). Default
+  // on, persisted to localStorage.
+  interventionBandsVisible: boolean;
+  toggleInterventionBandsVisible: () => void;
 
   // Sequence diagram (GraphView) zoom + pan state. `null` means "no explicit
   // viewport saved yet" — the view will fit-to-content on mount. Persisted to
@@ -338,6 +364,15 @@ export const useUiStore = create<UiState>((set) => ({
       writeContextOverlayVisible(next);
       s.activeRenderer?.setContextOverlayVisible(next);
       return { contextOverlayVisible: next };
+    }),
+
+  interventionBandsVisible: readInterventionBandsVisible(),
+  toggleInterventionBandsVisible: () =>
+    set((s) => {
+      const next = !s.interventionBandsVisible;
+      writeInterventionBandsVisible(next);
+      s.activeRenderer?.setInterventionBandsVisible(next);
+      return { interventionBandsVisible: next };
     }),
   setAgentsPaused: (paused, ts) =>
     set((s) => {

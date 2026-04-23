@@ -7,7 +7,7 @@ import { useSessionWatch } from '../../../rpc/hooks';
 import { colorForAgent } from '../../../theme/agentColors';
 import type { Task, TaskPlan, TaskStatus } from '../../../gantt/types';
 import { TaskStagesGraph } from '../../TaskStages/TaskStagesGraph';
-import { InterventionsTimeline } from '../../Interventions/InterventionsTimeline';
+import { InterventionsList } from '../../Interventions/InterventionsList';
 import { deriveInterventionsFromStore } from '../../../lib/interventions';
 import { useAnnotationStore } from '../../../state/annotationStore';
 
@@ -62,6 +62,11 @@ export function GanttView() {
   const toggleTaskPlanVisible = useUiStore((s) => s.toggleTaskPlanVisible);
   const contextOverlayVisible = useUiStore((s) => s.contextOverlayVisible);
   const toggleContextOverlayVisible = useUiStore((s) => s.toggleContextOverlayVisible);
+  const interventionBandsVisible = useUiStore((s) => s.interventionBandsVisible);
+  const toggleInterventionBandsVisible = useUiStore(
+    (s) => s.toggleInterventionBandsVisible,
+  );
+  const activeRenderer = useUiStore((s) => s.activeRenderer);
   const selectSpan = useUiStore((s) => s.selectSpan);
   const selectTask = useUiStore((s) => s.selectTask);
   const selectedTaskId = useUiStore((s) => s.selectedTaskId);
@@ -75,8 +80,9 @@ export function GanttView() {
   useEffect(() => {
     if (!watch?.store) return;
     // Subscribe to tasks for stage DAG refresh AND drifts/annotations so the
-    // InterventionsTimeline re-renders as new STEERs / drift events arrive
-    // without each marker racing to fetch ListInterventions.
+    // InterventionsList re-derives + the Gantt intervention bands repaint
+    // as new STEERs / drift events arrive without a ListInterventions
+    // round-trip per marker.
     const un = watch.store.tasks.subscribe(() => setTick((t) => t + 1));
     const unDrift = watch.store.drifts.subscribe(() => setTick((t) => t + 1));
     const unAnn = useAnnotationStore.subscribe(() => setTick((t) => t + 1));
@@ -151,40 +157,14 @@ export function GanttView() {
     ? deriveInterventionsFromStore(store, allAnnotations)
     : [];
 
-  // Session-wide axis for the InterventionsTimeline strips. Every
-  // intervention's `atMs` is session-relative (see lib/interventions.ts),
-  // so the strip's window must run from 0 (session start) to the
-  // effective "now" for the session — otherwise markers that fired well
-  // into the session land at the 0m end of a narrow per-plan window
-  // (user report: diamond pinned to 0m despite event ~7m in).
-  //
-  // For a live session we track `store.nowMs`; for a completed/aborted
-  // one we fall back to the max observed activity time across
-  // interventions, plans, and nowMs so the axis doesn't collapse if
-  // nowMs wasn't advanced past the final event.
-  //
-  // Floor matches the Gantt canvas's default viewport window (5 min) so
-  // the intervention strip's ticks render at the same minute cadence as
-  // the Gantt above it. Without this floor, a brand-new 30-second
-  // session would tick at 10s on the strip while the Gantt ticks at 1m,
-  // and the user has to mentally re-map tick labels when glancing from
-  // one to the other.
-  const MIN_SESSION_SPAN_MS = 5 * 60_000; // 5 minutes — matches Gantt default viewport
-  const sessionStartMs = 0;
-  const isLive =
-    watch?.sessionStatus === 'LIVE' || watch?.sessionStatus === 'UNKNOWN';
-  const observedMaxMs = store
-    ? Math.max(
-        0,
-        store.nowMs || 0,
-        ...interventions.map((r) => r.atMs),
-        ...plans.map((p) => p.createdAtMs),
-      )
-    : 0;
-  const sessionEndMs = Math.max(
-    isLive && store ? store.nowMs || observedMaxMs : observedMaxMs,
-    MIN_SESSION_SPAN_MS,
-  );
+  // Push the derived intervention rows down to the Gantt renderer so it
+  // can paint translucent bands at each intervention's atMs on the
+  // overlay layer. The renderer no-ops on ref-equal arrays, so this
+  // effect is cheap even when the deriver produces a new array every
+  // tick with identical contents.
+  useEffect(() => {
+    activeRenderer?.setInterventions(interventions);
+  }, [activeRenderer, interventions]);
 
   const agentNameFor = (id: string): string =>
     store?.agents.get(id)?.name ?? id;
@@ -336,6 +316,18 @@ export function GanttView() {
             />
             context
           </label>
+          <label
+            style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 8 }}
+            title="Show translucent bands on the Gantt at each intervention's time"
+          >
+            <input
+              type="checkbox"
+              data-testid="intervention-bands-toggle"
+              checked={interventionBandsVisible}
+              onChange={toggleInterventionBandsVisible}
+            />
+            bands
+          </label>
         </div>
         {panelOpen && (
           <div
@@ -382,29 +374,18 @@ export function GanttView() {
                   agentNameFor={agentNameFor}
                   onTaskClick={handleTaskClick}
                 />
-                <InterventionsTimeline
+                <InterventionsList
                   rows={interventions.filter(
                     // Attach each intervention to the plan whose rev it
                     // produced, or — if it never produced a revision —
-                    // the nearest preceding plan. This keeps every
-                    // plan strip uncluttered while still guaranteeing
-                    // every intervention shows up once.
+                    // the nearest preceding plan. Keeps every plan
+                    // uncluttered while still showing every
+                    // intervention exactly once.
                     (row) =>
                       row.planRevisionIndex > 0
                         ? (plan.revisionIndex ?? 0) === row.planRevisionIndex
                         : (plan.revisionIndex ?? 0) === 0,
                   )}
-                  // Session-wide axis so the strip acts as a proper time
-                  // axis shared with the Gantt above, rather than
-                  // column-aligning to this plan's DAG. All row.atMs
-                  // values are session-relative; the strip stretches to
-                  // the container width (no explicit `width` prop) so
-                  // markers land at the same fraction of horizontal
-                  // space as the equivalent time on the Gantt canvas.
-                  startMs={sessionStartMs}
-                  endMs={sessionEndMs}
-                  revs={plans}
-                  onJumpToRevision={undefined}
                 />
               </div>
             ))}

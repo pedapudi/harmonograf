@@ -25,6 +25,7 @@ import type { DelegationRecord, SessionStore } from './index';
 import type { SpanIndex, DirtyRect } from './spatialIndex';
 import type { Agent, ContextWindowSample, Span, SpanKind, Task, TaskStatus } from './types';
 import { hasThinking } from '../lib/thinking';
+import { SOURCE_COLOR, type InterventionRow } from '../lib/interventions';
 import {
   GUTTER_WIDTH_PX,
   ROW_HEIGHT_FOCUSED_PX,
@@ -216,6 +217,15 @@ export class GanttRenderer {
   // is drawn inside drawBlocks so flipping this only re-renders the blocks
   // layer, not the background or the overlay cursor.
   private contextOverlayVisible = true;
+
+  // Intervention bands overlay. Each intervention renders as a thin
+  // translucent vertical column on the overlay layer at its atMs,
+  // spanning the Gantt data area. Chrome pushes the derived rows down
+  // via setInterventions(); visibility is toggled via
+  // setInterventionBandsVisible(). Drawing happens in drawOverlay so
+  // toggling does not thrash the blocks layer.
+  private interventions: readonly InterventionRow[] = [];
+  private interventionBandsVisible = true;
 
   // Cached per-agent band geometry from the last drawBlocks pass. Used by
   // the hover tooltip code to interpolate the exact sample at the pointer x
@@ -558,6 +568,20 @@ export class GanttRenderer {
     // Clear cached geometry when the overlay is hidden so the hover tooltip
     // stops reporting stale samples.
     if (!v) this.contextBandByAgent.clear();
+  }
+
+  setInterventions(rows: readonly InterventionRow[]): void {
+    // Cheap ref equality first so a caller that re-derives the same array
+    // shape on every React render doesn't invalidate the overlay needlessly.
+    if (this.interventions === rows) return;
+    this.interventions = rows;
+    this.overlayDirty = true;
+  }
+
+  setInterventionBandsVisible(v: boolean): void {
+    if (this.interventionBandsVisible === v) return;
+    this.interventionBandsVisible = v;
+    this.overlayDirty = true;
   }
 
   // Push the resolved span id for the currently selected task (if any). The
@@ -1507,6 +1531,131 @@ export class GanttRenderer {
     return null;
   }
 
+  // --- Intervention bands ------------------------------------------------
+  //
+  // Translucent vertical columns painted on the overlay layer at each
+  // intervention's `atMs`. Replaces the per-plan intervention strip:
+  // users see WHEN an intervention happened inline with the Gantt's own
+  // time axis, at arbitrarily wide horizontal resolution.
+  //
+  // Width is fixed at a few CSS pixels (severity-ramped); position is
+  // pinned to the exact atMs so temporal alignment is identical to the
+  // delegation arrows and span bars drawn on the same canvas. Color is
+  // source-driven (user/drift/goldfive) via SOURCE_COLOR — no taxonomy
+  // knowledge beyond what the deriver already tagged.
+  //
+  // Adjacent bands whose centre-to-centre distance is < MERGE_PX merge
+  // into a single band that widens with count (up to a cap); the
+  // cluster list under the Gantt still enumerates every row so no data
+  // is lost when bands overlap.
+  private drawInterventionBands(ctx: CanvasRenderingContext2D): void {
+    // Always reset the per-frame instrumentation first so toggling
+    // visibility / clearing rows zeros the counters for tests.
+    this.lastInterventionBandCount = 0;
+    this.lastInterventionBandXs.length = 0;
+
+    if (!this.interventionBandsVisible) return;
+    if (this.interventions.length === 0) return;
+
+    const w = this.widthCss;
+    const h = this.heightCss;
+    const dataLeft = GUTTER_WIDTH_PX;
+    const dataRight = w;
+    if (dataRight <= dataLeft) return;
+
+    const vs = viewportStart(this.viewport);
+    const ve = this.viewport.endMs;
+    const msToPxBound = (ms: number): number => msToPx(this.viewport, w, ms);
+
+    // Precompute visible bands with their source + severity so the cluster
+    // pass can pick a dominant colour and width for merged bands.
+    interface VisBand {
+      atMs: number;
+      x: number;
+      source: InterventionRow['source'];
+      severity: string;
+    }
+    const visible: VisBand[] = [];
+    for (const row of this.interventions) {
+      if (row.atMs < vs || row.atMs > ve) continue;
+      const x = msToPxBound(row.atMs);
+      if (x < dataLeft || x > dataRight) continue;
+      visible.push({ atMs: row.atMs, x, source: row.source, severity: row.severity });
+    }
+    if (visible.length === 0) return;
+    visible.sort((a, b) => a.x - b.x);
+
+    // Cluster pass: merge bands within MERGE_PX of each other. Dominant
+    // source wins (user > drift > goldfive — user steers are the most
+    // actionable); worst severity wins for width.
+    const MERGE_PX = 6;
+    interface Cluster {
+      x: number;
+      source: InterventionRow['source'];
+      severity: string;
+      count: number;
+    }
+    const clusters: Cluster[] = [];
+    const pickSource = (
+      a: InterventionRow['source'],
+      b: InterventionRow['source'],
+    ): InterventionRow['source'] => {
+      if (a === 'user' || b === 'user') return 'user';
+      if (a === 'drift' || b === 'drift') return 'drift';
+      return 'goldfive';
+    };
+    const pickSeverity = (a: string, b: string): string => {
+      if (a === 'critical' || b === 'critical') return 'critical';
+      if (a === 'warning' || b === 'warning') return 'warning';
+      if (a === 'info' || b === 'info') return 'info';
+      return a || b;
+    };
+    for (const v of visible) {
+      const last = clusters[clusters.length - 1];
+      if (last && v.x - last.x <= MERGE_PX) {
+        last.source = pickSource(last.source, v.source);
+        last.severity = pickSeverity(last.severity, v.severity);
+        last.count += 1;
+        // Re-centre on the running mean so the cluster doesn't drift left.
+        last.x = (last.x * (last.count - 1) + v.x) / last.count;
+      } else {
+        clusters.push({ x: v.x, source: v.source, severity: v.severity, count: 1 });
+      }
+    }
+
+    // Severity → band pixel width (pre-cluster). Clusters widen on top.
+    const baseWidthPx = (sev: string): number => {
+      if (sev === 'critical') return 4;
+      if (sev === 'warning') return 3;
+      return 2;
+    };
+    const clusterBoost = (count: number): number =>
+      count <= 1 ? 0 : Math.min(4, Math.ceil(Math.log2(count + 1)));
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(dataLeft, TOP_MARGIN_PX, dataRight - dataLeft, h - TOP_MARGIN_PX);
+    ctx.clip();
+    const topY = TOP_MARGIN_PX;
+    const bottomY = h;
+    for (const c of clusters) {
+      const color = SOURCE_COLOR[c.source] ?? SOURCE_COLOR.goldfive;
+      const bw = baseWidthPx(c.severity) + clusterBoost(c.count);
+      // Fill: soft translucent column so spans + text behind it stay legible.
+      ctx.fillStyle = color;
+      ctx.globalAlpha = c.severity === 'critical' ? 0.22 : 0.14;
+      ctx.fillRect(c.x - bw / 2, topY, bw, bottomY - topY);
+      // 1px centre stripe at higher opacity to anchor the band visually —
+      // without this, wide warning/critical columns feel like haze.
+      ctx.globalAlpha = c.severity === 'critical' ? 0.85 : 0.55;
+      ctx.fillRect(c.x - 0.5, topY, 1, bottomY - topY);
+      this.lastInterventionBandXs.push(c.x);
+    }
+    this.lastInterventionBandCount = clusters.length;
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
   // --- Task plan chips + dependency edges --------------------------------
 
   private drawTasksAndEdges(ctx: CanvasRenderingContext2D): void {
@@ -1819,6 +1968,12 @@ export class GanttRenderer {
   // most recent drawBlocks pass. Lets tests assert the LLM_CALL → badge
   // mapping without having to diff pixels.
   lastBrainBadgeCount = 0;
+  // Exposed for band tests — count of cluster bands painted on the last
+  // drawInterventionBands pass, and the x-pixel positions so tests can
+  // confirm bands re-anchor after rebase. Zero when bands are off or no
+  // rows are visible.
+  lastInterventionBandCount = 0;
+  lastInterventionBandXs: number[] = [];
 
   // --- Overlay -----------------------------------------------------------
 
@@ -1828,6 +1983,10 @@ export class GanttRenderer {
     const w = this.widthCss;
     const h = this.heightCss;
     ctx.clearRect(0, 0, w, h);
+
+    // Intervention bands — translucent vertical columns painted first so
+    // they sit behind the now-cursor, hover rings, and delegation pulses.
+    this.drawInterventionBands(ctx);
 
     // Now cursor
     if (!this.viewport.replay) {
