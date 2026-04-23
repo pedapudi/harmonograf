@@ -39,6 +39,7 @@ from harmonograf_server.storage.base import (
     TaskPlan,
     TaskStatus,
     ContextWindowSample,
+    GoldfiveEventRecord,
 )
 
 
@@ -176,6 +177,38 @@ CREATE TABLE IF NOT EXISTS payloads (
     summary TEXT NOT NULL DEFAULT '',
     path TEXT NOT NULL
 );
+
+-- harmonograf#113: goldfive event audit log.
+--
+-- The ingest pipeline historically only fanned goldfive events out to
+-- the SessionBus for live subscribers. Any downstream consumer that
+-- needed to replay events (frontend reconnect, forensic analysis,
+-- test-log inspection) had nothing to read back from disk because
+-- the events were never persisted. This table is the durable mirror.
+--
+-- (session_id, run_id, sequence) uniquely identifies an event within
+-- a run — goldfive's runner increments sequence monotonically per
+-- run_id, so the pair is effectively the wire-level identity. kind
+-- is a denormalized string (payload variant name, e.g.
+-- "delegation_observed") so the common "give me all drifts for this
+-- session" query path doesn't have to parse payload_bytes.
+--
+-- payload_bytes carries the serialized ``goldfive.v1.Event`` envelope
+-- verbatim so the server can re-emit it onto the bus or decode new
+-- fields after a schema bump without needing a new column.
+CREATE TABLE IF NOT EXISTS goldfive_events (
+    session_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    recorded_at REAL NOT NULL,
+    payload_bytes BLOB NOT NULL DEFAULT X'',
+    PRIMARY KEY (session_id, run_id, sequence)
+);
+CREATE INDEX IF NOT EXISTS idx_goldfive_events_session_kind
+    ON goldfive_events(session_id, kind);
+CREATE INDEX IF NOT EXISTS idx_goldfive_events_session_time
+    ON goldfive_events(session_id, recorded_at);
 """
 
 
@@ -1172,6 +1205,114 @@ class SqliteStore(Store):
             ]
             out.sort(key=lambda s: (s.agent_id, s.recorded_at))
             return out
+
+    # goldfive events ----------------------------------------------------
+    async def append_goldfive_event(
+        self, record: GoldfiveEventRecord
+    ) -> None:
+        async with self._lock:
+            # INSERT OR IGNORE: goldfive's runner emits each (run_id,
+            # sequence) exactly once, but a reconnect / replay race
+            # could re-deliver the same envelope. Idempotent-by-key
+            # matches ``_handle_span_start`` 's dedup semantics.
+            await self.db.execute(
+                """
+                INSERT OR IGNORE INTO goldfive_events
+                    (session_id, run_id, sequence, kind, recorded_at, payload_bytes)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.session_id,
+                    record.run_id,
+                    int(record.sequence),
+                    record.kind,
+                    record.recorded_at,
+                    record.payload_bytes or b"",
+                ),
+            )
+            await self.db.commit()
+
+    async def list_goldfive_events(
+        self,
+        session_id: str,
+        *,
+        kind: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> list[GoldfiveEventRecord]:
+        async with self._lock:
+            q = (
+                "SELECT session_id, run_id, sequence, kind, recorded_at, payload_bytes "
+                "FROM goldfive_events WHERE session_id = ?"
+            )
+            args: list[Any] = [session_id]
+            if kind is not None:
+                q += " AND kind = ?"
+                args.append(kind)
+            q += " ORDER BY recorded_at ASC, sequence ASC"
+            if limit is not None:
+                q += " LIMIT ?"
+                args.append(int(limit))
+            async with self.db.execute(q, args) as cur:
+                rows = await cur.fetchall()
+        return [
+            GoldfiveEventRecord(
+                session_id=r["session_id"],
+                run_id=r["run_id"],
+                sequence=r["sequence"],
+                kind=r["kind"],
+                recorded_at=r["recorded_at"],
+                payload_bytes=bytes(r["payload_bytes"] or b""),
+            )
+            for r in rows
+        ]
+
+    # agent lookup helpers ----------------------------------------------
+    async def find_agent_id_by_name(
+        self, session_id: str, name: str
+    ) -> Optional[str]:
+        """Lookup (session, ADK name) → canonical agent_id.
+
+        Match precedence:
+          1. Exact ``agents.id`` match (caller already has the canonical id).
+          2. Exact ``agents.name`` match — the harmonograf#74 plugin
+             stamps ``name = <adk_agent_name>`` on per-ADK-agent rows.
+          3. Suffix match on ``agents.id`` (``...:<name>``) — tolerates
+             adk.agent.name cases where ``name`` got overwritten but the
+             id still encodes the ADK-agent-name suffix.
+
+        Returns None when no row matches. Single-row SELECT keyed on
+        ``session_id`` so the cost is bounded by the agent-registry
+        size (a few dozen rows in the worst case).
+        """
+        if not name or not session_id:
+            return None
+        async with self._lock:
+            # 1. exact id match
+            async with self.db.execute(
+                "SELECT id FROM agents WHERE session_id = ? AND id = ? LIMIT 1",
+                (session_id, name),
+            ) as cur:
+                row = await cur.fetchone()
+            if row is not None:
+                return row["id"]
+            # 2. exact name match
+            async with self.db.execute(
+                "SELECT id FROM agents WHERE session_id = ? AND name = ? LIMIT 1",
+                (session_id, name),
+            ) as cur:
+                row = await cur.fetchone()
+            if row is not None:
+                return row["id"]
+            # 3. suffix match on id
+            like = f"%:{name}"
+            async with self.db.execute(
+                "SELECT id FROM agents WHERE session_id = ? AND id LIKE ? LIMIT 1",
+                (session_id, like),
+            ) as cur:
+                row = await cur.fetchone()
+            if row is not None:
+                return row["id"]
+        return None
 
     # stats ---------------------------------------------------------------
     async def stats(self) -> Stats:

@@ -215,6 +215,40 @@ class ContextWindowSample:
 
 
 @dataclass
+class GoldfiveEventRecord:
+    """Persisted record of one ``goldfive.v1.Event`` envelope.
+
+    The ingest pipeline fans goldfive events out to the SessionBus for
+    live subscribers but historically never wrote them to disk — the
+    Gantt / Trajectory views would repopulate on reconnect from the
+    derived ``task_plans`` / ``tasks`` / annotations tables, but the
+    raw event stream (DelegationObserved, PlanSubmitted, PlanRevised,
+    DriftDetected, AgentInvocationStarted/Completed, TaskStarted/
+    Progress/Completed/Failed/Blocked/Cancelled, RunStarted/Completed/
+    Aborted, GoalDerived) had nowhere to land. That broke forensic
+    replay of delegation edges / drift markers in the frontend after a
+    server restart and made post-hoc analysis impossible.
+
+    Schema kept deliberately narrow: the wire payload is stored
+    verbatim as bytes (``payload_bytes``) so the server doesn't have
+    to keep a parallel dataclass per payload variant; ``kind`` /
+    ``run_id`` / ``sequence`` are denormalized for the common "give me
+    every drift this session saw" query path. A server restart can
+    re-emit events onto the bus on WatchSession initial burst without
+    re-parsing the raw payload if the frontend doesn't need it —
+    the mirror registries (``delegations``, ``drifts``) are already
+    reconstructed from this row's kind-specific columns.
+    """
+
+    session_id: str
+    run_id: str
+    kind: str
+    sequence: int
+    recorded_at: float
+    payload_bytes: bytes = b""
+
+
+@dataclass
 class Stats:
     session_count: int
     agent_count: int
@@ -406,6 +440,39 @@ class Store(ABC):
         agent_id: Optional[str] = None,
         limit_per_agent: int = 200,
     ) -> list[ContextWindowSample]: ...
+
+    # goldfive events -----------------------------------------------------
+    @abstractmethod
+    async def append_goldfive_event(
+        self, record: GoldfiveEventRecord
+    ) -> None: ...
+
+    @abstractmethod
+    async def list_goldfive_events(
+        self,
+        session_id: str,
+        *,
+        kind: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> list[GoldfiveEventRecord]: ...
+
+    # agent lookup helpers ------------------------------------------------
+    @abstractmethod
+    async def find_agent_id_by_name(
+        self, session_id: str, name: str
+    ) -> Optional[str]:
+        """Return the stored ``agents.id`` for the given (session, ADK name) or None.
+
+        Supports bug #113 — plans emit ``assignee_agent_id`` using the
+        bare ADK agent name (e.g. ``"coordinator_agent"``), but the
+        telemetry plugin registers agents with a per-ADK-agent id
+        (e.g. ``"<client_id>:coordinator_agent"``). Ingest calls this
+        to rewrite the plan's ``assignee_agent_id`` onto the canonical
+        per-ADK-agent id before storage so the frontend's agent-id
+        equality checks resolve. Returns None when no agent row
+        matches — caller keeps the bare name (degraded path).
+        """
+        ...
 
     # stats ----------------------------------------------------------------
     @abstractmethod

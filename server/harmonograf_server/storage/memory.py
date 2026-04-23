@@ -29,6 +29,7 @@ from harmonograf_server.storage.base import (
     TaskPlan,
     TaskStatus,
     ContextWindowSample,
+    GoldfiveEventRecord,
 )
 
 
@@ -46,6 +47,11 @@ class InMemoryStore(Store):
         self._task_plans: dict[str, TaskPlan] = {}
         # session_id -> agent_id -> list[ContextWindowSample] (append-only).
         self._ctx_samples: dict[str, dict[str, list[ContextWindowSample]]] = {}
+        # session_id -> list[GoldfiveEventRecord] (append-only, in wire order).
+        # Keyed-by-tuple dedup is layered on top via ``_seen_gf_events``
+        # to match sqlite's PRIMARY KEY semantics under reconnect replay.
+        self._gf_events: dict[str, list[GoldfiveEventRecord]] = {}
+        self._seen_gf_events: set[tuple[str, str, int]] = set()
 
     async def start(self) -> None:
         return None
@@ -457,6 +463,57 @@ class InMemoryStore(Store):
                     out.extend(copy.deepcopy(s) for s in lst[-limit:])
             out.sort(key=lambda s: (s.agent_id, s.recorded_at))
             return out
+
+    async def append_goldfive_event(
+        self, record: GoldfiveEventRecord
+    ) -> None:
+        key = (record.session_id, record.run_id, int(record.sequence))
+        async with self._lock:
+            if key in self._seen_gf_events:
+                return
+            self._seen_gf_events.add(key)
+            self._gf_events.setdefault(record.session_id, []).append(
+                copy.deepcopy(record)
+            )
+
+    async def list_goldfive_events(
+        self,
+        session_id: str,
+        *,
+        kind: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> list[GoldfiveEventRecord]:
+        async with self._lock:
+            lst = self._gf_events.get(session_id, [])
+            out = [copy.deepcopy(e) for e in lst]
+        if kind is not None:
+            out = [e for e in out if e.kind == kind]
+        out.sort(key=lambda e: (e.recorded_at, e.sequence))
+        if limit is not None:
+            out = out[: int(limit)]
+        return out
+
+    async def find_agent_id_by_name(
+        self, session_id: str, name: str
+    ) -> Optional[str]:
+        if not name or not session_id:
+            return None
+        async with self._lock:
+            # 1. exact id
+            if (session_id, name) in self._agents:
+                return name
+            # 2. exact name match
+            for (sid, aid), agent in self._agents.items():
+                if sid != session_id:
+                    continue
+                if agent.name == name:
+                    return aid
+            # 3. suffix match
+            suffix = f":{name}"
+            for (sid, aid), _ in self._agents.items():
+                if sid == session_id and aid.endswith(suffix):
+                    return aid
+        return None
 
     async def stats(self) -> Stats:
         async with self._lock:

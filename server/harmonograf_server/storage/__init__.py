@@ -22,10 +22,12 @@ from harmonograf_server.storage.base import (
     TaskPlan,
     TaskStatus,
     ContextWindowSample,
+    GoldfiveEventRecord,
 )
 from harmonograf_server.storage.factory import make_store
 
 __all__ = [
+    "GoldfiveEventRecord",
     "Store",
     "Session",
     "Agent",

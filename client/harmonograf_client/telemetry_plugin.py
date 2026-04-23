@@ -370,6 +370,43 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         # negligible.
         self._agent_stash: dict[str, list[str]] = {}
         self._seen_agents: set[tuple[str, str]] = set()
+
+        # harmonograf#113: nested-Runner invocation aliasing.
+        #
+        # ``goldfive.wrap`` produces a :class:`GoldfiveADKAgent` whose
+        # ``_run_async_impl`` drives an internal :class:`InMemoryRunner`
+        # around the user's real root agent. Under adk-web, ADK fires
+        # ``before_run_callback`` TWICE for the SAME root agent — once
+        # for the outer adk-web Runner (over ``GoldfiveADKAgent``),
+        # once for goldfive's inner Runner (over the actual
+        # coordinator). ``GoldfiveADKAgent`` copies its inner's
+        # ``name`` through (so both invocations report the same
+        # per-agent id from the plugin's POV) but the OUTER
+        # invocation produces no LLM calls of its own — only the
+        # inner does — so the outer INVOCATION span is a pure duplicate
+        # wrapper that:
+        #   * fragments the Gantt coordinator row into two identical
+        #     bars,
+        #   * confuses Drawer span selection (outer has no reasoning
+        #     trail; inner carries the full chain-of-thought),
+        #   * and on user cancel mid-run leaks as ``status=RUNNING``
+        #     because ``on_cancellation`` closes only one of the two
+        #     invocation ids.
+        #
+        # We detect the wrapper agent by class name
+        # (``GoldfiveADKAgent`` or any subclass whose bases include
+        # it) and short-circuit: no span opens, ``_invocation_spans``
+        # skips the entry, and LLM calls — which all arrive from the
+        # inner invocation_id — route to the inner's span unchanged.
+        # Cancellation on the outer invocation_id becomes a harmless
+        # no-op (no span to close); cancellation on the inner closes
+        # the real span normally.
+        #
+        # Class-name detection instead of ``isinstance`` avoids a hard
+        # dependency on goldfive from the client — the plugin stays
+        # installable in an environment that doesn't ship goldfive at
+        # all.
+        self._goldfive_wrapper_invocations: set[str] = set()
         # Reasoning aggregation for the INVOCATION span (harmonograf#108).
         #
         # Every LLM_CALL finalize inside an invocation appends its
@@ -1025,6 +1062,27 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
     # Invocation lifecycle
     # ------------------------------------------------------------------
 
+    def _is_goldfive_wrapper_agent(self, agent: Any) -> bool:
+        """Return True when ``agent`` is a goldfive.wrap wrapper agent.
+
+        Walks ``type(agent).__mro__`` and looks for a class named
+        ``GoldfiveADKAgent``. Matches the runtime class under
+        ``goldfive.adapters.adk_wrap`` without importing goldfive — the
+        client must stay installable in environments that ship only
+        ADK (no goldfive). Returns False on any lookup failure so
+        telemetry degrades to the pre-fix behaviour (duplicate
+        INVOCATION spans) rather than raising.
+        """
+        if agent is None:
+            return False
+        try:
+            for cls in type(agent).__mro__:
+                if cls.__name__ == "GoldfiveADKAgent":
+                    return True
+        except Exception:  # noqa: BLE001 — defensive
+            return False
+        return False
+
     async def before_run_callback(self, *, invocation_context: Any) -> None:
         if self._maybe_disable_as_duplicate(invocation_context):
             return
@@ -1068,6 +1126,14 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
                         exc_info=True,
                     )
 
+        # Goldfive.wrap nested-Runner detection (harmonograf#113).
+        # Skip the wrapper agent's INVOCATION entirely — see the
+        # docstring on ``_goldfive_wrapper_invocations`` for why.
+        if self._is_goldfive_wrapper_agent(agent):
+            if inv_id:
+                self._goldfive_wrapper_invocations.add(inv_id)
+            return
+
         attrs: dict[str, Any] = {}
         if inv_id:
             attrs["adk.invocation_id"] = inv_id
@@ -1096,6 +1162,14 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         if self._maybe_disable_as_duplicate(invocation_context):
             return
         inv_id = str(_safe_attr(invocation_context, "invocation_id", "") or "")
+        # Goldfive.wrap wrapper short-circuit (harmonograf#113). The
+        # matching ``before_run_callback`` opened no span for this
+        # invocation_id, so this after_run is a no-op. Dropping the
+        # tracking flag keeps the set from growing unbounded across
+        # many sequential runs.
+        if inv_id and inv_id in self._goldfive_wrapper_invocations:
+            self._goldfive_wrapper_invocations.discard(inv_id)
+            return
         # Close any model-call spans that never saw a non-partial
         # finalize (error paths, client disconnect mid-stream). Without
         # this sweep such spans would leak forever.
