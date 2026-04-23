@@ -6,7 +6,7 @@ import { useUiStore, type TaskPlanMode } from '../../../state/uiStore';
 import { useSessionWatch } from '../../../rpc/hooks';
 import { colorForAgent } from '../../../theme/agentColors';
 import type { Task, TaskPlan, TaskStatus } from '../../../gantt/types';
-import { TaskStagesGraph, computePlanDagWidth } from '../../TaskStages/TaskStagesGraph';
+import { TaskStagesGraph } from '../../TaskStages/TaskStagesGraph';
 import { InterventionsTimeline } from '../../Interventions/InterventionsTimeline';
 import { deriveInterventionsFromStore } from '../../../lib/interventions';
 import { useAnnotationStore } from '../../../state/annotationStore';
@@ -162,7 +162,14 @@ export function GanttView() {
   // one we fall back to the max observed activity time across
   // interventions, plans, and nowMs so the axis doesn't collapse if
   // nowMs wasn't advanced past the final event.
-  const MIN_SESSION_SPAN_MS = 60_000; // 1 minute floor so a brand-new strip still has axis room
+  //
+  // Floor matches the Gantt canvas's default viewport window (5 min) so
+  // the intervention strip's ticks render at the same minute cadence as
+  // the Gantt above it. Without this floor, a brand-new 30-second
+  // session would tick at 10s on the strip while the Gantt ticks at 1m,
+  // and the user has to mentally re-map tick labels when glancing from
+  // one to the other.
+  const MIN_SESSION_SPAN_MS = 5 * 60_000; // 5 minutes — matches Gantt default viewport
   const sessionStartMs = 0;
   const isLive =
     watch?.sessionStatus === 'LIVE' || watch?.sessionStatus === 'UNKNOWN';
@@ -387,19 +394,15 @@ export function GanttView() {
                         ? (plan.revisionIndex ?? 0) === row.planRevisionIndex
                         : (plan.revisionIndex ?? 0) === 0,
                   )}
-                  // Session-wide axis, not per-plan. All row.atMs values
-                  // are session-relative so the strip must span the
-                  // whole session for marker placement to be honest.
+                  // Session-wide axis so the strip acts as a proper time
+                  // axis shared with the Gantt above, rather than
+                  // column-aligning to this plan's DAG. All row.atMs
+                  // values are session-relative; the strip stretches to
+                  // the container width (no explicit `width` prop) so
+                  // markers land at the same fraction of horizontal
+                  // space as the equivalent time on the Gantt canvas.
                   startMs={sessionStartMs}
                   endMs={sessionEndMs}
-                  // Visually align the strip to the plan DAG directly
-                  // above it. Without this, the strip would stretch to
-                  // the CSS max-width cap (~960px) on wide panes even
-                  // when the DAG itself is narrower (e.g. a 3-stage
-                  // plan at ~444px), leaving a lone marker floating
-                  // far right of an otherwise empty strip. Zero-width
-                  // plans (empty/loading) fall through to the CSS cap.
-                  width={computePlanDagWidth(plan) || undefined}
                   revs={plans}
                   onJumpToRevision={undefined}
                 />
