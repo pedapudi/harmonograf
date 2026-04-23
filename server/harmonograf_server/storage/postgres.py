@@ -40,6 +40,7 @@ from harmonograf_server.storage.base import (
     AgentStatus,
     Annotation,
     ContextWindowSample,
+    GoldfiveEventRecord,
     PayloadMeta,
     PayloadRecord,
     Session,
@@ -212,6 +213,23 @@ class PostgresStore(Store):
         agent_id: Optional[str] = None,
         limit_per_agent: int = 200,
     ) -> list[ContextWindowSample]:
+        raise NotImplementedError(_NOT_IMPLEMENTED)
+
+    async def append_goldfive_event(self, record: GoldfiveEventRecord) -> None:
+        raise NotImplementedError(_NOT_IMPLEMENTED)
+
+    async def list_goldfive_events(
+        self,
+        session_id: str,
+        *,
+        kind: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> list[GoldfiveEventRecord]:
+        raise NotImplementedError(_NOT_IMPLEMENTED)
+
+    async def find_agent_id_by_name(
+        self, session_id: str, name: str
+    ) -> Optional[str]:
         raise NotImplementedError(_NOT_IMPLEMENTED)
 
     async def stats(self) -> Stats:

@@ -44,6 +44,7 @@ from harmonograf_server.storage import (
     Agent,
     AgentStatus,
     Framework,
+    GoldfiveEventRecord,
     Session,
     SessionStatus,
     SpanKind,
@@ -777,6 +778,40 @@ class IngestPipeline:
             sequence,
             kind,
         )
+        # Persist the event envelope verbatim before dispatch. Writes
+        # are idempotent on (session_id, run_id, sequence); a reconnect
+        # replay or duplicate delivery is safe. The bus fan-out below
+        # still runs so live subscribers see the event immediately —
+        # persistence is additive. See harmonograf#113.
+        if kind is not None and run_id:
+            try:
+                raw_bytes = event.SerializeToString()
+            except Exception as exc:  # noqa: BLE001 — proto edge cases
+                logger.debug(
+                    "goldfive event serialize failed session_id=%s kind=%s: %s",
+                    target_ctx.session_id,
+                    kind,
+                    exc,
+                )
+                raw_bytes = b""
+            try:
+                await self._store.append_goldfive_event(
+                    GoldfiveEventRecord(
+                        session_id=target_ctx.session_id,
+                        run_id=run_id,
+                        sequence=int(sequence),
+                        kind=kind,
+                        recorded_at=self._now(),
+                        payload_bytes=raw_bytes,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 — defensive: ingest must not raise
+                logger.debug(
+                    "goldfive event persist failed session_id=%s kind=%s: %s",
+                    target_ctx.session_id,
+                    kind,
+                    exc,
+                )
         if kind == "run_started":
             await self._on_run_started(target_ctx, event.run_started, run_id)
         elif kind == "goal_derived":
@@ -812,7 +847,7 @@ class IngestPipeline:
                 target_ctx, event.agent_invocation_completed, run_id
             )
         elif kind == "delegation_observed":
-            self._on_delegation_observed(target_ctx, event.delegation_observed, run_id)
+            await self._on_delegation_observed(target_ctx, event.delegation_observed, run_id)
         else:
             logger.debug(
                 "ignoring unknown goldfive event payload kind=%s on session_id=%s",
@@ -917,6 +952,37 @@ class IngestPipeline:
             created_at=created_at,
             planner_agent_id=ctx.agent_id,
         )
+        # Resolve each task's ``assignee_agent_id`` to a canonical
+        # agent-row id registered on this session (harmonograf#113).
+        # Goldfive planners emit the bare ADK agent name
+        # (``"coordinator_agent"``) while the harmonograf telemetry
+        # plugin registers per-ADK-agent rows with a compound id
+        # (``"<client_agent_id>:coordinator_agent"`` per harmonograf#74).
+        # Frontend surfaces that match task.assigneeAgentId against
+        # the registered agents list (GraphView pre-strip / ghost,
+        # Gantt task→agent lookup) silently fail under that mismatch,
+        # leaving the Plans checkbox toggling a no-op overlay and the
+        # Gantt pre-strip column empty despite valid plan data being
+        # in the DB. Resolving here lets downstream consumers keep
+        # their straightforward equality checks.
+        for task in stored.tasks:
+            bare = task.assignee_agent_id
+            if not bare:
+                continue
+            resolved = await self._store.find_agent_id_by_name(
+                ctx.session_id, bare
+            )
+            if resolved and resolved != bare:
+                task.assignee_agent_id = resolved
+        # Similarly resolve the planner_agent_id off the plan itself
+        # so the PlanRevisionBanner's "planner: X" attribution lands
+        # on a known agent row.
+        if stored.planner_agent_id:
+            resolved_planner = await self._store.find_agent_id_by_name(
+                ctx.session_id, stored.planner_agent_id
+            )
+            if resolved_planner and resolved_planner != stored.planner_agent_id:
+                stored.planner_agent_id = resolved_planner
         stored = await self._store.put_task_plan(stored)
         # Refresh the task index for span-to-task binding lookups on the
         # hot path. A re-emitted plan with the same id replaces previous
@@ -1252,17 +1318,47 @@ class IngestPipeline:
             completed_at=completed_at,
         )
 
-    def _on_delegation_observed(
+    async def _on_delegation_observed(
         self, ctx: StreamContext, payload: Any, run_id: str
     ) -> None:
         observed_at: Optional[float] = None
         if payload.HasField("observed_at"):
             observed_at = ts_to_float(payload.observed_at)
+        # Resolve from/to bare ADK names onto canonical agent-row ids
+        # (harmonograf#113). DelegationObserved events are emitted by
+        # goldfive's registry dispatch with the ADK agent.name strings,
+        # but the frontend's delegation arrow path matches fromAgentId
+        # / toAgentId against the registered agents list, which carries
+        # the telemetry-plugin's compound id format
+        # ``<client_id>:<adk_name>``. Without resolution the arrow's
+        # endpoint rows can't be found on the Gantt and the edge
+        # silently drops to nothing. Fall back to the raw name when no
+        # row is registered yet (rare race: DelegationObserved landing
+        # before the delegating agent's first span).
+        resolved_from = payload.from_agent
+        resolved_to = payload.to_agent
+        try:
+            f_id = await self._store.find_agent_id_by_name(
+                ctx.session_id, payload.from_agent
+            )
+            if f_id:
+                resolved_from = f_id
+            t_id = await self._store.find_agent_id_by_name(
+                ctx.session_id, payload.to_agent
+            )
+            if t_id:
+                resolved_to = t_id
+        except Exception as exc:  # noqa: BLE001 — defensive
+            logger.debug(
+                "delegation agent resolve failed session_id=%s: %s",
+                ctx.session_id,
+                exc,
+            )
         self._bus.publish_delegation_observed(
             ctx.session_id,
             run_id,
-            from_agent=payload.from_agent,
-            to_agent=payload.to_agent,
+            from_agent=resolved_from,
+            to_agent=resolved_to,
             task_id=payload.task_id,
             invocation_id=payload.invocation_id,
             observed_at=observed_at,

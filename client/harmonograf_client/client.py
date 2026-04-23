@@ -418,7 +418,16 @@ class Client:
         enum_val = getattr(types_pb2, f"SPAN_KIND_{name}", None)
         if enum_val is None:
             return types_pb2.SPAN_KIND_CUSTOM, name
-        return enum_val, ""
+        # Stamp the string label on every span — both known enum values
+        # and CUSTOM kinds. The server stores ``kind_string`` on the
+        # ``spans`` row; historically only CUSTOM kinds set it (the
+        # enum-known branch returned ""), which left ``kind_string``
+        # NULL for every INVOCATION / LLM_CALL / TOOL_CALL span and
+        # broke SQL filters / exports keyed on that column. Populating
+        # it consistently makes the column a reliable denormalized
+        # mirror of the enum for DB consumers, without any change to
+        # the wire shape (kind_string was already a field on the proto).
+        return enum_val, name
 
     def _resolve_status(self, status: str | SpanStatus) -> int:
         types_pb2 = self._types_pb2

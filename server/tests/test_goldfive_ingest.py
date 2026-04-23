@@ -1014,3 +1014,144 @@ async def test_registry_events_do_not_mutate_storage(pipeline, store):
     assert after is not None
     status_after = [(t.id, t.status) for t in after.tasks]
     assert status_before == status_after
+
+
+# ---- goldfive_events persistence (harmonograf#113) -----------------------
+
+
+@pytest.mark.asyncio
+async def test_every_goldfive_event_persists_to_store(pipeline, store):
+    """Every dispatched goldfive event lands in the audit log.
+
+    harmonograf#113: the ingest pipeline historically only fanned
+    events to the SessionBus. This test exercises a representative
+    sample (run_started, plan_submitted, delegation_observed,
+    drift_detected) and confirms each is retrievable via the store's
+    ``list_goldfive_events`` read path.
+    """
+    pipe, _bus, _ = pipeline
+    await _ensure_session(store)
+
+    events = [
+        (_make_event(sequence=0), "run_started"),
+        (_make_event(sequence=1), "plan_submitted"),
+        (_make_event(sequence=2), "delegation_observed"),
+        (_make_event(sequence=3), "drift_detected"),
+    ]
+    events[0][0].run_started.goal_summary = "go"
+    events[1][0].plan_submitted.plan.CopyFrom(_plan_pb(plan_id="p-gold"))
+    events[2][0].delegation_observed.from_agent = "agent_gf"
+    events[2][0].delegation_observed.to_agent = "sub"
+    events[3][0].drift_detected.detail = "stuck"
+
+    for evt, _kind in events:
+        await pipe.handle_message(_stream_ctx(), _wrap(evt))
+
+    stored = await store.list_goldfive_events("sess_gf")
+    stored_kinds = [r.kind for r in stored]
+    for _evt, kind in events:
+        assert kind in stored_kinds, (
+            f"expected {kind} persisted; got {stored_kinds}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_goldfive_event_persist_is_idempotent(pipeline, store):
+    """Re-delivering the same envelope is a no-op on the audit log."""
+    pipe, _bus, _ = pipeline
+    await _ensure_session(store)
+
+    evt = _make_event(sequence=7)
+    evt.run_started.goal_summary = "once"
+
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
+
+    stored = await store.list_goldfive_events(
+        "sess_gf", kind="run_started"
+    )
+    assert len(stored) == 1
+
+
+@pytest.mark.asyncio
+async def test_plan_assignee_agent_id_resolves_from_bare_name(pipeline, store):
+    """A plan whose task.assignee is a bare ADK name resolves to the canonical id.
+
+    Under the harmonograf#74 per-agent attribution scheme, the
+    telemetry plugin registers agent rows with a compound id
+    (``<client_id>:<adk_name>``). Goldfive's planner emits
+    ``assignee_agent_id`` with the bare ADK name. The ingest pipeline
+    rewrites the bare name onto the canonical row id so the frontend
+    pre-strip / Plans overlay can resolve the task-to-agent link via
+    ordinary equality.
+    """
+    from harmonograf_server.storage import Agent, AgentStatus, Framework
+
+    pipe, _bus, _ = pipeline
+    await _ensure_session(store)
+    # Register an agent with the compound-id format the plugin uses.
+    canonical_id = "client-xyz:coordinator_agent"
+    await store.register_agent(
+        Agent(
+            id=canonical_id,
+            session_id="sess_gf",
+            name="coordinator_agent",
+            framework=Framework.ADK,
+            connected_at=1000.0,
+            last_heartbeat=1000.0,
+            status=AgentStatus.CONNECTED,
+        )
+    )
+
+    # Plan carries the bare ADK name on the task assignee field.
+    plan_pb = gt.Plan()
+    plan_pb.id = "p-assign"
+    plan_pb.run_id = "run-1"
+    plan_pb.summary = "assign test"
+    t = plan_pb.tasks.add()
+    t.id = "t1"
+    t.title = "first"
+    t.assignee_agent_id = "coordinator_agent"
+    t.status = gt.TASK_STATUS_PENDING
+
+    evt = _make_event()
+    evt.plan_submitted.plan.CopyFrom(plan_pb)
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
+
+    stored = await store.get_task_plan("p-assign")
+    assert stored is not None
+    assert stored.tasks[0].assignee_agent_id == canonical_id
+
+
+@pytest.mark.asyncio
+async def test_delegation_observed_resolves_endpoint_agent_ids(pipeline, store):
+    """Bare from/to ADK names on DelegationObserved resolve to canonical ids."""
+    from harmonograf_server.storage import Agent, AgentStatus, Framework
+
+    pipe, bus, _ = pipeline
+    await _ensure_session(store)
+    for adk_name in ("coordinator_agent", "research_agent"):
+        await store.register_agent(
+            Agent(
+                id=f"client-abc:{adk_name}",
+                session_id="sess_gf",
+                name=adk_name,
+                framework=Framework.ADK,
+                connected_at=1000.0,
+                last_heartbeat=1000.0,
+                status=AgentStatus.CONNECTED,
+            )
+        )
+
+    sub = await bus.subscribe("sess_gf")
+    evt = _make_event()
+    evt.delegation_observed.from_agent = "coordinator_agent"
+    evt.delegation_observed.to_agent = "research_agent"
+    evt.delegation_observed.task_id = "t1"
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
+
+    delta = sub.queue.get_nowait()
+    assert delta.kind == DELTA_DELEGATION_OBSERVED
+    assert delta.payload["from_agent"] == "client-abc:coordinator_agent"
+    assert delta.payload["to_agent"] == "client-abc:research_agent"

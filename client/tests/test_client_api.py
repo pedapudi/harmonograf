@@ -102,6 +102,27 @@ class TestEmitSpanStart:
         env = _drain(client)[0]
         assert env.payload.span.kind_string == "WEIRD_KIND"
 
+    def test_known_enum_kind_also_stamps_kind_string(self, client):
+        """harmonograf#113: ``kind_string`` rides on every span.
+
+        Before the fix, ``_resolve_kind`` returned ``""`` whenever the
+        kind resolved to a known enum value, which left the storage
+        ``spans.kind_string`` column NULL for every INVOCATION /
+        LLM_CALL / TOOL_CALL span. That broke SQL filters / exports
+        keyed on the column. Populating it consistently for known
+        kinds matches the CUSTOM-kind shape and gives DB consumers a
+        reliable string label without needing to decode the enum.
+        """
+        client.emit_span_start(kind="LLM_CALL", name="m1")
+        client.emit_span_start(kind="TOOL_CALL", name="t1")
+        client.emit_span_start(kind="INVOCATION", name="i1")
+        envs = _drain(client)
+        assert [e.payload.span.kind_string for e in envs] == [
+            "LLM_CALL",
+            "TOOL_CALL",
+            "INVOCATION",
+        ]
+
     def test_attributes_are_typed(self, client):
         client.emit_span_start(
             kind="TOOL_CALL",
