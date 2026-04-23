@@ -22,6 +22,7 @@ import type {
   LinkRelation,
 } from '../../gantt/types';
 import type { PlanDiff, PlanRevision } from '../../gantt';
+import { bareAgentName } from '../../gantt';
 import { parseRevisionReason } from '../../gantt/driftKinds';
 import { formatDuration } from '../../lib/format';
 import { OrchestrationTimeline } from '../OrchestrationTimeline/OrchestrationTimeline';
@@ -235,7 +236,11 @@ function CurrentTaskSection({
       )}
       {task.assigneeAgentId && (
         <div className="hg-drawer__current-task-agent">
-          <code>{task.assigneeAgentId}</code>
+          <code title={task.assigneeAgentId}>
+            {store?.agents.get(task.assigneeAgentId)?.name ||
+              bareAgentName(task.assigneeAgentId) ||
+              task.assigneeAgentId}
+          </code>
         </div>
       )}
     </div>

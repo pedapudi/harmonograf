@@ -3,6 +3,7 @@ import { useUiStore } from '../../state/uiStore';
 import { getSessionStore } from '../../rpc/hooks';
 import type { ExecutionMode, Task, TaskStatus } from '../../gantt/types';
 import { readExecutionMode } from '../../gantt/types';
+import { bareAgentName } from '../../gantt/index';
 
 const STATUS_CLASS: Record<TaskStatus, string> = {
   UNSPECIFIED: 'hg-strip__chip--pending',
@@ -71,6 +72,14 @@ export function CurrentTaskStrip() {
     ? store?.agents.get(task.assigneeAgentId)
     : undefined;
   const mode = readExecutionMode(assignee);
+  // Display preference: the registry name (bare) when present, else
+  // derive the bare form directly from the compound id. Final fallback
+  // is the raw id itself so we never render "undefined" when the id is
+  // an empty string (the outer truthy-guard already skips that branch,
+  // but be defensive). See harmonograf#133.
+  const assigneeDisplay = task.assigneeAgentId
+    ? assignee?.name || bareAgentName(task.assigneeAgentId) || task.assigneeAgentId
+    : '';
 
   return (
     <div
@@ -96,7 +105,7 @@ export function CurrentTaskStrip() {
       )}
       {task.assigneeAgentId && (
         <span className="hg-strip__agent" title={`assigned to ${task.assigneeAgentId}`}>
-          {task.assigneeAgentId}
+          {assigneeDisplay}
           {isThinking && (
             <span
               className="hg-strip__thinking"

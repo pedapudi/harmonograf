@@ -6,6 +6,7 @@ import { useSessionWatch, sendStatusQuery } from '../../../rpc/hooks';
 import { colorForAgent } from '../../../theme/agentColors';
 import type { Span, Task, TaskPlan } from '../../../gantt/types';
 import type { SessionStore } from '../../../gantt/index';
+import { bareAgentName } from '../../../gantt/index';
 import { hasThinking } from '../../../lib/thinking';
 import {
   DEFAULT_VIEWPORT,
@@ -1714,8 +1715,17 @@ export function GraphView() {
             <div style={{ opacity: 0.8, marginBottom: 4 }}>
               {hoveredTask.task.description || <em>No description</em>}
             </div>
-            <div style={{ fontSize: 10, opacity: 0.7 }}>
-              Assignee: {hoveredTask.task.assigneeAgentId || '(unassigned)'}
+            <div
+              style={{ fontSize: 10, opacity: 0.7 }}
+              title={hoveredTask.task.assigneeAgentId || undefined}
+            >
+              Assignee:{' '}
+              {hoveredTask.task.assigneeAgentId
+                ? watch.store?.agents.get(hoveredTask.task.assigneeAgentId)
+                    ?.name ||
+                  bareAgentName(hoveredTask.task.assigneeAgentId) ||
+                  hoveredTask.task.assigneeAgentId
+                : '(unassigned)'}
             </div>
             <div style={{ fontSize: 10, opacity: 0.7 }}>
               Status: {hoveredTask.task.status}
