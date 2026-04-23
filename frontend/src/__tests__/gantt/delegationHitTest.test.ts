@@ -29,6 +29,7 @@ function mkRecord(
     taskId: `t-${seq}`,
     invocationId: `inv-${seq}`,
     observedAtMs: 1000 * (seq + 1),
+    observedAtAbsoluteMs: 1000 * (seq + 1),
     ...overrides,
   };
 }

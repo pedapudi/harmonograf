@@ -39,6 +39,7 @@ function mkDrift(over: Partial<DriftRecord> = {}): DriftRecord {
     taskId: 't1',
     agentId: 'a',
     recordedAtMs: 200,
+    recordedAtAbsoluteMs: 200,
     annotationId: '',
     driftId: '',
     ...over,
