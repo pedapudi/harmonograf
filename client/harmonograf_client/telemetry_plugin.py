@@ -106,6 +106,49 @@ def _adk_session_id(ctx: Any) -> str:
     return str(sid)
 
 
+def _extract_current_task_id(ctx: Any) -> str:
+    """Read ``goldfive.current_task_id`` out of an ADK callback context's session.state.
+
+    Goldfive's ADK state-protocol mirror (``_adk_state_protocol``) stamps
+    ``goldfive.current_task_id`` onto ``session.state`` on every
+    ``before_run_callback`` — see goldfive issue #3. The server's ingest
+    and the frontend's Task tab both key Trajectory / dependency
+    rendering off a ``hgraf.task_id`` attribute on SpanStart frames; this
+    helper pulls the goldfive-side value out of whichever shape the
+    callback gives us (CallbackContext exposes ``session`` directly;
+    ToolContext does too; InvocationContext does as well).
+
+    ADK shallow-copies ``session.state`` into ``CallbackContext`` so
+    *writes* on the callback side don't propagate back — this is a
+    **read-only** use and the mirror has fired on ``before_run_callback``
+    by the time any before-agent/tool/model callback runs, so the read
+    sees the latest task id.
+
+    Returns ``""`` when the context is non-goldfive (no state key present),
+    malformed, or pre-plan — callers must treat that as a no-op and not
+    invent a task id.
+    """
+    if ctx is None:
+        return ""
+    session = _safe_attr(ctx, "session", None)
+    if session is None:
+        inv = _safe_attr(ctx, "_invocation_context", None)
+        if inv is not None:
+            session = _safe_attr(inv, "session", None)
+    if session is None:
+        return ""
+    state = _safe_attr(session, "state", None)
+    if state is None:
+        return ""
+    try:
+        value = state.get("goldfive.current_task_id", "")
+    except Exception:  # noqa: BLE001 — defensive: telemetry must not raise
+        return ""
+    if not value:
+        return ""
+    return str(value)
+
+
 def _serialize_args(args: Any) -> bytes | None:
     if args is None:
         return None
@@ -590,40 +633,88 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
     def _stamp_agent_attrs(
         self, per_agent_id: str, attrs: Optional[dict[str, Any]] = None
     ) -> Optional[dict[str, Any]]:
-        """Return span attributes augmented with ``hgraf.agent.*`` on first-sight.
+        """Return span attributes augmented with ``hgraf.agent.*``.
 
-        Only the FIRST span the server sees for a given
-        ``(session_id, per_agent_id)`` pair needs to carry the metadata
-        payload; subsequent spans inherit the agent row via
-        ``_ensure_route``'s auto-register and don't re-pay the cost.
-        The plugin tracks first-sight locally via ``_seen_agents``,
-        keyed on ``(session_id, per_agent_id)`` because the same
-        per-agent id can appear in multiple sessions over a plugin
-        lifetime (adk-web reuses the process across runs).
+        Contract (harmonograf#6):
 
-        Returns ``attrs`` unchanged (may be ``None``) for already-seen
-        agents so the hot span-emit path doesn't copy dicts for every
-        model / tool call.
+        * ``hgraf.agent.name`` and ``hgraf.agent.kind`` are stamped on
+          EVERY SpanStart emitted for a registered per-agent id. The
+          frontend's Gantt/Graph/Timeline boundSpanId binding and the
+          Task tab's Trajectory subtab key off these, and follow-up
+          user turns reuse an already-registered per-agent id — so
+          gating on first-sight caused the second INVOCATION span for
+          the same agent to ship without ``hgraf.agent.kind`` and the
+          row rendered as ``unknown`` (verified against session
+          ``9fa8d4cb-...``).
+        * ``hgraf.agent.parent_id`` and ``hgraf.agent.branch`` remain
+          first-sight only — the server harvests them into ``Agent.metadata``
+          on auto-register, and re-shipping them on every span would
+          bloat span-stream bytes without changing behavior.
+
+        The ``_seen_agents`` set still gates first-sight so parent/branch
+        ride only on the first span per ``(session_id, per_agent_id)``
+        pair.
+
+        Returns a *new* dict when any stamping happened so the caller's
+        ``attrs`` reference stays pristine; returns the input unchanged
+        (possibly ``None``) when ``per_agent_id`` is the client root,
+        which is registered via the Hello frame and must not carry
+        agent-row metadata.
         """
         if per_agent_id == str(self._client.agent_id):
             # The client root id is registered by the Hello frame —
             # never stamp hgraf.agent.* on spans landing on the root.
             return attrs
-        session_id = self._root_session_id or str(self._client.session_id or "")
-        key = (session_id, per_agent_id)
-        if key in self._seen_agents:
-            return attrs
-        self._seen_agents.add(key)
         meta = self._agent_metadata.get(per_agent_id, {})
         if not meta:
             # Degraded path: span was emitted before ``before_agent_callback``
             # populated the metadata cache. Stamp a name-only entry so the
-            # server still creates a row.
+            # server still creates a row. Kind is left off — the server's
+            # auto-register defaults it to ``unknown`` until a subsequent
+            # span carries the real metadata.
             meta = {"hgraf.agent.name": per_agent_id.split(":", 1)[-1]}
         merged: dict[str, Any] = dict(attrs or {})
-        # Caller-provided attrs win (don't clobber user metadata).
-        for k, v in meta.items():
-            merged.setdefault(k, v)
+        # Always-stamp keys: name + kind land on every SpanStart so the
+        # Task tab / boundSpanId pipeline works on follow-up turns.
+        for k in ("hgraf.agent.name", "hgraf.agent.kind"):
+            v = meta.get(k)
+            if v is not None:
+                merged.setdefault(k, v)
+        # First-sight keys: parent_id + branch ride only on the first
+        # span per (session_id, per_agent_id) pair.
+        session_id = self._root_session_id or str(self._client.session_id or "")
+        key = (session_id, per_agent_id)
+        if key not in self._seen_agents:
+            self._seen_agents.add(key)
+            for k in ("hgraf.agent.parent_id", "hgraf.agent.branch"):
+                v = meta.get(k)
+                if v is not None:
+                    merged.setdefault(k, v)
+        return merged or None
+
+    def _stamp_task_id(
+        self, ctx: Any, attrs: Optional[dict[str, Any]] = None
+    ) -> Optional[dict[str, Any]]:
+        """Augment ``attrs`` with ``hgraf.task_id`` when ``ctx`` is in a goldfive run.
+
+        Goldfive's ``_adk_state_protocol`` mirror writes
+        ``goldfive.current_task_id`` into ADK ``session.state`` on each
+        ``before_run_callback``. The server's ingest and the frontend's
+        Task tab / Gantt / Timeline / Graph views all key task binding
+        off a ``hgraf.task_id`` string attribute on SpanStart frames
+        (``hgraf.task_id`` drives ``collectThinkingForTask`` and
+        ``TaskRegistry.boundSpanId``). Nobody emits it today — fixing
+        that is harmonograf#3.
+
+        No-op for non-goldfive runs or pre-plan spans (state key absent
+        or empty). Never invents a value.
+        """
+        task_id = _extract_current_task_id(ctx)
+        if not task_id:
+            return attrs
+        merged: dict[str, Any] = dict(attrs or {})
+        # Caller-provided attrs win — tests / future stamps can override.
+        merged.setdefault("hgraf.task_id", task_id)
         return merged
 
     # ------------------------------------------------------------------
@@ -1145,6 +1236,7 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         # id so the Gantt puts this invocation on the right row.
         per_agent_id = self._register_agent_for_ctx(invocation_context)
         augmented_attrs = self._stamp_agent_attrs(per_agent_id, attrs)
+        augmented_attrs = self._stamp_task_id(invocation_context, augmented_attrs)
         sid = self._client.emit_span_start(
             kind=SpanKind.INVOCATION,
             name=name,
@@ -1352,6 +1444,7 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         per_agent_id = self._resolve_agent_id(callback_context)
         attrs: dict[str, Any] = {"llm.model": model} if model else {}
         augmented_attrs = self._stamp_agent_attrs(per_agent_id, attrs or None)
+        augmented_attrs = self._stamp_task_id(callback_context, augmented_attrs)
         sid = self._client.emit_span_start(
             kind=SpanKind.LLM_CALL,
             name=model or "llm_call",
@@ -1460,6 +1553,7 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         payload = _serialize_args(tool_args)
         per_agent_id = self._resolve_agent_id(tool_context)
         augmented_attrs = self._stamp_agent_attrs(per_agent_id, None)
+        augmented_attrs = self._stamp_task_id(tool_context, augmented_attrs)
         sid = self._client.emit_span_start(
             kind=SpanKind.TOOL_CALL,
             name=tool_name,

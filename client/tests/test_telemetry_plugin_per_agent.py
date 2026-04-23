@@ -375,12 +375,19 @@ async def test_first_span_stamps_hgraf_agent_attributes(
 
 
 @pytest.mark.asyncio
-async def test_second_span_from_same_agent_skips_hgraf_attrs(
+async def test_second_span_from_same_agent_still_carries_name_and_kind(
     plugin: HarmonografTelemetryPlugin, client: Client
 ) -> None:
-    """The hot path doesn't re-stamp hgraf.agent.* on every span."""
+    """Every SpanStart carries hgraf.agent.name + hgraf.agent.kind (harmonograf#6).
+
+    Follow-up user turns reuse an already-registered per-agent id; if
+    we gated these on first-sight, the second INVOCATION span arrived
+    without ``hgraf.agent.kind`` and the row rendered as ``unknown``
+    (verified against session 9fa8d4cb-...). Parent/branch remain
+    first-sight only — they're harvested into Agent.metadata once.
+    """
     research = Agent("research_agent")
-    cb = _CallbackContext("inv-1", ROOT_SESSION, research)
+    cb = _CallbackContext("inv-1", ROOT_SESSION, research, branch="root.research_agent")
     await plugin.before_agent_callback(agent=research, callback_context=cb)
     await plugin.before_tool_callback(
         tool=_Tool("t1"), tool_args={}, tool_context=cb
@@ -389,11 +396,16 @@ async def test_second_span_from_same_agent_skips_hgraf_attrs(
         tool=_Tool("t2"), tool_args={}, tool_context=cb
     )
     spans = _span_starts(client)
-    # First tool span has the hgraf.agent attrs; second does not.
     attrs1 = dict(spans[0].attributes or {})
     attrs2 = dict(spans[1].attributes or {})
-    assert "hgraf.agent.name" in attrs1
-    assert "hgraf.agent.name" not in attrs2
+    # Name + kind are always-stamp.
+    assert attrs1["hgraf.agent.name"].string_value == "research_agent"
+    assert attrs1["hgraf.agent.kind"].string_value == "llm"
+    assert attrs2["hgraf.agent.name"].string_value == "research_agent"
+    assert attrs2["hgraf.agent.kind"].string_value == "llm"
+    # Branch is first-sight: on attrs1 only.
+    assert "hgraf.agent.branch" in attrs1
+    assert "hgraf.agent.branch" not in attrs2
 
 
 @pytest.mark.asyncio
@@ -414,6 +426,47 @@ async def test_root_client_agent_id_never_gets_hgraf_stamps(
     assert spans[0].agent_id == CLIENT_AGENT_ID
     attrs = dict(spans[0].attributes or {})
     assert "hgraf.agent.name" not in attrs
+
+
+# ---------------------------------------------------------------------------
+# Follow-up turns: every SpanStart (including INVOCATION) stamps kind
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_followup_invocation_on_registered_agent_stamps_kind(
+    plugin: HarmonografTelemetryPlugin, client: Client
+) -> None:
+    """Second INVOCATION SpanStart for an already-registered agent must
+    still carry hgraf.agent.kind (harmonograf#6).
+
+    Reproduces the session 9fa8d4cb-... bug: on a follow-up user turn,
+    before_run_callback fires again for the same coordinator; _seen_agents
+    suppression was hiding kind on that INVOCATION's SpanStart and the
+    frontend rendered the agent row as ``unknown``.
+    """
+    coord = Agent("coordinator")
+    # First turn: registers the coordinator.
+    await plugin.before_run_callback(
+        invocation_context=_InvocationContext("inv-1", ROOT_SESSION, coord)
+    )
+    await plugin.after_run_callback(
+        invocation_context=_InvocationContext("inv-1", ROOT_SESSION, coord)
+    )
+    # Second turn: SAME coordinator, fresh invocation id.
+    await plugin.before_run_callback(
+        invocation_context=_InvocationContext("inv-2", ROOT_SESSION, coord)
+    )
+    spans = _span_starts(client)
+    assert len(spans) == 2
+    attrs_first = dict(spans[0].attributes or {})
+    attrs_second = dict(spans[1].attributes or {})
+    # First turn carries name + kind.
+    assert attrs_first["hgraf.agent.name"].string_value == "coordinator"
+    assert attrs_first["hgraf.agent.kind"].string_value == "llm"
+    # Second turn MUST also carry name + kind — the fix.
+    assert attrs_second["hgraf.agent.name"].string_value == "coordinator"
+    assert attrs_second["hgraf.agent.kind"].string_value == "llm"
 
 
 # ---------------------------------------------------------------------------
