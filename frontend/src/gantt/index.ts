@@ -598,12 +598,25 @@ export class DelegationRegistry {
   private delegations: DelegationRecord[] = [];
   private listeners = new Set<() => void>();
   private nextSeq = 0;
+  // Dedup key set — harmonograf#117's WatchSession can deliver the same
+  // DelegationObserved event via both the initial-burst replay of persisted
+  // events AND the live bus publish during the subscription-setup race,
+  // which previously caused two ↪↪ arrows to render per delegation. The key
+  // is (fromAgentId|toAgentId|invocationId) when an invocationId is present
+  // (unique per delegation), else a timestamp-based fallback for older
+  // goldfive versions that don't set invocation_id.
+  private seen = new Set<string>();
 
   list(): readonly DelegationRecord[] {
     return this.delegations;
   }
 
   append(d: Omit<DelegationRecord, 'seq'>): void {
+    const key = d.invocationId
+      ? `${d.fromAgentId}|${d.toAgentId}|inv:${d.invocationId}`
+      : `${d.fromAgentId}|${d.toAgentId}|ts:${d.observedAtMs}`;
+    if (this.seen.has(key)) return;
+    this.seen.add(key);
     this.delegations.push({ ...d, seq: this.nextSeq++ });
     this.emit();
   }
@@ -612,6 +625,7 @@ export class DelegationRegistry {
     if (this.delegations.length === 0) return;
     this.delegations = [];
     this.nextSeq = 0;
+    this.seen.clear();
     this.emit();
   }
 
