@@ -16,7 +16,8 @@ vi.mock('../../rpc/hooks', () => ({
   usePayload: (digest: string | null) => usePayloadSpy(digest),
 }));
 
-import { ReasoningSection } from '../../components/shell/Drawer';
+import { ReasoningSection, SummaryTab } from '../../components/shell/Drawer';
+import type { Span } from '../../gantt/types';
 
 beforeEach(() => {
   usePayloadSpy.mockReset();
@@ -206,5 +207,86 @@ describe('ReasoningSection', () => {
     expect(screen.getByTestId('drawer-reasoning-toggle').textContent).toMatch(
       /^▸Reasoning$/,
     );
+  });
+});
+
+// --- SummaryTab integration ------------------------------------------------
+//
+// The Drawer defaults to the Summary tab when a user clicks a span. Prior to
+// this change the Reasoning section only lived under Task → Overview, leaving
+// users to conclude thinking capture was broken. These tests lock in the
+// behaviour that SummaryTab surfaces the ReasoningSection whenever the span
+// carries the relevant reasoning attributes.
+
+function makeSpan(overrides: Partial<Span> = {}): Span {
+  return {
+    id: 'span-1',
+    sessionId: 'sess-1',
+    agentId: 'agent-1',
+    parentSpanId: null,
+    kind: 'LLM_CALL',
+    status: 'COMPLETED',
+    name: 'llm-call',
+    startMs: 0,
+    endMs: 100,
+    links: [],
+    attributes: {},
+    payloadRefs: [],
+    error: null,
+    lane: 0,
+    replaced: false,
+    ...overrides,
+  };
+}
+
+describe('SummaryTab reasoning surfacing', () => {
+  it('renders the ReasoningSection when the span has has_reasoning and llm.reasoning set', () => {
+    const span = makeSpan({
+      attributes: {
+        has_reasoning: { kind: 'bool', value: true },
+        'llm.reasoning': {
+          kind: 'string',
+          value: 'chain of thought step one then step two',
+        },
+      },
+    });
+    render(<SummaryTab span={span} />);
+    // ReasoningSection is present by test id.
+    expect(screen.getByTestId('drawer-reasoning')).toBeTruthy();
+    // And opening it reveals the inline reasoning text.
+    fireEvent.click(screen.getByTestId('drawer-reasoning-toggle'));
+    expect(screen.getByTestId('drawer-reasoning-body').textContent).toContain(
+      'step one then step two',
+    );
+  });
+
+  it('does not render a ReasoningSection on spans without any reasoning signal', () => {
+    const span = makeSpan({
+      attributes: {
+        some_other_attr: { kind: 'string', value: 'nope' },
+      },
+    });
+    render(<SummaryTab span={span} />);
+    expect(screen.queryByTestId('drawer-reasoning')).toBeNull();
+  });
+
+  it('surfaces the INVOCATION reasoning_trail aggregate with a turn count', () => {
+    const span = makeSpan({
+      kind: 'INVOCATION',
+      attributes: {
+        has_reasoning: { kind: 'bool', value: true },
+        'llm.reasoning_trail': {
+          kind: 'string',
+          value: '[LLM call 1]\nfirst\n\n---\n\n[LLM call 2]\nsecond',
+        },
+        reasoning_call_count: { kind: 'int', value: 2n },
+      },
+    });
+    render(<SummaryTab span={span} />);
+    const toggle = screen.getByTestId('drawer-reasoning-toggle');
+    expect(toggle.textContent).toMatch(/Agent reasoning trail/);
+    expect(
+      screen.getByTestId('drawer-reasoning-call-count').textContent,
+    ).toBe('2 turns');
   });
 });

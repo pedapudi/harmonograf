@@ -326,6 +326,59 @@ function TaskSubtabButton({
   );
 }
 
+// Shared reader for the reasoning-related attributes a span can carry.
+// Extracted so both TaskOverviewPanel (Task → Overview subtab) and SummaryTab
+// (Summary tab) can surface ``<ReasoningSection />`` without duplicating the
+// attribute narrowing logic. Mirrors the attributes emitted by the goldfive
+// telemetry plugin: ``llm.reasoning`` (per LLM_CALL), ``llm.reasoning_trail``
+// (per INVOCATION aggregate, harmonograf#108), ``reasoning_call_count`` and
+// ``has_reasoning``. Large traces spill to a payload_ref with role="reasoning".
+function readReasoning(span: Span): {
+  inlineText: string | undefined;
+  payloadRef: PayloadRef | undefined;
+  callCount: number | undefined;
+  hasReasoningAttr: boolean;
+  isAggregate: boolean;
+  show: boolean;
+} {
+  const reasoningInline =
+    span.attributes['llm.reasoning']?.kind === 'string'
+      ? span.attributes['llm.reasoning'].value
+      : undefined;
+  const reasoningTrail =
+    span.attributes['llm.reasoning_trail']?.kind === 'string'
+      ? span.attributes['llm.reasoning_trail'].value
+      : undefined;
+  // Attribute rides as proto int64 → bigint on the wire. Narrow to number
+  // for the props; call counts in the hundreds-of-turns range fit easily
+  // inside a JS safe integer so Number() conversion is loss-less here.
+  const reasoningCallCountAttr = span.attributes['reasoning_call_count'];
+  const callCount =
+    reasoningCallCountAttr?.kind === 'int'
+      ? Number(reasoningCallCountAttr.value)
+      : undefined;
+  const hasReasoningAttr =
+    span.attributes['has_reasoning']?.kind === 'bool' &&
+    span.attributes['has_reasoning'].value === true;
+  const payloadRef = (span.payloadRefs ?? []).find((r) => r.role === 'reasoning');
+  const show = Boolean(
+    reasoningInline || reasoningTrail || payloadRef || hasReasoningAttr,
+  );
+  // Prefer the INVOCATION-level trail (agent-wide context) over a single
+  // LLM_CALL's reasoning. Both paths fall back to a payload_ref when the text
+  // is large enough to spill off the span attribute.
+  const inlineText = reasoningTrail ?? reasoningInline;
+  const isAggregate = Boolean(reasoningTrail) || callCount != null;
+  return {
+    inlineText,
+    payloadRef,
+    callCount,
+    hasReasoningAttr,
+    isAggregate,
+    show,
+  };
+}
+
 function TaskOverviewPanel({ span, sessionId }: { span: Span; sessionId: string | null }) {
   // harmonograf#110 / goldfive#205: resolve the bound task (if any) so the
   // panel can render a "Cancel reason" section when this span's task
@@ -352,31 +405,14 @@ function TaskOverviewPanel({ span, sessionId }: { span: Span; sessionId: string 
   const taskReport = (span.attributes['task_report']?.kind === 'string' ? span.attributes['task_report'].value : undefined);
   const isRunning = span.endMs == null;
   const agentDesc = (span.attributes['agent_description']?.kind === 'string' ? span.attributes['agent_description'].value : undefined);
-  // Per-LLM_CALL reasoning inline carrier (set by
-  // ``after_model_callback`` finalize for small reasoning).
-  const reasoningInline = (span.attributes['llm.reasoning']?.kind === 'string' ? span.attributes['llm.reasoning'].value : undefined);
-  // INVOCATION aggregate carrier (harmonograf#108). When the drawer opens
-  // on an agent row's INVOCATION span, this is the attribute that holds
-  // the concatenated chain-of-thought from every LLM_CALL child — the
-  // section was empty before the plugin started emitting this on
-  // after_run_callback.
-  const reasoningTrail = (span.attributes['llm.reasoning_trail']?.kind === 'string' ? span.attributes['llm.reasoning_trail'].value : undefined);
-  // Attribute rides as proto int64 → bigint on the wire. Narrow to number
-  // for the props; call counts in the hundreds-of-turns range fit easily
-  // inside a JS safe integer so Number() conversion is loss-less here.
-  const reasoningCallCountAttr = span.attributes['reasoning_call_count'];
-  const reasoningCallCount =
-    reasoningCallCountAttr?.kind === 'int'
-      ? Number(reasoningCallCountAttr.value)
-      : undefined;
-  const hasReasoningAttr = span.attributes['has_reasoning']?.kind === 'bool' && span.attributes['has_reasoning'].value;
-  const reasoningRef = (span.payloadRefs ?? []).find((r) => r.role === 'reasoning');
-  const showReasoning = Boolean(reasoningInline || reasoningTrail || reasoningRef || hasReasoningAttr);
-  // The inline text to hand to <ReasoningSection /> — prefer the
-  // INVOCATION-level trail (agent-wide context) over a single LLM_CALL's
-  // reasoning. Both paths fall back to a payload_ref when the text is
-  // large enough to spill off the span attribute.
-  const reasoningInlineText = reasoningTrail ?? reasoningInline;
+  const {
+    inlineText: reasoningInlineText,
+    payloadRef: reasoningRef,
+    callCount: reasoningCallCount,
+    hasReasoningAttr,
+    isAggregate: reasoningIsAggregate,
+    show: showReasoning,
+  } = readReasoning(span);
 
   return (
     <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -447,7 +483,7 @@ function TaskOverviewPanel({ span, sessionId }: { span: Span; sessionId: string 
           inline={reasoningInlineText}
           payloadRef={reasoningRef}
           callCount={reasoningCallCount}
-          isAggregate={Boolean(reasoningTrail) || reasoningCallCount != null}
+          isAggregate={reasoningIsAggregate}
         />
       )}
 
@@ -1030,13 +1066,32 @@ function formatRevisionTime(ms: number): string {
 
 // --- Summary tab ------------------------------------------------------------
 
-function SummaryTab({ span }: { span: Span }) {
+export function SummaryTab({ span }: { span: Span }) {
   const durationMs =
     span.endMs !== null ? span.endMs - span.startMs : null;
   const entries = Object.entries(span.attributes);
+  // Render the reasoning section on Summary too so it isn't hidden behind the
+  // Task → Overview subtab (harmonograf: Reasoning was undiscoverable from the
+  // default drawer tab). This is additive — the TaskOverviewPanel still renders
+  // its own copy for users who navigate there.
+  const {
+    inlineText: reasoningInlineText,
+    payloadRef: reasoningRef,
+    callCount: reasoningCallCount,
+    isAggregate: reasoningIsAggregate,
+    show: showReasoning,
+  } = readReasoning(span);
 
   return (
     <div className="hg-drawer__section">
+      {showReasoning && (
+        <ReasoningSection
+          inline={reasoningInlineText}
+          payloadRef={reasoningRef}
+          callCount={reasoningCallCount}
+          isAggregate={reasoningIsAggregate}
+        />
+      )}
       <dl className="hg-drawer__meta">
         <dt>Status</dt>
         <dd>{span.status}</dd>
