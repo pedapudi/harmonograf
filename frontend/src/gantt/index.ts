@@ -536,7 +536,7 @@ export interface DriftRecord {
   // once the session start is known (harmonograf#127 — kills a whole
   // class of session-relative-at-ingest races that would otherwise
   // misalign drift markers on the Gantt / Trajectory timelines).
-  recordedAtAbsoluteMs: number;
+  recordedAtAbsoluteMs?: number;
   // Non-empty for USER_STEER / USER_CANCEL drifts minted by goldfive
   // from a ControlMessage carrying a bridge-supplied annotation_id
   // (goldfive#176). Used by the intervention deriver (harmonograf#75)
@@ -646,7 +646,7 @@ export interface DelegationRecord {
   // refresh-path replay worked only because the burst ordered the
   // 'session' frame first, which set sessionStartMs before the first
   // delegation_observed event was replayed. harmonograf#127.
-  observedAtAbsoluteMs: number;
+  observedAtAbsoluteMs?: number;
 }
 
 // Delegation registry — in-memory list of DelegationObserved events received
