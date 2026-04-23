@@ -106,35 +106,13 @@ def _adk_session_id(ctx: Any) -> str:
     return str(sid)
 
 
-def _extract_current_task_id(ctx: Any) -> str:
-    """Read ``goldfive.current_task_id`` out of an ADK callback context's session.state.
+def _read_task_id_from_session(session: Any) -> str:
+    """Pull ``goldfive.current_task_id`` out of an ADK ``Session``-like object.
 
-    Goldfive's ADK state-protocol mirror (``_adk_state_protocol``) stamps
-    ``goldfive.current_task_id`` onto ``session.state`` on every
-    ``before_run_callback`` — see goldfive issue #3. The server's ingest
-    and the frontend's Task tab both key Trajectory / dependency
-    rendering off a ``hgraf.task_id`` attribute on SpanStart frames; this
-    helper pulls the goldfive-side value out of whichever shape the
-    callback gives us (CallbackContext exposes ``session`` directly;
-    ToolContext does too; InvocationContext does as well).
-
-    ADK shallow-copies ``session.state`` into ``CallbackContext`` so
-    *writes* on the callback side don't propagate back — this is a
-    **read-only** use and the mirror has fired on ``before_run_callback``
-    by the time any before-agent/tool/model callback runs, so the read
-    sees the latest task id.
-
-    Returns ``""`` when the context is non-goldfive (no state key present),
-    malformed, or pre-plan — callers must treat that as a no-op and not
-    invent a task id.
+    Pure helper: takes whatever ``session`` object the caller resolved
+    and reads ``.state['goldfive.current_task_id']``. Empty / missing /
+    malformed → ``""``. Never raises — telemetry is observability-only.
     """
-    if ctx is None:
-        return ""
-    session = _safe_attr(ctx, "session", None)
-    if session is None:
-        inv = _safe_attr(ctx, "_invocation_context", None)
-        if inv is not None:
-            session = _safe_attr(inv, "session", None)
     if session is None:
         return ""
     state = _safe_attr(session, "state", None)
@@ -147,6 +125,50 @@ def _extract_current_task_id(ctx: Any) -> str:
     if not value:
         return ""
     return str(value)
+
+
+def _extract_current_task_id(ctx: Any) -> str:
+    """Read ``goldfive.current_task_id`` out of an ADK callback context's session.state.
+
+    Goldfive's ADK state-protocol mirror (``_adk_state_protocol``) stamps
+    ``goldfive.current_task_id`` onto ``session.state`` on every
+    ``before_run_callback`` — see goldfive issue #3. The server's ingest
+    and the frontend's Task tab both key Trajectory / dependency
+    rendering off a ``hgraf.task_id`` attribute on SpanStart frames; this
+    helper pulls the goldfive-side value out of whichever shape the
+    callback gives us (CallbackContext exposes ``session`` directly;
+    ToolContext does too; InvocationContext does as well).
+
+    .. warning::
+
+       ADK's ``CallbackContext`` captures a **shallow copy** of
+       ``invocation_context.session.state`` at the moment the callback
+       context is constructed (see ``ReadonlyContext`` / ``CallbackContext``
+       in google.adk). Writes made to ``session.state`` *after* that
+       snapshot (e.g. goldfive's mirror on ``before_run_callback`` when
+       another plugin's ``before_run_callback`` has already minted the
+       CallbackContext used for a child model/tool callback) do NOT
+       flow back into the stale snapshot.
+
+       Prefer :meth:`HarmonografTelemetryPlugin._resolve_live_session`
+       + :func:`_read_task_id_from_session` in the plugin's own code
+       paths — this free function is the degraded legacy path kept for
+       callers who have no plugin instance handy (and for the ``session``
+       attribute resolve below which will still be correct when the
+       caller is an ``InvocationContext`` rather than a CallbackContext).
+
+    Returns ``""`` when the context is non-goldfive (no state key present),
+    malformed, or pre-plan — callers must treat that as a no-op and not
+    invent a task id.
+    """
+    if ctx is None:
+        return ""
+    session = _safe_attr(ctx, "session", None)
+    if session is None:
+        inv = _safe_attr(ctx, "_invocation_context", None)
+        if inv is not None:
+            session = _safe_attr(inv, "session", None)
+    return _read_task_id_from_session(session)
 
 
 def _serialize_args(args: Any) -> bytes | None:
@@ -479,6 +501,37 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         # :meth:`_register_agent_for_ctx`.
         self._agent_metadata: dict[str, dict[str, str]] = {}
 
+        # Live ADK Session cache keyed by ``invocation_id``
+        # (harmonograf#117 / goldfive state-handoff pitfall).
+        #
+        # ``CallbackContext`` holds a SHALLOW COPY of
+        # ``invocation_context.session.state`` taken at construction
+        # time. Goldfive's ADK state-protocol mirror writes
+        # ``goldfive.current_task_id`` onto the live
+        # ``invocation_context.session`` on ``before_run_callback`` —
+        # CallbackContexts already minted for child before_model /
+        # before_tool / before_agent callbacks don't see those writes.
+        # Pre-fix symptom: only 1/21 spans in a run carried
+        # ``hgraf.task_id``, breaking Gantt task→span edges and the
+        # Task-tab Trajectory subtab (``bound_span_id`` was NULL on
+        # 6/7 tasks of a verified failing session).
+        #
+        # Fix: cache the live ``invocation_context.session`` on
+        # ``before_run_callback`` keyed by ``invocation_id``; every
+        # subsequent before_* callback reads task_id from the cached
+        # LIVE session instead of the stale CallbackContext snapshot.
+        # IMPORTANT: we cache the *session object*, not the task_id
+        # string — goldfive's mirror may run AFTER harmonograf's
+        # ``before_run_callback`` (plugin ordering is not contractual),
+        # so the task_id value we'd read at stash time can be stale.
+        # Reading ``session.state`` at child-callback time sees the
+        # latest mirror write regardless of plugin ordering.
+        #
+        # Cleaned up in ``after_run_callback`` / ``on_cancellation`` /
+        # ``on_run_end`` so long-lived plugin instances don't retain
+        # references to dead ADK sessions.
+        self._live_sessions: dict[str, Any] = {}
+
     @property
     def client(self) -> Client:
         return self._client
@@ -692,6 +745,51 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
                     merged.setdefault(k, v)
         return merged or None
 
+    def _resolve_live_session(self, ctx: Any) -> Any:
+        """Return the live ADK Session for ``ctx`` — never the shallow copy.
+
+        ADK's ``CallbackContext`` (and ``ToolContext``, which extends it)
+        constructs with a shallow copy of ``invocation_context.session.state``
+        at the moment the callback context is created. Later writes to
+        the live ``invocation_context.session.state`` — e.g. goldfive's
+        state-protocol mirror stamping ``goldfive.current_task_id`` on
+        ``before_run_callback`` — are invisible to an already-minted
+        CallbackContext.
+
+        Resolution order:
+
+        1. Cache hit on ``_live_sessions[invocation_id]`` (populated by
+           :meth:`before_run_callback`, which receives the real
+           ``InvocationContext``).
+        2. ``ctx._invocation_context.session`` — on a CallbackContext
+           this IS the live session, not a copy (the copy is only of
+           ``state``, not of the enclosing Session object; on ADK
+           versions where the whole Session is copied the cache still
+           wins via step 1).
+        3. ``ctx.session`` — fallback for ``InvocationContext`` callers
+           directly, or unit-test harnesses that skip
+           ``before_run_callback``. This branch is the legacy
+           shallow-copy path; it's the last resort and only wrong for
+           the exact regression this method exists to fix.
+
+        Returns ``None`` when ``ctx`` has no resolvable session at all
+        (malformed harness, no ADK wiring). Callers must treat ``None``
+        as "no task id available" and not raise.
+        """
+        if ctx is None:
+            return None
+        inv_id = str(_safe_attr(ctx, "invocation_id", "") or "")
+        if inv_id:
+            cached = self._live_sessions.get(inv_id)
+            if cached is not None:
+                return cached
+        inv = _safe_attr(ctx, "_invocation_context", None)
+        if inv is not None:
+            live = _safe_attr(inv, "session", None)
+            if live is not None:
+                return live
+        return _safe_attr(ctx, "session", None)
+
     def _stamp_task_id(
         self, ctx: Any, attrs: Optional[dict[str, Any]] = None
     ) -> Optional[dict[str, Any]]:
@@ -703,13 +801,21 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         Task tab / Gantt / Timeline / Graph views all key task binding
         off a ``hgraf.task_id`` string attribute on SpanStart frames
         (``hgraf.task_id`` drives ``collectThinkingForTask`` and
-        ``TaskRegistry.boundSpanId``). Nobody emits it today — fixing
-        that is harmonograf#3.
+        ``TaskRegistry.boundSpanId``).
+
+        CRITICAL: reads from the LIVE session resolved via
+        :meth:`_resolve_live_session`, not from the CallbackContext's
+        shallow-copied state. See the ``_live_sessions`` cache
+        docstring in ``__init__`` for the full pitfall write-up —
+        pre-fix, only 1/21 spans in a run carried ``hgraf.task_id``
+        because CallbackContexts minted before goldfive's mirror write
+        served stale snapshots.
 
         No-op for non-goldfive runs or pre-plan spans (state key absent
         or empty). Never invents a value.
         """
-        task_id = _extract_current_task_id(ctx)
+        session = self._resolve_live_session(ctx)
+        task_id = _read_task_id_from_session(session)
         if not task_id:
             return attrs
         merged: dict[str, Any] = dict(attrs or {})
@@ -990,6 +1096,12 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         # cancelled invocation without touching concurrent siblings.
         self._agent_stash.pop(invocation_id, None)
 
+        # Drop the live-session cache entry for the cancelled
+        # invocation. Mirrors the cleanup in ``after_run_callback`` —
+        # on a cancel that bypasses after_run_callback, this is the
+        # only place the entry gets released.
+        self._live_sessions.pop(invocation_id, None)
+
         # If the cancelled invocation was the cached ROOT, release the
         # root-session cache and tear down the per-session control sub.
         # Without this, a subsequent run after a user cancel would still
@@ -1149,6 +1261,13 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         # plugin instances.
         self._reasoning_trails.clear()
 
+        # Drop any remaining live-session references so the plugin
+        # doesn't pin ADK sessions after the run exits. Normal path
+        # already popped per-invocation in ``after_run_callback`` /
+        # ``_close_stale_spans_for_invocation``; this final sweep
+        # handles ADK flows that skip those hooks.
+        self._live_sessions.clear()
+
     # ------------------------------------------------------------------
     # Invocation lifecycle
     # ------------------------------------------------------------------
@@ -1181,6 +1300,23 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         agent = _safe_attr(invocation_context, "agent")
         name = str(_safe_attr(agent, "name", "") or "invocation")
         adk_sid = _adk_session_id(invocation_context)
+
+        # Stash the LIVE ADK Session keyed by invocation_id so child
+        # before_model / before_tool / before_agent callbacks can read
+        # ``goldfive.current_task_id`` from the live session.state
+        # instead of the stale CallbackContext shallow copy. See the
+        # ``_live_sessions`` docstring in ``__init__`` for the
+        # shallow-copy pitfall this fixes (harmonograf#117).
+        #
+        # We stash the session OBJECT, not the task_id VALUE — goldfive's
+        # mirror plugin writes on ``before_run_callback`` too and its
+        # relative ordering vs ours is not contractual, so reading
+        # ``session.state`` lazily at child-callback time is the only
+        # way to guarantee we see the post-mirror value.
+        if inv_id:
+            live_session = _safe_attr(invocation_context, "session", None)
+            if live_session is not None:
+                self._live_sessions[inv_id] = live_session
 
         # Root-invocation detection (harmonograf#65 / goldfive#161).
         # The first ``before_run_callback`` we see with no cached root
@@ -1254,6 +1390,12 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         if self._maybe_disable_as_duplicate(invocation_context):
             return
         inv_id = str(_safe_attr(invocation_context, "invocation_id", "") or "")
+        # Drop the live-session cache entry for this invocation
+        # regardless of the short-circuit below — we never want to keep
+        # a reference to a dead ADK session across invocations. Pairs
+        # with the cache seed in ``before_run_callback``.
+        if inv_id:
+            self._live_sessions.pop(inv_id, None)
         # Goldfive.wrap wrapper short-circuit (harmonograf#113). The
         # matching ``before_run_callback`` opened no span for this
         # invocation_id, so this after_run is a no-op. Dropping the

@@ -305,3 +305,216 @@ async def test_task_id_flips_between_turns(
     assert len(spans) == 2
     assert _attr_string(spans[0], "hgraf.task_id") == "t1"
     assert _attr_string(spans[1], "hgraf.task_id") == "t2"
+
+
+# ---------------------------------------------------------------------------
+# Shallow-copy regression (harmonograf#117)
+# ---------------------------------------------------------------------------
+#
+# Regression: ADK's CallbackContext holds a SHALLOW COPY of
+# invocation_context.session.state at the moment the CallbackContext is
+# built. Goldfive's _adk_state_protocol mirror writes
+# ``goldfive.current_task_id`` onto the LIVE session.state on
+# before_run_callback. If the mirror fires AFTER harmonograf's
+# before_run_callback (plugin ordering is not contractual) — or if the
+# CallbackContext for a child before_model / before_tool was minted
+# before the mirror write — the stale snapshot does NOT see the update.
+#
+# DB-verified symptom on session 0f4959c9-798e-44b8-8cc2-ab049d0bb415:
+# 21 spans total, only 1 carried hgraf.task_id. Task-tab Trajectory
+# subtab was empty; Gantt task→span edges broken; 6/7 tasks' bound_span_id
+# was NULL. The one span that DID carry it was the LLM_CALL that happened
+# to fire close enough to the mirror write to see the value.
+#
+# Fix: cache the LIVE invocation_context.session on before_run_callback
+# keyed by invocation_id; every child callback reads task_id from the
+# cached live session at CALLBACK TIME so it sees the latest mirror
+# write regardless of plugin ordering.
+
+
+class _LiveSession:
+    """Session stand-in shared between an InvocationContext and N
+    CallbackContexts so tests can verify the plugin reads from the
+    LIVE object — writes to the live session must be visible to
+    already-minted CallbackContexts through the plugin's resolver."""
+
+    def __init__(self, sid: str, state: dict[str, Any] | None = None) -> None:
+        self.id = sid
+        self.state = dict(state or {})
+
+
+class _SharedSessionInvocationContext:
+    def __init__(
+        self,
+        invocation_id: str,
+        agent: Any,
+        live_session: _LiveSession,
+        branch: str = "",
+    ) -> None:
+        self.invocation_id = invocation_id
+        self.session = live_session  # THE live session — shared
+        self.agent = agent
+        self.branch = branch
+
+
+class _StaleCopyCallbackContext:
+    """CallbackContext that mimics ADK's real shallow-copy semantics.
+
+    ``self.session.state`` is a snapshot taken at construction time;
+    later writes to the LIVE session (held separately by the
+    InvocationContext passed in) DO NOT propagate to ``self.session.state``.
+    This is the exact shape that broke ``_extract_current_task_id``
+    pre-fix.
+    """
+
+    def __init__(
+        self,
+        invocation_context: _SharedSessionInvocationContext,
+        live_session: _LiveSession,
+    ) -> None:
+        self.invocation_id = invocation_context.invocation_id
+        self.branch = invocation_context.branch
+        # CRITICAL: snapshot the state dict — no shared reference.
+        self.session = _Session(
+            live_session.id, state=dict(live_session.state)
+        )
+        # CallbackContext still holds a ref to the live InvocationContext,
+        # which in turn holds a ref to the LIVE session. The plugin's
+        # resolver walks through this path when the cache misses; when
+        # the cache is seeded (normal flow) it takes precedence.
+        self._invocation_context = invocation_context
+
+
+@pytest.mark.asyncio
+async def test_live_session_write_after_callback_context_mint_is_visible(
+    plugin: HarmonografTelemetryPlugin, client: Client
+) -> None:
+    """Simulate the exact production pitfall:
+
+    1. before_run_callback fires → plugin caches the live session.
+    2. A CallbackContext for a child before_model is minted, snapshotting
+       state = {} (the mirror hasn't written yet).
+    3. Goldfive's mirror writes ``goldfive.current_task_id = "t-late"``
+       onto the LIVE session.state (AFTER the CallbackContext was minted).
+    4. before_model_callback fires with the stale CallbackContext.
+
+    Expected: the LLM_CALL SpanStart carries ``hgraf.task_id = "t-late"``
+    — read from the cached live session, NOT the stale snapshot on
+    ``callback_context.session.state``.
+
+    Pre-fix: the plugin read ``callback_context.session.state`` which
+    was empty, so the LLM_CALL SpanStart had no ``hgraf.task_id`` at
+    all — the exact DB-verified regression this test locks down.
+    """
+    coord = Agent("coordinator")
+    live = _LiveSession(ROOT_SESSION, state={})  # empty at run-start
+    inv_ctx = _SharedSessionInvocationContext("inv-late", coord, live)
+
+    # (1) Seed the plugin's live-session cache.
+    await plugin.before_run_callback(invocation_context=inv_ctx)
+
+    # (2) Child CallbackContext is minted here — snapshots empty state.
+    cb = _StaleCopyCallbackContext(inv_ctx, live)
+    # Sanity-check the harness: the snapshot on the CallbackContext is
+    # divorced from subsequent live writes.
+    assert cb.session.state.get("goldfive.current_task_id", "") == ""
+
+    # (3) Goldfive's mirror writes LATE on the LIVE session.
+    live.state["goldfive.current_task_id"] = "t-late"
+    # The stale snapshot still shows empty — this is the pitfall.
+    assert cb.session.state.get("goldfive.current_task_id", "") == ""
+
+    # (4) before_model_callback reads the LIVE session via the cache.
+    await plugin.before_model_callback(
+        callback_context=cb, llm_request=_LlmRequest("gpt-live")
+    )
+    spans = _span_starts(client)
+    llm_spans = [s for s in spans if s.name == "gpt-live"]
+    assert len(llm_spans) == 1
+    assert _attr_string(llm_spans[0], "hgraf.task_id") == "t-late", (
+        "Regression: plugin read CallbackContext shallow-copy instead of "
+        "live session. Every child span loses hgraf.task_id when goldfive's "
+        "mirror write lands after the CallbackContext is minted."
+    )
+
+
+@pytest.mark.asyncio
+async def test_live_session_write_visible_to_before_tool_callback(
+    plugin: HarmonografTelemetryPlugin, client: Client
+) -> None:
+    """Same pitfall, TOOL_CALL path. TOOL_CALL spans dominate a typical
+    run (6/7 cases in the verified regression) so a separate lock-down
+    test here guards the tool path explicitly."""
+    research = Agent("research_agent")
+    live = _LiveSession(ROOT_SESSION, state={})
+    inv_ctx = _SharedSessionInvocationContext("inv-tool", research, live)
+
+    await plugin.before_run_callback(invocation_context=inv_ctx)
+    cb = _StaleCopyCallbackContext(inv_ctx, live)
+    # Late mirror write — AFTER the CallbackContext was minted.
+    live.state["goldfive.current_task_id"] = "t-tool"
+
+    await plugin.before_tool_callback(
+        tool=_Tool("read_file"), tool_args={"path": "a.md"}, tool_context=cb
+    )
+    spans = _span_starts(client)
+    tool_spans = [s for s in spans if s.name == "read_file"]
+    assert len(tool_spans) == 1
+    assert _attr_string(tool_spans[0], "hgraf.task_id") == "t-tool"
+
+
+@pytest.mark.asyncio
+async def test_live_session_cache_cleared_after_run(
+    plugin: HarmonografTelemetryPlugin, client: Client
+) -> None:
+    """The live-session cache must not retain references across runs.
+    after_run_callback pops the entry keyed by invocation_id.
+    """
+    coord = Agent("coordinator")
+    live = _LiveSession(ROOT_SESSION, state={"goldfive.current_task_id": "t1"})
+    inv_ctx = _SharedSessionInvocationContext("inv-cleanup", coord, live)
+
+    await plugin.before_run_callback(invocation_context=inv_ctx)
+    assert "inv-cleanup" in plugin._live_sessions
+
+    await plugin.after_run_callback(invocation_context=inv_ctx)
+    assert "inv-cleanup" not in plugin._live_sessions
+
+
+@pytest.mark.asyncio
+async def test_live_session_cache_cleared_on_cancellation(
+    plugin: HarmonografTelemetryPlugin, client: Client
+) -> None:
+    """on_cancellation clears the live-session cache for the cancelled
+    invocation. Without this, the plugin would pin the ADK session
+    across cancelled runs."""
+    coord = Agent("coordinator")
+    live = _LiveSession(ROOT_SESSION, state={"goldfive.current_task_id": "t1"})
+    inv_ctx = _SharedSessionInvocationContext("inv-cancel", coord, live)
+
+    await plugin.before_run_callback(invocation_context=inv_ctx)
+    assert "inv-cancel" in plugin._live_sessions
+
+    plugin.on_cancellation("inv-cancel")
+    assert "inv-cancel" not in plugin._live_sessions
+
+
+@pytest.mark.asyncio
+async def test_live_session_cache_cleared_on_run_end(
+    plugin: HarmonografTelemetryPlugin, client: Client
+) -> None:
+    """on_run_end sweeps any leftover live-session entries so long-lived
+    plugin instances don't accumulate references."""
+    coord = Agent("coordinator")
+    live_a = _LiveSession(ROOT_SESSION, state={"goldfive.current_task_id": "t1"})
+    live_b = _LiveSession(ROOT_SESSION, state={"goldfive.current_task_id": "t2"})
+    await plugin.before_run_callback(
+        invocation_context=_SharedSessionInvocationContext("inv-a", coord, live_a)
+    )
+    await plugin.before_run_callback(
+        invocation_context=_SharedSessionInvocationContext("inv-b", coord, live_b)
+    )
+    assert len(plugin._live_sessions) == 2
+
+    plugin.on_run_end()
+    assert plugin._live_sessions == {}
