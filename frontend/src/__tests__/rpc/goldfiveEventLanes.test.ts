@@ -344,11 +344,13 @@ describe('goldfive lane synthesis (harmonograf#196)', () => {
     });
   });
 
-  it('forward-compat: reasoningJudgeInvoked (unknown oneof case pre-merge) is tolerated', () => {
-    // Pre-merge stubs don't know this case. Build the event manually so
-    // the oneof `case` string is 'reasoningJudgeInvoked' and verify that
-    // applyGoldfiveEvent either handles it (post-merge) or simply no-ops
-    // (pre-merge) without crashing.
+  it('Option X: reasoningJudgeInvoked is dropped client-side (sink translates to a span)', () => {
+    // Under Option X the harmonograf client sink translates
+    // goldfive_llm_call_{start,end} and reasoning_judge_invoked events
+    // into SpanStart/SpanEnd frames on the span transport. If a stale
+    // ReasoningJudgeInvoked reaches the frontend via the goldfive-event
+    // channel (e.g. an old-format replay), the handler no-ops — no
+    // synthetic span, no actor row mutation.
     const event = create(EventSchema, {
       eventId: 'ev',
       runId: 'run-1',
@@ -368,22 +370,8 @@ describe('goldfive lane synthesis (harmonograf#196)', () => {
 
     expect(() => applyGoldfiveEvent(event, store, 0)).not.toThrow();
 
-    // Post-merge path: if the switch case ran, a judge span landed.
-    // Pre-merge path: nothing happens (no assertion on span count, but
-    // the synthetic goldfive actor row is created on the judge branch).
     const spans: Array<ReturnType<typeof store.spans.get>> = [];
     store.spans.queryAgent(GOLDFIVE_ACTOR_ID, 0, 1_000_000, spans as never);
-    // If the branch ran (which it does — the switch uses the string
-    // compare directly), exactly one judge span lands.
-    const judge = spans.find((s) => s && s.name.startsWith('judge:'));
-    expect(judge).toBeTruthy();
-    expect(judge?.attributes['judge.verdict']).toEqual({
-      kind: 'string',
-      value: 'drift',
-    });
-    expect(judge?.attributes['judge.target_agent_id']).toEqual({
-      kind: 'string',
-      value: 'agent-a',
-    });
+    expect(spans).toHaveLength(0);
   });
 });

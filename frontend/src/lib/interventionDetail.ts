@@ -315,19 +315,21 @@ export function resolveJudgeDetail(
   };
 }
 
-// Returns true when the given span was synthesized by the judge-event
-// ingest path. Click handlers route to the judge detail card when this
-// is true. The discriminator is an explicit attribute stamped by the
-// synthesizer (see goldfiveEvent.synthesizeJudgeSpan) — do NOT match on
-// the span name, since display-name renames would silently break
-// routing.
+// Returns true when the given span represents a goldfive LLM-as-judge
+// invocation. Click handlers route to the judge detail card when this
+// is true. The discriminator is an explicit `judge.kind = "judge"`
+// attribute stamped by the harmonograf client sink when it translates
+// a ReasoningJudgeInvoked event to a span (Option X, harmonograf#N).
+// Do NOT match on the span name — display-name renames would silently
+// break routing.
 export function isJudgeSpan(span: Span | null | undefined): boolean {
   if (!span) return false;
   const attr = span.attributes['judge.kind'];
   if (attr && attr.kind === 'string' && attr.value === 'judge') return true;
   // Back-compat for spans produced before the `judge.kind` attribute
-  // existed: the old synthesizer named spans `judge: ...`. Keep matching
-  // so older sessions replayed from the server don't lose the routing.
+  // existed (pre-Option-X synthesizer named spans `judge: ...`). Keep
+  // matching so older sessions replayed from the server don't lose the
+  // routing.
   return span.agentId === '__goldfive__' && span.name.startsWith('judge:');
 }
 

@@ -8,6 +8,16 @@
 // from persisted state) and on the live tail (fanned out from the Phase
 // B bus). This module maps the envelope's payload oneof onto the
 // existing gantt stores without introducing any new store concepts.
+//
+// Note (Option X, harmonograf#N): goldfive LLM-call events
+// (goldfive_llm_call_start, goldfive_llm_call_end, reasoning_judge_invoked)
+// are now translated to SpanStart/SpanEnd at the harmonograf client
+// sink (see harmonograf_client/sink.py). They arrive as ordinary spans
+// via the span transport and are rendered by the normal span-ingest
+// path; no frontend-side synthesis needed. If you see a synthesize*Span
+// helper in this file, it's probably for user-lane synthesis (user
+// goal message from RunStarted) or the drift/refine visual-marker
+// synthesis — NOT part of Option X, those stay.
 
 import type { SessionStore } from '../gantt/index';
 import { bareAgentName } from '../gantt/index';
@@ -219,114 +229,6 @@ function synthesizeUserGoalSpan(
     attributes: {
       'user.goal_summary': { kind: 'string', value: goalSummary },
       'user.run_id': { kind: 'string', value: runId },
-      'harmonograf.synthetic_span': { kind: 'bool', value: true },
-    },
-    payloadRefs: [],
-    error: null,
-    lane: -1,
-    replaced: false,
-  };
-  store.spans.append(span);
-}
-
-// Parameters for the judge-span synthesizer. Grouped into an options
-// object so new forward-compat fields added on the wire (reason,
-// reasoning_input, raw_response, elapsed_ms, model, subject_agent_id)
-// don't balloon the positional arg list. All fields are optional —
-// callers supply what the event carried; missing fields render as empty
-// attributes so the detail panel can hide sections cleanly.
-interface JudgeSpanInput {
-  sessionId: string | null;
-  eventId: string;
-  recordedAtMs: number;
-  // Parsed-verdict fields (post-merge ReasoningJudgeInvoked).
-  onTask: boolean;
-  verdict: string; // 'on_task' | 'drift' | '' when malformed
-  severity: string;
-  reason: string;
-  // Raw judge payload + metadata.
-  reasoningInput: string;
-  rawResponse: string;
-  elapsedMs: number;
-  model: string;
-  subjectAgentId: string;
-  currentTaskId: string;
-}
-
-// Forward-compat: synthesize a "judge" span on the goldfive actor row
-// when a goldfive.v1.ReasoningJudgeInvoked event arrives. The stub may
-// not exist on the pre-merge submodule — callers guard the call path
-// with a string-case check on the oneof so a missing case does not crash
-// ingest. Once the submodule bumps the generated ``Event.payload.case``
-// union includes 'reasoningJudgeInvoked' and TS narrows automatically.
-//
-// The span carries ``judge.kind = "judge"`` as an explicit discriminator
-// so click handlers can route to JudgeInvocationDetail without having
-// to match on the span name. All the event's structured fields land as
-// string attributes on the span — the detail panel reads them back.
-function synthesizeJudgeSpan(store: SessionStore, input: JudgeSpanInput): void {
-  const {
-    sessionId,
-    eventId,
-    recordedAtMs,
-    onTask,
-    verdict,
-    severity,
-    reason,
-    reasoningInput,
-    rawResponse,
-    elapsedMs,
-    model,
-    subjectAgentId,
-    currentTaskId,
-  } = input;
-  const id = `judge-${recordedAtMs}-${verdict || (onTask ? 'on_task' : 'unspec')}`;
-  const name =
-    verdict && verdict !== 'on_task'
-      ? `judge: ${verdict}${severity ? ` (${severity})` : ''}`
-      : 'judge: on_task';
-  // ``recordedAtMs`` is when goldfive stamped the event — right after
-  // the judge's LLM call completed. The judge's actual wall-clock
-  // duration is ``elapsedMs``; the span covers
-  // ``[recordedAtMs - elapsedMs, recordedAtMs]`` so it has visible
-  // width on the Gantt. Zero-width spans are invisible at normal
-  // zoom levels; the whole point of surfacing goldfive's judge
-  // as a lane is to make its actual cost visible on the timeline.
-  // Clamp at 0 to defend against negative/zero elapsed values.
-  const safeElapsed = Number.isFinite(elapsedMs) && elapsedMs > 0 ? elapsedMs : 0;
-  const startMs = Math.max(0, recordedAtMs - safeElapsed);
-  const span: Span = {
-    id,
-    sessionId: sessionId ?? '',
-    agentId: GOLDFIVE_ACTOR_ID,
-    parentSpanId: null,
-    kind: 'CUSTOM',
-    status: 'COMPLETED',
-    name,
-    startMs,
-    endMs: recordedAtMs,
-    links: [],
-    attributes: {
-      // Discriminator — read by click handlers to route to the judge
-      // detail card. Backed by an explicit attribute (not the span name)
-      // so renames to the display name don't accidentally break routing.
-      'judge.kind': { kind: 'string', value: 'judge' },
-      'judge.event_id': { kind: 'string', value: eventId },
-      'judge.verdict': { kind: 'string', value: verdict },
-      'judge.on_task': { kind: 'bool', value: onTask },
-      'judge.severity': { kind: 'string', value: severity },
-      'judge.reason': { kind: 'string', value: reason },
-      'judge.reasoning_input': { kind: 'string', value: reasoningInput },
-      'judge.raw_response': { kind: 'string', value: rawResponse },
-      'judge.elapsed_ms': { kind: 'string', value: String(elapsedMs) },
-      'judge.model': { kind: 'string', value: model },
-      'judge.subject_agent_id': { kind: 'string', value: subjectAgentId },
-      'judge.target_agent_id': { kind: 'string', value: subjectAgentId },
-      'judge.target_task_id': { kind: 'string', value: currentTaskId },
-      // Back-compat alias: pre-rework tests and the existing detail
-      // resolvers still read ``judge.reasoning`` (judge's one-sentence
-      // reason / explanation). Keep both until nothing reads it.
-      'judge.reasoning': { kind: 'string', value: reason || reasoningInput },
       'harmonograf.synthetic_span': { kind: 'bool', value: true },
     },
     payloadRefs: [],
@@ -666,86 +568,14 @@ export function applyGoldfiveEvent(
     case 'agentInvocationStarted':
     case 'agentInvocationCompleted':
       return;
-    // harmonograf#196 forward-compat: goldfive#feat/judge-observability-events
-    // adds a `reasoningJudgeInvoked` oneof case (the orchestrator's LLM-as-
-    // judge fires on each reasoning step and classifies it on-task / drift).
-    // The case string is matched as a wide string because the generated
-    // union on the current submodule pin doesn't include it yet — once the
-    // submodule bumps the `payload.case` type narrows automatically and this
-    // branch becomes reachable through the normal switch.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    case 'reasoningJudgeInvoked' as any: {
-      ensureSyntheticActor(store, GOLDFIVE_ACTOR_ID);
-      const emittedAbsMs = tsToMsAbs(event.emittedAt);
-      const emittedMs = emittedAbsMs ? emittedAbsMs - sessionStartMs : 0;
-      const ju = payload.value as unknown as Record<string, unknown>;
-      // `verdict` is a harmonograf-local string synthesized from
-      // `on_task`/`severity` since the wire message doesn't expose a
-      // single-string verdict field. Pre-merge test fixtures that set
-      // ``verdict`` directly still flow through (the explicit string
-      // wins over the on_task derivation).
-      const onTaskRaw = ju.onTask;
-      const onTask = typeof onTaskRaw === 'boolean' ? onTaskRaw : false;
-      const severityRaw = ju.severity;
-      const severity =
-        typeof severityRaw === 'string'
-          ? severityRaw
-          : typeof severityRaw === 'number'
-            ? driftSeverityToString(severityRaw)
-            : '';
-      let verdict = typeof ju.verdict === 'string' ? (ju.verdict as string) : '';
-      if (!verdict) {
-        verdict = onTask ? 'on_task' : severity ? severity : '';
-      }
-      // Pre-merge tests pass `reasoning` as the single reasoning string;
-      // post-merge the wire separates `reasoning_input` (what the judge
-      // saw) from `reason` (the judge's explanation). Accept both and
-      // prefer the richer pair when both are set.
-      const reasoning =
-        typeof ju.reasoning === 'string' ? (ju.reasoning as string) : '';
-      const reason = typeof ju.reason === 'string' ? (ju.reason as string) : reasoning;
-      const reasoningInput =
-        typeof ju.reasoningInput === 'string'
-          ? (ju.reasoningInput as string)
-          : reasoning;
-      const rawResponse =
-        typeof ju.rawResponse === 'string' ? (ju.rawResponse as string) : '';
-      const elapsedRaw = ju.elapsedMs;
-      let elapsedMs = 0;
-      if (typeof elapsedRaw === 'number') elapsedMs = elapsedRaw;
-      else if (typeof elapsedRaw === 'bigint') elapsedMs = Number(elapsedRaw);
-      const model = typeof ju.model === 'string' ? (ju.model as string) : '';
-      // Post-merge field is `subject_agent_id`; pre-merge test fixtures
-      // used `currentAgentId`. Read both so neither wire shape breaks.
-      const subjectAgentId =
-        typeof ju.subjectAgentId === 'string'
-          ? (ju.subjectAgentId as string)
-          : typeof ju.currentAgentId === 'string'
-            ? (ju.currentAgentId as string)
-            : '';
-      const currentTaskId =
-        typeof ju.taskId === 'string'
-          ? (ju.taskId as string)
-          : typeof ju.currentTaskId === 'string'
-            ? (ju.currentTaskId as string)
-            : '';
-      synthesizeJudgeSpan(store, {
-        sessionId,
-        eventId: event.eventId || '',
-        recordedAtMs: emittedMs,
-        onTask,
-        verdict,
-        severity,
-        reason,
-        reasoningInput,
-        rawResponse,
-        elapsedMs,
-        model,
-        subjectAgentId,
-        currentTaskId,
-      });
+    // Option X (harmonograf#N): reasoningJudgeInvoked is now translated
+    // to SpanStart/SpanEnd at the harmonograf client sink (see
+    // harmonograf_client/sink.py). Judge spans arrive via the normal
+    // span transport; no frontend-side synthesis needed. Treat as a
+    // no-op if one reaches here (e.g. replay from an old-format
+    // recording that still used the goldfive-event channel).
+    case 'reasoningJudgeInvoked':
       return;
-    }
     case 'delegationObserved': {
       // DelegationObserved carries the coordinator→sub_agent edge that the
       // telemetry plugin only records as a generic TOOL_CALL span on the

@@ -1,11 +1,11 @@
 // harmonograf#197 — judge-detail resolver + judge-span discriminator.
 //
-// Integration-flavoured: feeds a ReasoningJudgeInvoked event through
-// applyGoldfiveEvent, then queries the synthesized span and runs it
-// through resolveJudgeDetail. Verifies the six sections (header meta,
-// context, reasoning input, verdict, raw response, steering outcome)
-// land correctly, plus the steered-plan lookup when a PlanRevised's
-// trigger_event_id matches the judge event id.
+// Option X update (harmonograf#N): ReasoningJudgeInvoked is now
+// translated to SpanStart/SpanEnd at the harmonograf client sink (see
+// harmonograf_client/sink.py). The frontend sees judge invocations as
+// ordinary spans on the goldfive lane carrying the documented
+// `judge.*` attributes — this test seeds such spans directly and
+// exercises the resolver against them.
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { create } from '@bufbuild/protobuf';
@@ -26,7 +26,7 @@ import {
 } from '../../pb/goldfive/v1/types_pb';
 import { isJudgeSpan, resolveJudgeDetail } from '../../lib/interventionDetail';
 import { GOLDFIVE_ACTOR_ID } from '../../theme/agentColors';
-import type { Span, TaskPlan } from '../../gantt/types';
+import type { AttributeValue, Span, TaskPlan } from '../../gantt/types';
 
 function ts(seconds: number) {
   return create(TimestampSchema, { seconds: BigInt(seconds), nanos: 0 });
@@ -58,26 +58,88 @@ function pbPlan(id: string, taskIds: string[], revisionIndex = 0) {
   });
 }
 
-// ReasoningJudgeInvoked doesn't have a bufbuild schema import in this test
-// file (the test lives alongside interventionDetail.test.ts which hand-
-// builds the judge payload via the oneof's string-case escape hatch).
-// We do the same here so the test is tolerant of pre-merge stubs.
-function judgeEvent(
-  eventId: string,
-  atSeconds: number,
-  fields: Record<string, unknown>,
-) {
-  const event = create(EventSchema, {
-    eventId,
-    runId: 'run-1',
-    sequence: 0n,
-    emittedAt: ts(atSeconds),
-  });
-  (event as unknown as Record<string, unknown>).payload = {
-    case: 'reasoningJudgeInvoked',
-    value: fields,
+// Seed a judge span directly onto the goldfive lane — mirroring what the
+// harmonograf client sink emits after translating a ReasoningJudgeInvoked
+// event under Option X. Only the `judge.*` attributes that the resolver
+// reads are populated; callers override via `attrs`.
+interface JudgeSpanSeed {
+  eventId: string;
+  atMs: number;
+  onTask?: boolean;
+  verdict?: string;
+  severity?: string;
+  reason?: string;
+  reasoningInput?: string;
+  rawResponse?: string;
+  model?: string;
+  elapsedMs?: number;
+  subjectAgentId?: string;
+  taskId?: string;
+}
+
+function seedJudgeSpan(store: SessionStore, seed: JudgeSpanSeed): Span {
+  const attrs: Record<string, AttributeValue> = {
+    'judge.kind': { kind: 'string', value: 'judge' },
+    'judge.event_id': { kind: 'string', value: seed.eventId },
   };
-  return event;
+  if (seed.onTask !== undefined) {
+    attrs['judge.on_task'] = { kind: 'bool', value: seed.onTask };
+  }
+  if (seed.verdict !== undefined) {
+    attrs['judge.verdict'] = { kind: 'string', value: seed.verdict };
+  }
+  if (seed.severity !== undefined) {
+    attrs['judge.severity'] = { kind: 'string', value: seed.severity };
+  }
+  if (seed.reason !== undefined) {
+    attrs['judge.reason'] = { kind: 'string', value: seed.reason };
+  }
+  if (seed.reasoningInput !== undefined) {
+    attrs['judge.reasoning_input'] = {
+      kind: 'string',
+      value: seed.reasoningInput,
+    };
+  }
+  if (seed.rawResponse !== undefined) {
+    attrs['judge.raw_response'] = { kind: 'string', value: seed.rawResponse };
+  }
+  if (seed.model !== undefined) {
+    attrs['judge.model'] = { kind: 'string', value: seed.model };
+  }
+  if (seed.elapsedMs !== undefined) {
+    attrs['judge.elapsed_ms'] = {
+      kind: 'string',
+      value: String(seed.elapsedMs),
+    };
+  }
+  if (seed.subjectAgentId !== undefined) {
+    attrs['judge.subject_agent_id'] = {
+      kind: 'string',
+      value: seed.subjectAgentId,
+    };
+  }
+  if (seed.taskId !== undefined) {
+    attrs['judge.target_task_id'] = { kind: 'string', value: seed.taskId };
+  }
+  const span: Span = {
+    id: `judge-${seed.eventId}`,
+    sessionId: 'sess-1',
+    agentId: GOLDFIVE_ACTOR_ID,
+    parentSpanId: null,
+    kind: 'CUSTOM',
+    status: 'COMPLETED',
+    name: `judge: ${seed.verdict || (seed.onTask ? 'on_task' : 'unspec')}`,
+    startMs: seed.atMs,
+    endMs: seed.atMs,
+    links: [],
+    attributes: attrs,
+    payloadRefs: [],
+    error: null,
+    lane: -1,
+    replaced: false,
+  };
+  store.spans.append(span);
+  return span;
 }
 
 function listJudgeSpans(store: SessionStore): Span[] {
@@ -99,27 +161,25 @@ function collectAllPlans(store: SessionStore): TaskPlan[] {
   return out;
 }
 
-describe('judge-span routing (harmonograf#197)', () => {
+describe('judge-span routing (harmonograf#197, Option X)', () => {
   let store: SessionStore;
   beforeEach(() => {
     store = new SessionStore();
   });
 
-  it('synthesized judge span carries kind=judge as a discriminator', () => {
-    applyGoldfiveEvent(
-      judgeEvent('ev-judge', 30, {
-        onTask: true,
-        reason: 'looks good',
-        reasoningInput: 'the agent said: I will search',
-        rawResponse: '{"on_task": true, "reason": "looks good"}',
-        model: 'haiku',
-        elapsedMs: 200,
-        subjectAgentId: 'agent-a',
-        taskId: 't1',
-      }),
-      store,
-      0,
-    );
+  it('judge span (as emitted by the sink translator) is discoverable via isJudgeSpan', () => {
+    seedJudgeSpan(store, {
+      eventId: 'ev-judge',
+      atMs: 30,
+      onTask: true,
+      reason: 'looks good',
+      reasoningInput: 'the agent said: I will search',
+      rawResponse: '{"on_task": true, "reason": "looks good"}',
+      model: 'haiku',
+      elapsedMs: 200,
+      subjectAgentId: 'agent-a',
+      taskId: 't1',
+    });
     const judges = listJudgeSpans(store);
     expect(judges).toHaveLength(1);
     expect(judges[0].attributes['judge.kind']).toEqual({
@@ -133,8 +193,9 @@ describe('judge-span routing (harmonograf#197)', () => {
     expect(isJudgeSpan(judges[0])).toBe(true);
   });
 
-  it('isJudgeSpan returns false for non-judge spans', () => {
-    // Seed a regular drift span on the goldfive lane.
+  it('isJudgeSpan returns false for non-judge spans on the goldfive lane', () => {
+    // Seed a regular drift span on the goldfive lane (drift synthesis
+    // stays under Option X — only LLM-call synthesis was retired).
     applyGoldfiveEvent(
       create(EventSchema, {
         eventId: 'ev-drift',
@@ -158,29 +219,25 @@ describe('judge-span routing (harmonograf#197)', () => {
     );
     const spans: Span[] = [];
     store.spans.queryAgent(GOLDFIVE_ACTOR_ID, 0, 1_000_000, spans);
-    // At least the drift span should be present; none are judge spans.
     expect(spans.length).toBeGreaterThan(0);
     for (const s of spans) expect(isJudgeSpan(s)).toBe(false);
   });
 
   it('resolveJudgeDetail surfaces the header + context + verdict for on_task', () => {
-    applyGoldfiveEvent(
-      judgeEvent('ev-j1', 45, {
-        onTask: true,
-        severity: '',
-        reason: 'on track',
-        reasoningInput: 'I will search',
-        rawResponse: '{"on_task": true}',
-        model: 'haiku',
-        elapsedMs: 175,
-        subjectAgentId: 'agent-a',
-        taskId: 't1',
-      }),
-      store,
-      0,
-    );
-    const judge = listJudgeSpans(store)[0];
-    const detail = resolveJudgeDetail(judge, []);
+    const span = seedJudgeSpan(store, {
+      eventId: 'ev-j1',
+      atMs: 45,
+      onTask: true,
+      severity: '',
+      reason: 'on track',
+      reasoningInput: 'I will search',
+      rawResponse: '{"on_task": true}',
+      model: 'haiku',
+      elapsedMs: 175,
+      subjectAgentId: 'agent-a',
+      taskId: 't1',
+    });
+    const detail = resolveJudgeDetail(span, []);
     expect(detail.verdictBucket).toBe('on_task');
     expect(detail.onTask).toBe(true);
     expect(detail.reason).toBe('on track');
@@ -193,47 +250,42 @@ describe('judge-span routing (harmonograf#197)', () => {
   });
 
   it('resolveJudgeDetail returns off_task bucket with severity + reason', () => {
-    applyGoldfiveEvent(
-      judgeEvent('ev-off', 80, {
-        onTask: false,
-        severity: 'warning',
-        reason: 'agent paraphrasing',
-        reasoningInput: 'agent repeated itself',
-        rawResponse: '{"on_task": false, "severity":"warning"}',
-        model: 'haiku',
-        elapsedMs: 310,
-        subjectAgentId: 'agent-a',
-        taskId: 't1',
-      }),
-      store,
-      0,
-    );
-    const judge = listJudgeSpans(store)[0];
-    const detail = resolveJudgeDetail(judge, []);
+    const span = seedJudgeSpan(store, {
+      eventId: 'ev-off',
+      atMs: 80,
+      onTask: false,
+      verdict: 'warning',
+      severity: 'warning',
+      reason: 'agent paraphrasing',
+      reasoningInput: 'agent repeated itself',
+      rawResponse: '{"on_task": false, "severity":"warning"}',
+      model: 'haiku',
+      elapsedMs: 310,
+      subjectAgentId: 'agent-a',
+      taskId: 't1',
+    });
+    const detail = resolveJudgeDetail(span, []);
     expect(detail.verdictBucket).toBe('off_task');
     expect(detail.severity).toBe('warning');
     expect(detail.reason).toBe('agent paraphrasing');
   });
 
   it('resolveJudgeDetail returns no_verdict when the judge emitted raw but no parsed fields', () => {
-    applyGoldfiveEvent(
-      judgeEvent('ev-bad', 90, {
-        // No onTask / verdict / severity — malformed judge output.
-        rawResponse: '{ bad json',
-        reasoningInput: 'agent thinking',
-      }),
-      store,
-      0,
-    );
-    const judge = listJudgeSpans(store)[0];
-    const detail = resolveJudgeDetail(judge, []);
+    const span = seedJudgeSpan(store, {
+      eventId: 'ev-bad',
+      atMs: 90,
+      // No onTask / verdict / severity — malformed judge output.
+      rawResponse: '{ bad json',
+      reasoningInput: 'agent thinking',
+    });
+    const detail = resolveJudgeDetail(span, []);
     expect(detail.verdictBucket).toBe('no_verdict');
     expect(detail.rawResponse).toContain('bad json');
   });
 
   it('links a matching PlanRevised as the steering outcome (by trigger_event_id)', () => {
     // Seed an initial plan so the PlanRevised has a prior revision to
-    // chain from. Then emit the judge event AND a PlanRevised whose
+    // chain from. Then seed a judge span AND a PlanRevised whose
     // trigger_event_id points at the judge event id.
     applyGoldfiveEvent(
       create(EventSchema, {
@@ -248,19 +300,18 @@ describe('judge-span routing (harmonograf#197)', () => {
       store,
       0,
     );
-    applyGoldfiveEvent(
-      judgeEvent('ev-judge-steer', 100, {
-        onTask: false,
-        severity: 'warning',
-        reason: 'drift',
-        reasoningInput: 'agent stuck',
-        rawResponse: '{"on_task": false}',
-        subjectAgentId: 'agent-a',
-        taskId: 't1',
-      }),
-      store,
-      0,
-    );
+    const judgeSpan = seedJudgeSpan(store, {
+      eventId: 'ev-judge-steer',
+      atMs: 100,
+      onTask: false,
+      verdict: 'warning',
+      severity: 'warning',
+      reason: 'drift',
+      reasoningInput: 'agent stuck',
+      rawResponse: '{"on_task": false}',
+      subjectAgentId: 'agent-a',
+      taskId: 't1',
+    });
     const rev = pbPlan('p1', ['t1', 't2-new'], 2);
     rev.revisionReason = 'recover from reasoning drift';
     rev.revisionKind = DriftKind.LOOPING_REASONING;
@@ -284,9 +335,8 @@ describe('judge-span routing (harmonograf#197)', () => {
       0,
     );
 
-    const judge = listJudgeSpans(store)[0];
     const plans = collectAllPlans(store);
-    const detail = resolveJudgeDetail(judge, plans);
+    const detail = resolveJudgeDetail(judgeSpan, plans);
     expect(detail.steeredPlan).not.toBeNull();
     expect(detail.steeredPlan?.id).toBe('p1');
     expect(detail.steeredPlan?.revisionIndex).toBe(2);
@@ -297,21 +347,19 @@ describe('judge-span routing (harmonograf#197)', () => {
   });
 
   it('no matching PlanRevised leaves steeredPlan null (ladder did not escalate)', () => {
-    applyGoldfiveEvent(
-      judgeEvent('ev-orphan', 200, {
-        onTask: false,
-        severity: 'info',
-        reason: 'mild drift',
-        reasoningInput: 'thinking',
-        rawResponse: '{}',
-        subjectAgentId: 'agent-a',
-        taskId: 't1',
-      }),
-      store,
-      0,
-    );
-    const judge = listJudgeSpans(store)[0];
-    const detail = resolveJudgeDetail(judge, collectAllPlans(store));
+    const span = seedJudgeSpan(store, {
+      eventId: 'ev-orphan',
+      atMs: 200,
+      onTask: false,
+      verdict: 'info',
+      severity: 'info',
+      reason: 'mild drift',
+      reasoningInput: 'thinking',
+      rawResponse: '{}',
+      subjectAgentId: 'agent-a',
+      taskId: 't1',
+    });
+    const detail = resolveJudgeDetail(span, collectAllPlans(store));
     expect(detail.steeredPlan).toBeNull();
     expect(detail.taskSummaries).toHaveLength(0);
   });
