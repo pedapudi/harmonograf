@@ -13,11 +13,17 @@ export type NavSection =
 
 export type TaskPlanMode = 'pre-strip' | 'ghost' | 'hybrid';
 
+// Task/Plan panel view mode. 'cumulative' renders the union-DAG across
+// revisions (default, with generation badges + supersedes edges).
+// 'latest' renders only the latest revision of each plan (legacy view).
+export type TaskPlanView = 'cumulative' | 'latest';
+
 // Persisted task-plan UI preferences. Read on store creation, written on
 // mutation. A direct localStorage touchpoint (no middleware) keeps this simple
 // and keeps the single-file store tree unchanged.
 const TASK_PLAN_MODE_KEY = 'harmonograf.taskPlanMode';
 const TASK_PLAN_VISIBLE_KEY = 'harmonograf.taskPlanVisible';
+const TASK_PLAN_VIEW_KEY = 'harmonograf.taskPlanView';
 const GRAPH_VIEWPORT_KEY = 'harmonograf.graphViewport';
 const CONTEXT_OVERLAY_VISIBLE_KEY = 'harmonograf.contextOverlayVisible';
 const INTERVENTION_BANDS_VISIBLE_KEY = 'harmonograf.interventionBandsVisible';
@@ -86,6 +92,24 @@ function writeTaskPlanMode(m: TaskPlanMode): void {
 function writeTaskPlanVisible(v: boolean): void {
   try {
     localStorage.setItem(TASK_PLAN_VISIBLE_KEY, v ? 'true' : 'false');
+  } catch {
+    /* ignore */
+  }
+}
+
+function readTaskPlanView(): TaskPlanView {
+  try {
+    const v = localStorage.getItem(TASK_PLAN_VIEW_KEY);
+    if (v === 'cumulative' || v === 'latest') return v;
+  } catch {
+    /* ignore */
+  }
+  return 'cumulative';
+}
+
+function writeTaskPlanView(v: TaskPlanView): void {
+  try {
+    localStorage.setItem(TASK_PLAN_VIEW_KEY, v);
   } catch {
     /* ignore */
   }
@@ -202,8 +226,10 @@ interface UiState {
   // Task-plan rendering preferences (persisted to localStorage).
   taskPlanMode: TaskPlanMode;
   taskPlanVisible: boolean;
+  taskPlanView: TaskPlanView;
   setTaskPlanMode: (m: TaskPlanMode) => void;
   toggleTaskPlanVisible: () => void;
+  setTaskPlanView: (v: TaskPlanView) => void;
 
   // Context-window overlay: per-agent sparkline band drawn under spans.
   // Default on, persisted to localStorage.
@@ -337,6 +363,7 @@ export const useUiStore = create<UiState>((set) => ({
 
   taskPlanMode: readTaskPlanMode(),
   taskPlanVisible: readTaskPlanVisible(),
+  taskPlanView: readTaskPlanView(),
   graphViewport: readGraphViewport(),
   graphActions: null,
   setGraphActions: (a) => set({ graphActions: a }),
@@ -355,6 +382,11 @@ export const useUiStore = create<UiState>((set) => ({
       const next = !s.taskPlanVisible;
       writeTaskPlanVisible(next);
       return { taskPlanVisible: next };
+    }),
+  setTaskPlanView: (v) =>
+    set(() => {
+      writeTaskPlanView(v);
+      return { taskPlanView: v };
     }),
 
   contextOverlayVisible: readContextOverlayVisible(),

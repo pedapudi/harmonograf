@@ -6,7 +6,7 @@ import { useUiStore, type TaskPlanMode } from '../../../state/uiStore';
 import { useSessionWatch } from '../../../rpc/hooks';
 import { colorForAgent } from '../../../theme/agentColors';
 import type { Task, TaskPlan, TaskStatus } from '../../../gantt/types';
-import { TaskStagesGraph } from '../../TaskStages/TaskStagesGraph';
+import { TaskPlanPanel } from '../../TaskStages/TaskPlanPanel';
 import { InterventionsList } from '../../Interventions/InterventionsList';
 import { deriveInterventionsFromStore } from '../../../lib/interventions';
 import { useAnnotationStore } from '../../../state/annotationStore';
@@ -357,17 +357,8 @@ export function GanttView() {
                 key={`stages-${plan.id}`}
                 style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
               >
-                <div
-                  style={{
-                    fontSize: 10,
-                    color: 'var(--md-sys-color-on-surface-variant, #9da3b4)',
-                    textTransform: 'uppercase',
-                    letterSpacing: 0.5,
-                  }}
-                >
-                  Plan: {plan.summary || plan.id}
-                </div>
-                <TaskStagesGraph
+                <TaskPlanPanel
+                  sessionId={sessionId}
                   plan={plan}
                   selectedTaskId={selectedTaskId}
                   agentColorFor={agentColorFor}
