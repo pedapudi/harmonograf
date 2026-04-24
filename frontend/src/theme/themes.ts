@@ -44,6 +44,16 @@ export interface ThemeTokens {
   kindTransfer: string;
   kindWaitForHuman: string;
   kindCustom: string;
+  // Goldfive call-category colors. The renderer reads these as
+  // `--hg-goldfive-*` so goldfive-translated spans (judge / refine / plan /
+  // reflective) render with a category-specific hue on the goldfive lane.
+  goldfiveJudgeOnTask: string;
+  goldfiveJudgeWarning: string;
+  goldfiveJudgeCritical: string;
+  goldfiveJudgeNeutral: string;
+  goldfiveRefine: string;
+  goldfivePlan: string;
+  goldfiveReflective: string;
 }
 
 const dark: ThemeTokens = {
@@ -83,6 +93,13 @@ const dark: ThemeTokens = {
   kindTransfer: '#ffd479',
   kindWaitForHuman: '#ffb4ab',
   kindCustom: '#8d9199',
+  goldfiveJudgeOnTask: '#3bb273',
+  goldfiveJudgeWarning: '#f59e0b',
+  goldfiveJudgeCritical: '#e06070',
+  goldfiveJudgeNeutral: '#8d9199',
+  goldfiveRefine: '#a78bfa',
+  goldfivePlan: '#4fd1c5',
+  goldfiveReflective: '#8d9199',
 };
 
 const light: ThemeTokens = {
@@ -122,6 +139,13 @@ const light: ThemeTokens = {
   kindTransfer: '#a8740c',
   kindWaitForHuman: '#ba1a1a',
   kindCustom: '#73777f',
+  goldfiveJudgeOnTask: '#1f8a4b',
+  goldfiveJudgeWarning: '#b86500',
+  goldfiveJudgeCritical: '#b4261a',
+  goldfiveJudgeNeutral: '#73777f',
+  goldfiveRefine: '#7c3aed',
+  goldfivePlan: '#0f8f83',
+  goldfiveReflective: '#73777f',
 };
 
 const amoled: ThemeTokens = {
@@ -156,6 +180,13 @@ const highContrast: ThemeTokens = {
   kindTransfer: '#ffe28f',
   kindWaitForHuman: '#ffd2cc',
   kindCustom: '#cfd1d8',
+  goldfiveJudgeOnTask: '#8affb8',
+  goldfiveJudgeWarning: '#ffd28f',
+  goldfiveJudgeCritical: '#ffbdb6',
+  goldfiveJudgeNeutral: '#cfd1d8',
+  goldfiveRefine: '#d3c3ff',
+  goldfivePlan: '#9ff0e8',
+  goldfiveReflective: '#cfd1d8',
 };
 
 export const themes: Record<ThemeBase, ThemeTokens> = {
@@ -223,7 +254,7 @@ export function applyTheme(base: ThemeBase, colorBlind: ColorBlindMode): void {
   }
   const root = document.documentElement;
   for (const [key, value] of Object.entries(tokens)) {
-    if (key.startsWith('kind')) {
+    if (key.startsWith('kind') || key.startsWith('goldfive')) {
       root.style.setProperty(`--hg-${camelToKebab(key)}`, value);
     } else {
       root.style.setProperty(`--md-sys-color-${camelToKebab(key)}`, value);

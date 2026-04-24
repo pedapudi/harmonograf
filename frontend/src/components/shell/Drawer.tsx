@@ -20,11 +20,22 @@ import type {
   PayloadRef,
   SpanLink,
   LinkRelation,
+  TaskPlan,
 } from '../../gantt/types';
-import type { PlanDiff, PlanRevision } from '../../gantt';
+import type { PlanDiff, PlanRevision, SessionStore } from '../../gantt';
 import { bareAgentName } from '../../gantt';
 import { parseRevisionReason } from '../../gantt/driftKinds';
 import { formatDuration } from '../../lib/format';
+import {
+  isGoldfiveSpan,
+  resolveGoldfiveSpanInfo,
+} from '../../lib/goldfiveSpan';
+import {
+  isJudgeSpan,
+  resolveJudgeDetail,
+} from '../../lib/interventionDetail';
+import { GoldfiveSpanDetail } from '../Interventions/GoldfiveSpanDetail';
+import { JudgeInvocationDetail } from '../Interventions/JudgeInvocationDetail';
 import { OrchestrationTimeline } from '../OrchestrationTimeline/OrchestrationTimeline';
 
 type TabId =
@@ -1069,6 +1080,116 @@ function formatRevisionTime(ms: number): string {
   }
 }
 
+// --- Goldfive detail helper -------------------------------------------------
+
+// Produces the JSX injected at the top of SummaryTab when the selected span
+// is a goldfive translated span. Lives outside SummaryTab so tests can
+// cover it in isolation via the component and so we can memoize the
+// expensive plan scan for judge / refine linkage separately from the
+// reasoning-section state the rest of the tab owns.
+function useGoldfiveDetailSection(
+  span: Span,
+  store: SessionStore | null,
+): React.ReactNode {
+  // Narrow to goldfive spans first — this is the common-case short-circuit.
+  const isGf = isGoldfiveSpan(span);
+
+  // Run the plan-scan memo unconditionally so the hook ordering is stable
+  // across calls where `isGf` flips between renders (shouldn't happen in
+  // practice, but React's hook rules demand it).
+  const plans = useMemo<TaskPlan[]>(() => {
+    if (!store) return [];
+    const list: TaskPlan[] = [];
+    const seen = new Set<TaskPlan>();
+    for (const live of store.tasks.listPlans()) {
+      for (const snap of store.tasks.allRevsForPlan(live.id)) {
+        if (seen.has(snap)) continue;
+        seen.add(snap);
+        list.push(snap);
+      }
+    }
+    return list;
+  }, [store]);
+
+  const judgeDetail = useMemo(() => {
+    if (!isGf) return null;
+    if (!isJudgeSpan(span)) return null;
+    return resolveJudgeDetail(span, plans);
+  }, [isGf, span, plans]);
+
+  const gfInfo = useMemo(() => {
+    if (!isGf) return null;
+    return resolveGoldfiveSpanInfo(span);
+  }, [isGf, span]);
+
+  // Linked PlanRevised lookup for refine_* spans. Resolve via
+  // target_task_id + temporal proximity: the plan revision whose plan
+  // contains a task with id == info.targetTaskId AND whose createdAtMs
+  // is closest to (and not before) the span's startMs. Falls back to the
+  // most recent revision of any plan if no task match is found.
+  const linkedPlan = useMemo<TaskPlan | null>(() => {
+    if (!isGf || !gfInfo) return null;
+    if (gfInfo.category !== 'refine') return null;
+    if (plans.length === 0) return null;
+    const targetTask = gfInfo.targetTaskId;
+    // Only consider real revisions (rev index > 0).
+    const candidates = plans.filter((p) => (p.revisionIndex ?? 0) > 0);
+    if (candidates.length === 0) return null;
+    const spanAt = span.startMs;
+    let best: TaskPlan | null = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (const p of candidates) {
+      // Skip revisions that ended before the span even started — those
+      // can't be the effect of this steer.
+      if (p.createdAtMs + 1 < spanAt) continue;
+      const taskMatch = targetTask && p.tasks.some((t) => t.id === targetTask);
+      // Prefer task matches; among task matches pick earliest-after-span.
+      const score = (taskMatch ? 0 : 100_000) + Math.abs(p.createdAtMs - spanAt);
+      if (score < bestScore) {
+        best = p;
+        bestScore = score;
+      }
+    }
+    return best;
+  }, [isGf, gfInfo, plans, span.startMs]);
+
+  if (!isGf || !gfInfo) return null;
+
+  // Judge spans keep their richer detail component — it covers verdict,
+  // severity, raw response, and steered-plan linkage in one panel.
+  if (judgeDetail) {
+    return (
+      <div
+        className="hg-drawer__goldfive"
+        data-testid="drawer-goldfive-section"
+        data-mode="judge"
+      >
+        <JudgeInvocationDetail
+          detail={judgeDetail}
+          resolveAgentName={(id) => store?.agents.get(id)?.name || bareAgentName(id) || id}
+        />
+      </div>
+    );
+  }
+
+  const linked = linkedPlan
+    ? {
+        plan: linkedPlan,
+        onOpen: undefined,
+      }
+    : null;
+
+  return (
+    <div
+      className="hg-drawer__goldfive"
+      data-testid="drawer-goldfive-section"
+      data-mode="generic"
+    >
+      <GoldfiveSpanDetail span={span} info={gfInfo} linkedPlanRevision={linked} />
+    </div>
+  );
+}
+
 // --- Summary tab ------------------------------------------------------------
 
 export function SummaryTab({ span }: { span: Span }) {
@@ -1087,8 +1208,19 @@ export function SummaryTab({ span }: { span: Span }) {
     show: showReasoning,
   } = readReasoning(span);
 
+  // Goldfive detail section: for translated goldfive spans (judge / refine /
+  // plan / reflective / unknown) surface the decision at the top of the
+  // summary tab so the drawer answers "what did goldfive decide?" before
+  // any raw attribute table. Judge spans route to the existing
+  // JudgeInvocationDetail; everything else renders the generic
+  // GoldfiveSpanDetail with input/output previews + context list.
+  const sessionId = useUiStore((s) => s.currentSessionId);
+  const store = getSessionStore(sessionId) ?? null;
+  const goldfiveSection = useGoldfiveDetailSection(span, store);
+
   return (
     <div className="hg-drawer__section">
+      {goldfiveSection}
       {showReasoning && (
         <ReasoningSection
           inline={reasoningInlineText}

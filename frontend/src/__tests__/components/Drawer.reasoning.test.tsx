@@ -14,6 +14,11 @@ const usePayloadSpy = vi.fn<(digest: string | null) => {
 
 vi.mock('../../rpc/hooks', () => ({
   usePayload: (digest: string | null) => usePayloadSpy(digest),
+  // SummaryTab now reads the session store to look up plan revisions for
+  // goldfive detail injection. The reasoning tests feed plain SummaryTab
+  // spans (not goldfive); returning undefined short-circuits the goldfive
+  // branch without exercising any store code.
+  getSessionStore: () => undefined,
 }));
 
 import { ReasoningSection, SummaryTab } from '../../components/shell/Drawer';
