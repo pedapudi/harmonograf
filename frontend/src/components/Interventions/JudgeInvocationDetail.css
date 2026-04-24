@@ -272,3 +272,204 @@
 .hg-judge-detail__tasks li {
   margin-bottom: 1px;
 }
+
+/* ----------------------------------------------------------------
+   Section headings (drawer variant) — one per Section A / B / C.
+   Deliberately larger than the tiny uppercase section-labels so the
+   reader's eye lands on the top-level break first.
+   ---------------------------------------------------------------- */
+.hg-judge-detail__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  margin-top: 2px;
+  border-top: 1px solid var(--md-sys-color-outline-variant, #43474e);
+}
+
+.hg-judge-detail__section:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.hg-judge-detail__section-heading {
+  margin: 0 0 2px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--md-sys-color-on-surface, #e2e2e9);
+  opacity: 0.92;
+}
+
+/* Task context card (title + description) in Section A. */
+.hg-judge-detail__task-context {
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hg-judge-detail__task-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.hg-judge-detail__task-desc {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+/* Goals list — surfaces the user's goal summaries the judge was
+   evaluating progress against. */
+.hg-judge-detail__goals {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hg-judge-detail__goals-list {
+  list-style: disc;
+  margin: 2px 0 0;
+  padding-left: 18px;
+  font-size: 11px;
+}
+
+.hg-judge-detail__goals-list li {
+  margin-bottom: 2px;
+  line-height: 1.4;
+}
+
+/* Parsed fields + diagnostic. */
+.hg-judge-detail__parsed {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+}
+
+.hg-judge-detail__parsed-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 0;
+  font-size: 11px;
+}
+
+.hg-judge-detail__parsed-list dt {
+  font-weight: 600;
+  opacity: 0.7;
+  font-variant: small-caps;
+}
+
+.hg-judge-detail__parsed-list dd {
+  margin: 0;
+  font-family: var(--hg-mono, ui-monospace, Menlo, monospace);
+}
+
+.hg-judge-detail__diagnostic {
+  font-size: 10px;
+  opacity: 0.75;
+  font-style: italic;
+}
+
+.hg-judge-detail__diagnostic--warn {
+  color: #f59e0b;
+  opacity: 1;
+}
+
+/* ----------------------------------------------------------------
+   Popover variant — compact layout with a big verdict banner.
+   ---------------------------------------------------------------- */
+.hg-judge-detail--popover {
+  gap: 8px;
+}
+
+.hg-judge-detail__banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #0b0d12;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.12);
+  min-height: 36px;
+}
+
+.hg-judge-detail__banner[data-tone='on_task'] {
+  background: #3bb273;
+}
+.hg-judge-detail__banner[data-tone='off_task_info'] {
+  background: #5b8def;
+  color: #e8f0ff;
+}
+.hg-judge-detail__banner[data-tone='off_task_warning'] {
+  background: #f59e0b;
+}
+.hg-judge-detail__banner[data-tone='off_task_critical'] {
+  background: #e06070;
+  color: #140608;
+}
+.hg-judge-detail__banner[data-tone='no_verdict'] {
+  background: #8d9199;
+}
+
+.hg-judge-detail__banner-label {
+  display: inline-block;
+}
+
+.hg-judge-detail__lead {
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  /* Soft 2-line clamp with ellipsis. Falls back to wrap on browsers
+     that lack -webkit-line-clamp support. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.hg-judge-detail__lead--empty {
+  font-style: italic;
+  opacity: 0.7;
+}
+
+.hg-judge-detail__context-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.hg-judge-detail__ctx-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hg-judge-detail__pre--excerpt {
+  max-height: 120px;
+}
+
+.hg-judge-detail__drawer-hint {
+  margin-top: 4px;
+  font-size: 10px;
+  font-style: italic;
+  opacity: 0.65;
+}

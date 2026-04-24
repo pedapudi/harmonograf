@@ -191,6 +191,22 @@ export function resolvePlanRevisionDetail(
 // `onTask` / `verdict` / `rawResponse` in that order to decide the bucket.
 export type JudgeVerdictBucket = 'on_task' | 'off_task' | 'no_verdict';
 
+// Fine-grained verdict tone used by the popover banner and the drawer's
+// verdict badge. Derived from `verdictBucket` + `severity`:
+//   on_task           → green banner "On task"
+//   off_task + info   → blue   banner "Off task (info)"
+//   off_task + warn   → amber  banner "Off task (warning)"
+//   off_task + crit   → red    banner "Off task (critical)"
+//   no_verdict / ''   → grey   banner "No verdict"
+// Kept as a separate field (rather than reconstructed in each view) so
+// the popover and drawer agree on colour without duplicating the ladder.
+export type JudgeVerdictTone =
+  | 'on_task'
+  | 'off_task_info'
+  | 'off_task_warning'
+  | 'off_task_critical'
+  | 'no_verdict';
+
 export interface JudgeDetail {
   // Span that triggered the detail lookup. Held so the view can key off
   // its id (copy-to-clipboard, deep-link) without a second query.
@@ -201,13 +217,25 @@ export interface JudgeDetail {
   elapsedMs: number;
   subjectAgentId: string;
   taskId: string;
+  targetAgentId: string; // usually == subjectAgentId for reasoning judges
   verdictBucket: JudgeVerdictBucket;
+  verdictTone: JudgeVerdictTone;
   // Parsed verdict fields.
   onTask: boolean;
   severity: string; // empty when on_task or no_verdict
   reason: string;   // judge's short explanation
   reasoningInput: string; // what the judge saw (chain-of-thought)
   rawResponse: string;    // raw LLM output before JSON parse
+  // True when the judge's response parsed cleanly to on_task + severity.
+  // False when the parser could not extract an on_task boolean — the drawer
+  // surfaces this with a diagnostic line under the parsed fields.
+  parseSuccessful: boolean;
+  // Optional richer context sourced from the pending goldfive.* sibling
+  // attributes (harmonograf#234+). When absent these stay empty and the
+  // drawer falls back to the plain judge.* fields.
+  inputPreview: string;    // goldfive.input_preview
+  outputPreview: string;   // goldfive.output_preview
+  decisionSummary: string; // goldfive.decision_summary
   // Steering outcome: the plan-revision this judge invocation triggered,
   // if any. Resolved via PlanRevised.trigger_event_id == this event id.
   steeredPlan: TaskPlan | null;
@@ -230,6 +258,20 @@ function classifyVerdict(
   return 'off_task';
 }
 
+function verdictToneFor(
+  bucket: JudgeVerdictBucket,
+  severity: string,
+): JudgeVerdictTone {
+  if (bucket === 'on_task') return 'on_task';
+  if (bucket === 'no_verdict') return 'no_verdict';
+  const s = (severity || '').toLowerCase();
+  if (s === 'critical') return 'off_task_critical';
+  if (s === 'warning' || s === 'warn') return 'off_task_warning';
+  // info / missing-severity / anything else on an off-task verdict treat
+  // as "info" rather than upgrading silently to warning.
+  return 'off_task_info';
+}
+
 // Resolve detail for a judge-span click. The caller finds the clicked
 // span by id; this helper reads its attributes + scans the plan list
 // for a PlanRevised whose trigger_event_id matches the judge event id.
@@ -240,6 +282,8 @@ export function resolveJudgeDetail(
   const eventId = readStringAttr(span, 'judge.event_id');
   const verdict = readStringAttr(span, 'judge.verdict');
   const onTaskAttr = span.attributes['judge.on_task'];
+  const parseSuccessful =
+    onTaskAttr?.kind === 'bool' || verdict === 'on_task' || verdict !== '';
   const onTask =
     onTaskAttr?.kind === 'bool'
       ? onTaskAttr.value
@@ -247,16 +291,34 @@ export function resolveJudgeDetail(
   const severity = readStringAttr(span, 'judge.severity');
   const reason = readStringAttr(span, 'judge.reason')
     || readStringAttr(span, 'judge.reasoning');
+  // Prefer the richer `goldfive.input_preview` (harmonograf#234+) when
+  // present — it carries the agent's reasoning with preamble trimmed and
+  // is shorter than `judge.reasoning_input` for the popover preview. The
+  // drawer still renders the full `judge.reasoning_input` for fidelity.
+  const inputPreview = readStringAttr(span, 'goldfive.input_preview');
+  const outputPreview = readStringAttr(span, 'goldfive.output_preview');
+  const decisionSummary = readStringAttr(span, 'goldfive.decision_summary');
   const reasoningInput = readStringAttr(span, 'judge.reasoning_input')
     || readStringAttr(span, 'judge.reasoning');
   const rawResponse = readStringAttr(span, 'judge.raw_response');
   const model = readStringAttr(span, 'judge.model');
-  const elapsedStr = readStringAttr(span, 'judge.elapsed_ms');
-  const elapsedMs = elapsedStr ? Number(elapsedStr) || 0 : 0;
+  const elapsedAttr = span.attributes['judge.elapsed_ms'];
+  let elapsedMs = 0;
+  if (elapsedAttr?.kind === 'int') {
+    elapsedMs = Number(elapsedAttr.value) || 0;
+  } else if (elapsedAttr?.kind === 'double') {
+    elapsedMs = Number(elapsedAttr.value) || 0;
+  } else {
+    const elapsedStr = readStringAttr(span, 'judge.elapsed_ms');
+    elapsedMs = elapsedStr ? Number(elapsedStr) || 0 : 0;
+  }
   const subjectAgentId = readStringAttr(span, 'judge.subject_agent_id')
     || readStringAttr(span, 'judge.target_agent_id');
+  const targetAgentId = readStringAttr(span, 'judge.target_agent_id')
+    || subjectAgentId;
   const taskId = readStringAttr(span, 'judge.target_task_id');
   const verdictBucket = classifyVerdict(onTask, verdict, rawResponse);
+  const verdictTone = verdictToneFor(verdictBucket, severity);
 
   let steeredPlan: TaskPlan | null = null;
   if (eventId && verdictBucket === 'off_task') {
@@ -302,13 +364,19 @@ export function resolveJudgeDetail(
     model,
     elapsedMs,
     subjectAgentId,
+    targetAgentId,
     taskId,
     verdictBucket,
+    verdictTone,
     onTask,
     severity,
     reason,
     reasoningInput,
     rawResponse,
+    parseSuccessful,
+    inputPreview,
+    outputPreview,
+    decisionSummary,
     steeredPlan,
     steeringSummary,
     taskSummaries,
