@@ -285,6 +285,16 @@ function synthesizeJudgeSpan(store: SessionStore, input: JudgeSpanInput): void {
     verdict && verdict !== 'on_task'
       ? `judge: ${verdict}${severity ? ` (${severity})` : ''}`
       : 'judge: on_task';
+  // ``recordedAtMs`` is when goldfive stamped the event — right after
+  // the judge's LLM call completed. The judge's actual wall-clock
+  // duration is ``elapsedMs``; the span covers
+  // ``[recordedAtMs - elapsedMs, recordedAtMs]`` so it has visible
+  // width on the Gantt. Zero-width spans are invisible at normal
+  // zoom levels; the whole point of surfacing goldfive's judge
+  // as a lane is to make its actual cost visible on the timeline.
+  // Clamp at 0 to defend against negative/zero elapsed values.
+  const safeElapsed = Number.isFinite(elapsedMs) && elapsedMs > 0 ? elapsedMs : 0;
+  const startMs = Math.max(0, recordedAtMs - safeElapsed);
   const span: Span = {
     id,
     sessionId: sessionId ?? '',
@@ -293,7 +303,7 @@ function synthesizeJudgeSpan(store: SessionStore, input: JudgeSpanInput): void {
     kind: 'CUSTOM',
     status: 'COMPLETED',
     name,
-    startMs: recordedAtMs,
+    startMs,
     endMs: recordedAtMs,
     links: [],
     attributes: {
