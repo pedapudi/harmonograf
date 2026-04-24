@@ -13,11 +13,18 @@
 //
 // Reads optional refine-span attributes (input_preview, output_preview,
 // decision_summary, target_agent_id) that the sibling goldfive-render
-// and sink-stamp worktrees stamp. Degrades to the bare PlanRevised
+// and sink-stamp worktreees stamp. Degrades to the bare PlanRevised
 // reason + drift detail when those attrs are absent.
+//
+// Refactor (harmonograf — floating-drawer): the content is split into a
+// pure `<SteeringDetailBody>` that renders the three sections + jump
+// footer, and a thin `<SteeringDetailPanel>` adapter that wraps the body
+// in a `<TrajectoryFloatingDrawer>` (backward-compat for existing call
+// sites and tests that expect a panel with data-testid
+// "steering-detail-panel"). New layouts should mount SteeringDetailBody
+// inside their own TrajectoryFloatingDrawer.
 
 import type React from 'react';
-import { useEffect } from 'react';
 import type { SessionStore } from '../../../gantt/index';
 import { bareAgentName } from '../../../gantt/index';
 import type { Span, Task, TaskPlan } from '../../../gantt/types';
@@ -25,12 +32,22 @@ import type {
   PlanRevisionRecord,
   SupersessionLink,
 } from '../../../state/planHistoryStore';
+import { TrajectoryFloatingDrawer } from './TrajectoryFloatingDrawer';
 
 export interface SteeringSelection {
   kind: 'revision' | 'supersedes';
   revision: number;
   oldTaskId?: string;
   targetTaskId?: string;
+}
+
+export interface SteeringDetailBodyProps {
+  selection: SteeringSelection;
+  plan: TaskPlan | null;
+  history: readonly PlanRevisionRecord[];
+  supersedes: Map<string, SupersessionLink>;
+  store: SessionStore | null;
+  onJumpToGantt: (atMs: number | null, driftId: string) => void;
 }
 
 export interface SteeringDetailPanelProps {
@@ -72,22 +89,10 @@ function agentDisplayName(store: SessionStore | null, id: string): string {
   return store?.agents.get(id)?.name || bareAgentName(id) || id;
 }
 
-export function SteeringDetailPanel(
-  props: SteeringDetailPanelProps,
-): React.ReactElement | null {
-  const { selection, plan, history, supersedes, store, onClose, onJumpToGantt } = props;
-
-  // Esc closes the panel.
-  useEffect(() => {
-    if (!selection) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [selection, onClose]);
-
-  if (!selection) return null;
+export function SteeringDetailBody(
+  props: SteeringDetailBodyProps,
+): React.ReactElement {
+  const { selection, plan, history, supersedes, store, onJumpToGantt } = props;
 
   const record: PlanRevisionRecord | undefined = history.find(
     (r) => r.revision === selection.revision,
@@ -128,29 +133,16 @@ export function SteeringDetailPanel(
   }
 
   return (
-    <aside
-      className="hg-traj__steering-panel"
-      data-testid="steering-detail-panel"
-      role="dialog"
-      aria-label="Steering decision detail"
+    <div
+      className="hg-traj__steering-panel-inner"
+      data-testid="steering-detail-body"
     >
-      <header className="hg-traj__steering-panel-head">
-        <div>
-          <span className="hg-traj__steering-panel-kicker" data-authored-by={authoredBy}>
-            {authoredBy === 'user' ? 'user steer' : 'goldfive steer'} · rev {selection.revision}
-          </span>
-          <h3 className="hg-traj__steering-panel-title">{kind || 'plan revised'}</h3>
-        </div>
-        <button
-          type="button"
-          className="hg-traj__steering-panel-close"
-          onClick={onClose}
-          aria-label="Close steering detail"
-          data-testid="steering-detail-close"
-        >
-          ×
-        </button>
-      </header>
+      <div className="hg-traj__steering-panel-kicker-row">
+        <span className="hg-traj__steering-panel-kicker" data-authored-by={authoredBy}>
+          {authoredBy === 'user' ? 'user steer' : 'goldfive steer'} · rev {selection.revision}
+        </span>
+        <span className="hg-traj__steering-panel-kind">{kind || 'plan revised'}</span>
+      </div>
 
       <section
         className="hg-traj__steering-panel-section"
@@ -203,7 +195,7 @@ export function SteeringDetailPanel(
         )}
       </section>
 
-      <footer className="hg-traj__steering-panel-foot">
+      <div className="hg-traj__steering-panel-foot">
         <button
           type="button"
           className="hg-traj__steering-panel-jump"
@@ -213,7 +205,43 @@ export function SteeringDetailPanel(
         >
           Jump to drift in Gantt
         </button>
-      </footer>
-    </aside>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Backward-compat adapter: mounts SteeringDetailBody inside a
+ * TrajectoryFloatingDrawer and forwards close/jump. Existing call sites
+ * (TrajectoryView today, plus the evolution tests) keep working
+ * unchanged — testids like `steering-detail-panel` and
+ * `steering-detail-close` are re-stamped on the drawer wrapper.
+ */
+export function SteeringDetailPanel(
+  props: SteeringDetailPanelProps,
+): React.ReactElement | null {
+  const { selection, onClose, ...bodyRest } = props;
+  const title = selection
+    ? `${selection.kind === 'supersedes' ? 'supersedes' : 'revision'} · rev ${selection.revision}`
+    : undefined;
+  return (
+    <TrajectoryFloatingDrawer
+      open={selection !== null}
+      onClose={onClose}
+      title={title}
+      testId="steering-detail-panel"
+      closeTestId="steering-detail-close"
+    >
+      {selection && (
+        <SteeringDetailBody
+          selection={selection}
+          plan={bodyRest.plan}
+          history={bodyRest.history}
+          supersedes={bodyRest.supersedes}
+          store={bodyRest.store}
+          onJumpToGantt={bodyRest.onJumpToGantt}
+        />
+      )}
+    </TrajectoryFloatingDrawer>
   );
 }
