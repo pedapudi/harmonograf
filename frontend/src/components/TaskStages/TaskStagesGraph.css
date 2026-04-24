@@ -110,3 +110,185 @@
   stroke-width: 1.25;
   opacity: 0.75;
 }
+
+/* Cumulative-DAG additions (harmonograf plan-evolution). */
+
+.hg-stages__card--muted {
+  opacity: 0.55;
+}
+
+.hg-stages__card--superseded .hg-stages__card-rect {
+  stroke-dasharray: 3 3;
+  fill: var(--md-sys-color-surface-container, #1c1f26);
+}
+
+.hg-stages__card--superseded {
+  opacity: 0.4;
+}
+
+.hg-stages__card--superseded:hover,
+.hg-stages__card--muted:hover {
+  opacity: 0.85;
+}
+
+.hg-stages__supersedes-path {
+  fill: none;
+  stroke-width: 1.2;
+  stroke-dasharray: 4 3;
+  opacity: 0.85;
+}
+
+.hg-stages__supersedes:hover .hg-stages__supersedes-path {
+  stroke-width: 2;
+  opacity: 1;
+}
+
+.hg-stages__supersedes-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.hg-stages__gen-badge-text {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Scrubber styling. Small horizontal strip with clickable notches. */
+
+.hg-scrubber {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--md-sys-color-surface-container, #1c1f26);
+  border-bottom: 1px solid var(--md-sys-color-outline-variant, #43474e);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.hg-scrubber__track {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.hg-scrubber__notch {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 9px;
+  border: 1px solid var(--md-sys-color-outline-variant, #43474e);
+  background: transparent;
+  color: var(--md-sys-color-on-surface-variant, #c3c6cf);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.hg-scrubber__notch:hover {
+  border-color: var(--md-sys-color-primary, #a8c8ff);
+  color: var(--md-sys-color-on-surface, #e2e2e9);
+}
+
+.hg-scrubber__notch--selected {
+  background: var(--md-sys-color-primary-container, #3e4a69);
+  border-color: var(--md-sys-color-primary, #a8c8ff);
+  color: var(--md-sys-color-on-primary-container, #d8e2ff);
+  font-weight: 600;
+}
+
+.hg-scrubber__label {
+  font-size: 10px;
+  color: var(--md-sys-color-on-surface-variant, #9da3b4);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+/* Steering-detail side panel. */
+
+.hg-steering-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 340px;
+  background: var(--md-sys-color-surface-container-high, #262931);
+  border-left: 1px solid var(--md-sys-color-outline-variant, #43474e);
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 3;
+}
+
+.hg-steering-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant, #43474e);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface, #e2e2e9);
+}
+
+.hg-steering-panel__close {
+  background: transparent;
+  border: none;
+  color: var(--md-sys-color-on-surface-variant, #c3c6cf);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.hg-steering-panel__body {
+  flex: 1;
+  padding: 10px 12px;
+  overflow-y: auto;
+  font-size: 11px;
+  color: var(--md-sys-color-on-surface, #e2e2e9);
+}
+
+.hg-steering-panel__section {
+  margin-bottom: 12px;
+}
+
+.hg-steering-panel__section-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--md-sys-color-on-surface-variant, #9da3b4);
+  margin-bottom: 4px;
+}
+
+.hg-steering-panel__section-body {
+  white-space: pre-wrap;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.hg-steering-panel__jump {
+  margin-top: 8px;
+  padding: 4px 10px;
+  background: var(--md-sys-color-primary-container, #3e4a69);
+  color: var(--md-sys-color-on-primary-container, #d8e2ff);
+  border: 1px solid var(--md-sys-color-primary, #a8c8ff);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.hg-steering-panel__jump:hover {
+  background: var(--md-sys-color-primary, #a8c8ff);
+  color: var(--md-sys-color-on-primary, #0a1939);
+}
