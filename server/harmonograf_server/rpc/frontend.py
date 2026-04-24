@@ -109,6 +109,22 @@ def _pb_session_status(pb: int) -> Optional[SessionStatus]:
     }.get(pb)
 
 
+def _plan_revision_kind_name(kind: str) -> str:
+    """Return the upper-case ``DriftKind`` enum name for a stored revision.
+
+    ``TaskPlan.revision_kind`` is persisted as the lowercase enum value
+    string (e.g. ``"user_steer"``). The ``PlanRevision`` wire contract
+    hands clients the upper-case name so they can switch on it without
+    round-tripping through the proto enum (closes #158). Empty input
+    (revision 0, or a corrupt row the handler already logged) returns
+    empty.
+    """
+
+    if not kind:
+        return ""
+    return kind.upper()
+
+
 def _storage_annotation_to_pb(ann: Annotation) -> types_pb2.Annotation:
     pb = types_pb2.Annotation(
         id=ann.id,
@@ -733,6 +749,85 @@ class FrontendServicerMixin:
         resp = frontend_pb2.ListInterventionsResponse()
         for rec in records:
             resp.interventions.append(record_to_pb(rec, types_pb2))
+        return resp
+
+    # ---- GetSessionPlanHistory ----------------------------------------
+
+    async def GetSessionPlanHistory(
+        self,
+        request: frontend_pb2.GetSessionPlanHistoryRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> frontend_pb2.GetSessionPlanHistoryResponse:
+        """Return every persisted plan revision for one session.
+
+        See ``docs/design/01`` § plan-history and issue #158. The response
+        is a chronological list (``task_plans.created_at`` ascending) of
+        ``PlanRevision`` records, each carrying the full ``goldfive.v1.Plan``
+        snapshot plus denormalized revision metadata
+        (``revision_number`` / ``revision_reason`` / ``revision_kind`` /
+        ``revision_trigger_event_id`` / ``emitted_at``).
+
+        Data-shape note: ``task_plans`` already denormalizes every revision
+        field at ingest time (see ``ingest._on_plan_revised``). No join
+        against ``goldfive_events`` is required — the handler reads only
+        ``list_task_plans_for_session``. A WARNING is logged when a non-
+        zero revision carries an empty ``revision_kind`` (corrupt or
+        legacy data); the revision is still returned with empty trigger
+        fields so the frontend can degrade gracefully rather than crash.
+        """
+        if not request.session_id:
+            await context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "session_id required"
+            )
+            return frontend_pb2.GetSessionPlanHistoryResponse()
+        sess = await self._store.get_session(request.session_id)
+        if sess is None:
+            await context.abort(
+                grpc.StatusCode.NOT_FOUND,
+                f"session {request.session_id} not found",
+            )
+            return frontend_pb2.GetSessionPlanHistoryResponse()
+
+        try:
+            plans = await self._store.list_task_plans_for_session(
+                request.session_id
+            )
+        except Exception as exc:  # noqa: BLE001 — defensive: RPC must not 500
+            logger.warning(
+                "list_task_plans_for_session failed session_id=%s: %s",
+                request.session_id,
+                exc,
+            )
+            plans = []
+        # Storage guarantees ``ORDER BY created_at``; re-sort defensively so
+        # in-memory/test backends that don't order stay deterministic.
+        plans = sorted(plans, key=lambda p: p.created_at)
+
+        resp = frontend_pb2.GetSessionPlanHistoryResponse()
+        for plan in plans:
+            # Every persisted revision has its metadata on the TaskPlan row
+            # (harmonograf#99). Non-zero revisions missing ``revision_kind``
+            # are corrupt/legacy — log once and still emit the revision.
+            if plan.revision_index and not plan.revision_kind:
+                logger.warning(
+                    "plan %s on session %s has revision_index=%d but empty "
+                    "revision_kind — returning with empty trigger fields",
+                    plan.id,
+                    request.session_id,
+                    plan.revision_index,
+                )
+            revision = resp.revisions.add()
+            revision.plan.CopyFrom(storage_plan_to_goldfive_pb(plan))
+            revision.revision_number = int(plan.revision_index)
+            revision.revision_reason = plan.revision_reason or ""
+            # ``revision_kind`` on the wire is the upper-case DriftKind name
+            # (e.g. ``"USER_STEER"``) so downstream consumers can switch on
+            # it without a lowercase-vs-enum mapping table. Empty on revision 0.
+            revision.revision_kind = _plan_revision_kind_name(plan.revision_kind)
+            revision.revision_trigger_event_id = plan.trigger_event_id or ""
+            emitted = float_to_ts(plan.created_at)
+            if emitted is not None:
+                revision.emitted_at.CopyFrom(emitted)
         return resp
 
     # ---- GetStats -----------------------------------------------------

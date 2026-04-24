@@ -77,4 +77,11 @@ service Harmonograf {
   // Merged chronological intervention history for one session. Unary —
   // the frontend recomputes live updates from WatchSession deltas.
   rpc ListInterventions(ListInterventionsRequest) returns (ListInterventionsResponse);
+
+  // Full plan-revision history for one session. Unary. Returns every
+  // persisted ``task_plans`` row for the session in ``created_at`` order
+  // so the frontend can render plans as an evolving artifact
+  // (generations, supersedes edges annotated with their triggering drift
+  // or user steer). See frontend.proto GetSessionPlanHistory docs.
+  rpc GetSessionPlanHistory(GetSessionPlanHistoryRequest) returns (GetSessionPlanHistoryResponse);
 }

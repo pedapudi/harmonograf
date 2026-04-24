@@ -26,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file goldfive/v1/events.proto.
  */
 export const file_goldfive_v1_events: GenFile = /*@__PURE__*/
-  fileDesc("Chhnb2xkZml2ZS92MS9ldmVudHMucHJvdG8SC2dvbGRmaXZlLnYxIvMKCgVFdmVudBIQCghldmVudF9pZBgBIAEoCRIOCgZydW5faWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAQSLgoKZW1pdHRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKc2Vzc2lvbl9pZBgFIAEoCRIuCgtydW5fc3RhcnRlZBgKIAEoCzIXLmdvbGRmaXZlLnYxLlJ1blN0YXJ0ZWRIABIwCgxnb2FsX2Rlcml2ZWQYCyABKAsyGC5nb2xkZml2ZS52MS5Hb2FsRGVyaXZlZEgAEjQKDnBsYW5fc3VibWl0dGVkGAwgASgLMhouZ29sZGZpdmUudjEuUGxhblN1Ym1pdHRlZEgAEjAKDHBsYW5fcmV2aXNlZBgNIAEoCzIYLmdvbGRmaXZlLnYxLlBsYW5SZXZpc2VkSAASMAoMdGFza19zdGFydGVkGA4gASgLMhguZ29sZGZpdmUudjEuVGFza1N0YXJ0ZWRIABIyCg10YXNrX3Byb2dyZXNzGA8gASgLMhkuZ29sZGZpdmUudjEuVGFza1Byb2dyZXNzSAASNAoOdGFza19jb21wbGV0ZWQYECABKAsyGi5nb2xkZml2ZS52MS5UYXNrQ29tcGxldGVkSAASLgoLdGFza19mYWlsZWQYESABKAsyFy5nb2xkZml2ZS52MS5UYXNrRmFpbGVkSAASMAoMdGFza19ibG9ja2VkGBIgASgLMhguZ29sZGZpdmUudjEuVGFza0Jsb2NrZWRIABI0Cg50YXNrX2NhbmNlbGxlZBgTIAEoCzIaLmdvbGRmaXZlLnYxLlRhc2tDYW5jZWxsZWRIABI0Cg5kcmlmdF9kZXRlY3RlZBgUIAEoCzIaLmdvbGRmaXZlLnYxLkRyaWZ0RGV0ZWN0ZWRIABIyCg1ydW5fY29tcGxldGVkGBUgASgLMhkuZ29sZGZpdmUudjEuUnVuQ29tcGxldGVkSAASLgoLcnVuX2Fib3J0ZWQYFiABKAsyFy5nb2xkZml2ZS52MS5SdW5BYm9ydGVkSAASQAoUY29udmVyc2F0aW9uX3N0YXJ0ZWQYFyABKAsyIC5nb2xkZml2ZS52MS5Db252ZXJzYXRpb25TdGFydGVkSAASPAoSY29udmVyc2F0aW9uX2VuZGVkGBggASgLMh4uZ29sZGZpdmUudjEuQ29udmVyc2F0aW9uRW5kZWRIABI8ChJhcHByb3ZhbF9yZXF1ZXN0ZWQYGSABKAsyHi5nb2xkZml2ZS52MS5BcHByb3ZhbFJlcXVlc3RlZEgAEjgKEGFwcHJvdmFsX2dyYW50ZWQYGiABKAsyHC5nb2xkZml2ZS52MS5BcHByb3ZhbEdyYW50ZWRIABI6ChFhcHByb3ZhbF9yZWplY3RlZBgbIAEoCzIdLmdvbGRmaXZlLnYxLkFwcHJvdmFsUmVqZWN0ZWRIABJHChhhZ2VudF9pbnZvY2F0aW9uX3N0YXJ0ZWQYHCABKAsyIy5nb2xkZml2ZS52MS5BZ2VudEludm9jYXRpb25TdGFydGVkSAASSwoaYWdlbnRfaW52b2NhdGlvbl9jb21wbGV0ZWQYHSABKAsyJS5nb2xkZml2ZS52MS5BZ2VudEludm9jYXRpb25Db21wbGV0ZWRIABI+ChNkZWxlZ2F0aW9uX29ic2VydmVkGB4gASgLMh8uZ29sZGZpdmUudjEuRGVsZWdhdGlvbk9ic2VydmVkSAASRQoXcmVhc29uaW5nX2p1ZGdlX2ludm9rZWQYHyABKAsyIi5nb2xkZml2ZS52MS5SZWFzb25pbmdKdWRnZUludm9rZWRIAEIJCgdwYXlsb2FkImIKClJ1blN0YXJ0ZWQSDgoGcnVuX2lkGAEgASgJEhQKDGdvYWxfc3VtbWFyeRgCIAEoCRIuCgpzdGFydGVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCIvCgtHb2FsRGVyaXZlZBIgCgVnb2FscxgBIAMoCzIRLmdvbGRmaXZlLnYxLkdvYWwiMAoNUGxhblN1Ym1pdHRlZBIfCgRwbGFuGAEgASgLMhEuZ29sZGZpdmUudjEuUGxhbiK5AQoQUGxhblJldmlzaW9uRGlmZhIWCg5hZGRlZF90YXNrX2lkcxgBIAMoCRIYChByZW1vdmVkX3Rhc2tfaWRzGAIgAygJEhkKEW1vZGlmaWVkX3Rhc2tfaWRzGAMgAygJEioKC2FkZGVkX2VkZ2VzGAQgAygLMhUuZ29sZGZpdmUudjEuVGFza0VkZ2USLAoNcmVtb3ZlZF9lZGdlcxgFIAMoCzIVLmdvbGRmaXZlLnYxLlRhc2tFZGdlIs0CCgtQbGFuUmV2aXNlZBIfCgRwbGFuGAEgASgLMhEuZ29sZGZpdmUudjEuUGxhbhIqCgpkcmlmdF9raW5kGAIgASgOMhYuZ29sZGZpdmUudjEuRHJpZnRLaW5kEiwKCHNldmVyaXR5GAMgASgOMhouZ29sZGZpdmUudjEuRHJpZnRTZXZlcml0eRIOCgZyZWFzb24YBCABKAkSFgoOcmV2aXNpb25faW5kZXgYBSABKA0SKwoEZGlmZhgGIAEoCzIdLmdvbGRmaXZlLnYxLlBsYW5SZXZpc2lvbkRpZmYSGAoQdHJpZ2dlcl9ldmVudF9pZBgHIAEoCRIcChRyZWZpbmVfaW5wdXRfc3VtbWFyeRgIIAEoCRIdChVyZWZpbmVfb3V0cHV0X3N1bW1hcnkYCSABKAkSFwoPdGFyZ2V0X2FnZW50X2lkGAogASgJIi4KC1Rhc2tTdGFydGVkEg8KB3Rhc2tfaWQYASABKAkSDgoGZGV0YWlsGAIgASgJIkEKDFRhc2tQcm9ncmVzcxIPCgd0YXNrX2lkGAEgASgJEhAKCGZyYWN0aW9uGAIgASgCEg4KBmRldGFpbBgDIAEoCSKhAQoNVGFza0NvbXBsZXRlZBIPCgd0YXNrX2lkGAEgASgJEg8KB3N1bW1hcnkYAiABKAkSPAoJYXJ0aWZhY3RzGAMgAygLMikuZ29sZGZpdmUudjEuVGFza0NvbXBsZXRlZC5BcnRpZmFjdHNFbnRyeRowCg5BcnRpZmFjdHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIkIKClRhc2tGYWlsZWQSDwoHdGFza19pZBgBIAEoCRIOCgZyZWFzb24YAiABKAkSEwoLcmVjb3ZlcmFibGUYAyABKAgiPwoLVGFza0Jsb2NrZWQSDwoHdGFza19pZBgBIAEoCRIPCgdibG9ja2VyGAIgASgJEg4KBm5lZWRlZBgDIAEoCSIwCg1UYXNrQ2FuY2VsbGVkEg8KB3Rhc2tfaWQYASABKAkSDgoGcmVhc29uGAIgASgJIuABCg1EcmlmdERldGVjdGVkEiQKBGtpbmQYASABKA4yFi5nb2xkZml2ZS52MS5EcmlmdEtpbmQSLAoIc2V2ZXJpdHkYAiABKA4yGi5nb2xkZml2ZS52MS5EcmlmdFNldmVyaXR5Eg4KBmRldGFpbBgDIAEoCRIXCg9jdXJyZW50X3Rhc2tfaWQYBCABKAkSGAoQY3VycmVudF9hZ2VudF9pZBgFIAEoCRIVCg1hbm5vdGF0aW9uX2lkGAYgASgJEgoKAmlkGAcgASgJEhUKDXRyaWdnZXJfaW5wdXQYCCABKAkiJwoMUnVuQ29tcGxldGVkEhcKD291dGNvbWVfc3VtbWFyeRgBIAEoCSIcCgpSdW5BYm9ydGVkEg4KBnJlYXNvbhgBIAEoCSJeChNDb252ZXJzYXRpb25TdGFydGVkEhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCRIuCgpzdGFydGVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJQChFDb252ZXJzYXRpb25FbmRlZBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSEgoKdHVybl9jb3VudBgCIAEoDRIOCgZyZWFzb24YAyABKAkixgEKEUFwcHJvdmFsUmVxdWVzdGVkEhEKCXRhcmdldF9pZBgBIAEoCRIMCgRraW5kGAIgASgJEg4KBnByb21wdBgDIAEoCRIPCgd0YXNrX2lkGAQgASgJEj4KCG1ldGFkYXRhGAUgAygLMiwuZ29sZGZpdmUudjEuQXBwcm92YWxSZXF1ZXN0ZWQuTWV0YWRhdGFFbnRyeRovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiNAoPQXBwcm92YWxHcmFudGVkEhEKCXRhcmdldF9pZBgBIAEoCRIOCgZkZXRhaWwYAiABKAkiNQoQQXBwcm92YWxSZWplY3RlZBIRCgl0YXJnZXRfaWQYASABKAkSDgoGZGV0YWlsGAIgASgJIqIBChZBZ2VudEludm9jYXRpb25TdGFydGVkEhIKCmFnZW50X25hbWUYASABKAkSDwoHdGFza19pZBgCIAEoCRIVCg1pbnZvY2F0aW9uX2lkGAMgASgJEhwKFHBhcmVudF9pbnZvY2F0aW9uX2lkGAQgASgJEi4KCnN0YXJ0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIpkBChhBZ2VudEludm9jYXRpb25Db21wbGV0ZWQSEgoKYWdlbnRfbmFtZRgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEhUKDWludm9jYXRpb25faWQYAyABKAkSDwoHc3VtbWFyeRgEIAEoCRIwCgxjb21wbGV0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIpMBChJEZWxlZ2F0aW9uT2JzZXJ2ZWQSEgoKZnJvbV9hZ2VudBgBIAEoCRIQCgh0b19hZ2VudBgCIAEoCRIPCgd0YXNrX2lkGAMgASgJEhUKDWludm9jYXRpb25faWQYBCABKAkSLwoLb2JzZXJ2ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wItcBChVSZWFzb25pbmdKdWRnZUludm9rZWQSDgoGcnVuX2lkGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkSGAoQc3ViamVjdF9hZ2VudF9pZBgDIAEoCRINCgVtb2RlbBgEIAEoCRISCgplbGFwc2VkX21zGAUgASgDEhcKD3JlYXNvbmluZ19pbnB1dBgGIAEoCRIUCgxyYXdfcmVzcG9uc2UYByABKAkSDwoHb25fdGFzaxgIIAEoCBIQCghzZXZlcml0eRgJIAEoCRIOCgZyZWFzb24YCiABKAlCOVo3Z2l0aHViLmNvbS9wZWRhcHVkaS9nb2xkZml2ZS9nZW4vZ29sZGZpdmUvdjE7Z29sZGZpdmV2MWIGcHJvdG8z", [file_google_protobuf_timestamp, file_goldfive_v1_types]);
+  fileDesc("Chhnb2xkZml2ZS92MS9ldmVudHMucHJvdG8SC2dvbGRmaXZlLnYxIvsLCgVFdmVudBIQCghldmVudF9pZBgBIAEoCRIOCgZydW5faWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAQSLgoKZW1pdHRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKc2Vzc2lvbl9pZBgFIAEoCRIuCgtydW5fc3RhcnRlZBgKIAEoCzIXLmdvbGRmaXZlLnYxLlJ1blN0YXJ0ZWRIABIwCgxnb2FsX2Rlcml2ZWQYCyABKAsyGC5nb2xkZml2ZS52MS5Hb2FsRGVyaXZlZEgAEjQKDnBsYW5fc3VibWl0dGVkGAwgASgLMhouZ29sZGZpdmUudjEuUGxhblN1Ym1pdHRlZEgAEjAKDHBsYW5fcmV2aXNlZBgNIAEoCzIYLmdvbGRmaXZlLnYxLlBsYW5SZXZpc2VkSAASMAoMdGFza19zdGFydGVkGA4gASgLMhguZ29sZGZpdmUudjEuVGFza1N0YXJ0ZWRIABIyCg10YXNrX3Byb2dyZXNzGA8gASgLMhkuZ29sZGZpdmUudjEuVGFza1Byb2dyZXNzSAASNAoOdGFza19jb21wbGV0ZWQYECABKAsyGi5nb2xkZml2ZS52MS5UYXNrQ29tcGxldGVkSAASLgoLdGFza19mYWlsZWQYESABKAsyFy5nb2xkZml2ZS52MS5UYXNrRmFpbGVkSAASMAoMdGFza19ibG9ja2VkGBIgASgLMhguZ29sZGZpdmUudjEuVGFza0Jsb2NrZWRIABI0Cg50YXNrX2NhbmNlbGxlZBgTIAEoCzIaLmdvbGRmaXZlLnYxLlRhc2tDYW5jZWxsZWRIABI0Cg5kcmlmdF9kZXRlY3RlZBgUIAEoCzIaLmdvbGRmaXZlLnYxLkRyaWZ0RGV0ZWN0ZWRIABIyCg1ydW5fY29tcGxldGVkGBUgASgLMhkuZ29sZGZpdmUudjEuUnVuQ29tcGxldGVkSAASLgoLcnVuX2Fib3J0ZWQYFiABKAsyFy5nb2xkZml2ZS52MS5SdW5BYm9ydGVkSAASQAoUY29udmVyc2F0aW9uX3N0YXJ0ZWQYFyABKAsyIC5nb2xkZml2ZS52MS5Db252ZXJzYXRpb25TdGFydGVkSAASPAoSY29udmVyc2F0aW9uX2VuZGVkGBggASgLMh4uZ29sZGZpdmUudjEuQ29udmVyc2F0aW9uRW5kZWRIABI8ChJhcHByb3ZhbF9yZXF1ZXN0ZWQYGSABKAsyHi5nb2xkZml2ZS52MS5BcHByb3ZhbFJlcXVlc3RlZEgAEjgKEGFwcHJvdmFsX2dyYW50ZWQYGiABKAsyHC5nb2xkZml2ZS52MS5BcHByb3ZhbEdyYW50ZWRIABI6ChFhcHByb3ZhbF9yZWplY3RlZBgbIAEoCzIdLmdvbGRmaXZlLnYxLkFwcHJvdmFsUmVqZWN0ZWRIABJHChhhZ2VudF9pbnZvY2F0aW9uX3N0YXJ0ZWQYHCABKAsyIy5nb2xkZml2ZS52MS5BZ2VudEludm9jYXRpb25TdGFydGVkSAASSwoaYWdlbnRfaW52b2NhdGlvbl9jb21wbGV0ZWQYHSABKAsyJS5nb2xkZml2ZS52MS5BZ2VudEludm9jYXRpb25Db21wbGV0ZWRIABI+ChNkZWxlZ2F0aW9uX29ic2VydmVkGB4gASgLMh8uZ29sZGZpdmUudjEuRGVsZWdhdGlvbk9ic2VydmVkSAASRQoXcmVhc29uaW5nX2p1ZGdlX2ludm9rZWQYHyABKAsyIi5nb2xkZml2ZS52MS5SZWFzb25pbmdKdWRnZUludm9rZWRIABJEChdnb2xkZml2ZV9sbG1fY2FsbF9zdGFydBggIAEoCzIhLmdvbGRmaXZlLnYxLkdvbGRmaXZlTExNQ2FsbFN0YXJ0SAASQAoVZ29sZGZpdmVfbGxtX2NhbGxfZW5kGCEgASgLMh8uZ29sZGZpdmUudjEuR29sZGZpdmVMTE1DYWxsRW5kSABCCQoHcGF5bG9hZCJiCgpSdW5TdGFydGVkEg4KBnJ1bl9pZBgBIAEoCRIUCgxnb2FsX3N1bW1hcnkYAiABKAkSLgoKc3RhcnRlZF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiLwoLR29hbERlcml2ZWQSIAoFZ29hbHMYASADKAsyES5nb2xkZml2ZS52MS5Hb2FsIjAKDVBsYW5TdWJtaXR0ZWQSHwoEcGxhbhgBIAEoCzIRLmdvbGRmaXZlLnYxLlBsYW4iuQEKEFBsYW5SZXZpc2lvbkRpZmYSFgoOYWRkZWRfdGFza19pZHMYASADKAkSGAoQcmVtb3ZlZF90YXNrX2lkcxgCIAMoCRIZChFtb2RpZmllZF90YXNrX2lkcxgDIAMoCRIqCgthZGRlZF9lZGdlcxgEIAMoCzIVLmdvbGRmaXZlLnYxLlRhc2tFZGdlEiwKDXJlbW92ZWRfZWRnZXMYBSADKAsyFS5nb2xkZml2ZS52MS5UYXNrRWRnZSLNAgoLUGxhblJldmlzZWQSHwoEcGxhbhgBIAEoCzIRLmdvbGRmaXZlLnYxLlBsYW4SKgoKZHJpZnRfa2luZBgCIAEoDjIWLmdvbGRmaXZlLnYxLkRyaWZ0S2luZBIsCghzZXZlcml0eRgDIAEoDjIaLmdvbGRmaXZlLnYxLkRyaWZ0U2V2ZXJpdHkSDgoGcmVhc29uGAQgASgJEhYKDnJldmlzaW9uX2luZGV4GAUgASgNEisKBGRpZmYYBiABKAsyHS5nb2xkZml2ZS52MS5QbGFuUmV2aXNpb25EaWZmEhgKEHRyaWdnZXJfZXZlbnRfaWQYByABKAkSHAoUcmVmaW5lX2lucHV0X3N1bW1hcnkYCCABKAkSHQoVcmVmaW5lX291dHB1dF9zdW1tYXJ5GAkgASgJEhcKD3RhcmdldF9hZ2VudF9pZBgKIAEoCSIuCgtUYXNrU3RhcnRlZBIPCgd0YXNrX2lkGAEgASgJEg4KBmRldGFpbBgCIAEoCSJBCgxUYXNrUHJvZ3Jlc3MSDwoHdGFza19pZBgBIAEoCRIQCghmcmFjdGlvbhgCIAEoAhIOCgZkZXRhaWwYAyABKAkioQEKDVRhc2tDb21wbGV0ZWQSDwoHdGFza19pZBgBIAEoCRIPCgdzdW1tYXJ5GAIgASgJEjwKCWFydGlmYWN0cxgDIAMoCzIpLmdvbGRmaXZlLnYxLlRhc2tDb21wbGV0ZWQuQXJ0aWZhY3RzRW50cnkaMAoOQXJ0aWZhY3RzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASJCCgpUYXNrRmFpbGVkEg8KB3Rhc2tfaWQYASABKAkSDgoGcmVhc29uGAIgASgJEhMKC3JlY292ZXJhYmxlGAMgASgIIj8KC1Rhc2tCbG9ja2VkEg8KB3Rhc2tfaWQYASABKAkSDwoHYmxvY2tlchgCIAEoCRIOCgZuZWVkZWQYAyABKAkiMAoNVGFza0NhbmNlbGxlZBIPCgd0YXNrX2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCSKXAgoNRHJpZnREZXRlY3RlZBIkCgRraW5kGAEgASgOMhYuZ29sZGZpdmUudjEuRHJpZnRLaW5kEiwKCHNldmVyaXR5GAIgASgOMhouZ29sZGZpdmUudjEuRHJpZnRTZXZlcml0eRIOCgZkZXRhaWwYAyABKAkSFwoPY3VycmVudF90YXNrX2lkGAQgASgJEhgKEGN1cnJlbnRfYWdlbnRfaWQYBSABKAkSFQoNYW5ub3RhdGlvbl9pZBgGIAEoCRIKCgJpZBgHIAEoCRIVCg10cmlnZ2VyX2lucHV0GAggASgJEhMKC2F1dGhvcmVkX2J5GAkgASgJEiAKGHN1cHByZXNzZWRfYnlfdXNlcl9zdGVlchgKIAEoCCInCgxSdW5Db21wbGV0ZWQSFwoPb3V0Y29tZV9zdW1tYXJ5GAEgASgJIhwKClJ1bkFib3J0ZWQSDgoGcmVhc29uGAEgASgJIl4KE0NvbnZlcnNhdGlvblN0YXJ0ZWQSFwoPY29udmVyc2F0aW9uX2lkGAEgASgJEi4KCnN0YXJ0ZWRfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIlAKEUNvbnZlcnNhdGlvbkVuZGVkEhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCRISCgp0dXJuX2NvdW50GAIgASgNEg4KBnJlYXNvbhgDIAEoCSLGAQoRQXBwcm92YWxSZXF1ZXN0ZWQSEQoJdGFyZ2V0X2lkGAEgASgJEgwKBGtpbmQYAiABKAkSDgoGcHJvbXB0GAMgASgJEg8KB3Rhc2tfaWQYBCABKAkSPgoIbWV0YWRhdGEYBSADKAsyLC5nb2xkZml2ZS52MS5BcHByb3ZhbFJlcXVlc3RlZC5NZXRhZGF0YUVudHJ5Gi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASI0Cg9BcHByb3ZhbEdyYW50ZWQSEQoJdGFyZ2V0X2lkGAEgASgJEg4KBmRldGFpbBgCIAEoCSI1ChBBcHByb3ZhbFJlamVjdGVkEhEKCXRhcmdldF9pZBgBIAEoCRIOCgZkZXRhaWwYAiABKAkiogEKFkFnZW50SW52b2NhdGlvblN0YXJ0ZWQSEgoKYWdlbnRfbmFtZRgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEhUKDWludm9jYXRpb25faWQYAyABKAkSHAoUcGFyZW50X2ludm9jYXRpb25faWQYBCABKAkSLgoKc3RhcnRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAimQEKGEFnZW50SW52b2NhdGlvbkNvbXBsZXRlZBISCgphZ2VudF9uYW1lGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkSFQoNaW52b2NhdGlvbl9pZBgDIAEoCRIPCgdzdW1tYXJ5GAQgASgJEjAKDGNvbXBsZXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAikwEKEkRlbGVnYXRpb25PYnNlcnZlZBISCgpmcm9tX2FnZW50GAEgASgJEhAKCHRvX2FnZW50GAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSFQoNaW52b2NhdGlvbl9pZBgEIAEoCRIvCgtvYnNlcnZlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAi1wEKFVJlYXNvbmluZ0p1ZGdlSW52b2tlZBIOCgZydW5faWQYASABKAkSDwoHdGFza19pZBgCIAEoCRIYChBzdWJqZWN0X2FnZW50X2lkGAMgASgJEg0KBW1vZGVsGAQgASgJEhIKCmVsYXBzZWRfbXMYBSABKAMSFwoPcmVhc29uaW5nX2lucHV0GAYgASgJEhQKDHJhd19yZXNwb25zZRgHIAEoCRIPCgdvbl90YXNrGAggASgIEhAKCHNldmVyaXR5GAkgASgJEg4KBnJlYXNvbhgKIAEoCSJsChRHb2xkZml2ZUxMTUNhbGxTdGFydBIPCgdzcGFuX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSDQoFbW9kZWwYAyABKAkSDwoHdGFza19pZBgEIAEoCRIVCg1zdGFydF90aW1lX25zGAUgASgDImcKEkdvbGRmaXZlTExNQ2FsbEVuZBIPCgdzcGFuX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSEwoLZW5kX3RpbWVfbnMYAyABKAMSDgoGc3RhdHVzGAQgASgJEg0KBWVycm9yGAUgASgJQjlaN2dpdGh1Yi5jb20vcGVkYXB1ZGkvZ29sZGZpdmUvZ2VuL2dvbGRmaXZlL3YxO2dvbGRmaXZldjFiBnByb3RvMw", [file_google_protobuf_timestamp, file_goldfive_v1_types]);
 
 /**
  * Event is the uniform envelope wrapping every goldfive event. Sinks
@@ -215,6 +215,18 @@ export type Event = Message<"goldfive.v1.Event"> & {
      */
     value: ReasoningJudgeInvoked;
     case: "reasoningJudgeInvoked";
+  } | {
+    /**
+     * @generated from field: goldfive.v1.GoldfiveLLMCallStart goldfive_llm_call_start = 32;
+     */
+    value: GoldfiveLLMCallStart;
+    case: "goldfiveLlmCallStart";
+  } | {
+    /**
+     * @generated from field: goldfive.v1.GoldfiveLLMCallEnd goldfive_llm_call_end = 33;
+     */
+    value: GoldfiveLLMCallEnd;
+    case: "goldfiveLlmCallEnd";
   } | { case: undefined; value?: undefined };
 };
 
@@ -731,6 +743,36 @@ export type DriftDetected = Message<"goldfive.v1.DriftDetected"> & {
    * @generated from field: string trigger_input = 8;
    */
   triggerInput: string;
+
+  /**
+   * Source attribution for the drift. One of:
+   *   * ``"user"``    — minted from a ``ControlMessage`` (USER_STEER /
+   *                     USER_CANCEL / USER_PAUSE).
+   *   * ``"goldfive"`` — minted by a goldfive detector (reasoning judge,
+   *                      embedding detectors, goal-drift, loop detectors,
+   *                      tool-loops, confabulation).
+   *   * ``""``        — legacy / unknown (pre-goldfive-steer-unification
+   *                     producers). Readers MUST tolerate the empty
+   *                     string and treat it as "not attributed".
+   * Downstream UI (harmonograf) uses this to colour-code intervention
+   * rows and to decide whether to surface the drift under the operator's
+   * steering lane or under the judge/detector lane.
+   *
+   * @generated from field: string authored_by = 9;
+   */
+  authoredBy: string;
+
+  /**
+   * True when a goldfive-detected drift was suppressed from promoting
+   * to a steer-level intervention because a recent user-authored steer
+   * is still active (see ``DefaultSteerer.goldfive_steer_suppression_window_turns``).
+   * The DriftDetected row is still emitted so operators can see the
+   * detector fired — but no cancel-in-flight or refine was triggered on
+   * goldfive's behalf. Always ``false`` on user-authored drifts.
+   *
+   * @generated from field: bool suppressed_by_user_steer = 10;
+   */
+  suppressedByUserSteer: boolean;
 };
 
 /**
@@ -1177,4 +1219,118 @@ export type ReasoningJudgeInvoked = Message<"goldfive.v1.ReasoningJudgeInvoked">
  */
 export const ReasoningJudgeInvokedSchema: GenMessage<ReasoningJudgeInvoked> = /*@__PURE__*/
   messageDesc(file_goldfive_v1_events, 23);
+
+/**
+ * Start marker for a goldfive-internal LLM call span.
+ *
+ * @generated from message goldfive.v1.GoldfiveLLMCallStart
+ */
+export type GoldfiveLLMCallStart = Message<"goldfive.v1.GoldfiveLLMCallStart"> & {
+  /**
+   * Unique id for this span. Paired with the matching ``GoldfiveLLMCallEnd``.
+   * UUID4 hex is fine; clients MUST emit exactly one End for each Start.
+   *
+   * @generated from field: string span_id = 1;
+   */
+  spanId: string;
+
+  /**
+   * Short symbolic name of the call site (e.g. ``"refine_steer"``,
+   * ``"judge_goal_drift"``, ``"plan_generate"``, ``"goal_derive"``,
+   * ``"reflective_check"``, ``"judge_reasoning"``).
+   *
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * The LLM model the call was dispatched with (forwarded verbatim to
+   * ``call_llm``). Empty when the callable substitutes its own default.
+   *
+   * @generated from field: string model = 3;
+   */
+  model: string;
+
+  /**
+   * Task the span is attributed to, when available. Used by sinks that
+   * want to group goldfive-internal work under the driving task on a
+   * Gantt. Empty when the call is not task-scoped (e.g. initial plan
+   * generation, goal-derive).
+   *
+   * @generated from field: string task_id = 4;
+   */
+  taskId: string;
+
+  /**
+   * Wall-clock start time (nanoseconds since the Unix epoch, from
+   * ``time.time_ns()``). Advisory only — the Event envelope's
+   * ``emitted_at`` carries the authoritative emission timestamp.
+   *
+   * @generated from field: int64 start_time_ns = 5;
+   */
+  startTimeNs: bigint;
+};
+
+/**
+ * Describes the message goldfive.v1.GoldfiveLLMCallStart.
+ * Use `create(GoldfiveLLMCallStartSchema)` to create a new message.
+ */
+export const GoldfiveLLMCallStartSchema: GenMessage<GoldfiveLLMCallStart> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 24);
+
+/**
+ * End marker for a goldfive-internal LLM call span. Emitted on both the
+ * success and exception paths so spans always close on the wire.
+ *
+ * @generated from message goldfive.v1.GoldfiveLLMCallEnd
+ */
+export type GoldfiveLLMCallEnd = Message<"goldfive.v1.GoldfiveLLMCallEnd"> & {
+  /**
+   * Unique id matching the corresponding ``GoldfiveLLMCallStart``.
+   *
+   * @generated from field: string span_id = 1;
+   */
+  spanId: string;
+
+  /**
+   * Echo of ``GoldfiveLLMCallStart.name`` so consumers that buffer End
+   * events independently of Start events can still label them.
+   *
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * Wall-clock end time (nanoseconds since the Unix epoch, from
+   * ``time.time_ns()``). Paired with ``GoldfiveLLMCallStart.start_time_ns``
+   * to compute duration without re-deriving from ``emitted_at``.
+   *
+   * @generated from field: int64 end_time_ns = 3;
+   */
+  endTimeNs: bigint;
+
+  /**
+   * Terminal status of the wrapped call. ``"completed"`` when the
+   * ``await`` returned normally; ``"failed"`` when it raised.
+   *
+   * @generated from field: string status = 4;
+   */
+  status: string;
+
+  /**
+   * Error text when ``status == "failed"``. Empty otherwise. Truncated
+   * to 1024 chars with " … [truncated]" when longer — the goal is a
+   * short diagnostic, not a full traceback.
+   *
+   * @generated from field: string error = 5;
+   */
+  error: string;
+};
+
+/**
+ * Describes the message goldfive.v1.GoldfiveLLMCallEnd.
+ * Use `create(GoldfiveLLMCallEndSchema)` to create a new message.
+ */
+export const GoldfiveLLMCallEndSchema: GenMessage<GoldfiveLLMCallEnd> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 25);
 

@@ -16,6 +16,7 @@ import "google/protobuf/timestamp.proto";
 import "harmonograf/v1/types.proto";
 import "goldfive/v1/control.proto";
 import "goldfive/v1/events.proto";
+import "goldfive/v1/types.proto";
 
 option go_package = "github.com/pedapudi/harmonograf/gen/harmonograf/v1;harmonografv1";
 
@@ -377,4 +378,53 @@ message GetStatsResponse {
   // Active telemetry streams right now.
   int32 active_telemetry_streams = 10;
   int32 active_control_streams = 11;
+}
+
+// ---------------------------------------------------------------------------
+// GetSessionPlanHistory
+// ---------------------------------------------------------------------------
+//
+// Returns every persisted plan revision for one session in chronological
+// order, so the Task / Plan panel can render plans as an evolving artifact
+// (generations, supersedes edges annotated with their triggering drift or
+// user steer). The existing ``WatchSession`` path collapses to the latest
+// revision; this RPC hands back the full lineage so the frontend can
+// accumulate into ``SessionStore.planHistory``.
+//
+// Data-shape note (harmonograf#158): ``task_plans`` already denormalizes
+// ``revision_reason`` / ``revision_kind`` / ``revision_index`` /
+// ``trigger_event_id`` at ingest time (see ingest._on_plan_revised). The
+// handler therefore reads only ``task_plans``/``tasks``; no join against
+// ``goldfive_events`` is required. A WARNING is logged when a non-zero
+// revision carries an empty ``revision_kind`` (corrupt / legacy data), but
+// the revision is still returned with empty trigger fields.
+message GetSessionPlanHistoryRequest {
+  string session_id = 1;
+}
+
+message GetSessionPlanHistoryResponse {
+  repeated PlanRevision revisions = 1;
+}
+
+// One persisted plan revision. ``plan`` is the full ``goldfive.v1.Plan``
+// snapshot at this revision — reused rather than mirrored to keep the wire
+// single-sourced at goldfive.
+message PlanRevision {
+  // Full plan snapshot at this revision (goldfive.v1.Plan).
+  goldfive.v1.Plan plan = 1;
+  // 0 for the initial ``plan_submitted``; increments by one per
+  // subsequent revision. Mirrors ``Plan.revision_index``.
+  int32 revision_number = 2;
+  // Human-readable reason. For user steers, the steer body; for drift
+  // refines, the drift detail. Empty on revision 0.
+  string revision_reason = 3;
+  // Upper-case ``DriftKind`` name (e.g. ``"USER_STEER"``,
+  // ``"LOOPING_REASONING"``, ``"CASCADE_CANCEL"``). Empty on revision 0.
+  string revision_kind = 4;
+  // Opaque id of the triggering event. References ``goldfive_events.id``
+  // when applicable (for autonomous drifts: the DriftDetected id; for
+  // user-sourced: the annotation id). Empty on revision 0.
+  string revision_trigger_event_id = 5;
+  // Wall-clock time this revision was persisted (plan.created_at).
+  google.protobuf.Timestamp emitted_at = 6;
 }
