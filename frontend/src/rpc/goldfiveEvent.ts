@@ -69,6 +69,8 @@ function synthesizeDriftSpan(
   targetAgentId: string,
   recordedAtMs: number,
   triggerInput?: string,
+  authoredBy?: string,
+  driftEventId?: string,
 ): void {
   const spanKind: SpanKind = actorId === USER_ACTOR_ID ? 'USER_MESSAGE' : 'CUSTOM';
   const id = `drift-${actorId}-${recordedAtMs}-${kind}`;
@@ -88,6 +90,18 @@ function synthesizeDriftSpan(
   // (not empty-string) when the field is missing on the pre-merge wire.
   if (triggerInput) {
     attributes['drift.trigger_input'] = { kind: 'string', value: triggerInput };
+  }
+  // harmonograf forward-compat: goldfive's /tmp/goldfive-steer-unify branch
+  // adds DriftDetected.authored_by ("user" / "goldfive" / ""). Pre-merge
+  // the field is absent; surface it on the span so the intervention detail
+  // pane can label rows as "Authored by: goldfive" vs "Authored by: user"
+  // once the submodule bumps. Absent / empty-string ⇒ no attribute so the
+  // UI hides the label.
+  if (authoredBy) {
+    attributes['drift.authored_by'] = { kind: 'string', value: authoredBy };
+  }
+  if (driftEventId) {
+    attributes['drift.event_id'] = { kind: 'string', value: driftEventId };
   }
   const span: Span = {
     id,
@@ -215,23 +229,58 @@ function synthesizeUserGoalSpan(
   store.spans.append(span);
 }
 
+// Parameters for the judge-span synthesizer. Grouped into an options
+// object so new forward-compat fields added on the wire (reason,
+// reasoning_input, raw_response, elapsed_ms, model, subject_agent_id)
+// don't balloon the positional arg list. All fields are optional —
+// callers supply what the event carried; missing fields render as empty
+// attributes so the detail panel can hide sections cleanly.
+interface JudgeSpanInput {
+  sessionId: string | null;
+  eventId: string;
+  recordedAtMs: number;
+  // Parsed-verdict fields (post-merge ReasoningJudgeInvoked).
+  onTask: boolean;
+  verdict: string; // 'on_task' | 'drift' | '' when malformed
+  severity: string;
+  reason: string;
+  // Raw judge payload + metadata.
+  reasoningInput: string;
+  rawResponse: string;
+  elapsedMs: number;
+  model: string;
+  subjectAgentId: string;
+  currentTaskId: string;
+}
+
 // Forward-compat: synthesize a "judge" span on the goldfive actor row
 // when a goldfive.v1.ReasoningJudgeInvoked event arrives. The stub may
 // not exist on the pre-merge submodule — callers guard the call path
 // with a string-case check on the oneof so a missing case does not crash
 // ingest. Once the submodule bumps the generated ``Event.payload.case``
 // union includes 'reasoningJudgeInvoked' and TS narrows automatically.
-function synthesizeJudgeSpan(
-  store: SessionStore,
-  sessionId: string | null,
-  verdict: string,
-  severity: string,
-  reasoning: string,
-  currentAgentId: string,
-  currentTaskId: string,
-  recordedAtMs: number,
-): void {
-  const id = `judge-${recordedAtMs}-${verdict || 'on_task'}`;
+//
+// The span carries ``judge.kind = "judge"`` as an explicit discriminator
+// so click handlers can route to JudgeInvocationDetail without having
+// to match on the span name. All the event's structured fields land as
+// string attributes on the span — the detail panel reads them back.
+function synthesizeJudgeSpan(store: SessionStore, input: JudgeSpanInput): void {
+  const {
+    sessionId,
+    eventId,
+    recordedAtMs,
+    onTask,
+    verdict,
+    severity,
+    reason,
+    reasoningInput,
+    rawResponse,
+    elapsedMs,
+    model,
+    subjectAgentId,
+    currentTaskId,
+  } = input;
+  const id = `judge-${recordedAtMs}-${verdict || (onTask ? 'on_task' : 'unspec')}`;
   const name =
     verdict && verdict !== 'on_task'
       ? `judge: ${verdict}${severity ? ` (${severity})` : ''}`
@@ -248,11 +297,26 @@ function synthesizeJudgeSpan(
     endMs: recordedAtMs,
     links: [],
     attributes: {
+      // Discriminator — read by click handlers to route to the judge
+      // detail card. Backed by an explicit attribute (not the span name)
+      // so renames to the display name don't accidentally break routing.
+      'judge.kind': { kind: 'string', value: 'judge' },
+      'judge.event_id': { kind: 'string', value: eventId },
       'judge.verdict': { kind: 'string', value: verdict },
+      'judge.on_task': { kind: 'bool', value: onTask },
       'judge.severity': { kind: 'string', value: severity },
-      'judge.reasoning': { kind: 'string', value: reasoning },
-      'judge.target_agent_id': { kind: 'string', value: currentAgentId },
+      'judge.reason': { kind: 'string', value: reason },
+      'judge.reasoning_input': { kind: 'string', value: reasoningInput },
+      'judge.raw_response': { kind: 'string', value: rawResponse },
+      'judge.elapsed_ms': { kind: 'string', value: String(elapsedMs) },
+      'judge.model': { kind: 'string', value: model },
+      'judge.subject_agent_id': { kind: 'string', value: subjectAgentId },
+      'judge.target_agent_id': { kind: 'string', value: subjectAgentId },
       'judge.target_task_id': { kind: 'string', value: currentTaskId },
+      // Back-compat alias: pre-rework tests and the existing detail
+      // resolvers still read ``judge.reasoning`` (judge's one-sentence
+      // reason / explanation). Keep both until nothing reads it.
+      'judge.reasoning': { kind: 'string', value: reason || reasoningInput },
       'harmonograf.synthetic_span': { kind: 'bool', value: true },
     },
     payloadRefs: [],
@@ -501,6 +565,11 @@ export function applyGoldfiveEvent(
       const emittedMs = emittedAbsMs ? emittedAbsMs - sessionStartMs : 0;
       const kindStr = driftKindToString(d.kind as unknown as number);
       const sevStr = driftSeverityToString(d.severity as unknown as number);
+      // Forward-compat read for DriftDetected.authored_by
+      // (goldfive /tmp/goldfive-steer-unify). Empty on pre-merge events.
+      const duEarly = d as unknown as Record<string, unknown>;
+      const authoredByForRecord =
+        typeof duEarly.authoredBy === 'string' ? (duEarly.authoredBy as string) : '';
       store.drifts.append({
         kind: kindStr,
         severity: sevStr,
@@ -518,6 +587,7 @@ export function applyGoldfiveEvent(
         // subsequent PlanRevised (whose trigger_event_id == this id)
         // onto the drift row.
         driftId: d.id || '',
+        authoredBy: authoredByForRecord,
       });
       // Attribute the drift to an actor row so it shows up in gantt / graph /
       // trajectory without those views having to special-case drift events.
@@ -533,6 +603,8 @@ export function applyGoldfiveEvent(
       const du = d as unknown as Record<string, unknown>;
       const triggerInput =
         typeof du.triggerInput === 'string' ? (du.triggerInput as string) : '';
+      const authoredBy =
+        typeof du.authoredBy === 'string' ? (du.authoredBy as string) : '';
       synthesizeDriftSpan(
         store,
         sessionId,
@@ -544,6 +616,8 @@ export function applyGoldfiveEvent(
         d.currentAgentId,
         emittedMs,
         triggerInput,
+        authoredBy,
+        event.eventId || '',
       );
       return;
     }
@@ -595,7 +669,13 @@ export function applyGoldfiveEvent(
       const emittedAbsMs = tsToMsAbs(event.emittedAt);
       const emittedMs = emittedAbsMs ? emittedAbsMs - sessionStartMs : 0;
       const ju = payload.value as unknown as Record<string, unknown>;
-      const verdict = typeof ju.verdict === 'string' ? (ju.verdict as string) : '';
+      // `verdict` is a harmonograf-local string synthesized from
+      // `on_task`/`severity` since the wire message doesn't expose a
+      // single-string verdict field. Pre-merge test fixtures that set
+      // ``verdict`` directly still flow through (the explicit string
+      // wins over the on_task derivation).
+      const onTaskRaw = ju.onTask;
+      const onTask = typeof onTaskRaw === 'boolean' ? onTaskRaw : false;
       const severityRaw = ju.severity;
       const severity =
         typeof severityRaw === 'string'
@@ -603,22 +683,57 @@ export function applyGoldfiveEvent(
           : typeof severityRaw === 'number'
             ? driftSeverityToString(severityRaw)
             : '';
+      let verdict = typeof ju.verdict === 'string' ? (ju.verdict as string) : '';
+      if (!verdict) {
+        verdict = onTask ? 'on_task' : severity ? severity : '';
+      }
+      // Pre-merge tests pass `reasoning` as the single reasoning string;
+      // post-merge the wire separates `reasoning_input` (what the judge
+      // saw) from `reason` (the judge's explanation). Accept both and
+      // prefer the richer pair when both are set.
       const reasoning =
         typeof ju.reasoning === 'string' ? (ju.reasoning as string) : '';
-      const currentAgentId =
-        typeof ju.currentAgentId === 'string' ? (ju.currentAgentId as string) : '';
+      const reason = typeof ju.reason === 'string' ? (ju.reason as string) : reasoning;
+      const reasoningInput =
+        typeof ju.reasoningInput === 'string'
+          ? (ju.reasoningInput as string)
+          : reasoning;
+      const rawResponse =
+        typeof ju.rawResponse === 'string' ? (ju.rawResponse as string) : '';
+      const elapsedRaw = ju.elapsedMs;
+      let elapsedMs = 0;
+      if (typeof elapsedRaw === 'number') elapsedMs = elapsedRaw;
+      else if (typeof elapsedRaw === 'bigint') elapsedMs = Number(elapsedRaw);
+      const model = typeof ju.model === 'string' ? (ju.model as string) : '';
+      // Post-merge field is `subject_agent_id`; pre-merge test fixtures
+      // used `currentAgentId`. Read both so neither wire shape breaks.
+      const subjectAgentId =
+        typeof ju.subjectAgentId === 'string'
+          ? (ju.subjectAgentId as string)
+          : typeof ju.currentAgentId === 'string'
+            ? (ju.currentAgentId as string)
+            : '';
       const currentTaskId =
-        typeof ju.currentTaskId === 'string' ? (ju.currentTaskId as string) : '';
-      synthesizeJudgeSpan(
-        store,
+        typeof ju.taskId === 'string'
+          ? (ju.taskId as string)
+          : typeof ju.currentTaskId === 'string'
+            ? (ju.currentTaskId as string)
+            : '';
+      synthesizeJudgeSpan(store, {
         sessionId,
+        eventId: event.eventId || '',
+        recordedAtMs: emittedMs,
+        onTask,
         verdict,
         severity,
-        reasoning,
-        currentAgentId,
+        reason,
+        reasoningInput,
+        rawResponse,
+        elapsedMs,
+        model,
+        subjectAgentId,
         currentTaskId,
-        emittedMs,
-      );
+      });
       return;
     }
     case 'delegationObserved': {

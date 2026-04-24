@@ -45,6 +45,10 @@ export interface InterventionDetail {
   // Target task id, when known. Surfaced alongside the agent in the
   // detail pane so the "Target" section can link to the task lane too.
   targetTaskId: string;
+  // Forward-compat: DriftDetected.authored_by ("user" / "goldfive" / "").
+  // Empty string on legacy events or non-drift selections — the view
+  // hides the label in that case.
+  authoredBy?: string;
 }
 
 // Pull a string attribute off a Span, handling absent / wrong-kind gracefully.
@@ -142,11 +146,18 @@ export function resolveDriftDetail(
   const refineTarget = readStringAttr(refineSpan, 'refine.target_agent_id');
   const targetAgentId = refineTarget || drift.agentId || '';
   const targetTaskId = drift.taskId || '';
+  // authored_by is forward-compat (goldfive /tmp/goldfive-steer-unify).
+  // Prefer the drift record field (populated from the wire) and fall
+  // back to the synthesized drift span's attribute (stamped by the
+  // ingest layer) so either carrying path surfaces the label.
+  const authoredBy =
+    drift.authoredBy || readStringAttr(driftSpan, 'drift.authored_by') || '';
   return {
     trigger: triggerParts.join('\n\n'),
     steering: steeringText,
     targetAgentId,
     targetTaskId,
+    authoredBy,
   };
 }
 
@@ -173,6 +184,151 @@ export function resolvePlanRevisionDetail(
     targetAgentId: readStringAttr(refineSpan, 'refine.target_agent_id'),
     targetTaskId: '',
   };
+}
+
+// Verdict bucket used by the judge detail panel to pick the badge + colour.
+// Kept stable across pre-merge / post-merge wire shapes: callers inspect
+// `onTask` / `verdict` / `rawResponse` in that order to decide the bucket.
+export type JudgeVerdictBucket = 'on_task' | 'off_task' | 'no_verdict';
+
+export interface JudgeDetail {
+  // Span that triggered the detail lookup. Held so the view can key off
+  // its id (copy-to-clipboard, deep-link) without a second query.
+  spanId: string;
+  eventId: string;
+  recordedAtMs: number;
+  model: string;
+  elapsedMs: number;
+  subjectAgentId: string;
+  taskId: string;
+  verdictBucket: JudgeVerdictBucket;
+  // Parsed verdict fields.
+  onTask: boolean;
+  severity: string; // empty when on_task or no_verdict
+  reason: string;   // judge's short explanation
+  reasoningInput: string; // what the judge saw (chain-of-thought)
+  rawResponse: string;    // raw LLM output before JSON parse
+  // Steering outcome: the plan-revision this judge invocation triggered,
+  // if any. Resolved via PlanRevised.trigger_event_id == this event id.
+  steeredPlan: TaskPlan | null;
+  steeringSummary: string; // human-readable summary of the plan rev
+  taskSummaries: string[]; // short bullet points for new / changed tasks
+}
+
+function classifyVerdict(
+  onTask: boolean,
+  verdict: string,
+  rawResponse: string,
+): JudgeVerdictBucket {
+  if (onTask || verdict === 'on_task') return 'on_task';
+  // "no verdict" covers malformed / error / null cases where the judge
+  // didn't produce an on_task boolean but emitted raw response text.
+  // We detect this by the absence of a verdict string + the presence of
+  // raw output (otherwise we'd hide empty panels).
+  if (!verdict && rawResponse) return 'no_verdict';
+  if (!verdict && !rawResponse) return 'no_verdict';
+  return 'off_task';
+}
+
+// Resolve detail for a judge-span click. The caller finds the clicked
+// span by id; this helper reads its attributes + scans the plan list
+// for a PlanRevised whose trigger_event_id matches the judge event id.
+export function resolveJudgeDetail(
+  span: Span,
+  plans: readonly TaskPlan[],
+): JudgeDetail {
+  const eventId = readStringAttr(span, 'judge.event_id');
+  const verdict = readStringAttr(span, 'judge.verdict');
+  const onTaskAttr = span.attributes['judge.on_task'];
+  const onTask =
+    onTaskAttr?.kind === 'bool'
+      ? onTaskAttr.value
+      : verdict === 'on_task';
+  const severity = readStringAttr(span, 'judge.severity');
+  const reason = readStringAttr(span, 'judge.reason')
+    || readStringAttr(span, 'judge.reasoning');
+  const reasoningInput = readStringAttr(span, 'judge.reasoning_input')
+    || readStringAttr(span, 'judge.reasoning');
+  const rawResponse = readStringAttr(span, 'judge.raw_response');
+  const model = readStringAttr(span, 'judge.model');
+  const elapsedStr = readStringAttr(span, 'judge.elapsed_ms');
+  const elapsedMs = elapsedStr ? Number(elapsedStr) || 0 : 0;
+  const subjectAgentId = readStringAttr(span, 'judge.subject_agent_id')
+    || readStringAttr(span, 'judge.target_agent_id');
+  const taskId = readStringAttr(span, 'judge.target_task_id');
+  const verdictBucket = classifyVerdict(onTask, verdict, rawResponse);
+
+  let steeredPlan: TaskPlan | null = null;
+  if (eventId && verdictBucket === 'off_task') {
+    for (const p of plans) {
+      if ((p.revisionIndex ?? 0) <= 0) continue;
+      if (p.triggerEventId === eventId) {
+        // Prefer the latest revision when multiple match (chained refines).
+        if (!steeredPlan || p.createdAtMs > steeredPlan.createdAtMs) {
+          steeredPlan = p;
+        }
+      }
+    }
+  }
+
+  let steeringSummary = '';
+  const taskSummaries: string[] = [];
+  if (steeredPlan) {
+    steeringSummary = steeredPlan.revisionReason
+      || `Plan revised to r${steeredPlan.revisionIndex}`;
+    // Stash new-task titles for the view to list. Keep the list short:
+    // the detail panel is a peek surface, not the full plan diff.
+    const maxTasks = 6;
+    for (const t of steeredPlan.tasks.slice(0, maxTasks)) {
+      const label = t.title || t.id || '';
+      if (!label) continue;
+      const flag =
+        t.status === 'CANCELLED'
+          ? 'cancelled: '
+          : t.status === 'FAILED'
+            ? 'failed: '
+            : '';
+      taskSummaries.push(`${flag}${label}`);
+    }
+    if (steeredPlan.tasks.length > maxTasks) {
+      taskSummaries.push(`… +${steeredPlan.tasks.length - maxTasks} more`);
+    }
+  }
+
+  return {
+    spanId: span.id,
+    eventId,
+    recordedAtMs: span.startMs,
+    model,
+    elapsedMs,
+    subjectAgentId,
+    taskId,
+    verdictBucket,
+    onTask,
+    severity,
+    reason,
+    reasoningInput,
+    rawResponse,
+    steeredPlan,
+    steeringSummary,
+    taskSummaries,
+  };
+}
+
+// Returns true when the given span was synthesized by the judge-event
+// ingest path. Click handlers route to the judge detail card when this
+// is true. The discriminator is an explicit attribute stamped by the
+// synthesizer (see goldfiveEvent.synthesizeJudgeSpan) — do NOT match on
+// the span name, since display-name renames would silently break
+// routing.
+export function isJudgeSpan(span: Span | null | undefined): boolean {
+  if (!span) return false;
+  const attr = span.attributes['judge.kind'];
+  if (attr && attr.kind === 'string' && attr.value === 'judge') return true;
+  // Back-compat for spans produced before the `judge.kind` attribute
+  // existed: the old synthesizer named spans `judge: ...`. Keep matching
+  // so older sessions replayed from the server don't lose the routing.
+  return span.agentId === '__goldfive__' && span.name.startsWith('judge:');
 }
 
 // Resolve detail for a task cancellation (terminal status + cancelReason).

@@ -1,0 +1,274 @@
+/* Judge invocation detail panel. Shares the visual language of
+   InterventionsList.css (uppercase tiny labels, severity swatches) so
+   it slots into the goldfive panel without its own theme. */
+
+.hg-judge-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--md-sys-color-on-surface, #e2e2e9);
+  font: 12px/1.4 var(--md-sys-typescale-body-small-font, system-ui, sans-serif);
+}
+
+.hg-judge-detail__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant, #43474e);
+}
+
+.hg-judge-detail__title {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.2px;
+}
+
+.hg-judge-detail__meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  color: var(--md-sys-color-on-surface-variant, #9da3b4);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hg-judge-detail__at,
+.hg-judge-detail__elapsed,
+.hg-judge-detail__model {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.hg-judge-detail__badges {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.hg-judge-detail__verdict {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #0b0d12;
+}
+
+.hg-judge-detail__verdict[data-bucket='on_task'] {
+  background: #3bb273;
+}
+.hg-judge-detail__verdict[data-bucket='off_task'] {
+  background: #e06070;
+}
+.hg-judge-detail__verdict[data-bucket='no_verdict'] {
+  background: #8d9199;
+}
+
+.hg-judge-detail__severity {
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 9px;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: #0b0d12;
+  background: #f59e0b;
+}
+
+.hg-judge-detail__severity[data-severity='critical'] {
+  background: #e06070;
+}
+.hg-judge-detail__severity[data-severity='info'] {
+  background: #5b8def;
+  color: #e8f0ff;
+}
+
+.hg-judge-detail__section-label {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  opacity: 0.7;
+  margin-bottom: 2px;
+}
+
+.hg-judge-detail__context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+
+.hg-judge-detail__ctx-link,
+.hg-judge-detail__ctx-plain {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+
+.hg-judge-detail__ctx-plain {
+  cursor: default;
+}
+
+.hg-judge-detail__ctx-link:hover {
+  text-decoration: underline;
+}
+
+.hg-judge-detail__ctx-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  opacity: 0.65;
+  letter-spacing: 0.3px;
+}
+
+.hg-judge-detail__collapsible {
+  border: 1px solid var(--md-sys-color-outline-variant, #43474e);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.hg-judge-detail__collapsible-header {
+  display: flex;
+  align-items: center;
+  padding: 4px 6px;
+}
+
+.hg-judge-detail__collapsible-toggle {
+  flex: 1;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  opacity: 0.8;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hg-judge-detail__collapsible-toggle:hover {
+  opacity: 1;
+}
+
+.hg-judge-detail__copy {
+  background: transparent;
+  border: 1px solid var(--md-sys-color-outline-variant, #43474e);
+  color: inherit;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.hg-judge-detail__copy:hover {
+  opacity: 1;
+}
+
+.hg-judge-detail__collapsible-body {
+  padding: 4px 8px 6px;
+}
+
+.hg-judge-detail__pre {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  font: 11px/1.45 var(--hg-mono, ui-monospace, Menlo, monospace);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--md-sys-color-on-surface, #e2e2e9);
+}
+
+.hg-judge-detail__verdict-section {
+  padding: 4px 0;
+}
+
+.hg-judge-detail__reason {
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.hg-judge-detail__reason--off {
+  border-left: 3px solid #e06070;
+  background: rgba(224, 96, 112, 0.08);
+}
+
+.hg-judge-detail__reason--none {
+  font-style: italic;
+  opacity: 0.75;
+}
+
+.hg-judge-detail__empty {
+  padding: 4px 8px;
+  font-style: italic;
+  opacity: 0.65;
+  font-size: 11px;
+}
+
+.hg-judge-detail__steering {
+  padding: 6px 8px;
+  background: rgba(168, 200, 255, 0.06);
+  border: 1px solid rgba(168, 200, 255, 0.15);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hg-judge-detail__steering-link {
+  background: transparent;
+  border: 0;
+  color: var(--md-sys-color-primary, #a8c8ff);
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.hg-judge-detail__steering-link:disabled {
+  cursor: default;
+  color: var(--md-sys-color-on-surface, #e2e2e9);
+  font-weight: 600;
+}
+
+.hg-judge-detail__steering-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.hg-judge-detail__steering-summary {
+  font-size: 11px;
+  opacity: 0.85;
+  white-space: pre-wrap;
+}
+
+.hg-judge-detail__tasks {
+  list-style: disc;
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.hg-judge-detail__tasks li {
+  margin-bottom: 1px;
+}

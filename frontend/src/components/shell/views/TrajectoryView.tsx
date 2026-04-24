@@ -1444,6 +1444,21 @@ function InterventionDetailSections({
           {detail.targetTaskId && (
             <code style={{ opacity: 0.7, fontSize: 10 }}>{detail.targetTaskId}</code>
           )}
+          {detail.authoredBy && (
+            <span
+              data-testid="detail-drift-authored-by"
+              data-authored-by={detail.authoredBy}
+              title="Who initiated this intervention"
+              style={{
+                fontSize: 10,
+                opacity: 0.65,
+                marginLeft: 'auto',
+                textTransform: 'none',
+              }}
+            >
+              Authored by: {detail.authoredBy}
+            </span>
+          )}
         </div>
       )}
     </section>

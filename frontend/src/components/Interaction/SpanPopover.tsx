@@ -1,14 +1,25 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { OverlayContext } from '../../gantt/GanttCanvas';
 import { usePopoverStore, type SpanPopover as SpanPopoverState } from '../../state/popoverStore';
 import { useUiStore } from '../../state/uiStore';
 import { useAgentLive, usePostAnnotation, useSendControl } from '../../rpc/hooks';
 import type { Span, SpanKind } from '../../gantt/types';
+import type { SessionStore } from '../../gantt/index';
+import { bareAgentName } from '../../gantt/index';
 import {
   extractThinkingText,
   formatThinkingPreview,
   hasThinking as spanHasThinking,
 } from '../../lib/thinking';
+import {
+  isJudgeSpan,
+  resolveJudgeDetail,
+} from '../../lib/interventionDetail';
+import type { TaskPlan } from '../../gantt/types';
+import { JudgeInvocationDetail } from '../Interventions/JudgeInvocationDetail';
+
+// Local alias purely for useMemo annotation.
+type TaskPlanForJudge = TaskPlan;
 
 // Floating quick-look popover anchored to a span block. Separate from the
 // full Inspector Drawer: the drawer is the deep-dive surface, this is the
@@ -87,6 +98,7 @@ export function SpanPopover({ ctx, sessionId }: Props) {
             key={p.spanId}
             state={p}
             span={span}
+            store={store}
             sessionId={sessionId}
             left={left}
             top={top}
@@ -122,6 +134,7 @@ function computePosition(
 function PopoverCard({
   state,
   span,
+  store,
   sessionId,
   left,
   top,
@@ -130,6 +143,7 @@ function PopoverCard({
 }: {
   state: SpanPopoverState;
   span: Span;
+  store: SessionStore;
   sessionId: string;
   left: number;
   top: number;
@@ -141,6 +155,27 @@ function PopoverCard({
   const post = usePostAnnotation();
   const agent = useAgentLive(sessionId, span.agentId);
   const agentName = agent?.name || span.agentId;
+
+  // Judge spans render a specialised detail block under the meta header
+  // so operators can see the judge's input + verdict + steering outcome
+  // without bouncing to another view. The generic kind/status/duration
+  // block still renders above; the judge detail supplants the Thinking /
+  // Steer / Annotate sections (none of those apply to a synthesised
+  // zero-duration event span).
+  const judgeMode = isJudgeSpan(span);
+  const judgeDetail = useMemo(() => {
+    if (!judgeMode) return null;
+    const plans: TaskPlanForJudge[] = [];
+    const seen = new Set<TaskPlanForJudge>();
+    for (const live of store.tasks.listPlans()) {
+      for (const snap of store.tasks.allRevsForPlan(live.id)) {
+        if (seen.has(snap)) continue;
+        seen.add(snap);
+        plans.push(snap);
+      }
+    }
+    return resolveJudgeDetail(span, plans);
+  }, [span, store, judgeMode]);
   const duration =
     span.endMs != null ? `${Math.max(0, span.endMs - span.startMs).toFixed(0)}ms` : '…';
 
@@ -200,16 +235,22 @@ function PopoverCard({
     void post({ sessionId, spanId: span.id, body: text, kind: 'COMMENT' }).catch(() => {});
   };
 
+  // Judge popovers carry more content (reasoning input, raw response,
+  // steering outcome); widen them so the sections don't truncate the
+  // reader's eye on typical laptops.
+  const popoverWidth = judgeMode ? POPOVER_WIDTH + 80 : POPOVER_WIDTH;
+
   return (
     <div
       role="dialog"
       data-testid="span-popover"
+      data-judge={judgeMode ? 'true' : 'false'}
       data-pinned={state.pinned ? 'true' : 'false'}
       style={{
         position: 'absolute',
         left,
         top,
-        width: POPOVER_WIDTH,
+        width: popoverWidth,
         pointerEvents: 'auto',
         background: 'var(--md-sys-color-surface-container-highest, #31333c)',
         color: 'var(--md-sys-color-on-surface, #e2e2e9)',
@@ -272,7 +313,35 @@ function PopoverCard({
           {duration}
         </div>
       </div>
-      {thinkingHint && (
+      {judgeMode && judgeDetail && (
+        <div style={{ marginTop: 10 }}>
+          <JudgeInvocationDetail
+            detail={judgeDetail}
+            resolveAgentName={(id) => store.agents.get(id)?.name || bareAgentName(id) || id}
+            onFocusAgent={(id) => {
+              useUiStore.getState().setFocusedAgent(id);
+            }}
+            onFocusTask={(id) => {
+              useUiStore.getState().selectTask(id);
+            }}
+            onOpenSteering={(_planId, _revIdx) => {
+              // Today the intervention-detail panel lives in TrajectoryView;
+              // the cleanest hand-off is to surface the plan revision there.
+              // The PlanRevised event is already rendered as a separate
+              // "refine:" span on the goldfive lane (goldfiveEvent.ts), so
+              // we select that span — clicking opens its own popover with
+              // the existing Trigger/Steering/Target panel for plan revs.
+              void _planId;
+              void _revIdx;
+              // Leave close-before-open so the popover doesn't visually
+              // stack; the user can click the refine span to see its
+              // details.
+              onClose();
+            }}
+          />
+        </div>
+      )}
+      {!judgeMode && thinkingHint && (
         <div
           data-testid="span-popover-thinking"
           data-open={thinkingOpen ? 'true' : 'false'}
@@ -362,14 +431,20 @@ function PopoverCard({
           borderTop: '1px solid var(--md-sys-color-outline-variant, #43474e)',
         }}
       >
-        <ActionButton onClick={toggleSteer} primary={steerOpen}>Steer</ActionButton>
-        <ActionButton onClick={annotate}>Annotate</ActionButton>
+        {!judgeMode && (
+          <>
+            <ActionButton onClick={toggleSteer} primary={steerOpen}>Steer</ActionButton>
+            <ActionButton onClick={annotate}>Annotate</ActionButton>
+          </>
+        )}
         <ActionButton onClick={copyId}>Copy id</ActionButton>
-        <ActionButton onClick={openInDrawer} primary>
-          Open drawer
-        </ActionButton>
+        {!judgeMode && (
+          <ActionButton onClick={openInDrawer} primary>
+            Open drawer
+          </ActionButton>
+        )}
       </div>
-      {steerOpen && (
+      {!judgeMode && steerOpen && (
         <div
           style={{
             marginTop: 8,
