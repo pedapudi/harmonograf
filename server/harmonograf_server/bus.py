@@ -62,6 +62,15 @@ DELTA_SESSION_ENDED = "session_ended"
 # same "intervention timeline marker" role as DELTA_DRIFT but with a
 # stop-glyph rather than a drift chevron.
 DELTA_INVOCATION_CANCELLED = "invocation_cancelled"
+# Operator-observability: goldfive started / failed a refine attempt
+# (goldfive#264). RefineAttempted fires at the start of every refine,
+# RefineFailed fires when the attempt produced an unusable outcome.
+# A successful attempt is reported by the existing PlanRevised goldfive
+# event; correlation between attempted ↔ terminal lives on the frontend
+# via the shared ``attempt_id``. The frontend collapses a paired
+# attempted+terminal into a single intervention row per attempt.
+DELTA_REFINE_ATTEMPTED = "refine_attempted"
+DELTA_REFINE_FAILED = "refine_failed"
 
 
 @dataclass
@@ -430,6 +439,95 @@ class SessionBus:
                     "drift_kind": drift_kind,
                     "detail": detail,
                     "tool_name": tool_name,
+                    "recorded_at": recorded_at,
+                },
+            )
+        )
+
+    def publish_refine_attempted(
+        self,
+        session_id: str,
+        run_id: str,
+        *,
+        sequence: int = 0,
+        emitted_at: float | None = None,
+        attempt_id: str = "",
+        drift_id: str = "",
+        trigger_kind: str = "",
+        trigger_severity: str = "",
+        current_task_id: str = "",
+        current_agent_id: str = "",
+        recorded_at: float | None = None,
+    ) -> None:
+        """Publish a ``refine_attempted`` record onto the session bus.
+
+        Fields mirror the wire ``RefineAttempted`` message (see
+        ``telemetry.proto``). ``recorded_at`` is the ingest-side wall
+        clock; ``emitted_at`` is the goldfive-side wall clock from the
+        envelope. Frontend prefers ``emitted_at`` and falls back to
+        ``recorded_at`` (matches the DELTA_INVOCATION_CANCELLED pattern).
+        """
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_REFINE_ATTEMPTED,
+                {
+                    "run_id": run_id,
+                    "sequence": int(sequence or 0),
+                    "emitted_at": emitted_at,
+                    "attempt_id": attempt_id,
+                    "drift_id": drift_id,
+                    "trigger_kind": trigger_kind,
+                    "trigger_severity": trigger_severity,
+                    "current_task_id": current_task_id,
+                    "current_agent_id": current_agent_id,
+                    "recorded_at": recorded_at,
+                },
+            )
+        )
+
+    def publish_refine_failed(
+        self,
+        session_id: str,
+        run_id: str,
+        *,
+        sequence: int = 0,
+        emitted_at: float | None = None,
+        attempt_id: str = "",
+        drift_id: str = "",
+        trigger_kind: str = "",
+        trigger_severity: str = "",
+        failure_kind: str = "",
+        reason: str = "",
+        detail: str = "",
+        current_task_id: str = "",
+        current_agent_id: str = "",
+        recorded_at: float | None = None,
+    ) -> None:
+        """Publish a ``refine_failed`` record onto the session bus.
+
+        Fields mirror the wire ``RefineFailed`` message. The
+        ``failure_kind`` enum-like string is taxonomy-typed but carried
+        as a string so the wire stays forward-compatible without
+        another proto bump when goldfive adds a new failure kind.
+        """
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_REFINE_FAILED,
+                {
+                    "run_id": run_id,
+                    "sequence": int(sequence or 0),
+                    "emitted_at": emitted_at,
+                    "attempt_id": attempt_id,
+                    "drift_id": drift_id,
+                    "trigger_kind": trigger_kind,
+                    "trigger_severity": trigger_severity,
+                    "failure_kind": failure_kind,
+                    "reason": reason,
+                    "detail": detail,
+                    "current_task_id": current_task_id,
+                    "current_agent_id": current_agent_id,
                     "recorded_at": recorded_at,
                 },
             )

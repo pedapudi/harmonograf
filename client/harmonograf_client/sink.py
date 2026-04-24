@@ -279,7 +279,124 @@ class HarmonografSink:
         probe in :meth:`emit`.
         """
         kind = event.get("kind", "") or ""
+        if kind == "refine_attempted":
+            self._emit_refine_attempted(event)
+            return
+        if kind == "refine_failed":
+            self._emit_refine_failed(event)
+            return
+        # ``plan_revised`` lands as both a goldfive proto Event AND a
+        # dict envelope (the steerer fires the dict as a correlation
+        # side-car carrying ``attempt_id``, see goldfive#264). The
+        # proto path is authoritative; drop the dict here so the server
+        # doesn't double-publish the plan revision.
+        if kind == "plan_revised":
+            return
+        # ``invocation_cancelled`` is now a typed goldfive proto event
+        # (goldfive#262, harmonograf#190). A pre-#262 client that still
+        # ships dicts ends up here — drop at DEBUG; the typed path is
+        # the only supported route.
         logger.debug("ignoring unknown dict goldfive event kind=%r", kind)
+
+    def _emit_refine_attempted(self, event: dict) -> None:
+        """Convert a goldfive ``refine_attempted`` dict → proto.
+
+        Field-by-field mirror of
+        ``goldfive/steerer.py::DefaultSteerer._emit_refine_attempted``.
+        ``current_agent_id`` is canonicalized bare→compound the same
+        way the goldfive_event branch canonicalizes agent ids.
+
+        Pre-bump tolerance: callers that ship the event before the
+        sibling proto stubs regenerate would land here with no
+        ``RefineAttempted`` symbol on ``telemetry_pb2``; the
+        ``getattr`` guard returns ``None`` and the helper is a no-op.
+        """
+        telemetry_pb2 = self._client._telemetry_pb2  # type: ignore[attr-defined]
+        ctor = getattr(telemetry_pb2, "RefineAttempted", None)
+        if ctor is None:
+            logger.debug(
+                "harmonograf telemetry_pb2 missing RefineAttempted; "
+                "skip emit (proto stubs need regeneration)"
+            )
+            return
+        payload = event.get("payload", {}) or {}
+        agent_id = str(payload.get("current_agent_id", "") or "")
+        if agent_id:
+            agent_id = self._compound(agent_id)
+
+        seconds_val, nanos_val = self._read_emitted_at(event)
+        msg = ctor(
+            run_id=str(event.get("run_id", "") or ""),
+            sequence=max(0, int(event.get("sequence", 0) or 0)),
+            session_id=str(event.get("session_id", "") or ""),
+            attempt_id=str(payload.get("attempt_id", "") or ""),
+            drift_id=str(payload.get("drift_id", "") or ""),
+            trigger_kind=str(payload.get("trigger_kind", "") or ""),
+            trigger_severity=str(payload.get("trigger_severity", "") or ""),
+            current_task_id=str(payload.get("current_task_id", "") or ""),
+            current_agent_id=agent_id,
+        )
+        if seconds_val or nanos_val:
+            msg.emitted_at.seconds = seconds_val
+            msg.emitted_at.nanos = nanos_val
+        self._client.emit_refine_attempted(msg)
+
+    def _emit_refine_failed(self, event: dict) -> None:
+        """Convert a goldfive ``refine_failed`` dict → proto.
+
+        Field-by-field mirror of
+        ``goldfive/steerer.py::DefaultSteerer._emit_refine_failed``.
+        Same agent-id canonicalization rule as the attempted side.
+        """
+        telemetry_pb2 = self._client._telemetry_pb2  # type: ignore[attr-defined]
+        ctor = getattr(telemetry_pb2, "RefineFailed", None)
+        if ctor is None:
+            logger.debug(
+                "harmonograf telemetry_pb2 missing RefineFailed; "
+                "skip emit (proto stubs need regeneration)"
+            )
+            return
+        payload = event.get("payload", {}) or {}
+        agent_id = str(payload.get("current_agent_id", "") or "")
+        if agent_id:
+            agent_id = self._compound(agent_id)
+
+        seconds_val, nanos_val = self._read_emitted_at(event)
+        msg = ctor(
+            run_id=str(event.get("run_id", "") or ""),
+            sequence=max(0, int(event.get("sequence", 0) or 0)),
+            session_id=str(event.get("session_id", "") or ""),
+            attempt_id=str(payload.get("attempt_id", "") or ""),
+            drift_id=str(payload.get("drift_id", "") or ""),
+            trigger_kind=str(payload.get("trigger_kind", "") or ""),
+            trigger_severity=str(payload.get("trigger_severity", "") or ""),
+            failure_kind=str(payload.get("failure_kind", "") or ""),
+            reason=str(payload.get("reason", "") or ""),
+            detail=str(payload.get("detail", "") or ""),
+            current_task_id=str(payload.get("current_task_id", "") or ""),
+            current_agent_id=agent_id,
+        )
+        if seconds_val or nanos_val:
+            msg.emitted_at.seconds = seconds_val
+            msg.emitted_at.nanos = nanos_val
+        self._client.emit_refine_failed(msg)
+
+    @staticmethod
+    def _read_emitted_at(event: dict) -> tuple[int, int]:
+        """Read the ``emitted_at`` ``{"seconds", "nanos"}`` pair off a
+        dict envelope. Tolerant of missing / malformed fields — returns
+        ``(0, 0)`` so the caller can leave the proto Timestamp unset
+        and let the server stamp wall-clock on receipt (matches the
+        invocation_cancelled fallback)."""
+        emitted_at = event.get("emitted_at") or {}
+        if not isinstance(emitted_at, dict):
+            return (0, 0)
+        try:
+            seconds_val = int(emitted_at.get("seconds", 0) or 0)
+            nanos_val = int(emitted_at.get("nanos", 0) or 0)
+        except (TypeError, ValueError):
+            return (0, 0)
+        return (seconds_val, nanos_val)
 
     async def close(self) -> None:
         """Mark the sink as closed. Does *not* shut down the underlying client.

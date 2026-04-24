@@ -14,6 +14,7 @@ package harmonograf.v1;
 
 import "google/protobuf/timestamp.proto";
 import "harmonograf/v1/types.proto";
+import "harmonograf/v1/telemetry.proto";
 import "goldfive/v1/control.proto";
 import "goldfive/v1/events.proto";
 import "goldfive/v1/types.proto";
@@ -124,6 +125,16 @@ message SessionUpdate {
     // persisted plans + task state, then streamed live as
     // HarmonografSink ingest fans out deltas on the bus.
     goldfive.v1.Event goldfive_event = 19;
+    // Operator-observability: goldfive started / failed a refine attempt
+    // (goldfive#264). Fanned out alongside ``goldfive_event`` so the
+    // frontend can correlate ``RefineAttempted`` ↔ ``PlanRevised`` /
+    // ``RefineFailed`` by ``attempt_id`` and merge them into a single
+    // intervention row per attempt. Same dict→proto pattern that
+    // ``invocation_cancelled`` used pre-#190; when goldfive Stream C
+    // (#256) promotes these to typed proto variants the slots collapse
+    // into the existing ``goldfive_event`` envelope.
+    RefineAttempted refine_attempted = 21;
+    RefineFailed refine_failed = 22;
   }
 }
 

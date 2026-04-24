@@ -523,6 +523,8 @@ describe('marker sizing / palette', () => {
       triggerEventId: 'ann',
       targetAgentId: '',
       driftId: '',
+      attemptId: '',
+      failureKind: '',
     });
     const baseDrift = markerRadiusFor({
       key: 'd',
@@ -539,6 +541,8 @@ describe('marker sizing / palette', () => {
       triggerEventId: '',
       targetAgentId: '',
       driftId: '',
+      attemptId: '',
+      failureKind: '',
     });
     expect(baseDrift).toBeGreaterThan(baseUser);
   });

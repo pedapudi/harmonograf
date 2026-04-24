@@ -30,7 +30,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file harmonograf/v1/telemetry.proto.
  */
 export const file_harmonograf_v1_telemetry: GenFile = /*@__PURE__*/
-  fileDesc("Ch5oYXJtb25vZ3JhZi92MS90ZWxlbWV0cnkucHJvdG8SDmhhcm1vbm9ncmFmLnYxIssCCgVIZWxsbxIQCghhZ2VudF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEgwKBG5hbWUYAyABKAkSLAoJZnJhbWV3b3JrGAQgASgOMhkuaGFybW9ub2dyYWYudjEuRnJhbWV3b3JrEhkKEWZyYW1ld29ya192ZXJzaW9uGAUgASgJEjAKDGNhcGFiaWxpdGllcxgGIAMoDjIaLmhhcm1vbm9ncmFmLnYxLkNhcGFiaWxpdHkSNQoIbWV0YWRhdGEYByADKAsyIy5oYXJtb25vZ3JhZi52MS5IZWxsby5NZXRhZGF0YUVudHJ5EhQKDHJlc3VtZV90b2tlbhgIIAEoCRIVCg1zZXNzaW9uX3RpdGxlGAkgASgJGi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASIvCglTcGFuU3RhcnQSIgoEc3BhbhgBIAEoCzIULmhhcm1vbm9ncmFmLnYxLlNwYW4ijgIKClNwYW5VcGRhdGUSDwoHc3Bhbl9pZBgBIAEoCRI+CgphdHRyaWJ1dGVzGAIgAygLMiouaGFybW9ub2dyYWYudjEuU3BhblVwZGF0ZS5BdHRyaWJ1dGVzRW50cnkSKgoGc3RhdHVzGAMgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIwCgxwYXlsb2FkX3JlZnMYBCADKAsyGi5oYXJtb25vZ3JhZi52MS5QYXlsb2FkUmVmGlEKD0F0dHJpYnV0ZXNFbnRyeRILCgNrZXkYASABKAkSLQoFdmFsdWUYAiABKAsyHi5oYXJtb25vZ3JhZi52MS5BdHRyaWJ1dGVWYWx1ZToCOAEi4AIKB1NwYW5FbmQSDwoHc3Bhbl9pZBgBIAEoCRIsCghlbmRfdGltZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKgoGc3RhdHVzGAMgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIoCgVlcnJvchgEIAEoCzIZLmhhcm1vbm9ncmFmLnYxLkVycm9ySW5mbxI7CgphdHRyaWJ1dGVzGAUgAygLMicuaGFybW9ub2dyYWYudjEuU3BhbkVuZC5BdHRyaWJ1dGVzRW50cnkSMAoMcGF5bG9hZF9yZWZzGAYgAygLMhouaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlZhpRCg9BdHRyaWJ1dGVzRW50cnkSCwoDa2V5GAEgASgJEi0KBXZhbHVlGAIgASgLMh4uaGFybW9ub2dyYWYudjEuQXR0cmlidXRlVmFsdWU6AjgBIm8KDVBheWxvYWRVcGxvYWQSDgoGZGlnZXN0GAEgASgJEhIKCnRvdGFsX3NpemUYAiABKAMSDAoEbWltZRgDIAEoCRINCgVjaHVuaxgEIAEoDBIMCgRsYXN0GAUgASgIEg8KB2V2aWN0ZWQYBiABKAgi1QIKCUhlYXJ0YmVhdBIXCg9idWZmZXJlZF9ldmVudHMYASABKAMSFgoOZHJvcHBlZF9ldmVudHMYAiABKAMSHgoWZHJvcHBlZF9zcGFuc19jcml0aWNhbBgDIAEoAxIeChZidWZmZXJlZF9wYXlsb2FkX2J5dGVzGAQgASgDEhgKEHBheWxvYWRzX2V2aWN0ZWQYBSABKAMSFAoMY3B1X3NlbGZfcGN0GAYgASgBEi8KC2NsaWVudF90aW1lGAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIYChBwcm9ncmVzc19jb3VudGVyGAggASgDEhgKEGN1cnJlbnRfYWN0aXZpdHkYCSABKAkSHQoVY29udGV4dF93aW5kb3dfdG9rZW5zGAogASgDEiMKG2NvbnRleHRfd2luZG93X2xpbWl0X3Rva2VucxgLIAEoAyIZCgdHb29kYnllEg4KBnJlYXNvbhgBIAEoCSLLAwoLVGVsZW1ldHJ5VXASJgoFaGVsbG8YASABKAsyFS5oYXJtb25vZ3JhZi52MS5IZWxsb0gAEi8KCnNwYW5fc3RhcnQYAiABKAsyGS5oYXJtb25vZ3JhZi52MS5TcGFuU3RhcnRIABIxCgtzcGFuX3VwZGF0ZRgDIAEoCzIaLmhhcm1vbm9ncmFmLnYxLlNwYW5VcGRhdGVIABIrCghzcGFuX2VuZBgEIAEoCzIXLmhhcm1vbm9ncmFmLnYxLlNwYW5FbmRIABIwCgdwYXlsb2FkGAUgASgLMh0uaGFybW9ub2dyYWYudjEuUGF5bG9hZFVwbG9hZEgAEi4KCWhlYXJ0YmVhdBgGIAEoCzIZLmhhcm1vbm9ncmFmLnYxLkhlYXJ0YmVhdEgAEi4KC2NvbnRyb2xfYWNrGAcgASgLMhcuZ29sZGZpdmUudjEuQ29udHJvbEFja0gAEioKB2dvb2RieWUYCCABKAsyFy5oYXJtb25vZ3JhZi52MS5Hb29kYnllSAASLAoOZ29sZGZpdmVfZXZlbnQYCyABKAsyEi5nb2xkZml2ZS52MS5FdmVudEgAQgUKA21zZ0oECAkQCkoECAoQC0oECAwQDSKAAgoHV2VsY29tZRIQCghhY2NlcHRlZBgBIAEoCBIbChNhc3NpZ25lZF9zZXNzaW9uX2lkGAIgASgJEhoKEmFzc2lnbmVkX3N0cmVhbV9pZBgDIAEoCRIvCgtzZXJ2ZXJfdGltZRgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMQoFZmxhZ3MYBSADKAsyIi5oYXJtb25vZ3JhZi52MS5XZWxjb21lLkZsYWdzRW50cnkSGAoQcmVqZWN0aW9uX3JlYXNvbhgGIAEoCRosCgpGbGFnc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiIAoOUGF5bG9hZFJlcXVlc3QSDgoGZGlnZXN0GAEgASgJIocBCgtGbG93Q29udHJvbBIyCgZhY3Rpb24YASABKA4yIi5oYXJtb25vZ3JhZi52MS5GbG93Q29udHJvbC5BY3Rpb24iRAoGQWN0aW9uEhYKEkFDVElPTl9VTlNQRUNJRklFRBAAEg8KC0FDVElPTl9TTE9XEAESEQoNQUNUSU9OX1JFU1VNRRACIh8KDVNlcnZlckdvb2RieWUSDgoGcmVhc29uGAEgASgJIusBCg1UZWxlbWV0cnlEb3duEioKB3dlbGNvbWUYASABKAsyFy5oYXJtb25vZ3JhZi52MS5XZWxjb21lSAASOQoPcGF5bG9hZF9yZXF1ZXN0GAIgASgLMh4uaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlcXVlc3RIABIzCgxmbG93X2NvbnRyb2wYAyABKAsyGy5oYXJtb25vZ3JhZi52MS5GbG93Q29udHJvbEgAEjcKDnNlcnZlcl9nb29kYnllGAQgASgLMh0uaGFybW9ub2dyYWYudjEuU2VydmVyR29vZGJ5ZUgAQgUKA21zZ0JCWkBnaXRodWIuY29tL3BlZGFwdWRpL2hhcm1vbm9ncmFmL2dlbi9oYXJtb25vZ3JhZi92MTtoYXJtb25vZ3JhZnYxYgZwcm90bzM", [file_google_protobuf_timestamp, file_harmonograf_v1_types, file_goldfive_v1_control, file_goldfive_v1_events]);
+  fileDesc("Ch5oYXJtb25vZ3JhZi92MS90ZWxlbWV0cnkucHJvdG8SDmhhcm1vbm9ncmFmLnYxIssCCgVIZWxsbxIQCghhZ2VudF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEgwKBG5hbWUYAyABKAkSLAoJZnJhbWV3b3JrGAQgASgOMhkuaGFybW9ub2dyYWYudjEuRnJhbWV3b3JrEhkKEWZyYW1ld29ya192ZXJzaW9uGAUgASgJEjAKDGNhcGFiaWxpdGllcxgGIAMoDjIaLmhhcm1vbm9ncmFmLnYxLkNhcGFiaWxpdHkSNQoIbWV0YWRhdGEYByADKAsyIy5oYXJtb25vZ3JhZi52MS5IZWxsby5NZXRhZGF0YUVudHJ5EhQKDHJlc3VtZV90b2tlbhgIIAEoCRIVCg1zZXNzaW9uX3RpdGxlGAkgASgJGi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASIvCglTcGFuU3RhcnQSIgoEc3BhbhgBIAEoCzIULmhhcm1vbm9ncmFmLnYxLlNwYW4ijgIKClNwYW5VcGRhdGUSDwoHc3Bhbl9pZBgBIAEoCRI+CgphdHRyaWJ1dGVzGAIgAygLMiouaGFybW9ub2dyYWYudjEuU3BhblVwZGF0ZS5BdHRyaWJ1dGVzRW50cnkSKgoGc3RhdHVzGAMgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIwCgxwYXlsb2FkX3JlZnMYBCADKAsyGi5oYXJtb25vZ3JhZi52MS5QYXlsb2FkUmVmGlEKD0F0dHJpYnV0ZXNFbnRyeRILCgNrZXkYASABKAkSLQoFdmFsdWUYAiABKAsyHi5oYXJtb25vZ3JhZi52MS5BdHRyaWJ1dGVWYWx1ZToCOAEi4AIKB1NwYW5FbmQSDwoHc3Bhbl9pZBgBIAEoCRIsCghlbmRfdGltZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKgoGc3RhdHVzGAMgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIoCgVlcnJvchgEIAEoCzIZLmhhcm1vbm9ncmFmLnYxLkVycm9ySW5mbxI7CgphdHRyaWJ1dGVzGAUgAygLMicuaGFybW9ub2dyYWYudjEuU3BhbkVuZC5BdHRyaWJ1dGVzRW50cnkSMAoMcGF5bG9hZF9yZWZzGAYgAygLMhouaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlZhpRCg9BdHRyaWJ1dGVzRW50cnkSCwoDa2V5GAEgASgJEi0KBXZhbHVlGAIgASgLMh4uaGFybW9ub2dyYWYudjEuQXR0cmlidXRlVmFsdWU6AjgBIm8KDVBheWxvYWRVcGxvYWQSDgoGZGlnZXN0GAEgASgJEhIKCnRvdGFsX3NpemUYAiABKAMSDAoEbWltZRgDIAEoCRINCgVjaHVuaxgEIAEoDBIMCgRsYXN0GAUgASgIEg8KB2V2aWN0ZWQYBiABKAgi1QIKCUhlYXJ0YmVhdBIXCg9idWZmZXJlZF9ldmVudHMYASABKAMSFgoOZHJvcHBlZF9ldmVudHMYAiABKAMSHgoWZHJvcHBlZF9zcGFuc19jcml0aWNhbBgDIAEoAxIeChZidWZmZXJlZF9wYXlsb2FkX2J5dGVzGAQgASgDEhgKEHBheWxvYWRzX2V2aWN0ZWQYBSABKAMSFAoMY3B1X3NlbGZfcGN0GAYgASgBEi8KC2NsaWVudF90aW1lGAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIYChBwcm9ncmVzc19jb3VudGVyGAggASgDEhgKEGN1cnJlbnRfYWN0aXZpdHkYCSABKAkSHQoVY29udGV4dF93aW5kb3dfdG9rZW5zGAogASgDEiMKG2NvbnRleHRfd2luZG93X2xpbWl0X3Rva2VucxgLIAEoAyIZCgdHb29kYnllEg4KBnJlYXNvbhgBIAEoCSK/BAoLVGVsZW1ldHJ5VXASJgoFaGVsbG8YASABKAsyFS5oYXJtb25vZ3JhZi52MS5IZWxsb0gAEi8KCnNwYW5fc3RhcnQYAiABKAsyGS5oYXJtb25vZ3JhZi52MS5TcGFuU3RhcnRIABIxCgtzcGFuX3VwZGF0ZRgDIAEoCzIaLmhhcm1vbm9ncmFmLnYxLlNwYW5VcGRhdGVIABIrCghzcGFuX2VuZBgEIAEoCzIXLmhhcm1vbm9ncmFmLnYxLlNwYW5FbmRIABIwCgdwYXlsb2FkGAUgASgLMh0uaGFybW9ub2dyYWYudjEuUGF5bG9hZFVwbG9hZEgAEi4KCWhlYXJ0YmVhdBgGIAEoCzIZLmhhcm1vbm9ncmFmLnYxLkhlYXJ0YmVhdEgAEi4KC2NvbnRyb2xfYWNrGAcgASgLMhcuZ29sZGZpdmUudjEuQ29udHJvbEFja0gAEioKB2dvb2RieWUYCCABKAsyFy5oYXJtb25vZ3JhZi52MS5Hb29kYnllSAASLAoOZ29sZGZpdmVfZXZlbnQYCyABKAsyEi5nb2xkZml2ZS52MS5FdmVudEgAEjsKEHJlZmluZV9hdHRlbXB0ZWQYDSABKAsyHy5oYXJtb25vZ3JhZi52MS5SZWZpbmVBdHRlbXB0ZWRIABI1Cg1yZWZpbmVfZmFpbGVkGA4gASgLMhwuaGFybW9ub2dyYWYudjEuUmVmaW5lRmFpbGVkSABCBQoDbXNnSgQICRAKSgQIChALSgQIDBANIoACCg9SZWZpbmVBdHRlbXB0ZWQSDgoGcnVuX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgEEhIKCnNlc3Npb25faWQYAyABKAkSLgoKZW1pdHRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKYXR0ZW1wdF9pZBgFIAEoCRIQCghkcmlmdF9pZBgGIAEoCRIUCgx0cmlnZ2VyX2tpbmQYByABKAkSGAoQdHJpZ2dlcl9zZXZlcml0eRgIIAEoCRIXCg9jdXJyZW50X3Rhc2tfaWQYCSABKAkSGAoQY3VycmVudF9hZ2VudF9pZBgKIAEoCSKzAgoMUmVmaW5lRmFpbGVkEg4KBnJ1bl9pZBgBIAEoCRIQCghzZXF1ZW5jZRgCIAEoBBISCgpzZXNzaW9uX2lkGAMgASgJEi4KCmVtaXR0ZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmF0dGVtcHRfaWQYBSABKAkSEAoIZHJpZnRfaWQYBiABKAkSFAoMdHJpZ2dlcl9raW5kGAcgASgJEhgKEHRyaWdnZXJfc2V2ZXJpdHkYCCABKAkSFAoMZmFpbHVyZV9raW5kGAkgASgJEg4KBnJlYXNvbhgKIAEoCRIOCgZkZXRhaWwYCyABKAkSFwoPY3VycmVudF90YXNrX2lkGAwgASgJEhgKEGN1cnJlbnRfYWdlbnRfaWQYDSABKAkigAIKB1dlbGNvbWUSEAoIYWNjZXB0ZWQYASABKAgSGwoTYXNzaWduZWRfc2Vzc2lvbl9pZBgCIAEoCRIaChJhc3NpZ25lZF9zdHJlYW1faWQYAyABKAkSLwoLc2VydmVyX3RpbWUYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjEKBWZsYWdzGAUgAygLMiIuaGFybW9ub2dyYWYudjEuV2VsY29tZS5GbGFnc0VudHJ5EhgKEHJlamVjdGlvbl9yZWFzb24YBiABKAkaLAoKRmxhZ3NFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIiAKDlBheWxvYWRSZXF1ZXN0Eg4KBmRpZ2VzdBgBIAEoCSKHAQoLRmxvd0NvbnRyb2wSMgoGYWN0aW9uGAEgASgOMiIuaGFybW9ub2dyYWYudjEuRmxvd0NvbnRyb2wuQWN0aW9uIkQKBkFjdGlvbhIWChJBQ1RJT05fVU5TUEVDSUZJRUQQABIPCgtBQ1RJT05fU0xPVxABEhEKDUFDVElPTl9SRVNVTUUQAiIfCg1TZXJ2ZXJHb29kYnllEg4KBnJlYXNvbhgBIAEoCSLrAQoNVGVsZW1ldHJ5RG93bhIqCgd3ZWxjb21lGAEgASgLMhcuaGFybW9ub2dyYWYudjEuV2VsY29tZUgAEjkKD3BheWxvYWRfcmVxdWVzdBgCIAEoCzIeLmhhcm1vbm9ncmFmLnYxLlBheWxvYWRSZXF1ZXN0SAASMwoMZmxvd19jb250cm9sGAMgASgLMhsuaGFybW9ub2dyYWYudjEuRmxvd0NvbnRyb2xIABI3Cg5zZXJ2ZXJfZ29vZGJ5ZRgEIAEoCzIdLmhhcm1vbm9ncmFmLnYxLlNlcnZlckdvb2RieWVIAEIFCgNtc2dCQlpAZ2l0aHViLmNvbS9wZWRhcHVkaS9oYXJtb25vZ3JhZi9nZW4vaGFybW9ub2dyYWYvdjE7aGFybW9ub2dyYWZ2MWIGcHJvdG8z", [file_google_protobuf_timestamp, file_harmonograf_v1_types, file_goldfive_v1_control, file_goldfive_v1_events]);
 
 /**
  * First message on every StreamTelemetry. The server replies with Welcome.
@@ -439,6 +439,37 @@ export type TelemetryUp = Message<"harmonograf.v1.TelemetryUp"> & {
      */
     value: Event;
     case: "goldfiveEvent";
+  } | {
+    /**
+     * Operator-observability events emitted by goldfive's steerer at
+     * refine time (goldfive#264). ``RefineAttempted`` fires at the start
+     * of every refine attempt (autonomous _handle_drift path AND the
+     * goldfive-steer _promote_drift_to_steer path); ``RefineFailed``
+     * fires when the attempt produces an unusable outcome (parse error,
+     * validator rejection, LLM error). Successful attempts are reported
+     * by the existing ``goldfive.v1.PlanRevised`` event. Each pair is
+     * correlated by ``attempt_id`` so the harmonograf UI can merge a
+     * ``RefineAttempted`` with its terminal ``PlanRevised`` /
+     * ``RefineFailed`` into a single intervention row per attempt.
+     *
+     * Same dict→proto pattern as the pre-#190 InvocationCancelled
+     * path: goldfive ships these as dict envelopes for forward-compat
+     * (the proto promotion is tracked as goldfive Stream C #256), and
+     * harmonograf materializes them at the client sink. When the
+     * promotion lands, these slots collapse into the existing
+     * ``goldfive_event`` envelope (matches the InvocationCancelled
+     * migration in #190).
+     *
+     * @generated from field: harmonograf.v1.RefineAttempted refine_attempted = 13;
+     */
+    value: RefineAttempted;
+    case: "refineAttempted";
+  } | {
+    /**
+     * @generated from field: harmonograf.v1.RefineFailed refine_failed = 14;
+     */
+    value: RefineFailed;
+    case: "refineFailed";
   } | { case: undefined; value?: undefined };
 };
 
@@ -448,6 +479,211 @@ export type TelemetryUp = Message<"harmonograf.v1.TelemetryUp"> & {
  */
 export const TelemetryUpSchema: GenMessage<TelemetryUp> = /*@__PURE__*/
   messageDesc(file_harmonograf_v1_telemetry, 7);
+
+/**
+ * Operator-facing record that goldfive started a refine attempt against
+ * a drift. Fires at the start of every refine call (both the autonomous
+ * ``DefaultSteerer._handle_drift`` path and the goldfive-steer
+ * ``_promote_drift_to_steer`` path). Pairs with exactly one of
+ * ``goldfive.v1.PlanRevised`` (success) / ``RefineFailed`` (failure)
+ * carrying the same ``attempt_id``.
+ *
+ * The harmonograf UI merges a ``RefineAttempted`` with its terminal
+ * counterpart into a single intervention row per attempt — see
+ * ``frontend/src/lib/interventions.ts::mergeRefineAttempts``.
+ *
+ * Wire shape mirrors the dict envelope goldfive emits verbatim so the
+ * sink's dict→proto conversion is a field-by-field copy. See
+ * ``goldfive/steerer.py::DefaultSteerer._emit_refine_attempted`` for the
+ * authoritative source.
+ *
+ * @generated from message harmonograf.v1.RefineAttempted
+ */
+export type RefineAttempted = Message<"harmonograf.v1.RefineAttempted"> & {
+  /**
+   * Envelope metadata — same fields the goldfive dict envelope carries
+   * alongside the payload.
+   *
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+
+  /**
+   * @generated from field: uint64 sequence = 2;
+   */
+  sequence: bigint;
+
+  /**
+   * @generated from field: string session_id = 3;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp emitted_at = 4;
+   */
+  emittedAt?: Timestamp;
+
+  /**
+   * UUID4 minted by goldfive at attempt start. Stable across the paired
+   * ``RefineFailed`` / ``PlanRevised`` event so harmonograf can merge
+   * the attempted row with its terminal row.
+   *
+   * @generated from field: string attempt_id = 5;
+   */
+  attemptId: string;
+
+  /**
+   * Cross-reference to the triggering ``DriftDetected.id`` (UUID4).
+   *
+   * @generated from field: string drift_id = 6;
+   */
+  driftId: string;
+
+  /**
+   * Lowercase drift kind that triggered the refine — "off_topic",
+   * "looping_reasoning", "user_steer", etc.
+   *
+   * @generated from field: string trigger_kind = 7;
+   */
+  triggerKind: string;
+
+  /**
+   * Lowercase drift severity — "info" / "warning" / "critical".
+   *
+   * @generated from field: string trigger_severity = 8;
+   */
+  triggerSeverity: string;
+
+  /**
+   * Task this refine targets, when known. Empty when the drift was
+   * detected outside any single task scope.
+   *
+   * @generated from field: string current_task_id = 9;
+   */
+  currentTaskId: string;
+
+  /**
+   * Agent the cancelled invocation runs under. Bare on the goldfive
+   * side; the harmonograf sink canonicalizes to ``<client>:<bare>``
+   * (mirrors the rule applied to every other compound id).
+   *
+   * @generated from field: string current_agent_id = 10;
+   */
+  currentAgentId: string;
+};
+
+/**
+ * Describes the message harmonograf.v1.RefineAttempted.
+ * Use `create(RefineAttemptedSchema)` to create a new message.
+ */
+export const RefineAttemptedSchema: GenMessage<RefineAttempted> = /*@__PURE__*/
+  messageDesc(file_harmonograf_v1_telemetry, 8);
+
+/**
+ * Operator-facing record that a refine attempt produced an unusable
+ * outcome (parse error, validator rejection, LLM error). Crucially
+ * emitted WITHOUT bumping ``revision_index`` — the ``attempt_id``
+ * disambiguates the failure across otherwise-incrementing revisions.
+ *
+ * See ``goldfive/steerer.py::DefaultSteerer._emit_refine_failed``.
+ *
+ * @generated from message harmonograf.v1.RefineFailed
+ */
+export type RefineFailed = Message<"harmonograf.v1.RefineFailed"> & {
+  /**
+   * Envelope metadata — same fields the goldfive dict envelope carries.
+   *
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+
+  /**
+   * @generated from field: uint64 sequence = 2;
+   */
+  sequence: bigint;
+
+  /**
+   * @generated from field: string session_id = 3;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp emitted_at = 4;
+   */
+  emittedAt?: Timestamp;
+
+  /**
+   * Correlation key with the paired ``RefineAttempted``. Always set.
+   *
+   * @generated from field: string attempt_id = 5;
+   */
+  attemptId: string;
+
+  /**
+   * Backlink to the triggering ``DriftDetected.id``. Always set
+   * (goldfive emits the failure event with the originating drift's id).
+   *
+   * @generated from field: string drift_id = 6;
+   */
+  driftId: string;
+
+  /**
+   * @generated from field: string trigger_kind = 7;
+   */
+  triggerKind: string;
+
+  /**
+   * @generated from field: string trigger_severity = 8;
+   */
+  triggerSeverity: string;
+
+  /**
+   * Coarse failure taxonomy:
+   *   "parse_error"        — refine LLM returned bytes the parser
+   *                          rejected (malformed JSON, missing fields).
+   *   "validator_rejected" — parsed plan failed a downstream validator
+   *                          (supersedes coverage, structural check).
+   *   "llm_error"          — the refine LLM call itself errored.
+   *   "other"              — anything else; ``detail`` carries context.
+   * String not enum so adding a new failure kind is a drop-in change
+   * on the goldfive side without a proto bump.
+   *
+   * @generated from field: string failure_kind = 9;
+   */
+  failureKind: string;
+
+  /**
+   * Short human-readable summary of the failure cause.
+   *
+   * @generated from field: string reason = 10;
+   */
+  reason: string;
+
+  /**
+   * Free-form longer payload (e.g. validator exception text). May be
+   * empty when ``reason`` already says everything useful.
+   *
+   * @generated from field: string detail = 11;
+   */
+  detail: string;
+
+  /**
+   * @generated from field: string current_task_id = 12;
+   */
+  currentTaskId: string;
+
+  /**
+   * @generated from field: string current_agent_id = 13;
+   */
+  currentAgentId: string;
+};
+
+/**
+ * Describes the message harmonograf.v1.RefineFailed.
+ * Use `create(RefineFailedSchema)` to create a new message.
+ */
+export const RefineFailedSchema: GenMessage<RefineFailed> = /*@__PURE__*/
+  messageDesc(file_harmonograf_v1_telemetry, 9);
 
 /**
  * Sent in response to Hello. Carries the assigned session_id (which may
@@ -500,7 +736,7 @@ export type Welcome = Message<"harmonograf.v1.Welcome"> & {
  * Use `create(WelcomeSchema)` to create a new message.
  */
 export const WelcomeSchema: GenMessage<Welcome> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_telemetry, 8);
+  messageDesc(file_harmonograf_v1_telemetry, 10);
 
 /**
  * Server asks the client to re-upload a payload by digest, typically
@@ -520,7 +756,7 @@ export type PayloadRequest = Message<"harmonograf.v1.PayloadRequest"> & {
  * Use `create(PayloadRequestSchema)` to create a new message.
  */
 export const PayloadRequestSchema: GenMessage<PayloadRequest> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_telemetry, 9);
+  messageDesc(file_harmonograf_v1_telemetry, 11);
 
 /**
  * Soft hint that the client should slow down or may resume. v0 ingest does
@@ -541,7 +777,7 @@ export type FlowControl = Message<"harmonograf.v1.FlowControl"> & {
  * Use `create(FlowControlSchema)` to create a new message.
  */
 export const FlowControlSchema: GenMessage<FlowControl> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_telemetry, 10);
+  messageDesc(file_harmonograf_v1_telemetry, 12);
 
 /**
  * @generated from enum harmonograf.v1.FlowControl.Action
@@ -567,7 +803,7 @@ export enum FlowControl_Action {
  * Describes the enum harmonograf.v1.FlowControl.Action.
  */
 export const FlowControl_ActionSchema: GenEnum<FlowControl_Action> = /*@__PURE__*/
-  enumDesc(file_harmonograf_v1_telemetry, 10, 0);
+  enumDesc(file_harmonograf_v1_telemetry, 12, 0);
 
 /**
  * @generated from message harmonograf.v1.ServerGoodbye
@@ -584,7 +820,7 @@ export type ServerGoodbye = Message<"harmonograf.v1.ServerGoodbye"> & {
  * Use `create(ServerGoodbyeSchema)` to create a new message.
  */
 export const ServerGoodbyeSchema: GenMessage<ServerGoodbye> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_telemetry, 11);
+  messageDesc(file_harmonograf_v1_telemetry, 13);
 
 /**
  * TelemetryDown is the downstream oneof.
@@ -627,5 +863,5 @@ export type TelemetryDown = Message<"harmonograf.v1.TelemetryDown"> & {
  * Use `create(TelemetryDownSchema)` to create a new message.
  */
 export const TelemetryDownSchema: GenMessage<TelemetryDown> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_telemetry, 12);
+  messageDesc(file_harmonograf_v1_telemetry, 14);
 

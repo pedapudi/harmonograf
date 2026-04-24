@@ -34,6 +34,10 @@ import type {
   Event as GoldfiveEvent,
   InvocationCancelled as InvocationCancelledPb,
 } from '../pb/goldfive/v1/events_pb.js';
+import type {
+  RefineAttempted as RefineAttemptedPb,
+  RefineFailed as RefineFailedPb,
+} from '../pb/harmonograf/v1/telemetry_pb.js';
 import { useApprovalsStore } from '../state/approvalsStore';
 import {
   USER_ACTOR_ID,
@@ -798,5 +802,151 @@ export function applyInvocationCancelled(
     payload.invocationId || '',
     payload.driftId || '',
     recordedMs,
+  );
+}
+
+// Synthesize a failed-refine marker span on the goldfive actor row. Same
+// pattern as ``synthesizeRefineSpan`` (which lands on plan_revised) but
+// rendered with a distinct ``harmonograf.refine_failed = true`` flag and
+// a ``refine.failure_kind`` attribute so the Gantt renderer can pick the
+// failed-refine glyph (a crossed-out refine symbol in #179's lifeline
+// glyph infrastructure) without scanning per-span. Lives on the goldfive
+// lane next to the drift / successful-refine spans so the lane reads as
+// a chronological timeline of orchestrator decisions.
+//
+// ``attemptId`` is stamped as an attribute so the click-through detail
+// pane can correlate the synthesized span back to the failure record on
+// :class:`RefineFailureRegistry`.
+function synthesizeFailedRefineSpan(
+  store: SessionStore,
+  sessionId: string | null,
+  attemptId: string,
+  driftId: string,
+  triggerKind: string,
+  triggerSeverity: string,
+  failureKind: string,
+  reason: string,
+  detail: string,
+  recordedAtMs: number,
+  goldfiveActorId: string,
+): void {
+  const id = `refine-failed-${attemptId || `${recordedAtMs}-${driftId || 'x'}`}`;
+  const attributes: Span['attributes'] = {
+    'refine.attempt_id': { kind: 'string', value: attemptId },
+    'refine.drift_id': { kind: 'string', value: driftId },
+    'refine.trigger_kind': { kind: 'string', value: triggerKind },
+    'refine.trigger_severity': { kind: 'string', value: triggerSeverity },
+    'refine.failure_kind': { kind: 'string', value: failureKind },
+    'refine.reason': { kind: 'string', value: reason },
+    'refine.detail': { kind: 'string', value: detail },
+    'harmonograf.synthetic_span': { kind: 'bool', value: true },
+    // Flag the renderer reads to pick the failed-refine glyph variant.
+    // Distinct from ``harmonograf.cancel_marker`` (cancel uses a stop
+    // glyph; failed refine uses a crossed-out refine glyph).
+    'harmonograf.refine_failed': { kind: 'bool', value: true },
+  };
+  const span: Span = {
+    id,
+    sessionId: sessionId ?? '',
+    agentId: goldfiveActorId,
+    parentSpanId: null,
+    kind: 'CUSTOM',
+    status: 'COMPLETED',
+    name: failureKind ? `refine failed: ${failureKind}` : 'refine failed',
+    startMs: recordedAtMs,
+    endMs: recordedAtMs,
+    links: [],
+    attributes,
+    payloadRefs: [],
+    error: null,
+    lane: -1,
+    replaced: false,
+  };
+  store.spans.append(span);
+}
+
+// Operator-observability: a ``RefineAttempted`` envelope landed on the
+// WatchSession stream (goldfive#264). Append to the per-session
+// :class:`RefineAttemptRegistry` so the deriver in
+// ``lib/interventions.ts`` can correlate the attempt with its terminal
+// counterpart (a successful ``PlanRevised`` or a ``RefineFailed``)
+// by ``attemptId``.
+//
+// We deliberately do NOT synthesize a span here. The successful-refine
+// path already mints a span via ``synthesizeRefineSpan`` on
+// ``plan_revised``; the failed-refine path mints one via
+// ``synthesizeFailedRefineSpan`` on ``refine_failed``. Synthesizing a
+// span on every attempted-event would double-render the successful
+// refines (one before, one after the terminal arrives).
+export function applyRefineAttempted(
+  event: RefineAttemptedPb,
+  store: SessionStore,
+  sessionStartMs: number,
+): void {
+  const recordedAbsMs = tsToMsAbs(event.emittedAt);
+  const abs = recordedAbsMs || Date.now();
+  const recordedMs = abs - sessionStartMs;
+  store.refineAttempts.append({
+    runId: event.runId || '',
+    attemptId: event.attemptId || '',
+    driftId: event.driftId || '',
+    triggerKind: (event.triggerKind || '').toLowerCase(),
+    triggerSeverity: (event.triggerSeverity || '').toLowerCase(),
+    taskId: event.currentTaskId || '',
+    agentId: event.currentAgentId || '',
+    recordedAtMs: recordedMs,
+    recordedAtAbsoluteMs: abs,
+  });
+}
+
+// Operator-observability: a ``RefineFailed`` envelope landed on the
+// WatchSession stream (goldfive#264). Append to the per-session
+// :class:`RefineFailureRegistry` AND synthesize a failed-refine marker
+// span on the goldfive actor row so the Gantt + Graph views render the
+// failure as a first-class glyph (rather than only a row in the
+// intervention list). Pairs with the existing
+// :func:`synthesizeRefineSpan` on the success path.
+export function applyRefineFailed(
+  event: RefineFailedPb,
+  store: SessionStore,
+  sessionStartMs: number,
+  sessionId: string | null = null,
+): void {
+  const recordedAbsMs = tsToMsAbs(event.emittedAt);
+  const abs = recordedAbsMs || Date.now();
+  const recordedMs = abs - sessionStartMs;
+  const triggerKind = (event.triggerKind || '').toLowerCase();
+  const triggerSeverity = (event.triggerSeverity || '').toLowerCase();
+  const failureKind = (event.failureKind || '').toLowerCase();
+  store.refineFailures.append({
+    runId: event.runId || '',
+    attemptId: event.attemptId || '',
+    driftId: event.driftId || '',
+    triggerKind,
+    triggerSeverity,
+    failureKind,
+    reason: event.reason || '',
+    detail: event.detail || '',
+    taskId: event.currentTaskId || '',
+    agentId: event.currentAgentId || '',
+    recordedAtMs: recordedMs,
+    recordedAtAbsoluteMs: abs,
+  });
+  // Synthesize the marker span on the goldfive actor row so the Gantt
+  // + Graph views surface the failure on the orchestrator lane next to
+  // its drift + successful-refine siblings.
+  const goldfiveId = ensureSyntheticActor(store, GOLDFIVE_ACTOR_ID);
+  synthesizeFailedRefineSpan(
+    store,
+    sessionId,
+    event.attemptId || '',
+    event.driftId || '',
+    triggerKind,
+    triggerSeverity,
+    failureKind,
+    event.reason || '',
+    event.detail || '',
+    recordedMs,
+    goldfiveId,
   );
 }

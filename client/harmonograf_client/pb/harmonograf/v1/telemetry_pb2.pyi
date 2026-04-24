@@ -139,7 +139,7 @@ class Goodbye(_message.Message):
     def __init__(self, reason: _Optional[str] = ...) -> None: ...
 
 class TelemetryUp(_message.Message):
-    __slots__ = ("hello", "span_start", "span_update", "span_end", "payload", "heartbeat", "control_ack", "goodbye", "goldfive_event")
+    __slots__ = ("hello", "span_start", "span_update", "span_end", "payload", "heartbeat", "control_ack", "goodbye", "goldfive_event", "refine_attempted", "refine_failed")
     HELLO_FIELD_NUMBER: _ClassVar[int]
     SPAN_START_FIELD_NUMBER: _ClassVar[int]
     SPAN_UPDATE_FIELD_NUMBER: _ClassVar[int]
@@ -149,6 +149,8 @@ class TelemetryUp(_message.Message):
     CONTROL_ACK_FIELD_NUMBER: _ClassVar[int]
     GOODBYE_FIELD_NUMBER: _ClassVar[int]
     GOLDFIVE_EVENT_FIELD_NUMBER: _ClassVar[int]
+    REFINE_ATTEMPTED_FIELD_NUMBER: _ClassVar[int]
+    REFINE_FAILED_FIELD_NUMBER: _ClassVar[int]
     hello: Hello
     span_start: SpanStart
     span_update: SpanUpdate
@@ -158,7 +160,63 @@ class TelemetryUp(_message.Message):
     control_ack: _control_pb2.ControlAck
     goodbye: Goodbye
     goldfive_event: _events_pb2.Event
-    def __init__(self, hello: _Optional[_Union[Hello, _Mapping]] = ..., span_start: _Optional[_Union[SpanStart, _Mapping]] = ..., span_update: _Optional[_Union[SpanUpdate, _Mapping]] = ..., span_end: _Optional[_Union[SpanEnd, _Mapping]] = ..., payload: _Optional[_Union[PayloadUpload, _Mapping]] = ..., heartbeat: _Optional[_Union[Heartbeat, _Mapping]] = ..., control_ack: _Optional[_Union[_control_pb2.ControlAck, _Mapping]] = ..., goodbye: _Optional[_Union[Goodbye, _Mapping]] = ..., goldfive_event: _Optional[_Union[_events_pb2.Event, _Mapping]] = ...) -> None: ...
+    refine_attempted: RefineAttempted
+    refine_failed: RefineFailed
+    def __init__(self, hello: _Optional[_Union[Hello, _Mapping]] = ..., span_start: _Optional[_Union[SpanStart, _Mapping]] = ..., span_update: _Optional[_Union[SpanUpdate, _Mapping]] = ..., span_end: _Optional[_Union[SpanEnd, _Mapping]] = ..., payload: _Optional[_Union[PayloadUpload, _Mapping]] = ..., heartbeat: _Optional[_Union[Heartbeat, _Mapping]] = ..., control_ack: _Optional[_Union[_control_pb2.ControlAck, _Mapping]] = ..., goodbye: _Optional[_Union[Goodbye, _Mapping]] = ..., goldfive_event: _Optional[_Union[_events_pb2.Event, _Mapping]] = ..., refine_attempted: _Optional[_Union[RefineAttempted, _Mapping]] = ..., refine_failed: _Optional[_Union[RefineFailed, _Mapping]] = ...) -> None: ...
+
+class RefineAttempted(_message.Message):
+    __slots__ = ("run_id", "sequence", "session_id", "emitted_at", "attempt_id", "drift_id", "trigger_kind", "trigger_severity", "current_task_id", "current_agent_id")
+    RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    EMITTED_AT_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    DRIFT_ID_FIELD_NUMBER: _ClassVar[int]
+    TRIGGER_KIND_FIELD_NUMBER: _ClassVar[int]
+    TRIGGER_SEVERITY_FIELD_NUMBER: _ClassVar[int]
+    CURRENT_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    CURRENT_AGENT_ID_FIELD_NUMBER: _ClassVar[int]
+    run_id: str
+    sequence: int
+    session_id: str
+    emitted_at: _timestamp_pb2.Timestamp
+    attempt_id: str
+    drift_id: str
+    trigger_kind: str
+    trigger_severity: str
+    current_task_id: str
+    current_agent_id: str
+    def __init__(self, run_id: _Optional[str] = ..., sequence: _Optional[int] = ..., session_id: _Optional[str] = ..., emitted_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., attempt_id: _Optional[str] = ..., drift_id: _Optional[str] = ..., trigger_kind: _Optional[str] = ..., trigger_severity: _Optional[str] = ..., current_task_id: _Optional[str] = ..., current_agent_id: _Optional[str] = ...) -> None: ...
+
+class RefineFailed(_message.Message):
+    __slots__ = ("run_id", "sequence", "session_id", "emitted_at", "attempt_id", "drift_id", "trigger_kind", "trigger_severity", "failure_kind", "reason", "detail", "current_task_id", "current_agent_id")
+    RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    EMITTED_AT_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    DRIFT_ID_FIELD_NUMBER: _ClassVar[int]
+    TRIGGER_KIND_FIELD_NUMBER: _ClassVar[int]
+    TRIGGER_SEVERITY_FIELD_NUMBER: _ClassVar[int]
+    FAILURE_KIND_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    DETAIL_FIELD_NUMBER: _ClassVar[int]
+    CURRENT_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    CURRENT_AGENT_ID_FIELD_NUMBER: _ClassVar[int]
+    run_id: str
+    sequence: int
+    session_id: str
+    emitted_at: _timestamp_pb2.Timestamp
+    attempt_id: str
+    drift_id: str
+    trigger_kind: str
+    trigger_severity: str
+    failure_kind: str
+    reason: str
+    detail: str
+    current_task_id: str
+    current_agent_id: str
+    def __init__(self, run_id: _Optional[str] = ..., sequence: _Optional[int] = ..., session_id: _Optional[str] = ..., emitted_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., attempt_id: _Optional[str] = ..., drift_id: _Optional[str] = ..., trigger_kind: _Optional[str] = ..., trigger_severity: _Optional[str] = ..., failure_kind: _Optional[str] = ..., reason: _Optional[str] = ..., detail: _Optional[str] = ..., current_task_id: _Optional[str] = ..., current_agent_id: _Optional[str] = ...) -> None: ...
 
 class Welcome(_message.Message):
     __slots__ = ("accepted", "assigned_session_id", "assigned_stream_id", "server_time", "flags", "rejection_reason")

@@ -54,6 +54,8 @@ function mkRow(over: Partial<InterventionRow>): InterventionRow {
     triggerEventId: '',
     targetAgentId: '',
     driftId: '',
+    attemptId: '',
+    failureKind: '',
     ...over,
   };
 }

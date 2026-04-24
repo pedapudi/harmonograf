@@ -782,6 +782,10 @@ class Transport:
             return telemetry_pb2.TelemetryUp(span_end=payload)
         if env.kind is EnvelopeKind.GOLDFIVE_EVENT:
             return telemetry_pb2.TelemetryUp(goldfive_event=payload)
+        if env.kind is EnvelopeKind.REFINE_ATTEMPTED:
+            return telemetry_pb2.TelemetryUp(refine_attempted=payload)
+        if env.kind is EnvelopeKind.REFINE_FAILED:
+            return telemetry_pb2.TelemetryUp(refine_failed=payload)
         return None
 
     def _build_hello(
@@ -1135,6 +1139,14 @@ def _session_id_of_envelope(env: SpanEnvelope) -> str:
             return ""
         return getattr(span, "session_id", "") or ""
     if env.kind is EnvelopeKind.GOLDFIVE_EVENT:
+        return getattr(payload, "session_id", "") or ""
+    if (
+        env.kind is EnvelopeKind.REFINE_ATTEMPTED
+        or env.kind is EnvelopeKind.REFINE_FAILED
+    ):
+        # Refine dict-sourced envelopes carry session_id at the top
+        # level of the proto (mirrors the pre-#190 InvocationCancelled
+        # path goldfive ships pre-proto-promotion events on).
         return getattr(payload, "session_id", "") or ""
     return ""
 
