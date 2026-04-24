@@ -1,8 +1,14 @@
 // Click-through detail panel for goldfive judge spans (harmonograf#197).
 //
-// Rendered when the user clicks a synthesized judge span on the
-// __goldfive__ lane. Surfaces the six questions an operator asks about
-// an LLM-as-judge invocation:
+// Rendered when the user clicks a judge span on the goldfive lane. The
+// span arrives via the normal span transport — the harmonograf client
+// sink translates ReasoningJudgeInvoked goldfive events into
+// SpanStart/SpanEnd frames under Option X (harmonograf#N). The panel
+// reads `judge.*` attributes directly off the span; nothing here
+// depends on the event-side synthesizer that Option X retired.
+//
+// Surfaces the six questions an operator asks about an LLM-as-judge
+// invocation:
 //
 //   1. when did it fire, which model, how long did it take
 //   2. which agent + task was being judged
