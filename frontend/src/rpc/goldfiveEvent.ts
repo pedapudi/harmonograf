@@ -342,6 +342,20 @@ export function applyGoldfiveEvent(
       if (plan) {
         const converted = convertGoldfivePlan(plan, sessionStartMs);
         store.tasks.upsertPlan(converted);
+        // Plan-history accumulator: append this revision to the
+        // per-plan registry so the Task/Plan panel + Trajectory view
+        // can render cumulative / per-rev / supersedes views. The
+        // registry dedups on (plan_id, revision_number), so this is
+        // safe to call on stream reconnect replays too.
+        const emittedAbsMsHist = tsToMsAbs(event.emittedAt);
+        store.planHistory.append({
+          revision: Number(plan.revisionIndex ?? 0),
+          plan: converted,
+          reason: plan.revisionReason || '',
+          kind: driftKindToString(plan.revisionKind as unknown as number),
+          triggerEventId: plan.revisionTriggerEventId || '',
+          emittedAtMs: emittedAbsMsHist,
+        });
         // harmonograf#133: seed the agent registry from plan content so
         // tasks whose assignee hasn't emitted a span yet still resolve
         // to a bare display name (e.g. `reviewer_agent`) instead of the
