@@ -15,6 +15,12 @@ import {
   isJudgeSpan,
   resolveJudgeDetail,
 } from '../../lib/interventionDetail';
+import {
+  isGoldfiveSpan,
+  resolveGoldfiveSpanInfo,
+  truncatePreview,
+  type GoldfiveSpanInfo,
+} from '../../lib/goldfiveSpan';
 import type { TaskPlan } from '../../gantt/types';
 import { JudgeInvocationDetail } from '../Interventions/JudgeInvocationDetail';
 
@@ -176,6 +182,17 @@ function PopoverCard({
     }
     return resolveJudgeDetail(span, plans);
   }, [span, store, judgeMode]);
+  // Non-judge goldfive spans (refine_*, goal_derive, plan_generate,
+  // reflective_check, unknown) get their own compact detail block —
+  // decision summary headline, target row, input/output disclosures.
+  // Judge spans also resolve info here so the popover header can swap
+  // the bare span name for the call_name when the sink has stamped one,
+  // but the judge detail component is still authoritative for verdict.
+  const goldfiveMode = isGoldfiveSpan(span);
+  const goldfiveInfo: GoldfiveSpanInfo | null = useMemo(
+    () => (goldfiveMode ? resolveGoldfiveSpanInfo(span) : null),
+    [goldfiveMode, span],
+  );
   const duration =
     span.endMs != null ? `${Math.max(0, span.endMs - span.startMs).toFixed(0)}ms` : '…';
 
@@ -235,10 +252,11 @@ function PopoverCard({
     void post({ sessionId, spanId: span.id, body: text, kind: 'COMMENT' }).catch(() => {});
   };
 
-  // Judge popovers carry more content (reasoning input, raw response,
-  // steering outcome); widen them so the sections don't truncate the
-  // reader's eye on typical laptops.
-  const popoverWidth = judgeMode ? POPOVER_WIDTH + 80 : POPOVER_WIDTH;
+  // Judge popovers + generic goldfive popovers carry more content
+  // (reasoning input, raw response, steering outcome, input/output
+  // previews); widen them so the sections don't truncate the reader's
+  // eye on typical laptops.
+  const popoverWidth = judgeMode || goldfiveMode ? POPOVER_WIDTH + 80 : POPOVER_WIDTH;
 
   return (
     <div
@@ -277,8 +295,11 @@ function PopoverCard({
           marginBottom: 4,
         }}
       >
-        <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {span.name}
+        <div
+          data-testid="span-popover-title"
+          style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+        >
+          {goldfiveInfo ? goldfiveInfo.callName : span.name}
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
           <IconButton
@@ -294,9 +315,38 @@ function PopoverCard({
           </IconButton>
         </div>
       </div>
-      <div style={{ opacity: 0.85, lineHeight: 1.5, marginBottom: 6 }}>
-        {summary}
+      <div
+        data-testid="span-popover-summary"
+        style={{ opacity: 0.85, lineHeight: 1.5, marginBottom: 6 }}
+      >
+        {goldfiveInfo ? goldfiveInfo.decisionSummary : summary}
       </div>
+      {goldfiveInfo && (goldfiveInfo.targetAgentId || goldfiveInfo.targetTaskId) && (
+        <div
+          data-testid="span-popover-goldfive-context"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '2px 10px',
+            marginBottom: 6,
+            fontSize: 11,
+            opacity: 0.85,
+          }}
+        >
+          {goldfiveInfo.targetAgentId && (
+            <span data-testid="span-popover-goldfive-target-agent">
+              <span style={{ opacity: 0.6 }}>target </span>
+              {goldfiveInfo.targetAgentId}
+            </span>
+          )}
+          {goldfiveInfo.targetTaskId && (
+            <span data-testid="span-popover-goldfive-target-task">
+              <span style={{ opacity: 0.6 }}>task </span>
+              <code style={{ fontSize: 10 }}>{goldfiveInfo.targetTaskId}</code>
+            </span>
+          )}
+        </div>
+      )}
       <div style={{ opacity: 0.85, lineHeight: 1.5 }}>
         <div>
           <span style={{ opacity: 0.7 }}>kind </span>
@@ -341,7 +391,10 @@ function PopoverCard({
           />
         </div>
       )}
-      {!judgeMode && thinkingHint && (
+      {goldfiveMode && !judgeMode && goldfiveInfo && (
+        <GoldfivePreviewDisclosures info={goldfiveInfo} />
+      )}
+      {!judgeMode && !goldfiveMode && thinkingHint && (
         <div
           data-testid="span-popover-thinking"
           data-open={thinkingOpen ? 'true' : 'false'}
@@ -431,20 +484,20 @@ function PopoverCard({
           borderTop: '1px solid var(--md-sys-color-outline-variant, #43474e)',
         }}
       >
-        {!judgeMode && (
+        {!judgeMode && !goldfiveMode && (
           <>
             <ActionButton onClick={toggleSteer} primary={steerOpen}>Steer</ActionButton>
             <ActionButton onClick={annotate}>Annotate</ActionButton>
           </>
         )}
         <ActionButton onClick={copyId}>Copy id</ActionButton>
-        {!judgeMode && (
+        {(!judgeMode || goldfiveMode) && (
           <ActionButton onClick={openInDrawer} primary>
             Open drawer
           </ActionButton>
         )}
       </div>
-      {!judgeMode && steerOpen && (
+      {!judgeMode && !goldfiveMode && steerOpen && (
         <div
           style={{
             marginTop: 8,
@@ -521,6 +574,116 @@ function PopoverCard({
             </ActionButton>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function GoldfivePreviewDisclosures({ info }: { info: GoldfiveSpanInfo }) {
+  // Both disclosures closed by default — operators usually only want one of
+  // them at a time. Popover variant is ~400 chars; the drawer shows the full
+  // 4 KiB preview.
+  const [inputOpen, setInputOpen] = useState(false);
+  const [outputOpen, setOutputOpen] = useState(false);
+  const hasInput = !!info.inputPreview;
+  const hasOutput = !!info.outputPreview;
+  if (!hasInput && !hasOutput) return null;
+  return (
+    <div
+      data-testid="span-popover-goldfive-previews"
+      style={{
+        marginTop: 10,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+      }}
+    >
+      {hasInput && (
+        <GoldfiveDisclosure
+          label="Input preview"
+          open={inputOpen}
+          onToggle={() => setInputOpen((v) => !v)}
+          text={info.inputPreview}
+          testId="span-popover-goldfive-input"
+        />
+      )}
+      {hasOutput && (
+        <GoldfiveDisclosure
+          label="Output preview"
+          open={outputOpen}
+          onToggle={() => setOutputOpen((v) => !v)}
+          text={info.outputPreview}
+          testId="span-popover-goldfive-output"
+        />
+      )}
+    </div>
+  );
+}
+
+function GoldfiveDisclosure({
+  label,
+  open,
+  onToggle,
+  text,
+  testId,
+}: {
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+  text: string;
+  testId: string;
+}) {
+  const preview = truncatePreview(text, 400);
+  return (
+    <div
+      data-testid={testId}
+      data-open={open ? 'true' : 'false'}
+      style={{
+        border: '1px solid var(--md-sys-color-outline-variant, #43474e)',
+        borderRadius: 6,
+        background: 'rgba(255,255,255,0.03)',
+      }}
+    >
+      <button
+        type="button"
+        data-testid={`${testId}-toggle`}
+        onClick={onToggle}
+        aria-expanded={open}
+        style={{
+          all: 'unset',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          width: '100%',
+          padding: '4px 8px',
+          fontSize: 10,
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+          opacity: 0.75,
+        }}
+      >
+        <span>{open ? '▾' : '▸'}</span>
+        <span>{label}</span>
+      </button>
+      {open && (
+        <pre
+          data-testid={`${testId}-body`}
+          style={{
+            margin: 0,
+            padding: '4px 8px 6px',
+            fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace",
+            fontSize: 11,
+            lineHeight: 1.4,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            maxHeight: 180,
+            overflow: 'auto',
+            color: 'rgba(226,226,233,0.88)',
+          }}
+        >
+          {preview}
+        </pre>
       )}
     </div>
   );

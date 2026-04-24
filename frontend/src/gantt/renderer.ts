@@ -25,6 +25,12 @@ import type { DelegationRecord, SessionStore } from './index';
 import type { SpanIndex, DirtyRect } from './spatialIndex';
 import type { Agent, ContextWindowSample, Span, SpanKind, Task, TaskStatus } from './types';
 import { hasThinking } from '../lib/thinking';
+import {
+  goldfiveCallFill,
+  isGoldfiveSpan,
+  resolveGoldfiveSpanInfo,
+  type GoldfiveSpanInfo,
+} from '../lib/goldfiveSpan';
 import { SOURCE_COLOR, type InterventionRow } from '../lib/interventions';
 import {
   GUTTER_WIDTH_PX,
@@ -873,7 +879,14 @@ export class GanttRenderer {
       hatched: boolean;
       dashed: boolean;
       rects: number[]; // flat [x,y,wr,hr,...]
-      labels: Array<{ s: Span; x: number; y: number; w: number; h: number }>;
+      labels: Array<{
+        s: Span;
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        gf: GoldfiveSpanInfo | null;
+      }>;
     };
     const buckets = new Map<string, Bucket>();
     // Liveness ticks drawn on top of running LLM spans. Each entry is the
@@ -890,6 +903,11 @@ export class GanttRenderer {
     // whose spans carry reasoning content. The badge is a hint that the
     // span has a Trajectory worth opening in the drawer.
     const brainBadges: Array<{ x: number; y: number; w: number; h: number }> = [];
+    // harmonograf#157: track per-span goldfive fills for test assertions.
+    // Populated only when the call-category override fires (judge /
+    // refine / plan / reflective). Copied to lastGoldfiveFills at end of
+    // pass so the exposed field is stable between rebuilds.
+    const goldfiveFillRecord = new Map<string, string>();
 
     let y = TOP_MARGIN_PX;
     let visibleCount = 0;
@@ -933,6 +951,18 @@ export class GanttRenderer {
           continue;
         }
         const style = resolveStyle(s.kind, s.status, s.replaced);
+        // Goldfive-translated spans override the fill with a category-
+        // specific hue so judge/refine/plan/reflective calls read at a
+        // glance on the goldfive lane. Status styling (PENDING opacity,
+        // CANCELLED hatch, FAILED error-icon) still applies on top via
+        // the existing resolveStyle result.
+        const gfInfo: GoldfiveSpanInfo | null = isGoldfiveSpan(s)
+          ? resolveGoldfiveSpanInfo(s)
+          : null;
+        if (gfInfo && gfInfo.category !== 'unknown' && s.status !== 'FAILED') {
+          style.fill = goldfiveCallFill(gfInfo, cssVar, style.fill);
+          goldfiveFillRecord.set(s.id, style.fill);
+        }
         const key = bucketKey(style);
         let b = buckets.get(key);
         if (!b) {
@@ -948,7 +978,7 @@ export class GanttRenderer {
         }
         b.rects.push(x1, laneTop, width, rectH);
         if (width > 12) {
-          b.labels.push({ s, x: x1, y: laneTop, w: width, h: rectH });
+          b.labels.push({ s, x: x1, y: laneTop, w: width, h: rectH, gf: gfInfo });
         }
         if (
           s.status === 'RUNNING' &&
@@ -1017,20 +1047,41 @@ export class GanttRenderer {
     }
 
     // Labels pass — full label for bars > 40px, icon-only for 12–40px.
+    // Goldfive-translated bars (gf set) substitute the call_name for the
+    // span name and append "→ <bare_agent>" on the right when the bar
+    // is wide enough and a target is known.
     ctx.font = '11px system-ui, sans-serif';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = cssVar('--md-sys-color-on-surface') || '#e2e2e9';
     for (const b of buckets.values()) {
       for (const l of b.labels) {
-        const { s, x, y: ly, w: lw, h: lh } = l;
+        const { s, x, y: ly, w: lw, h: lh, gf } = l;
         const icon = KIND_ICON[s.kind];
         if (lw > 40) {
-          const label = icon ? `${icon} ${s.name}` : s.name;
+          const primary = gf ? gf.callName : s.name;
+          const label = icon ? `${icon} ${primary}` : primary;
           ctx.save();
           ctx.beginPath();
           ctx.rect(x, ly, lw, lh);
           ctx.clip();
           ctx.fillText(label, x + 4, ly + lh / 2);
+          // Target-agent right-side suffix for goldfive spans. We only
+          // draw it when the bar is at least ~80px wide and the target
+          // doesn't overlap the left label — a rough two-lane budget.
+          if (gf && gf.targetAgentId && lw > 80) {
+            const arrow = `→ ${gf.targetAgentId}`;
+            const metrics = ctx.measureText(arrow);
+            const arrowW = metrics.width;
+            // Leave 24px gutter between the two texts.
+            const leftW = ctx.measureText(label).width;
+            if (arrowW + leftW + 24 < lw) {
+              ctx.textAlign = 'right';
+              ctx.globalAlpha = 0.85;
+              ctx.fillText(arrow, x + lw - 6, ly + lh / 2);
+              ctx.textAlign = 'left';
+              ctx.globalAlpha = 1;
+            }
+          }
           ctx.restore();
         } else if (icon) {
           // Narrow bar: just the kind icon centered
@@ -1094,6 +1145,7 @@ export class GanttRenderer {
     // Expose last-draw count for stress tooling.
     this.lastDrawnCount = visibleCount;
     this.lastBrainBadgeCount = brainBadges.length;
+    this.lastGoldfiveFills = goldfiveFillRecord;
   }
 
   // --- Links -------------------------------------------------------------
@@ -1974,6 +2026,12 @@ export class GanttRenderer {
   // rows are visible.
   lastInterventionBandCount = 0;
   lastInterventionBandXs: number[] = [];
+  // Exposed for goldfive-bar tests (harmonograf#157): span-id → fill color
+  // used on the most recent drawBlocks pass. Populated only for spans
+  // whose fill came from the goldfive call-category override (judge /
+  // refine / plan / reflective); other spans are omitted so tests can
+  // assert the override fired without walking every bucket.
+  lastGoldfiveFills = new Map<string, string>();
 
   // --- Overlay -----------------------------------------------------------
 

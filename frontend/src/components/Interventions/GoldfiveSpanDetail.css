@@ -1,0 +1,206 @@
+/* Drawer detail panel for goldfive-translated spans (harmonograf#157).
+   Shares the visual language of JudgeInvocationDetail.css so the two
+   panels slot into the drawer with consistent chrome — the only new
+   elements are the call-name / target badges and the monospace pre-blocks
+   used for input / output previews. */
+
+.hg-gf-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+  color: var(--md-sys-color-on-surface, #e2e2e9);
+  font: 12px/1.45 var(--md-sys-typescale-body-small-font, system-ui, sans-serif);
+}
+
+.hg-gf-detail__header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant, #43474e);
+}
+
+.hg-gf-detail__title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.hg-gf-detail__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: center;
+}
+
+.hg-gf-detail__badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: lowercase;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--md-sys-color-outline-variant, #43474e);
+  color: var(--md-sys-color-on-surface, #e2e2e9);
+}
+
+/* Category tinting: match the goldfive bar colors. Kept as low-alpha
+   tints so badges read as chips rather than full-saturation swatches. */
+.hg-gf-detail__badge--call[data-category='judge'] {
+  background: rgba(59, 178, 115, 0.18);
+  border-color: rgba(59, 178, 115, 0.4);
+}
+.hg-gf-detail__badge--call[data-category='refine'] {
+  background: rgba(167, 139, 250, 0.18);
+  border-color: rgba(167, 139, 250, 0.4);
+}
+.hg-gf-detail__badge--call[data-category='plan'] {
+  background: rgba(79, 209, 197, 0.18);
+  border-color: rgba(79, 209, 197, 0.4);
+}
+.hg-gf-detail__badge--call[data-category='reflective'] {
+  background: rgba(141, 145, 153, 0.22);
+  border-color: rgba(141, 145, 153, 0.45);
+}
+
+.hg-gf-detail__badge--target {
+  background: rgba(168, 200, 255, 0.15);
+  border-color: rgba(168, 200, 255, 0.4);
+  font-family: var(--hg-mono, ui-monospace, Menlo, monospace);
+  text-transform: none;
+}
+
+.hg-gf-detail__badge--task {
+  background: rgba(255, 255, 255, 0.03);
+  font-family: var(--hg-mono, ui-monospace, Menlo, monospace);
+  text-transform: none;
+}
+
+.hg-gf-detail__section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hg-gf-detail__section--linked {
+  background: rgba(167, 139, 250, 0.07);
+  border: 1px solid rgba(167, 139, 250, 0.25);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.hg-gf-detail__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.hg-gf-detail__section-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  opacity: 0.65;
+}
+
+.hg-gf-detail__copy {
+  background: transparent;
+  border: 1px solid var(--md-sys-color-outline-variant, #43474e);
+  color: inherit;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.hg-gf-detail__copy:hover {
+  opacity: 1;
+}
+
+.hg-gf-detail__pre {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  font: 11px/1.5 var(--hg-mono, ui-monospace, Menlo, monospace);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.hg-gf-detail__empty {
+  font-style: italic;
+  opacity: 0.6;
+  padding: 4px 0;
+}
+
+.hg-gf-detail__context-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  padding: 0;
+}
+
+.hg-gf-detail__context-grid dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  opacity: 0.6;
+  align-self: baseline;
+}
+
+.hg-gf-detail__context-grid dd {
+  margin: 0;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.hg-gf-detail__context-grid code {
+  font-size: 10px;
+  opacity: 0.9;
+}
+
+.hg-gf-detail__linked-plan-link {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--md-sys-color-primary, #a8c8ff);
+  cursor: pointer;
+  text-align: left;
+}
+
+.hg-gf-detail__linked-plan-link:disabled {
+  color: var(--md-sys-color-on-surface, #e2e2e9);
+  cursor: default;
+}
+
+.hg-gf-detail__linked-plan-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.hg-gf-detail__linked-plan-reason {
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.hg-gf-detail__linked-plan-tasks {
+  list-style: disc;
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.hg-gf-detail__linked-plan-task-agent {
+  font-family: var(--hg-mono, ui-monospace, Menlo, monospace);
+  font-size: 10px;
+  opacity: 0.8;
+}

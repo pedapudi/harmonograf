@@ -9,6 +9,7 @@ import { SpanContextMenu, type ContextMenuState } from '../components/Interactio
 import { usePopoverStore } from '../state/popoverStore';
 import { DelegationTooltip } from '../components/DelegationTooltip/DelegationTooltip';
 import { actorDisplayLabel } from '../theme/agentColors';
+import { isGoldfiveSpan, resolveGoldfiveSpanInfo } from '../lib/goldfiveSpan';
 
 interface ContextHover {
   agentId: string;
@@ -345,34 +346,47 @@ export function GanttCanvas({ store, height, renderOverlay }: Props) {
           </div>
         </div>
       )}
-      {hover && span && (
-        <div
-          role="tooltip"
-          style={{
-            position: 'absolute',
-            left: Math.min(hover.x + 12, 9999),
-            top: Math.max(0, hover.y - 48),
-            background: 'var(--md-sys-color-surface-container-highest, #31333c)',
-            color: 'var(--md-sys-color-on-surface, #e2e2e9)',
-            padding: '6px 10px',
-            borderRadius: 6,
-            pointerEvents: 'none',
-            fontSize: 12,
-            fontFamily: 'system-ui, sans-serif',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-            zIndex: 10,
-            maxWidth: 360,
-          }}
-        >
-          <div style={{ fontWeight: 600 }}>{span.name}</div>
-          <div style={{ opacity: 0.8 }}>
-            {span.kind} · {span.status}
-            {span.endMs !== null && (
-              <> · {(span.endMs - span.startMs).toFixed(0)}ms</>
+      {hover && span && (() => {
+        // Goldfive spans swap the bare name for the decision summary so the
+        // pre-click hover already answers "what did goldfive decide?".
+        const gf = isGoldfiveSpan(span) ? resolveGoldfiveSpanInfo(span) : null;
+        const title = gf ? gf.callName : span.name;
+        const summary = gf ? gf.decisionSummary : '';
+        return (
+          <div
+            role="tooltip"
+            data-testid="gantt-hover-tooltip"
+            data-goldfive={gf ? 'true' : 'false'}
+            style={{
+              position: 'absolute',
+              left: Math.min(hover.x + 12, 9999),
+              top: Math.max(0, hover.y - 48),
+              background: 'var(--md-sys-color-surface-container-highest, #31333c)',
+              color: 'var(--md-sys-color-on-surface, #e2e2e9)',
+              padding: '6px 10px',
+              borderRadius: 6,
+              pointerEvents: 'none',
+              fontSize: 12,
+              fontFamily: 'system-ui, sans-serif',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+              zIndex: 10,
+              maxWidth: 360,
+            }}
+          >
+            <div style={{ fontWeight: 600 }}>{title}</div>
+            {summary && (
+              <div style={{ opacity: 0.85, marginTop: 2 }}>{summary}</div>
             )}
+            <div style={{ opacity: 0.7, marginTop: summary ? 2 : 0 }}>
+              {span.kind} · {span.status}
+              {span.endMs !== null && (
+                <> · {(span.endMs - span.startMs).toFixed(0)}ms</>
+              )}
+              {gf && gf.targetAgentId && <> · → {gf.targetAgentId}</>}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       {delegHover && !hover && (
         <DelegationTooltip
           hover={delegHover}
