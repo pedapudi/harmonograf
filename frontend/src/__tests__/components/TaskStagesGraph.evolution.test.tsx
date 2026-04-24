@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { vi } from 'vitest';
 import type { Task, TaskEdge, TaskPlan, TaskStatus } from '../../gantt/types';
 import { SessionStore } from '../../gantt/index';
 
@@ -14,6 +15,7 @@ vi.mock('../../rpc/hooks', () => ({
 // Mock CSS so vitest's "css: false" doesn't complain about side-effect
 // imports on the component under test.
 vi.mock('../../components/TaskStages/TaskStagesGraph.css', () => ({}));
+vi.mock('../../components/TaskStages/RevisionHistoryBadge.css', () => ({}));
 
 // Imported AFTER the mock so the hooks bind to our fake getSessionStore.
 import { TaskStagesGraph } from '../../components/TaskStages/TaskStagesGraph';
@@ -156,8 +158,8 @@ describe('plan-evolution · pure derivation', () => {
   });
 });
 
-describe('<TaskStagesGraph /> cumulative mode', () => {
-  it('renders both live and superseded tasks with muted styling for superseded', () => {
+describe('<TaskStagesGraph /> cumulative mode (collapsed chains)', () => {
+  it('collapses a supersedes chain into one canonical card; singleton tasks render as their own card', () => {
     const store = seedTwoRevPlan();
     const cum = __internal.deriveCumulative('plan-1', store.tasks.allRevsForPlan('plan-1'));
     const supersedes = __internal.deriveSupersedes(
@@ -172,26 +174,51 @@ describe('<TaskStagesGraph /> cumulative mode', () => {
       />,
     );
     const cards = container.querySelectorAll('g.hg-stages__card');
-    expect(cards.length).toBe(3); // t1, t2 (superseded), t3
-    const superseded = Array.from(cards).filter(
-      (c) => c.getAttribute('data-superseded') === 'true',
-    );
-    expect(superseded).toHaveLength(1);
+    // t1 (singleton) + {t2, t3} collapsed into one chain card = 2 cards.
+    expect(cards.length).toBe(2);
   });
 
-  it('renders one generation badge per task with the right revision number', () => {
+  it('attaches a RevisionHistoryBadge to the multi-member chain card only', () => {
     const store = seedTwoRevPlan();
     const cum = __internal.deriveCumulative('plan-1', store.tasks.allRevsForPlan('plan-1'));
+    const supersedes = __internal.deriveSupersedes(
+      store.tasks.allRevsForPlan('plan-1'),
+      new Map([['drift-abc', store.drifts.list()[0]]]),
+    );
     const { container } = render(
-      <TaskStagesGraph plan={mkPlan(0, [])} cumulative={cum} />,
+      <TaskStagesGraph
+        plan={mkPlan(0, [])}
+        cumulative={cum}
+        supersedesMap={supersedes}
+      />,
+    );
+    // One chain-badge slot for the {t2,t3} canonical card. t1 is
+    // singleton so has no badge.
+    const badges = container.querySelectorAll('[data-testid^="chain-badge-for-"]');
+    expect(badges.length).toBe(1);
+    // The canonical of the {t2,t3} chain is t3 (latest member).
+    expect(badges[0].getAttribute('data-testid')).toBe('chain-badge-for-t3');
+  });
+
+  it('renders one generation badge per collapsed card', () => {
+    const store = seedTwoRevPlan();
+    const cum = __internal.deriveCumulative('plan-1', store.tasks.allRevsForPlan('plan-1'));
+    const supersedes = __internal.deriveSupersedes(
+      store.tasks.allRevsForPlan('plan-1'),
+      new Map([['drift-abc', store.drifts.list()[0]]]),
+    );
+    const { container } = render(
+      <TaskStagesGraph
+        plan={mkPlan(0, [])}
+        cumulative={cum}
+        supersedesMap={supersedes}
+      />,
     );
     const badges = container.querySelectorAll('g.hg-stages__gen-badge');
-    expect(badges.length).toBe(3);
-    const revs = Array.from(badges).map((b) => b.getAttribute('data-rev'));
-    expect(revs.sort()).toEqual(['0', '0', '1']);
+    expect(badges.length).toBe(2);
   });
 
-  it('renders a supersedes edge with a drift-kind annotation', () => {
+  it('no longer renders visible "supersedes-edge" elements (chain badge replaces them)', () => {
     const store = seedTwoRevPlan();
     const cum = __internal.deriveCumulative('plan-1', store.tasks.allRevsForPlan('plan-1'));
     const supersedes = __internal.deriveSupersedes(
@@ -205,103 +232,53 @@ describe('<TaskStagesGraph /> cumulative mode', () => {
         supersedesMap={supersedes}
       />,
     );
-    const edges = container.querySelectorAll('[data-testid="supersedes-edge"]');
-    expect(edges.length).toBe(1);
-    const label = edges[0].querySelector('.hg-stages__supersedes-label');
-    expect(label?.textContent).toContain('off_topic');
-    expect(label?.textContent).toContain('goldfive');
-  });
-
-  it('fires onSupersedesEdgeClick with the link payload when clicked', () => {
-    const store = seedTwoRevPlan();
-    const cum = __internal.deriveCumulative('plan-1', store.tasks.allRevsForPlan('plan-1'));
-    const supersedes = __internal.deriveSupersedes(
-      store.tasks.allRevsForPlan('plan-1'),
-      new Map([['drift-abc', store.drifts.list()[0]]]),
-    );
-    const handler = vi.fn();
-    const { container } = render(
-      <TaskStagesGraph
-        plan={mkPlan(0, [])}
-        cumulative={cum}
-        supersedesMap={supersedes}
-        onSupersedesEdgeClick={handler}
-      />,
-    );
-    const edge = container.querySelector('[data-testid="supersedes-edge"]');
-    expect(edge).toBeTruthy();
-    fireEvent.click(edge!);
-    expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler.mock.calls[0][0].oldTaskId).toBe('t2');
-    expect(handler.mock.calls[0][0].newTaskId).toBe('t3');
+    expect(container.querySelectorAll('[data-testid="supersedes-edge"]')).toHaveLength(0);
   });
 });
 
-describe('<TaskPlanPanel /> integration', () => {
-  it('defaults to cumulative view and renders the scrubber + both task revs', () => {
+describe('<TaskPlanPanel /> integration (collapsed chains)', () => {
+  it('defaults to cumulative view and renders one card per logical slot after collapse', () => {
     const store = seedTwoRevPlan();
     const plan = store.tasks.getPlan('plan-1')!;
     render(<TaskPlanPanel sessionId="sess-1" plan={plan} />);
     expect(screen.getByTestId('task-stages-graph')).toBeInTheDocument();
     expect(screen.getByTestId('plan-revision-scrubber')).toBeInTheDocument();
-    // cumulative → shows t1, t2 (muted), t3
+    // cumulative → t1 + {t2,t3}-chain = 2 cards after collapse.
     const cards = document
       .querySelector('[data-testid="task-stages-graph"]')!
       .querySelectorAll('g.hg-stages__card');
-    expect(cards.length).toBe(3);
+    expect(cards.length).toBe(2);
   });
 
-  it('opens the steering-detail side panel on supersedes-edge click', () => {
-    const store = seedTwoRevPlan();
-    const plan = store.tasks.getPlan('plan-1')!;
-    render(<TaskPlanPanel sessionId="sess-1" plan={plan} />);
-    const edges = document.querySelectorAll('[data-testid="supersedes-edge"]');
-    expect(edges.length).toBe(1);
-    fireEvent.click(edges[0]);
-    const panel = screen.getByTestId('steering-detail-panel');
-    expect(panel).toBeInTheDocument();
-    // Trigger / Steering / Target sections populated.
-    expect(screen.getByTestId('steering-detail-trigger').textContent).toContain(
-      'off_topic',
-    );
-    expect(screen.getByTestId('steering-detail-steering').textContent).toContain(
-      'goldfive',
-    );
-    expect(screen.getByTestId('steering-detail-target').textContent).toContain('agent-a');
-  });
-
-  it('revision scrubber filter mutes tasks introduced in later revisions', () => {
+  it('revision scrubber hides chains whose earliest member is introduced after the pinned rev', () => {
     const store = seedThreeRevPlan();
     const plan = store.tasks.getPlan('plan-1')!;
     render(<TaskPlanPanel sessionId="sess-3" plan={plan} />);
-    // Default selection is 'Latest' → nothing muted from the scrubber
-    // (cards may still be superseded in the no-superseded path here; t3
-    // is the tail so no tasks are superseded). Click rev 0.
+    // Click rev 0. t1 was intro'd at rev 0 → visible. t2 (rev 1) + t3
+    // (rev 2) are singleton chains whose firstRev > 0 → hidden (not
+    // rendered at all, per filterCollapsedAtRevision contract).
     fireEvent.click(screen.getByTestId('scrubber-notch-0'));
     const cards = document
       .querySelector('[data-testid="task-stages-graph"]')!
       .querySelectorAll('g.hg-stages__card');
-    const muted = Array.from(cards).filter((c) =>
-      c.classList.contains('hg-stages__card--muted'),
-    );
-    // t2 + t3 were introduced after rev 0 → muted.
-    expect(muted.length).toBe(2);
+    expect(cards.length).toBe(1);
   });
 
-  it('Latest-only toggle drops the cumulative rendering (no supersedes edges)', () => {
+  it('Latest-only toggle drops the cumulative rendering (no chain badges, no gen badges)', () => {
     const store = seedTwoRevPlan();
     const plan = store.tasks.getPlan('plan-1')!;
     render(<TaskPlanPanel sessionId="sess-1" plan={plan} />);
     // Switch to Latest only.
     const toggle = screen.getByTestId('task-plan-view-toggle') as HTMLSelectElement;
     fireEvent.change(toggle, { target: { value: 'latest' } });
-    // Latest only → just t1 + t3 (the live rev 1 shape). No gen badges.
+    // Latest only → just t1 + t3 (the live rev 1 shape). No gen badges,
+    // no chain badges (singleton tasks don't get a badge).
     const cards = document
       .querySelector('[data-testid="task-stages-graph"]')!
       .querySelectorAll('g.hg-stages__card');
     expect(cards.length).toBe(2);
     expect(
-      document.querySelectorAll('[data-testid="supersedes-edge"]'),
+      document.querySelectorAll('[data-testid^="chain-badge-for-"]'),
     ).toHaveLength(0);
     expect(document.querySelectorAll('g.hg-stages__gen-badge')).toHaveLength(0);
   });
