@@ -392,6 +392,40 @@ class Client:
         self._events.push(env)
         self._transport.notify()
 
+    def emit_refine_attempted(self, msg: Any) -> None:
+        """Ship a ``RefineAttempted`` record to the server.
+
+        ``msg`` is a ``harmonograf.v1.RefineAttempted`` proto, already
+        materialized by :class:`HarmonografSink._emit_refine_attempted`
+        from goldfive's dict envelope (goldfive#264). Same buffer +
+        transport flow as :meth:`emit_goldfive_event` — routed on the
+        ``TelemetryUp.refine_attempted`` wire slot.
+        """
+        env = SpanEnvelope(
+            kind=EnvelopeKind.REFINE_ATTEMPTED,
+            span_id="",
+            payload=msg,
+        )
+        self._events.push(env)
+        self._transport.notify()
+
+    def emit_refine_failed(self, msg: Any) -> None:
+        """Ship a ``RefineFailed`` record to the server.
+
+        Companion to :meth:`emit_refine_attempted`. The two events are
+        correlated server-side (and on the frontend) by ``attempt_id``
+        so the operator UI can merge an attempt + its terminal outcome
+        into a single intervention row. Routed on the
+        ``TelemetryUp.refine_failed`` wire slot.
+        """
+        env = SpanEnvelope(
+            kind=EnvelopeKind.REFINE_FAILED,
+            span_id="",
+            payload=msg,
+        )
+        self._events.push(env)
+        self._transport.notify()
+
     def shutdown(self, flush_timeout: float = 5.0) -> None:
         if self._shutdown_called:
             return

@@ -32,6 +32,8 @@ from harmonograf_server.bus import (
     DELTA_GOAL_DERIVED,
     DELTA_HEARTBEAT,
     DELTA_INVOCATION_CANCELLED,
+    DELTA_REFINE_ATTEMPTED,
+    DELTA_REFINE_FAILED,
     DELTA_RUN_ABORTED,
     DELTA_RUN_COMPLETED,
     DELTA_RUN_STARTED,
@@ -72,7 +74,7 @@ from goldfive.v1 import types_pb2 as goldfive_types_pb2
 from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
 from harmonograf_server.ingest import IngestPipeline
 from harmonograf_server.interventions import list_interventions, record_to_pb
-from harmonograf_server.pb import frontend_pb2, types_pb2
+from harmonograf_server.pb import frontend_pb2, telemetry_pb2, types_pb2
 from harmonograf_server.storage import (
     Agent,
     Annotation,
@@ -391,6 +393,74 @@ class FrontendServicerMixin:
                     )
                     continue
                 yield frontend_pb2.SessionUpdate(goldfive_event=ev)
+
+            # 4b.3. Refine attempts + failures (goldfive#264). Same ring
+            # rationale as cancels: dict-sourced, not persisted in
+            # ``goldfive_events``, but the operator UI relies on the
+            # paired RefineAttempted ↔ terminal correlation surviving a
+            # reconnect. Replayed in arrival order so the frontend's
+            # merge-by-attempt_id logic matches what it sees on the live
+            # tail — attempted before its terminal counterpart, never
+            # the other way around (goldfive's emitter holds the
+            # ordering invariant).
+            try:
+                attempts = self._ingest.refine_attempts_for_session(
+                    session_id
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("refine_attempts_for_session failed: %s", exc)
+                attempts = []
+            for ar in attempts:
+                rmsg = telemetry_pb2.RefineAttempted(
+                    run_id=ar.get("run_id", "") or "",
+                    sequence=int(ar.get("sequence", 0) or 0),
+                    session_id=session_id,
+                    attempt_id=ar.get("attempt_id", "") or "",
+                    drift_id=ar.get("drift_id", "") or "",
+                    trigger_kind=ar.get("trigger_kind", "") or "",
+                    trigger_severity=ar.get("trigger_severity", "") or "",
+                    current_task_id=ar.get("current_task_id", "") or "",
+                    current_agent_id=ar.get("current_agent_id", "") or "",
+                )
+                ts_val = ar.get("emitted_at")
+                if not isinstance(ts_val, (int, float)):
+                    ts_val = ar.get("recorded_at")
+                if isinstance(ts_val, (int, float)):
+                    ts = float_to_ts(float(ts_val))
+                    if ts is not None:
+                        rmsg.emitted_at.CopyFrom(ts)
+                yield frontend_pb2.SessionUpdate(refine_attempted=rmsg)
+
+            try:
+                failures = self._ingest.refine_failures_for_session(
+                    session_id
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("refine_failures_for_session failed: %s", exc)
+                failures = []
+            for fr in failures:
+                fmsg = telemetry_pb2.RefineFailed(
+                    run_id=fr.get("run_id", "") or "",
+                    sequence=int(fr.get("sequence", 0) or 0),
+                    session_id=session_id,
+                    attempt_id=fr.get("attempt_id", "") or "",
+                    drift_id=fr.get("drift_id", "") or "",
+                    trigger_kind=fr.get("trigger_kind", "") or "",
+                    trigger_severity=fr.get("trigger_severity", "") or "",
+                    failure_kind=fr.get("failure_kind", "") or "",
+                    reason=fr.get("reason", "") or "",
+                    detail=fr.get("detail", "") or "",
+                    current_task_id=fr.get("current_task_id", "") or "",
+                    current_agent_id=fr.get("current_agent_id", "") or "",
+                )
+                ts_val = fr.get("emitted_at")
+                if not isinstance(ts_val, (int, float)):
+                    ts_val = fr.get("recorded_at")
+                if isinstance(ts_val, (int, float)):
+                    ts = float_to_ts(float(ts_val))
+                    if ts is not None:
+                        fmsg.emitted_at.CopyFrom(ts)
+                yield frontend_pb2.SessionUpdate(refine_failed=fmsg)
 
             # 4c. Context window samples — replay the most recent per-agent
             # series so the Gantt context-window lane renders immediately
@@ -1340,6 +1410,54 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
             if ts is not None:
                 ev.emitted_at.CopyFrom(ts)
         return frontend_pb2.SessionUpdate(goldfive_event=ev)
+    if delta.kind == DELTA_REFINE_ATTEMPTED:
+        p = delta.payload
+        rmsg = telemetry_pb2.RefineAttempted(
+            run_id=p.get("run_id", "") or "",
+            sequence=int(p.get("sequence", 0) or 0),
+            session_id=delta.session_id,
+            attempt_id=p.get("attempt_id", "") or "",
+            drift_id=p.get("drift_id", "") or "",
+            trigger_kind=p.get("trigger_kind", "") or "",
+            trigger_severity=p.get("trigger_severity", "") or "",
+            current_task_id=p.get("current_task_id", "") or "",
+            current_agent_id=p.get("current_agent_id", "") or "",
+        )
+        # Prefer the goldfive-side emitted_at; fall back to ingest-side
+        # recorded_at so the frontend always has a timestamp to render
+        # (mirrors the DELTA_DRIFT emittedAt stamping).
+        ts_val = p.get("emitted_at")
+        if not isinstance(ts_val, (int, float)):
+            ts_val = p.get("recorded_at")
+        if isinstance(ts_val, (int, float)):
+            ts = float_to_ts(float(ts_val))
+            if ts is not None:
+                rmsg.emitted_at.CopyFrom(ts)
+        return frontend_pb2.SessionUpdate(refine_attempted=rmsg)
+    if delta.kind == DELTA_REFINE_FAILED:
+        p = delta.payload
+        fmsg = telemetry_pb2.RefineFailed(
+            run_id=p.get("run_id", "") or "",
+            sequence=int(p.get("sequence", 0) or 0),
+            session_id=delta.session_id,
+            attempt_id=p.get("attempt_id", "") or "",
+            drift_id=p.get("drift_id", "") or "",
+            trigger_kind=p.get("trigger_kind", "") or "",
+            trigger_severity=p.get("trigger_severity", "") or "",
+            failure_kind=p.get("failure_kind", "") or "",
+            reason=p.get("reason", "") or "",
+            detail=p.get("detail", "") or "",
+            current_task_id=p.get("current_task_id", "") or "",
+            current_agent_id=p.get("current_agent_id", "") or "",
+        )
+        ts_val = p.get("emitted_at")
+        if not isinstance(ts_val, (int, float)):
+            ts_val = p.get("recorded_at")
+        if isinstance(ts_val, (int, float)):
+            ts = float_to_ts(float(ts_val))
+            if ts is not None:
+                fmsg.emitted_at.CopyFrom(ts)
+        return frontend_pb2.SessionUpdate(refine_failed=fmsg)
     if delta.kind == DELTA_AGENT_INVOCATION_STARTED:
         p = delta.payload
         ev = goldfive_events_pb2.Event(run_id=p.get("run_id", ""))

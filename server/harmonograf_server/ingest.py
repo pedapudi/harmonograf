@@ -238,6 +238,18 @@ class IngestPipeline:
         self._drifts_by_session: dict[str, list[dict[str, Any]]] = {}
         self._drift_ring_max = 500
 
+        # Per-session ring of recent RefineAttempted / RefineFailed
+        # events (goldfive#264). Same reconnect-replay role as the
+        # drift ring above — goldfive ships these as dict envelopes
+        # for forward-compat (the proto promotion is tracked as
+        # goldfive Stream C #256), so the records can't round-trip
+        # through ``list_goldfive_events``. When the promotion lands,
+        # the rings can collapse into the goldfive_events replay path
+        # the way the InvocationCancelled rings did in #190.
+        self._refine_attempts_by_session: dict[str, list[dict[str, Any]]] = {}
+        self._refine_failures_by_session: dict[str, list[dict[str, Any]]] = {}
+        self._refine_ring_max = 500
+
     # ---- public API ---------------------------------------------------
 
     @property
@@ -333,6 +345,10 @@ class IngestPipeline:
             self._control_sink.record_ack(msg.control_ack, stream_id=ctx.stream_id)
         elif kind == "goldfive_event":
             await self._handle_goldfive_event(ctx, msg.goldfive_event)
+        elif kind == "refine_attempted":
+            await self._handle_refine_attempted(ctx, msg.refine_attempted)
+        elif kind == "refine_failed":
+            await self._handle_refine_failed(ctx, msg.refine_failed)
         elif kind == "goodbye":
             await self._handle_goodbye(ctx, msg.goodbye)
         elif kind == "hello":
@@ -1303,6 +1319,120 @@ class IngestPipeline:
             tool_name=payload.tool_name or "",
             recorded_at=self._now(),
         )
+
+    async def _handle_refine_attempted(
+        self, ctx: StreamContext, msg: Any
+    ) -> None:
+        """Ingest a ``RefineAttempted`` envelope.
+
+        Same "operator-observability marker" role as
+        :meth:`_handle_invocation_cancelled` (post-#190 routing via the
+        goldfive_event path): stash on the per-session ring (so
+        reconnect replay during WatchSession initial burst keeps the
+        marker visible) and publish a DELTA_REFINE_ATTEMPTED on the bus
+        so live subscribers render the marker immediately.
+
+        Not persisted in the ``goldfive_events`` table — the events
+        arrive as dict envelopes, same forward-compat pattern that
+        pre-#190 InvocationCancelled used. When goldfive Stream C
+        (#256) promotes them to typed proto variants the rings can
+        collapse into the goldfive_events replay path the same way.
+        """
+        emitted_at_val: float | None = None
+        if msg.HasField("emitted_at"):
+            emitted_at_val = ts_to_float(msg.emitted_at)
+        record: dict[str, Any] = {
+            "run_id": msg.run_id or "",
+            "sequence": int(msg.sequence or 0),
+            "emitted_at": emitted_at_val,
+            "attempt_id": msg.attempt_id or "",
+            "drift_id": msg.drift_id or "",
+            "trigger_kind": msg.trigger_kind or "",
+            "trigger_severity": msg.trigger_severity or "",
+            "current_task_id": msg.current_task_id or "",
+            "current_agent_id": msg.current_agent_id or "",
+            "recorded_at": self._now(),
+        }
+        ring = self._refine_attempts_by_session.setdefault(ctx.session_id, [])
+        ring.append(record)
+        if len(ring) > self._refine_ring_max:
+            del ring[: len(ring) - self._refine_ring_max]
+        self._bus.publish_refine_attempted(
+            ctx.session_id,
+            record["run_id"],
+            sequence=record["sequence"],
+            emitted_at=record["emitted_at"],
+            attempt_id=record["attempt_id"],
+            drift_id=record["drift_id"],
+            trigger_kind=record["trigger_kind"],
+            trigger_severity=record["trigger_severity"],
+            current_task_id=record["current_task_id"],
+            current_agent_id=record["current_agent_id"],
+            recorded_at=record["recorded_at"],
+        )
+
+    async def _handle_refine_failed(self, ctx: StreamContext, msg: Any) -> None:
+        """Ingest a ``RefineFailed`` envelope.
+
+        Companion to :meth:`_handle_refine_attempted`. Stashes on the
+        failures ring so initial-burst replay can re-deliver both the
+        attempted and the failed terminal — preserving the merge-by-
+        ``attempt_id`` correlation the frontend relies on.
+        """
+        emitted_at_val: float | None = None
+        if msg.HasField("emitted_at"):
+            emitted_at_val = ts_to_float(msg.emitted_at)
+        record: dict[str, Any] = {
+            "run_id": msg.run_id or "",
+            "sequence": int(msg.sequence or 0),
+            "emitted_at": emitted_at_val,
+            "attempt_id": msg.attempt_id or "",
+            "drift_id": msg.drift_id or "",
+            "trigger_kind": msg.trigger_kind or "",
+            "trigger_severity": msg.trigger_severity or "",
+            "failure_kind": msg.failure_kind or "",
+            "reason": msg.reason or "",
+            "detail": msg.detail or "",
+            "current_task_id": msg.current_task_id or "",
+            "current_agent_id": msg.current_agent_id or "",
+            "recorded_at": self._now(),
+        }
+        ring = self._refine_failures_by_session.setdefault(ctx.session_id, [])
+        ring.append(record)
+        if len(ring) > self._refine_ring_max:
+            del ring[: len(ring) - self._refine_ring_max]
+        self._bus.publish_refine_failed(
+            ctx.session_id,
+            record["run_id"],
+            sequence=record["sequence"],
+            emitted_at=record["emitted_at"],
+            attempt_id=record["attempt_id"],
+            drift_id=record["drift_id"],
+            trigger_kind=record["trigger_kind"],
+            trigger_severity=record["trigger_severity"],
+            failure_kind=record["failure_kind"],
+            reason=record["reason"],
+            detail=record["detail"],
+            current_task_id=record["current_task_id"],
+            current_agent_id=record["current_agent_id"],
+            recorded_at=record["recorded_at"],
+        )
+
+    def refine_attempts_for_session(
+        self, session_id: str
+    ) -> list[dict[str, Any]]:
+        """Return the in-memory refine-attempted ring (oldest first).
+
+        Replayed during WatchSession initial burst so reconnects keep
+        the attempted side of every paired refine intervention.
+        """
+        return list(self._refine_attempts_by_session.get(session_id, []))
+
+    def refine_failures_for_session(
+        self, session_id: str
+    ) -> list[dict[str, Any]]:
+        """Return the in-memory refine-failed ring (oldest first)."""
+        return list(self._refine_failures_by_session.get(session_id, []))
 
     async def _on_run_completed(
         self, ctx: StreamContext, payload: Any, run_id: str

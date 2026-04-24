@@ -41,6 +41,16 @@ function fmtOutcome(outcome: string): string {
     const rest = outcome.slice('cascade_cancel:'.length).replace('_', ' ');
     return `→ cancel ${rest}`;
   }
+  // goldfive#264 refine outcomes:
+  //   - ``refine_failed:<failure_kind>`` — failure terminal.
+  //   - ``pending`` — attempted but no terminal observed yet.
+  if (outcome.startsWith('refine_failed:')) {
+    const fk = outcome.slice('refine_failed:'.length).replace('_', ' ');
+    return `× ${fk}`;
+  }
+  if (outcome === 'pending') {
+    return '… pending';
+  }
   return `→ ${outcome}`;
 }
 
@@ -114,7 +124,7 @@ export function InterventionsList({ rows, onRowClick }: InterventionsListProps) 
                     style={{ background: color }}
                     aria-hidden="true"
                   >
-                    {row.source === 'cancel' ? (
+                    {row.source === 'cancel' || row.source === 'refine' ? (
                       <span className="hg-interventions-list__glyph" aria-hidden="true">
                         {glyph}
                       </span>

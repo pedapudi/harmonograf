@@ -752,6 +752,188 @@ export interface InvocationCancelRecord {
   recordedAtAbsoluteMs: number;
 }
 
+// A captured goldfive RefineAttempted event (goldfive#264). Operator-
+// facing record that goldfive started a refine attempt against a drift.
+// Pairs with exactly one of:
+//   - a successful goldfive PlanRevised (matched by attempt_id), or
+//   - a RefineFailed (matched by attempt_id),
+// stored in :class:`RefineFailureRecord` below. The intervention
+// derivation in ``lib/interventions.ts`` merges the attempted row with
+// its terminal counterpart so the operator sees exactly one row per
+// refine attempt with the outcome rolled in.
+//
+// Plays the same "intervention timeline marker" role as DriftRecord but
+// is informational (not a drift signal); the merged downstream row
+// inherits the trigger severity from the attempted side.
+export interface RefineAttemptRecord {
+  seq: number;              // monotonic per session, assigned on arrival
+  runId: string;
+  attemptId: string;        // UUID4 minted by goldfive for correlation
+  driftId: string;          // backlink to the triggering DriftRecord
+  triggerKind: string;      // lowercase drift kind that triggered the refine
+  triggerSeverity: string;  // lowercase drift severity
+  taskId: string;           // empty when no specific task scope
+  agentId: string;          // canonicalized <client>:<bare> on the wire
+  recordedAtMs: number;
+  recordedAtAbsoluteMs: number;
+}
+
+// A captured goldfive RefineFailed event (goldfive#264). Terminal
+// counterpart for a RefineAttemptRecord whose refine produced an
+// unusable outcome (parse error, validator rejection, LLM error).
+// Correlates with the attempted side via ``attemptId``.
+export interface RefineFailureRecord {
+  seq: number;
+  runId: string;
+  attemptId: string;
+  driftId: string;
+  triggerKind: string;
+  triggerSeverity: string;
+  failureKind: string;      // 'parse_error' | 'validator_rejected' | 'llm_error' | 'other'
+  reason: string;           // short human-readable summary
+  detail: string;           // long-form (e.g. validator exception text)
+  taskId: string;
+  agentId: string;
+  recordedAtMs: number;
+  recordedAtAbsoluteMs: number;
+}
+
+// Registry of per-session refine-attempt records (the start side).
+// Same append-on-ingest + rebase-on-session-start pattern as
+// DriftRegistry / InvocationCancelRegistry. Bounded only by session
+// length; refines are low-volume (one per drift, low single digits per
+// run typically).
+export class RefineAttemptRegistry {
+  private attempts: RefineAttemptRecord[] = [];
+  private listeners = new Set<() => void>();
+  private nextSeq = 0;
+  // Dedup on attemptId: a reconnecting client receives the same
+  // RefineAttempted via initial-burst replay AND the live tail during
+  // the subscribe race, which would otherwise produce duplicate rows.
+  // attemptId is goldfive-minted UUID4 (always non-empty) so the key is
+  // strong; for the rare envelope without one we fall back to a
+  // (sequence, runId) tuple.
+  private seen = new Set<string>();
+
+  list(): readonly RefineAttemptRecord[] {
+    return this.attempts;
+  }
+
+  append(
+    a: Omit<RefineAttemptRecord, 'seq' | 'recordedAtAbsoluteMs'> &
+      Partial<Pick<RefineAttemptRecord, 'recordedAtAbsoluteMs'>>,
+  ): void {
+    const key = a.attemptId
+      ? `id:${a.attemptId}`
+      : `fb:${a.runId}|${a.driftId}|${a.recordedAtMs}`;
+    if (this.seen.has(key)) return;
+    this.seen.add(key);
+    const recordedAtAbsoluteMs = a.recordedAtAbsoluteMs ?? a.recordedAtMs;
+    this.attempts.push({
+      ...a,
+      recordedAtAbsoluteMs,
+      seq: this.nextSeq++,
+    });
+    this.emit();
+  }
+
+  rebase(sessionStartMs: number): void {
+    if (this.attempts.length === 0) return;
+    let changed = false;
+    for (const a of this.attempts) {
+      if (!a.recordedAtAbsoluteMs) continue;
+      const next = a.recordedAtAbsoluteMs - sessionStartMs;
+      if (a.recordedAtMs !== next) {
+        a.recordedAtMs = next;
+        changed = true;
+      }
+    }
+    if (changed) this.emit();
+  }
+
+  clear(): void {
+    if (this.attempts.length === 0) return;
+    this.attempts = [];
+    this.nextSeq = 0;
+    this.seen.clear();
+    this.emit();
+  }
+
+  subscribe(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  private emit(): void {
+    for (const fn of this.listeners) fn();
+  }
+}
+
+// Registry of per-session refine-failure records (the failed-terminal
+// side). Same shape as RefineAttemptRegistry; the two are kept in
+// separate registries so the deriver in ``lib/interventions.ts`` can
+// walk attempts and look up failures by attemptId without filtering a
+// mixed list.
+export class RefineFailureRegistry {
+  private failures: RefineFailureRecord[] = [];
+  private listeners = new Set<() => void>();
+  private nextSeq = 0;
+  private seen = new Set<string>();
+
+  list(): readonly RefineFailureRecord[] {
+    return this.failures;
+  }
+
+  append(
+    f: Omit<RefineFailureRecord, 'seq' | 'recordedAtAbsoluteMs'> &
+      Partial<Pick<RefineFailureRecord, 'recordedAtAbsoluteMs'>>,
+  ): void {
+    const key = f.attemptId
+      ? `id:${f.attemptId}`
+      : `fb:${f.runId}|${f.driftId}|${f.recordedAtMs}`;
+    if (this.seen.has(key)) return;
+    this.seen.add(key);
+    const recordedAtAbsoluteMs = f.recordedAtAbsoluteMs ?? f.recordedAtMs;
+    this.failures.push({
+      ...f,
+      recordedAtAbsoluteMs,
+      seq: this.nextSeq++,
+    });
+    this.emit();
+  }
+
+  rebase(sessionStartMs: number): void {
+    if (this.failures.length === 0) return;
+    let changed = false;
+    for (const f of this.failures) {
+      if (!f.recordedAtAbsoluteMs) continue;
+      const next = f.recordedAtAbsoluteMs - sessionStartMs;
+      if (f.recordedAtMs !== next) {
+        f.recordedAtMs = next;
+        changed = true;
+      }
+    }
+    if (changed) this.emit();
+  }
+
+  clear(): void {
+    if (this.failures.length === 0) return;
+    this.failures = [];
+    this.nextSeq = 0;
+    this.seen.clear();
+    this.emit();
+  }
+
+  subscribe(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  private emit(): void {
+    for (const fn of this.listeners) fn();
+  }
+}
+
 // Registry of per-session invocation-cancel records. Lives alongside
 // DriftRegistry and plays the same "append on ingest, rebase on session
 // start, render as a timeline marker" role.
@@ -935,6 +1117,12 @@ export class SessionStore {
   readonly tasks = new TaskRegistry();
   readonly drifts = new DriftRegistry();
   readonly invocationCancels = new InvocationCancelRegistry();
+  // goldfive#264 refine-lifecycle observability. The two registries are
+  // separate (rather than one mixed registry) so the deriver in
+  // ``lib/interventions.ts`` can walk attempts and look up the matching
+  // failure by ``attemptId`` in O(1) without filtering a tagged union.
+  readonly refineAttempts = new RefineAttemptRegistry();
+  readonly refineFailures = new RefineFailureRegistry();
   readonly delegations = new DelegationRegistry();
   readonly contextSeries = new ContextSeriesRegistry();
   // Accumulator for every revision of every plan observed in this
@@ -1083,6 +1271,8 @@ export class SessionStore {
   rebaseRelativeTimestamps(sessionStartMs: number): void {
     this.drifts.rebase(sessionStartMs);
     this.invocationCancels.rebase(sessionStartMs);
+    this.refineAttempts.rebase(sessionStartMs);
+    this.refineFailures.rebase(sessionStartMs);
     this.delegations.rebase(sessionStartMs);
   }
 
@@ -1144,6 +1334,9 @@ export class SessionStore {
     this.spans.clear();
     this.tasks.clear();
     this.drifts.clear();
+    this.invocationCancels.clear();
+    this.refineAttempts.clear();
+    this.refineFailures.clear();
     this.delegations.clear();
     this.contextSeries.clear();
     this.planHistory.clear();

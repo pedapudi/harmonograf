@@ -33,6 +33,8 @@ import type { Annotation } from '../state/annotationStore';
 import type {
   DriftRecord,
   InvocationCancelRecord,
+  RefineAttemptRecord,
+  RefineFailureRecord,
   SessionStore,
 } from '../gantt/index';
 import type { TaskPlan } from '../gantt/types';
@@ -46,7 +48,15 @@ import type { TaskPlan } from '../gantt/types';
 // because a cancel is a consequence of a drift, not a drift itself; the
 // two rows coexist in the timeline (the drift explains WHY and the
 // cancel records WHAT happened to the invocation).
-export type InterventionSource = 'user' | 'drift' | 'goldfive' | 'cancel';
+//
+// ``refine`` is the source tag for the merged refine-attempt rows
+// (goldfive#264). One row per ``RefineAttempted`` event, carrying the
+// outcome of the paired terminal (a successful ``PlanRevised`` or a
+// ``RefineFailed``) inline in ``outcome`` and ``severity``. Distinct
+// from ``goldfive`` (which is reserved for autonomous orchestrator
+// kinds like cascade_cancel) so the UI can pick a refine-specific
+// glyph + palette swatch.
+export type InterventionSource = 'user' | 'drift' | 'goldfive' | 'cancel' | 'refine';
 
 export interface InterventionRow {
   // Stable key for React lists — composed from source + (annotation id /
@@ -82,6 +92,18 @@ export interface InterventionRow {
   // Empty when no drift backed it (user-cancel path, plan-revised path)
   // or when this row isn't a cancel.
   driftId: string;
+  // For refine rows: the goldfive-minted UUID4 correlating
+  // ``RefineAttempted`` with its terminal counterpart. Empty on every
+  // other source. Surfaced on the row so the click-through detail
+  // panel can address the underlying RefineAttemptRecord directly.
+  attemptId: string;
+  // For refine rows whose terminal was a failure: one of
+  // 'parse_error' / 'validator_rejected' / 'llm_error' / 'other'.
+  // Empty for successful and pending refines, and on every other
+  // source. Together with ``severity`` lets the renderer pick the
+  // failed-refine glyph variant (warning chevron) without re-deriving
+  // the outcome from ``outcome``.
+  failureKind: string;
 }
 
 // Drift kinds emitted by goldfive when the user pulled the trigger. Mirrors
@@ -122,6 +144,14 @@ export interface DeriveInput {
   // itself). Optional so callers that don't have a SessionStore handy
   // can still derive over the existing three sources.
   cancels?: readonly InvocationCancelRecord[];
+  // goldfive#264: refine-attempt lifecycle records. ``refineAttempts``
+  // is the start side; ``refineFailures`` carries the failed-terminal
+  // counterparts (correlated via ``attemptId``). Successful terminals
+  // are inferred from ``plans`` matching by ``drift_id``. Both arrays
+  // are optional so callers without a SessionStore can still derive
+  // the historical four sources.
+  refineAttempts?: readonly RefineAttemptRecord[];
+  refineFailures?: readonly RefineFailureRecord[];
   // Opt-in Tier-2 legacy time-window fallback for plan-revision
   // attribution (pre-#99 behaviour). Default 0 / undefined disables.
   // Provided by the caller (app runtime context) — never read from
@@ -153,6 +183,8 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
       triggerEventId: ann.id,
       targetAgentId: '',
       driftId: '',
+      attemptId: '',
+      failureKind: '',
     });
   }
 
@@ -178,6 +210,8 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
       triggerEventId: trig,
       targetAgentId: dr.agentId || '',
       driftId: dr.driftId || '',
+      attemptId: '',
+      failureKind: '',
     });
   }
 
@@ -206,6 +240,8 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
       triggerEventId: plan.triggerEventId || '',
       targetAgentId: '',
       driftId: '',
+      attemptId: '',
+      failureKind: '',
     });
   }
 
@@ -249,7 +285,139 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
       triggerEventId: '',
       targetAgentId: cr.agentId || '',
       driftId: cr.driftId || '',
+      attemptId: '',
+      failureKind: '',
     });
+  }
+
+  // RefineAttempted + (PlanRevised | RefineFailed) — goldfive#264.
+  // Merged into a single row per attempt: a successful attempt renders
+  // as ``REFINE`` with ``outcome=plan_revised:rN``; a failed attempt
+  // renders as ``REFINE_FAILED`` with the failure_kind in ``kind`` and
+  // the warning severity. A pending attempt (attempted observed but no
+  // terminal yet — rare since refine is sync or near-sync per
+  // goldfive's _handle_drift) renders as ``REFINE`` with
+  // ``outcome=pending``.
+  //
+  // Correlation strategy:
+  //   * Strict: attempted.attemptId === failed.attemptId for failures.
+  //   * For successes, plan_revised carries triggerEventId == drift_id;
+  //     the attempted record carries the same drift_id, so we look up
+  //     the success outcome via plan rows whose triggerEventId matches
+  //     the attempted's driftId. Goldfive emits at most one terminal
+  //     per drift's _handle_drift cycle, so this 1:1 match is safe.
+  //
+  // Side effect on the original plan / drift rows: when a refine
+  // succeeds, the existing per-drift + per-plan rows STILL render —
+  // they capture the WHY (drift) and the WHAT-CHANGED (plan revision).
+  // The new merged refine row sits alongside them, capturing the
+  // ATTEMPT itself with its outcome rolled in. Operators see all three
+  // (drift → refine → plan-rev) but the refine row is the one that
+  // says "goldfive tried to fix this and {succeeded|failed}".
+  if ((input.refineAttempts && input.refineAttempts.length) || false) {
+    const attempts = input.refineAttempts ?? [];
+    const failures = input.refineFailures ?? [];
+    const failuresByAttempt = new Map<string, RefineFailureRecord>();
+    for (const f of failures) {
+      if (!f.attemptId) continue;
+      // First-write wins; goldfive only fires one failure per attempt.
+      if (!failuresByAttempt.has(f.attemptId)) {
+        failuresByAttempt.set(f.attemptId, f);
+      }
+    }
+    const planByDrift = new Map<string, TaskPlan>();
+    for (const p of input.plans) {
+      if ((p.revisionIndex ?? 0) <= 0) continue;
+      if (!p.triggerEventId) continue;
+      // First-write wins on duplicate triggerEventId (would only happen
+      // on data corruption — a single drift driving two refines).
+      if (!planByDrift.has(p.triggerEventId)) {
+        planByDrift.set(p.triggerEventId, p);
+      }
+    }
+    for (const att of attempts) {
+      const triggerKind = (att.triggerKind || '').toLowerCase();
+      const triggerSeverity = (att.triggerSeverity || '').toLowerCase();
+      const failed = att.attemptId
+        ? failuresByAttempt.get(att.attemptId)
+        : undefined;
+      const succeeded = att.driftId
+        ? planByDrift.get(att.driftId)
+        : undefined;
+      let kind: string;
+      let outcome: string;
+      let severity: string;
+      let body: string;
+      let planRev = 0;
+      let failureKind = '';
+      if (failed) {
+        const fkRaw = (failed.failureKind || '').toLowerCase();
+        kind = `REFINE_FAILED${fkRaw ? `:${fkRaw.toUpperCase()}` : ''}`;
+        outcome = `refine_failed${fkRaw ? `:${fkRaw}` : ''}`;
+        // Failures escalate to warning by default — operator attention
+        // needed. Honor the explicit trigger severity when it's higher
+        // than warning (e.g. critical drift that produced a parse
+        // error stays critical).
+        severity =
+          triggerSeverity === 'critical' ? 'critical' : 'warning';
+        body =
+          failed.detail ||
+          failed.reason ||
+          (fkRaw
+            ? `refine failed (${fkRaw})`
+            : 'refine failed');
+        failureKind = fkRaw;
+      } else if (succeeded) {
+        const idx = succeeded.revisionIndex ?? 0;
+        kind = `REFINE${triggerKind ? `:${triggerKind.toUpperCase()}` : ''}`;
+        outcome = `plan_revised:r${idx}`;
+        // Success is informational — no operator action needed. Inherit
+        // the trigger severity for chrome (a critical drift that was
+        // successfully refined still shows the critical chevron).
+        severity = triggerSeverity || 'info';
+        body = succeeded.revisionReason ||
+          (triggerKind
+            ? `refine succeeded (${triggerKind})`
+            : 'refine succeeded');
+        planRev = idx;
+      } else {
+        // Pending — attempted observed but no terminal yet. Render with
+        // a 'pending' outcome marker so the renderer can show a spinner
+        // / pending-state indicator. See goldfive#264 for the (rare)
+        // ordering this triggers.
+        kind = `REFINE${triggerKind ? `:${triggerKind.toUpperCase()}` : ''}`;
+        outcome = 'pending';
+        severity = triggerSeverity || 'info';
+        body = triggerKind
+          ? `refine pending (${triggerKind})`
+          : 'refine pending';
+      }
+      rows.push({
+        key: `refine:${att.attemptId || `seq${att.seq}`}`,
+        atMs: att.recordedAtMs,
+        source: 'refine',
+        kind,
+        bodyOrReason: body,
+        author: '',
+        outcome,
+        planRevisionIndex: planRev,
+        severity,
+        annotationId: '',
+        driftKind: triggerKind,
+        // Refine rows carry the source drift_id as triggerEventId so
+        // they can backlink in the click-through detail panel; we
+        // intentionally do NOT participate in the strict-id merge
+        // groups (the merged refine row is itself the consolidation —
+        // collapsing further would lose information). The merge
+        // function below special-cases ``source === 'refine'`` to skip
+        // the merge group.
+        triggerEventId: att.driftId || '',
+        targetAgentId: att.agentId || '',
+        driftId: att.driftId || '',
+        attemptId: att.attemptId || '',
+        failureKind,
+      });
+    }
   }
 
   rows.sort((a, b) => a.atMs - b.atMs);
@@ -379,6 +547,15 @@ function mergeByTriggerEventId(rows: InterventionRow[]): InterventionRow[] {
   const groups = new Map<string, InterventionRow[]>();
   const passthrough: InterventionRow[] = [];
   for (const row of rows) {
+    // Refine rows are pre-merged by the deriver (one row per attempt
+    // with the outcome rolled in via attemptId correlation). Skipping
+    // them here keeps the merged row from collapsing into its source
+    // drift / plan revision, which would discard the attempt-specific
+    // failure_kind + bodyOrReason styling. See goldfive#264 / Option A.
+    if (row.source === 'refine') {
+      passthrough.push(row);
+      continue;
+    }
     if (row.triggerEventId) {
       const g = groups.get(row.triggerEventId);
       if (g) g.push(row);
@@ -506,6 +683,8 @@ export function deriveInterventionsFromStore(
     drifts: store.drifts.list(),
     plans: allRevs,
     cancels: store.invocationCancels.list(),
+    refineAttempts: store.refineAttempts.list(),
+    refineFailures: store.refineFailures.list(),
     legacyPlanAttributionWindowMs: opts.legacyPlanAttributionWindowMs,
   });
 }
@@ -521,35 +700,46 @@ export const SEVERITY_WEIGHT: Record<string, number> = {
 };
 
 export function markerRadiusFor(row: InterventionRow): number {
-  // Non-drift / non-cancel rows render at the "info" weight; drift and
-  // cancel severities can grow the marker so high-severity cancels read
-  // as heavier on the strip (they're the most consequential marker).
-  if (row.source !== 'drift' && row.source !== 'cancel')
+  // drift / cancel / refine rows scale by severity so high-severity
+  // markers read as heavier on the strip (the most consequential
+  // markers). Annotation + plan-only rows render at the "info" weight
+  // (they don't carry a meaningful severity for the sizing axis).
+  if (
+    row.source !== 'drift' &&
+    row.source !== 'cancel' &&
+    row.source !== 'refine'
+  )
     return SEVERITY_WEIGHT.info;
   return SEVERITY_WEIGHT[row.severity] ?? SEVERITY_WEIGHT.info;
 }
 
 // Palette keyed by source — aligns with the palette note in issue #69:
-//   user-blue, drift-amber, goldfive-grey, cancel-red.
+//   user-blue, drift-amber, goldfive-grey, cancel-red, refine-teal.
 // Centralized so the planning and trajectory views render uniformly.
 // Cancel rows use a distinct red so the stop-glyph reads at a glance as
 // a terminal, operator-only marker (critical cancels intensify in the
-// renderer via the severity weight, not via the palette swatch).
+// renderer via the severity weight, not via the palette swatch). Refine
+// rows use a teal so they read as "orchestrator self-correction" without
+// pulling visual weight from cancels (red) or drifts (amber).
 export const SOURCE_COLOR: Record<InterventionSource, string> = {
   user: '#5b8def',
   drift: '#f59e0b',
   goldfive: '#8d9199',
   cancel: '#e05e4a',
+  refine: '#3a9b8a',
 };
 
 // Glyph character keyed by source — so the compact list renders a
 // source-discriminating leading symbol even before the row's text kicks
 // in. Cancel is the stop / cancel symbol (U+2298 CIRCLED DIVISION SLASH),
-// mirroring the lane markers on the Gantt and Graph views. Other sources
-// default to a small middle dot so the column aligns across rows.
+// mirroring the lane markers on the Gantt and Graph views. Refine uses
+// the cycle / refresh symbol (U+21BB CLOCKWISE OPEN CIRCLE ARROW). Other
+// sources default to a small middle dot so the column aligns across
+// rows.
 export const SOURCE_GLYPH: Record<InterventionSource, string> = {
   user: '·',
   drift: '·',
   goldfive: '·',
   cancel: '⊘',
+  refine: '↻',
 };

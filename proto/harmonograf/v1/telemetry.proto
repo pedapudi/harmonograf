@@ -164,7 +164,113 @@ message TelemetryUp {
     // Server ingest dispatches on the event's payload oneof; frontend
     // WatchSession fans it out as typed deltas.
     goldfive.v1.Event goldfive_event = 11;
+    // Operator-observability events emitted by goldfive's steerer at
+    // refine time (goldfive#264). ``RefineAttempted`` fires at the start
+    // of every refine attempt (autonomous _handle_drift path AND the
+    // goldfive-steer _promote_drift_to_steer path); ``RefineFailed``
+    // fires when the attempt produces an unusable outcome (parse error,
+    // validator rejection, LLM error). Successful attempts are reported
+    // by the existing ``goldfive.v1.PlanRevised`` event. Each pair is
+    // correlated by ``attempt_id`` so the harmonograf UI can merge a
+    // ``RefineAttempted`` with its terminal ``PlanRevised`` /
+    // ``RefineFailed`` into a single intervention row per attempt.
+    //
+    // Same dict→proto pattern as the pre-#190 InvocationCancelled
+    // path: goldfive ships these as dict envelopes for forward-compat
+    // (the proto promotion is tracked as goldfive Stream C #256), and
+    // harmonograf materializes them at the client sink. When the
+    // promotion lands, these slots collapse into the existing
+    // ``goldfive_event`` envelope (matches the InvocationCancelled
+    // migration in #190).
+    RefineAttempted refine_attempted = 13;
+    RefineFailed refine_failed = 14;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Operator-observability: refine attempt lifecycle (goldfive#264)
+// ---------------------------------------------------------------------------
+
+// Operator-facing record that goldfive started a refine attempt against
+// a drift. Fires at the start of every refine call (both the autonomous
+// ``DefaultSteerer._handle_drift`` path and the goldfive-steer
+// ``_promote_drift_to_steer`` path). Pairs with exactly one of
+// ``goldfive.v1.PlanRevised`` (success) / ``RefineFailed`` (failure)
+// carrying the same ``attempt_id``.
+//
+// The harmonograf UI merges a ``RefineAttempted`` with its terminal
+// counterpart into a single intervention row per attempt — see
+// ``frontend/src/lib/interventions.ts::mergeRefineAttempts``.
+//
+// Wire shape mirrors the dict envelope goldfive emits verbatim so the
+// sink's dict→proto conversion is a field-by-field copy. See
+// ``goldfive/steerer.py::DefaultSteerer._emit_refine_attempted`` for the
+// authoritative source.
+message RefineAttempted {
+  // Envelope metadata — same fields the goldfive dict envelope carries
+  // alongside the payload.
+  string run_id = 1;
+  uint64 sequence = 2;
+  string session_id = 3;
+  google.protobuf.Timestamp emitted_at = 4;
+
+  // UUID4 minted by goldfive at attempt start. Stable across the paired
+  // ``RefineFailed`` / ``PlanRevised`` event so harmonograf can merge
+  // the attempted row with its terminal row.
+  string attempt_id = 5;
+  // Cross-reference to the triggering ``DriftDetected.id`` (UUID4).
+  string drift_id = 6;
+  // Lowercase drift kind that triggered the refine — "off_topic",
+  // "looping_reasoning", "user_steer", etc.
+  string trigger_kind = 7;
+  // Lowercase drift severity — "info" / "warning" / "critical".
+  string trigger_severity = 8;
+  // Task this refine targets, when known. Empty when the drift was
+  // detected outside any single task scope.
+  string current_task_id = 9;
+  // Agent the cancelled invocation runs under. Bare on the goldfive
+  // side; the harmonograf sink canonicalizes to ``<client>:<bare>``
+  // (mirrors the rule applied to every other compound id).
+  string current_agent_id = 10;
+}
+
+// Operator-facing record that a refine attempt produced an unusable
+// outcome (parse error, validator rejection, LLM error). Crucially
+// emitted WITHOUT bumping ``revision_index`` — the ``attempt_id``
+// disambiguates the failure across otherwise-incrementing revisions.
+//
+// See ``goldfive/steerer.py::DefaultSteerer._emit_refine_failed``.
+message RefineFailed {
+  // Envelope metadata — same fields the goldfive dict envelope carries.
+  string run_id = 1;
+  uint64 sequence = 2;
+  string session_id = 3;
+  google.protobuf.Timestamp emitted_at = 4;
+
+  // Correlation key with the paired ``RefineAttempted``. Always set.
+  string attempt_id = 5;
+  // Backlink to the triggering ``DriftDetected.id``. Always set
+  // (goldfive emits the failure event with the originating drift's id).
+  string drift_id = 6;
+  string trigger_kind = 7;
+  string trigger_severity = 8;
+  // Coarse failure taxonomy:
+  //   "parse_error"        — refine LLM returned bytes the parser
+  //                          rejected (malformed JSON, missing fields).
+  //   "validator_rejected" — parsed plan failed a downstream validator
+  //                          (supersedes coverage, structural check).
+  //   "llm_error"          — the refine LLM call itself errored.
+  //   "other"              — anything else; ``detail`` carries context.
+  // String not enum so adding a new failure kind is a drop-in change
+  // on the goldfive side without a proto bump.
+  string failure_kind = 9;
+  // Short human-readable summary of the failure cause.
+  string reason = 10;
+  // Free-form longer payload (e.g. validator exception text). May be
+  // empty when ``reason`` already says everything useful.
+  string detail = 11;
+  string current_task_id = 12;
+  string current_agent_id = 13;
 }
 
 // ---------------------------------------------------------------------------

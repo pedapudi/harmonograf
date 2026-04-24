@@ -50,6 +50,17 @@ class EnvelopeKind(enum.Enum):
     # Goldfive orchestration event; payload is a goldfive.v1.Event proto
     # (issue #2 migration).
     GOLDFIVE_EVENT = "goldfive_event"
+    # Harmonograf-local refine-attempt observability variants
+    # (goldfive#264). Same dict→proto pattern that pre-#190
+    # ``invocation_cancelled`` followed: goldfive ships
+    # ``refine_attempted`` / ``refine_failed`` dict envelopes for
+    # forward-compat; the sink materializes them into the harmonograf-
+    # local proto messages and routes on their own oneof slots
+    # (``TelemetryUp.refine_attempted`` / ``.refine_failed``). When
+    # goldfive Stream C (#256) promotes these to typed variants the
+    # envelope kinds collapse the same way INVOCATION_CANCELLED did.
+    REFINE_ATTEMPTED = "refine_attempted"
+    REFINE_FAILED = "refine_failed"
 
 
 @dataclasses.dataclass

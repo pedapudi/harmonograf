@@ -23,7 +23,11 @@ import { useAnnotationStore } from '../state/annotationStore';
 import { packLanes } from '../gantt/layout';
 import type { ListSessionsResponse } from '../pb/harmonograf/v1/frontend_pb.js';
 import { SessionStatus as PbSessionStatus } from '../pb/harmonograf/v1/types_pb.js';
-import { applyGoldfiveEvent } from './goldfiveEvent';
+import {
+  applyGoldfiveEvent,
+  applyRefineAttempted,
+  applyRefineFailed,
+} from './goldfiveEvent';
 import { loadPlanHistory } from '../state/planHistoryLoader';
 
 // Translate the generated SessionStatus enum to the closed string set
@@ -518,6 +522,29 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
               // translation is testable without standing up a mocked
               // Connect transport.
               applyGoldfiveEvent(
+                kind.value,
+                store,
+                origin?.startMs ?? 0,
+                sessionId,
+              );
+              break;
+            }
+            case 'refineAttempted': {
+              // Operator-observability marker (goldfive#264). Same dict-
+              // sourced pattern that pre-#190 InvocationCancelled used —
+              // pairs with a terminal ``planRevised`` (success) or
+              // ``refineFailed`` (failure) by ``attempt_id``; the deriver
+              // in ``lib/interventions.ts`` merges the two into a single
+              // intervention row per refine attempt.
+              applyRefineAttempted(
+                kind.value,
+                store,
+                origin?.startMs ?? 0,
+              );
+              break;
+            }
+            case 'refineFailed': {
+              applyRefineFailed(
                 kind.value,
                 store,
                 origin?.startMs ?? 0,
