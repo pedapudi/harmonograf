@@ -312,12 +312,15 @@ function JudgeDrawerPanel({
         onOpenSteering={(_planId, _revIdx) => {
           // Jump into the refine: span on the goldfive lane so the user
           // lands on the existing plan-revision detail panel. The refine
-          // synthesizer stamps `refine.index = <revIdx>` on a
-          // __goldfive__ span (see rpc/goldfiveEvent.ts).
+          // synthesizer stamps `refine.index = <revIdx>` on the goldfive
+          // actor row (see rpc/goldfiveEvent.ts). Post-goldfive-unify
+          // the row may be the legacy `__goldfive__` id or the compound
+          // `<client>:goldfive` id — resolveGoldfiveActorId picks the
+          // survivor of the alias collapse.
           void _planId;
           const spans: Span[] = [];
           store.spans.queryAgent(
-            '__goldfive__',
+            store.resolveGoldfiveActorId(),
             0,
             Number.POSITIVE_INFINITY,
             spans,

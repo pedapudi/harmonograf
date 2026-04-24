@@ -305,12 +305,23 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
               break;
             }
             case 'agent': {
-              store.agents.upsert(convertAgent(kind.value));
+              const agent = convertAgent(kind.value);
+              store.agents.upsert(agent);
+              // Collapse the legacy `__goldfive__` row into the
+              // sink-translated `<client>:goldfive` row when the
+              // server announces the latter (harmonograf#goldfive-unify).
+              if (agent.id.endsWith(':goldfive')) {
+                store.mergeGoldfiveAlias();
+              }
               break;
             }
             case 'initialSpan': {
               if (!origin) origin = { startMs: 0 };
-              store.spans.append(convertSpan(kind.value, origin));
+              const span = convertSpan(kind.value, origin);
+              store.spans.append(span);
+              if (span.agentId.endsWith(':goldfive')) {
+                store.mergeGoldfiveAlias();
+              }
               break;
             }
             case 'burstComplete': {
@@ -335,6 +346,9 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
               if (kind.value.span) {
                 const ui = convertSpan(kind.value.span, origin);
                 store.spans.append(ui);
+                if (ui.agentId.endsWith(':goldfive')) {
+                  store.mergeGoldfiveAlias();
+                }
               }
               break;
             }
@@ -432,7 +446,11 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
             }
             case 'agentJoined': {
               if (kind.value.agent) {
-                store.agents.upsert(convertAgent(kind.value.agent));
+                const agent = convertAgent(kind.value.agent);
+                store.agents.upsert(agent);
+                if (agent.id.endsWith(':goldfive')) {
+                  store.mergeGoldfiveAlias();
+                }
               }
               break;
             }

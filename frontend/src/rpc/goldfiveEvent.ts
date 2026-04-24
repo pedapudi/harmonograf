@@ -46,10 +46,24 @@ const USER_DRIFT_KINDS = new Set<string>([
   'user_pause',
 ]);
 
-function ensureSyntheticActor(store: SessionStore, actorId: string): void {
-  if (store.agents.get(actorId)) return;
+// Resolve the id the goldfive synthetic-actor row should use. For the
+// user actor this is always the legacy `__user__` constant. For the
+// goldfive actor, if a sink-translated `<client>:goldfive` row has
+// already been registered (via span-ingest or Hello), synthesis lands
+// on that compound id so we don't double-render the orchestrator. Else
+// we fall back to the legacy `__goldfive__` constant; a subsequent
+// compound row arriving later triggers SessionStore.mergeGoldfiveAlias
+// which collapses the legacy row into it.
+function resolveActorId(store: SessionStore, actorId: string): string {
+  if (actorId !== GOLDFIVE_ACTOR_ID) return actorId;
+  return store.resolveGoldfiveActorId(GOLDFIVE_ACTOR_ID);
+}
+
+function ensureSyntheticActor(store: SessionStore, actorId: string): string {
+  const resolved = resolveActorId(store, actorId);
+  if (store.agents.get(resolved)) return resolved;
   store.agents.upsert({
-    id: actorId,
+    id: resolved,
     name: actorId === USER_ACTOR_ID ? 'user' : 'goldfive',
     framework: 'CUSTOM',
     capabilities: [],
@@ -66,6 +80,14 @@ function ensureSyntheticActor(store: SessionStore, actorId: string): void {
       'harmonograf.synthetic_actor': '1',
     },
   });
+  // Collapse any legacy `__goldfive__` row we may have created earlier
+  // — if the resolver returned a compound id, this is a no-op; if it
+  // returned the legacy id and a compound row arrives later, the
+  // upsert path will re-run mergeGoldfiveAlias.
+  if (actorId === GOLDFIVE_ACTOR_ID) {
+    store.mergeGoldfiveAlias(GOLDFIVE_ACTOR_ID);
+  }
+  return resolved;
 }
 
 function synthesizeDriftSpan(
@@ -82,6 +104,11 @@ function synthesizeDriftSpan(
   authoredBy?: string,
   driftEventId?: string,
 ): void {
+  // `actorId` may be the legacy `__goldfive__` / `__user__` constant or
+  // (post-goldfive-unify) the compound `<client>:goldfive` id returned
+  // by ensureSyntheticActor. `spanKind` / id prefix still hinge on the
+  // semantic distinction between user vs goldfive, so branch on whether
+  // the id is the user constant.
   const spanKind: SpanKind = actorId === USER_ACTOR_ID ? 'USER_MESSAGE' : 'CUSTOM';
   const id = `drift-${actorId}-${recordedAtMs}-${kind}`;
   const attributes: Span['attributes'] = {
@@ -157,6 +184,7 @@ function synthesizeRefineSpan(
   targetAgentId: string,
   refineInputSummary: string,
   refineOutputSummary: string,
+  goldfiveActorId: string,
 ): void {
   const id = `refine-${recordedAtMs}-${revisionIndex}`;
   const nameCore = revisionKind || 'refine';
@@ -183,7 +211,7 @@ function synthesizeRefineSpan(
   const span: Span = {
     id,
     sessionId: sessionId ?? '',
-    agentId: GOLDFIVE_ACTOR_ID,
+    agentId: goldfiveActorId,
     parentSpanId: null,
     kind: 'CUSTOM',
     status: 'COMPLETED',
@@ -376,7 +404,7 @@ export function applyGoldfiveEvent(
       // revision_index == 0) — that's the baseline, not a steering move.
       if (payload.case === 'planRevised') {
         const pr = payload.value;
-        ensureSyntheticActor(store, GOLDFIVE_ACTOR_ID);
+        const goldfiveId = ensureSyntheticActor(store, GOLDFIVE_ACTOR_ID);
         const emittedAbsMs = tsToMsAbs(event.emittedAt);
         const emittedMs = emittedAbsMs ? emittedAbsMs - sessionStartMs : 0;
         const revKind = driftKindToString(pr.driftKind as unknown as number);
@@ -409,6 +437,7 @@ export function applyGoldfiveEvent(
           targetAgent,
           refineInput,
           refineOutput,
+          goldfiveId,
         );
       }
       return;
@@ -517,10 +546,11 @@ export function applyGoldfiveEvent(
       });
       // Attribute the drift to an actor row so it shows up in gantt / graph /
       // trajectory without those views having to special-case drift events.
-      const actorId = USER_DRIFT_KINDS.has(kindStr)
-        ? USER_ACTOR_ID
-        : GOLDFIVE_ACTOR_ID;
-      ensureSyntheticActor(store, actorId);
+      const isUserDrift = USER_DRIFT_KINDS.has(kindStr);
+      const resolvedActorId = ensureSyntheticActor(
+        store,
+        isUserDrift ? USER_ACTOR_ID : GOLDFIVE_ACTOR_ID,
+      );
       // Forward-compat: goldfive#feat/judge-observability-events adds
       // DriftDetected.trigger_input (the reasoning snippet / activity
       // summary that produced the drift). Read through `unknown` + string
@@ -534,7 +564,7 @@ export function applyGoldfiveEvent(
       synthesizeDriftSpan(
         store,
         sessionId,
-        actorId,
+        resolvedActorId,
         kindStr,
         sevStr,
         d.detail,

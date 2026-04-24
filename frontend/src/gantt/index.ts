@@ -178,6 +178,18 @@ export class AgentRegistry {
     this.emit();
   }
 
+  // Drop an agent row. Used by SessionStore.mergeGoldfiveAlias after the
+  // row's spans have been reassigned onto the merge target. Silently
+  // no-ops if the id isn't known.
+  remove(agentId: string): void {
+    const existing = this.byId.get(agentId);
+    if (!existing) return;
+    this.byId.delete(agentId);
+    const idx = this.agents.indexOf(existing);
+    if (idx >= 0) this.agents.splice(idx, 1);
+    this.emit();
+  }
+
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
@@ -983,6 +995,55 @@ export class SessionStore {
   rebaseRelativeTimestamps(sessionStartMs: number): void {
     this.drifts.rebase(sessionStartMs);
     this.delegations.rebase(sessionStartMs);
+  }
+
+  // Collapse the legacy synthetic-actor `__goldfive__` row into the
+  // sink-translated `<client>:goldfive` row when both exist. Keeps the
+  // Graph view from rendering goldfive twice (once as a CUSTOM-framework
+  // synthetic actor, once as the ADK-framework span-ingest row).
+  //
+  // Order of operations is not significant — callers may invoke this
+  // whenever they observe a `:goldfive` id (e.g. right after a
+  // span-ingest upsert) or a new `__goldfive__` row (e.g. right after
+  // the drift/refine synthesizers mint one).
+  //
+  // Returns the canonical goldfive agent id (the compound one if it
+  // exists, otherwise the legacy id, otherwise empty string).
+  //
+  // Strategy: if the compound `<client>:goldfive` row exists, move every
+  // span keyed on `__goldfive__` over to that id and delete the legacy
+  // row. If only `__goldfive__` exists, leave it alone — the compound
+  // row may still arrive later, at which point the same call
+  // collapses them. No re-parenting is needed for drifts/delegations;
+  // those registries key by `agentId` strings but do not rely on an
+  // AgentRegistry row existing.
+  mergeGoldfiveAlias(legacyId = '__goldfive__'): string {
+    let compound = '';
+    for (const a of this.agents.list) {
+      if (a.id !== legacyId && a.id.endsWith(':goldfive')) {
+        compound = a.id;
+        break;
+      }
+    }
+    if (!compound) return legacyId;
+    if (this.agents.get(legacyId)) {
+      this.spans.reassignAgent(legacyId, compound);
+      this.agents.remove(legacyId);
+    }
+    return compound;
+  }
+
+  // Resolve the canonical goldfive actor id for synthesis. Returns the
+  // compound `<client>:goldfive` id when any such row has been
+  // registered (via sink-translated span ingest or convertAgent from
+  // Hello); otherwise returns the legacy `__goldfive__` id as a
+  // fallback. Used by the goldfiveEvent synthesizers so drift + refine
+  // spans land on the same row as sink-translated judge spans.
+  resolveGoldfiveActorId(legacyId = '__goldfive__'): string {
+    for (const a of this.agents.list) {
+      if (a.id !== legacyId && a.id.endsWith(':goldfive')) return a.id;
+    }
+    return legacyId;
   }
 
   // Current wall-clock "now" relative to session start. Advanced by the
