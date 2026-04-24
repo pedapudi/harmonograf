@@ -72,7 +72,7 @@ from goldfive.v1 import types_pb2 as goldfive_types_pb2
 from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
 from harmonograf_server.ingest import IngestPipeline
 from harmonograf_server.interventions import list_interventions, record_to_pb
-from harmonograf_server.pb import frontend_pb2, telemetry_pb2, types_pb2
+from harmonograf_server.pb import frontend_pb2, types_pb2
 from harmonograf_server.storage import (
     Agent,
     Annotation,
@@ -361,44 +361,36 @@ class FrontendServicerMixin:
                         ev.emitted_at.CopyFrom(ts)
                 yield frontend_pb2.SessionUpdate(goldfive_event=ev)
 
-            # 4b.2. Invocation cancellations — replay the per-session ring
-            # so the cancel markers on Trajectory / Gantt / Graph reappear
-            # on reconnect. Same sibling rationale as drifts: the event is
-            # dict-sourced, not persisted in ``goldfive_events``. When the
-            # goldfive proto adds an InvocationCancelled variant the ring
-            # can collapse into the drift-style replay path above.
+            # 4b.2. Invocation cancellations — replay from the persisted
+            # ``goldfive_events`` table. After goldfive#262 / harmonograf
+            # PR (Wave 2 / A8) the cancel rides on the typed
+            # ``goldfive.v1.InvocationCancelled`` variant of the
+            # ``Event.payload`` oneof, so it lands in the same persistence
+            # path every other goldfive event uses (see
+            # IngestPipeline._handle_goldfive_event). Mirrors the
+            # delegation_observed replay pattern below.
             try:
-                cancel_records = self._ingest.invocation_cancels_for_session(
-                    session_id
+                cancel_events = await self._store.list_goldfive_events(
+                    session_id, kind="invocation_cancelled"
                 )
             except Exception as exc:  # noqa: BLE001
-                logger.debug("invocation_cancels_for_session failed: %s", exc)
-                cancel_records = []
-            for cr in cancel_records:
-                cmsg = telemetry_pb2.InvocationCancelled(
-                    run_id=cr.get("run_id", "") or "",
-                    sequence=int(cr.get("sequence", 0) or 0),
-                    session_id=session_id,
-                    invocation_id=cr.get("invocation_id", "") or "",
-                    agent_name=cr.get("agent_name", "") or "",
-                    reason=cr.get("reason", "") or "",
-                    severity=cr.get("severity", "") or "",
-                    drift_id=cr.get("drift_id", "") or "",
-                    drift_kind=cr.get("drift_kind", "") or "",
-                    detail=cr.get("detail", "") or "",
-                    tool_name=cr.get("tool_name", "") or "",
+                logger.debug(
+                    "list_goldfive_events(invocation_cancelled) failed: %s", exc
                 )
-                # Prefer the goldfive-side emitted_at (clock that fired
-                # the cancel); fall back to the ingest-side recorded_at
-                # when absent so the UI always has a timestamp to render.
-                ts_val = cr.get("emitted_at")
-                if not isinstance(ts_val, (int, float)):
-                    ts_val = cr.get("recorded_at")
-                if isinstance(ts_val, (int, float)):
-                    ts = float_to_ts(float(ts_val))
-                    if ts is not None:
-                        cmsg.emitted_at.CopyFrom(ts)
-                yield frontend_pb2.SessionUpdate(invocation_cancelled=cmsg)
+                cancel_events = []
+            for rec in cancel_events:
+                try:
+                    ev = goldfive_events_pb2.Event()
+                    ev.ParseFromString(rec.payload_bytes)
+                except Exception as exc:  # noqa: BLE001 — proto edge cases
+                    logger.debug(
+                        "invocation_cancelled replay parse failed session_id=%s seq=%s: %s",
+                        session_id,
+                        rec.sequence,
+                        exc,
+                    )
+                    continue
+                yield frontend_pb2.SessionUpdate(goldfive_event=ev)
 
             # 4c. Context window samples — replay the most recent per-agent
             # series so the Gantt context-window lane renders immediately
@@ -1318,19 +1310,25 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
         return frontend_pb2.SessionUpdate(goldfive_event=ev)
     if delta.kind == DELTA_INVOCATION_CANCELLED:
         p = delta.payload
-        cmsg = telemetry_pb2.InvocationCancelled(
+        # Wraps the cancel as a ``goldfive.v1.Event`` with the
+        # ``invocation_cancelled`` payload oneof variant (goldfive#262 /
+        # harmonograf Wave 2 / A8). Frontend WatchSession dispatches on
+        # the goldfive-event payload case; the prior dedicated
+        # ``SessionUpdate.invocation_cancelled`` slot was removed when
+        # goldfive promoted the dict envelope to a typed proto message.
+        ev = goldfive_events_pb2.Event(
             run_id=p.get("run_id", "") or "",
             sequence=int(p.get("sequence", 0) or 0),
             session_id=delta.session_id,
-            invocation_id=p.get("invocation_id", "") or "",
-            agent_name=p.get("agent_name", "") or "",
-            reason=p.get("reason", "") or "",
-            severity=p.get("severity", "") or "",
-            drift_id=p.get("drift_id", "") or "",
-            drift_kind=p.get("drift_kind", "") or "",
-            detail=p.get("detail", "") or "",
-            tool_name=p.get("tool_name", "") or "",
         )
+        ev.invocation_cancelled.invocation_id = p.get("invocation_id", "") or ""
+        ev.invocation_cancelled.agent_name = p.get("agent_name", "") or ""
+        ev.invocation_cancelled.reason = p.get("reason", "") or ""
+        ev.invocation_cancelled.severity = p.get("severity", "") or ""
+        ev.invocation_cancelled.drift_id = p.get("drift_id", "") or ""
+        ev.invocation_cancelled.drift_kind = p.get("drift_kind", "") or ""
+        ev.invocation_cancelled.detail = p.get("detail", "") or ""
+        ev.invocation_cancelled.tool_name = p.get("tool_name", "") or ""
         # Prefer the goldfive-side emitted_at; fall back to ingest-side
         # recorded_at so the frontend always has a timestamp to render
         # (mirrors the DELTA_DRIFT emittedAt stamping).
@@ -1340,8 +1338,8 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
         if isinstance(ts_val, (int, float)):
             ts = float_to_ts(float(ts_val))
             if ts is not None:
-                cmsg.emitted_at.CopyFrom(ts)
-        return frontend_pb2.SessionUpdate(invocation_cancelled=cmsg)
+                ev.emitted_at.CopyFrom(ts)
+        return frontend_pb2.SessionUpdate(goldfive_event=ev)
     if delta.kind == DELTA_AGENT_INVOCATION_STARTED:
         p = delta.payload
         ev = goldfive_events_pb2.Event(run_id=p.get("run_id", ""))

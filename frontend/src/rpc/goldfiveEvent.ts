@@ -30,8 +30,10 @@ import {
   DriftKind as GoldfiveDriftKindEnum,
   DriftSeverity as GoldfiveDriftSeverityEnum,
 } from '../pb/goldfive/v1/types_pb.js';
-import type { Event as GoldfiveEvent } from '../pb/goldfive/v1/events_pb.js';
-import type { InvocationCancelled as InvocationCancelledPb } from '../pb/harmonograf/v1/telemetry_pb.js';
+import type {
+  Event as GoldfiveEvent,
+  InvocationCancelled as InvocationCancelledPb,
+} from '../pb/goldfive/v1/events_pb.js';
 import { useApprovalsStore } from '../state/approvalsStore';
 import {
   USER_ACTOR_ID,
@@ -653,6 +655,18 @@ export function applyGoldfiveEvent(
       });
       return;
     }
+    case 'invocationCancelled': {
+      // Operator-observability marker (goldfive#262 / Stream C of #251).
+      // Promoted from a dict envelope (harmonograf PR#187 ingested it via
+      // a placeholder ``harmonograf.v1.InvocationCancelled`` carried on
+      // its own ``SessionUpdate`` oneof slot) to a typed
+      // ``goldfive.v1.InvocationCancelled`` payload variant on the
+      // standard ``Event`` envelope. Envelope metadata (run_id,
+      // emitted_at) reads off the parent ``event``; the payload carries
+      // the cancel-specific fields.
+      applyInvocationCancelled(payload.value, event, store, sessionStartMs, sessionId);
+      return;
+    }
   }
 }
 
@@ -716,43 +730,50 @@ function synthesizeCancelSpan(
   store.spans.append(span);
 }
 
-// Operator-observability: an InvocationCancelled envelope landed on the
-// WatchSession stream. Unlike goldfive events, this arrives as its own
-// oneof variant (harmonograf.v1.InvocationCancelled) because the
-// goldfive proto envelope doesn't yet mint an InvocationCancelled
-// message — the sink materializes it from a dict payload goldfive emits
-// alongside the cancellation. Translated straight into an
-// InvocationCancelRecord on the session store so the Trajectory / Gantt
-// / Graph views can render a cancel marker without crawling spans.
+// Operator-observability: an InvocationCancelled payload landed on the
+// WatchSession stream as part of a ``goldfive.v1.Event`` envelope
+// (goldfive#262). The cancel was previously delivered on a dedicated
+// ``SessionUpdate.invocation_cancelled`` slot carrying a placeholder
+// ``harmonograf.v1.InvocationCancelled`` message (harmonograf PR#187),
+// because the goldfive proto envelope had no ``InvocationCancelled``
+// variant yet. With the typed promotion both routes converge on this
+// helper — it is now invoked from the ``invocationCancelled`` case in
+// :func:`applyGoldfiveEvent`, and reads envelope metadata (``run_id``,
+// ``emitted_at``) off the parent ``Event`` rather than the payload.
 //
-// Agent-agnostic: ``agentId`` is read verbatim from the event (already
+// Translated straight into an InvocationCancelRecord on the session
+// store so the Trajectory / Gantt / Graph views can render a cancel
+// marker without crawling spans.
+//
+// Agent-agnostic: ``agentId`` is read verbatim from the payload (already
 // canonicalized <client>:<bare> by the client sink). No special-casing
 // of any particular agent ("coordinator", etc.) — the renderer looks
 // up the agent's lane/lifeline by id.
 export function applyInvocationCancelled(
-  event: InvocationCancelledPb,
+  payload: InvocationCancelledPb,
+  event: GoldfiveEvent,
   store: SessionStore,
   sessionStartMs: number,
   sessionId: string | null = null,
 ): void {
   const recordedAbsMs = tsToMsAbs(event.emittedAt);
   // When the envelope didn't carry emitted_at (shouldn't happen on a
-  // well-formed event but the sink tolerates pre-bump servers), fall
-  // back to "now" so the marker renders at the ingest moment rather
-  // than the session start.
+  // well-formed event but tolerated for replays of legacy recordings),
+  // fall back to "now" so the marker renders at the ingest moment
+  // rather than the session start.
   const abs = recordedAbsMs || Date.now();
   const recordedMs = abs - sessionStartMs;
-  const agentId = event.agentName || '';
+  const agentId = payload.agentName || '';
   store.invocationCancels.append({
     runId: event.runId || '',
-    invocationId: event.invocationId || '',
+    invocationId: payload.invocationId || '',
     agentId,
-    reason: event.reason || '',
-    severity: event.severity || '',
-    driftId: event.driftId || '',
-    driftKind: event.driftKind || '',
-    detail: event.detail || '',
-    toolName: event.toolName || '',
+    reason: payload.reason || '',
+    severity: payload.severity || '',
+    driftId: payload.driftId || '',
+    driftKind: payload.driftKind || '',
+    detail: payload.detail || '',
+    toolName: payload.toolName || '',
     recordedAtMs: recordedMs,
     recordedAtAbsoluteMs: abs,
   });
@@ -769,13 +790,13 @@ export function applyInvocationCancelled(
     store,
     sessionId,
     agentId,
-    event.reason || '',
-    event.severity || '',
-    event.driftKind || '',
-    event.detail || '',
-    event.toolName || '',
-    event.invocationId || '',
-    event.driftId || '',
+    payload.reason || '',
+    payload.severity || '',
+    payload.driftKind || '',
+    payload.detail || '',
+    payload.toolName || '',
+    payload.invocationId || '',
+    payload.driftId || '',
     recordedMs,
   );
 }

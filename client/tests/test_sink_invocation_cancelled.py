@@ -1,24 +1,31 @@
-"""Tests for dict→proto translation of goldfive's ``invocation_cancelled``
-sink event (goldfive#251 Stream C / #259).
+"""Tests for the sink's handling of ``invocation_cancelled`` events
+post goldfive#262 / harmonograf migration (Wave 2 / A8).
 
-The goldfive side ships the cancel event as a dict via
-``goldfive.events.make_event`` because the goldfive proto envelope does
-not (yet) have an ``InvocationCancelled`` message. The harmonograf sink
-converts that dict to the local ``harmonograf.v1.InvocationCancelled``
-proto and pushes it via the transport's
-``TelemetryUp.invocation_cancelled`` slot.
+History
+-------
+PR #187 added a placeholder ``harmonograf.v1.InvocationCancelled`` proto
++ a dict→proto conversion path on the sink, because goldfive shipped
+the cancel event as a dict envelope (Stream C of #251). goldfive#262
+then promoted the event to a typed ``goldfive.v1.InvocationCancelled``
+variant on the proto envelope; the sink's dict→proto path was retired
+in this PR.
 
-These tests cover the translation in both directions:
-
-* A well-formed dict round-trips into a proto with every field
-  populated; ``agent_name`` is canonicalized to the compound id form;
-  ``emitted_at`` lands as a google.protobuf.Timestamp.
-* A missing / empty dict envelope is tolerated (observability must
-  never raise).
-* Unknown dict kinds are swallowed at DEBUG (no forwarding, no raise).
-* The transport materializes the envelope into the
-  ``TelemetryUp.invocation_cancelled`` oneof variant with the expected
-  discriminator.
+What these tests cover now
+--------------------------
+* The proto path: a goldfive ``Event`` carrying ``invocation_cancelled``
+  passes straight through ``emit_goldfive_event`` like every other
+  goldfive event. The sink does NOT translate the message body — the
+  server consumes the typed payload directly via the goldfive event
+  pipeline.
+* Migration regression: a pre-#262 dict envelope keyed
+  ``"kind": "invocation_cancelled"`` is now dropped at DEBUG with no
+  forwarding (no harmonograf proto exists to convert it into). The
+  client never raises — observability events must not break a
+  tearing-down runner.
+* Generic dict envelopes for OTHER kinds (e.g. forward-compat dicts
+  goldfive may ship before promoting to proto) keep landing on the
+  same dict-drop branch — we don't accidentally re-introduce typed
+  conversion for kinds we don't know about.
 """
 
 from __future__ import annotations
@@ -29,7 +36,10 @@ import pytest
 
 from harmonograf_client.buffer import EnvelopeKind
 from harmonograf_client.client import Client
+from harmonograf_client.pb import telemetry_pb2  # noqa: F401 — grafts goldfive.v1 onto goldfive
 from harmonograf_client.sink import HarmonografSink
+
+from goldfive.v1 import events_pb2 as goldfive_events_pb2  # noqa: E402
 
 from tests._fixtures import FakeTransport, make_factory
 
@@ -60,144 +70,136 @@ def _drain(client: Client) -> list:
     return list(client._events.drain())
 
 
-def _make_dict_envelope(**overrides) -> dict:
-    base = {
-        "event_id": "evt-cancel-1",
-        "run_id": "run-abc",
-        "sequence": 7,
-        "emitted_at": {"seconds": 1_700_000_000, "nanos": 123_000_000},
-        "session_id": "sess-cancel",
-        "kind": "invocation_cancelled",
-        "payload": {
-            "invocation_id": "inv-42",
-            "agent_name": "researcher_agent",
-            "reason": "drift",
-            "severity": "critical",
-            "drift_id": "drift-uuid-1",
-            "drift_kind": "off_topic",
-            "detail": "assistant veered off task",
-            "tool_name": "",
-        },
-    }
-    base.update(overrides)
-    return base
+def _make_proto_event(
+    *,
+    run_id: str = "run-abc",
+    sequence: int = 7,
+    session_id: str = "sess-cancel",
+    invocation_id: str = "inv-42",
+    agent_name: str = "researcher_agent",
+    reason: str = "drift",
+    severity: str = "critical",
+    drift_id: str = "drift-uuid-1",
+    drift_kind: str = "off_topic",
+    detail: str = "assistant veered off task",
+    tool_name: str = "",
+):
+    """Build a goldfive ``Event`` with the typed ``invocation_cancelled``
+    payload variant — matches what goldfive#262's
+    ``invocation_cancelled_event`` factory produces."""
+    evt = goldfive_events_pb2.Event(
+        run_id=run_id,
+        sequence=sequence,
+        session_id=session_id,
+    )
+    evt.invocation_cancelled.invocation_id = invocation_id
+    evt.invocation_cancelled.agent_name = agent_name
+    evt.invocation_cancelled.reason = reason
+    evt.invocation_cancelled.severity = severity
+    evt.invocation_cancelled.drift_id = drift_id
+    evt.invocation_cancelled.drift_kind = drift_kind
+    evt.invocation_cancelled.detail = detail
+    evt.invocation_cancelled.tool_name = tool_name
+    return evt
 
 
-class TestInvocationCancelledDictTranslation:
+class TestInvocationCancelledProtoPath:
     @pytest.mark.asyncio
-    async def test_dict_envelope_translated_to_proto(
+    async def test_proto_event_passes_through_goldfive_event_envelope(
         self, sink: HarmonografSink, client: Client, made: list[FakeTransport]
     ):
-        """A well-formed dict envelope is converted field-for-field into
-        the harmonograf ``InvocationCancelled`` proto."""
-        evt = _make_dict_envelope()
+        """A typed ``goldfive.v1.InvocationCancelled`` event flows
+        through the standard ``GOLDFIVE_EVENT`` envelope. No dedicated
+        slot, no harmonograf-side translation — the sink just forwards."""
+        evt = _make_proto_event()
         await sink.emit(evt)
         envs = _drain(client)
         assert len(envs) == 1
         env = envs[0]
-        assert env.kind is EnvelopeKind.INVOCATION_CANCELLED
-        payload = env.payload
-        assert payload.run_id == "run-abc"
-        assert payload.sequence == 7
-        assert payload.session_id == "sess-cancel"
-        assert payload.invocation_id == "inv-42"
-        # Agent name canonicalized bare→compound using the client's
-        # agent_id (same rule as the goldfive_event path).
-        assert payload.agent_name == "presentation-orchestrated-abc:researcher_agent"
-        assert payload.reason == "drift"
-        assert payload.severity == "critical"
-        assert payload.drift_id == "drift-uuid-1"
-        assert payload.drift_kind == "off_topic"
-        assert payload.detail == "assistant veered off task"
-        assert payload.tool_name == ""
-        # emitted_at populated from the dict pair.
-        assert payload.emitted_at.seconds == 1_700_000_000
-        assert payload.emitted_at.nanos == 123_000_000
+        assert env.kind is EnvelopeKind.GOLDFIVE_EVENT
+        # The forwarded payload IS the original Event proto with the
+        # typed payload preserved.
+        assert env.payload is evt
+        assert env.payload.WhichOneof("payload") == "invocation_cancelled"
+        assert env.payload.invocation_cancelled.invocation_id == "inv-42"
+        assert env.payload.invocation_cancelled.severity == "critical"
         assert made[0].notify_count >= 1
 
     @pytest.mark.asyncio
-    async def test_already_compound_agent_name_is_idempotent(
+    async def test_proto_event_envelope_metadata_preserved(
         self, sink: HarmonografSink, client: Client
     ):
-        """Already-compound agent_name passes through unchanged (no
-        double-prefixing)."""
-        evt = _make_dict_envelope(
-            payload={
-                "invocation_id": "inv-1",
-                "agent_name": "presentation-orchestrated-abc:researcher_agent",
-                "reason": "user_steer",
-                "severity": "warning",
-                "drift_id": "",
-                "drift_kind": "user_steer",
-                "detail": "user asked to stop",
-                "tool_name": "",
-            }
+        """Envelope metadata (run_id, sequence, session_id) on the
+        ``Event`` rides through verbatim — the server reads these off
+        the parent envelope when persisting."""
+        evt = _make_proto_event(
+            run_id="run-xyz", sequence=42, session_id="sess-other"
         )
         await sink.emit(evt)
         env = _drain(client)[0]
-        assert (
-            env.payload.agent_name
-            == "presentation-orchestrated-abc:researcher_agent"
-        )
+        assert env.payload.run_id == "run-xyz"
+        assert env.payload.sequence == 42
+        assert env.payload.session_id == "sess-other"
+
+
+class TestInvocationCancelledDictDropped:
+    """Migration regression: the dict envelope path that PR #187
+    used to convert into the placeholder
+    ``harmonograf.v1.InvocationCancelled`` is gone.
+
+    A pre-#262 goldfive (still emitting dict envelopes for the cancel)
+    must NOT crash the sink, but also must not silently push a wrong
+    record onto the wire — there is no harmonograf proto to materialize
+    into. The dict is dropped at DEBUG.
+    """
 
     @pytest.mark.asyncio
-    async def test_tool_name_field_carried_when_present(
-        self, sink: HarmonografSink, client: Client
-    ):
-        """``tool_name`` rides through verbatim for cancels that fired at
-        a tool-dispatch checkpoint."""
-        evt = _make_dict_envelope(
-            payload={
-                "invocation_id": "inv-1",
-                "agent_name": "researcher_agent",
-                "reason": "drift",
-                "severity": "critical",
-                "drift_id": "drift-xyz",
-                "drift_kind": "off_topic",
-                "detail": "tool call veered off task",
-                "tool_name": "search_web",
-            }
-        )
-        await sink.emit(evt)
-        env = _drain(client)[0]
-        assert env.payload.tool_name == "search_web"
-
-    @pytest.mark.asyncio
-    async def test_missing_emitted_at_leaves_field_unset(
-        self, sink: HarmonografSink, client: Client
-    ):
-        """When the dict doesn't carry ``emitted_at`` (e.g. Stream C
-        fell back to next_sequence=0 / no clock read), the proto's
-        emitted_at stays zero so the server can stamp wall-clock on
-        receipt."""
-        evt = _make_dict_envelope()
-        evt["emitted_at"] = {}
-        await sink.emit(evt)
-        env = _drain(client)[0]
-        assert env.payload.emitted_at.seconds == 0
-        assert env.payload.emitted_at.nanos == 0
-
-    @pytest.mark.asyncio
-    async def test_negative_sequence_clamped_to_zero(
-        self, sink: HarmonografSink, client: Client
-    ):
-        """Defensive: a negative sequence (goldfive's
-        ``session.next_sequence()`` raised and fell back to -1) is
-        clamped to 0 so it doesn't wrap into a huge uint64."""
-        evt = _make_dict_envelope(sequence=-1)
-        await sink.emit(evt)
-        env = _drain(client)[0]
-        assert env.payload.sequence == 0
-
-    @pytest.mark.asyncio
-    async def test_unknown_dict_kind_is_dropped(
+    async def test_invocation_cancelled_dict_is_dropped(
         self,
         sink: HarmonografSink,
         client: Client,
         caplog: pytest.LogCaptureFixture,
     ):
-        """Dict envelopes with an unknown ``kind`` are swallowed at
-        DEBUG with no forwarding — observability must never raise."""
+        caplog.set_level(logging.DEBUG, logger="harmonograf_client.sink")
+        evt = {
+            "event_id": "evt-cancel-1",
+            "run_id": "run-abc",
+            "sequence": 7,
+            "emitted_at": {"seconds": 1_700_000_000, "nanos": 123_000_000},
+            "session_id": "sess-cancel",
+            "kind": "invocation_cancelled",
+            "payload": {
+                "invocation_id": "inv-42",
+                "agent_name": "researcher_agent",
+                "reason": "drift",
+                "severity": "critical",
+                "drift_id": "drift-uuid-1",
+                "drift_kind": "off_topic",
+                "detail": "assistant veered off task",
+                "tool_name": "",
+            },
+        }
+        await sink.emit(evt)
+        # No envelope pushed — no harmonograf proto exists for this dict
+        # shape after the migration.
+        assert _drain(client) == []
+        # Debug log fires so operators see the drop without an exception.
+        assert any(
+            "ignoring unknown dict goldfive event" in rec.getMessage()
+            for rec in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_unknown_dict_kind_still_dropped(
+        self,
+        sink: HarmonografSink,
+        client: Client,
+        caplog: pytest.LogCaptureFixture,
+    ):
+        """Generic dict-envelope handling for unknown kinds is preserved
+        — only the ``invocation_cancelled``-specific conversion was
+        removed. Future dict-only events land on the same drop branch
+        until they are typed and routed via ``goldfive_event``."""
         caplog.set_level(logging.DEBUG, logger="harmonograf_client.sink")
         evt = {"kind": "some_future_event", "payload": {}}
         await sink.emit(evt)
@@ -208,28 +210,12 @@ class TestInvocationCancelledDictTranslation:
         )
 
     @pytest.mark.asyncio
-    async def test_transport_wraps_in_telemetry_up_variant(
-        self, sink: HarmonografSink, client: Client
-    ):
-        """The envelope materializes into the
-        ``TelemetryUp.invocation_cancelled`` oneof variant — mirrors the
-        equivalent ``goldfive_event`` round-trip test in
-        ``test_harmonograf_sink.py``."""
-        from harmonograf_client.pb import telemetry_pb2
-
-        evt = _make_dict_envelope()
-        await sink.emit(evt)
-        env = _drain(client)[0]
-        up = telemetry_pb2.TelemetryUp(invocation_cancelled=env.payload)
-        assert up.WhichOneof("msg") == "invocation_cancelled"
-        assert up.invocation_cancelled.invocation_id == "inv-42"
-        assert up.invocation_cancelled.severity == "critical"
-
-    @pytest.mark.asyncio
     async def test_emit_after_close_is_silent_drop(
         self, sink: HarmonografSink, client: Client
     ):
-        """Late cancel events from a tearing-down runner are dropped."""
+        """Late events from a tearing-down runner are dropped silently —
+        applies to both the proto path and the dict path."""
         await sink.close()
-        await sink.emit(_make_dict_envelope())
+        await sink.emit(_make_proto_event())
+        await sink.emit({"kind": "invocation_cancelled", "payload": {}})
         assert _drain(client) == []

@@ -238,19 +238,6 @@ class IngestPipeline:
         self._drifts_by_session: dict[str, list[dict[str, Any]]] = {}
         self._drift_ring_max = 500
 
-        # Per-session ring of recent InvocationCancelled events (goldfive
-        # #251 Stream C / #259). Same reconnect-replay role as the drift
-        # ring above — goldfive's proto schema doesn't carry a dedicated
-        # InvocationCancelled variant today, so this ring is a sibling
-        # dict-parsed record store rather than reading back through
-        # ``list_goldfive_events``. When the proto variant lands in a
-        # future goldfive bump, this ring can collapse into the drift
-        # ring's replay path.
-        self._invocation_cancels_by_session: dict[
-            str, list[dict[str, Any]]
-        ] = {}
-        self._invocation_cancel_ring_max = 500
-
     # ---- public API ---------------------------------------------------
 
     @property
@@ -346,8 +333,6 @@ class IngestPipeline:
             self._control_sink.record_ack(msg.control_ack, stream_id=ctx.stream_id)
         elif kind == "goldfive_event":
             await self._handle_goldfive_event(ctx, msg.goldfive_event)
-        elif kind == "invocation_cancelled":
-            await self._handle_invocation_cancelled(ctx, msg.invocation_cancelled)
         elif kind == "goodbye":
             await self._handle_goodbye(ctx, msg.goodbye)
         elif kind == "hello":
@@ -901,6 +886,10 @@ class IngestPipeline:
             )
         elif kind == "delegation_observed":
             await self._on_delegation_observed(target_ctx, event.delegation_observed, run_id)
+        elif kind == "invocation_cancelled":
+            self._on_invocation_cancelled(
+                target_ctx, event.invocation_cancelled, run_id, event
+            )
         else:
             logger.debug(
                 "ignoring unknown goldfive event payload kind=%s on session_id=%s",
@@ -1270,77 +1259,50 @@ class IngestPipeline:
         """
         return list(self._drifts_by_session.get(session_id, []))
 
-    async def _handle_invocation_cancelled(
-        self, ctx: StreamContext, msg: Any
+    def _on_invocation_cancelled(
+        self,
+        ctx: StreamContext,
+        payload: Any,
+        run_id: str,
+        event: Any,
     ) -> None:
-        """Ingest an ``InvocationCancelled`` envelope.
+        """Ingest an ``InvocationCancelled`` payload (goldfive#262).
 
         Plays the same "operator observability marker" role as
-        ``_on_drift_detected``: stash a replay record on the per-session
-        ring (so late-joining WatchSession subscribers see the marker
-        during initial burst) and publish a DELTA_INVOCATION_CANCELLED
-        on the bus so live subscribers render the marker immediately.
+        :meth:`_on_drift_detected`: publish a
+        ``DELTA_INVOCATION_CANCELLED`` on the bus so live WatchSession
+        subscribers render the marker immediately. Persistence happens
+        upstream in :meth:`_handle_goldfive_event` via
+        ``Store.append_goldfive_event`` — the cancel rides on the same
+        ``goldfive_events`` table as every other goldfive Event variant,
+        so reconnect replay during the initial burst pulls it back
+        through the persisted-event read path with no separate ring.
 
-        Not stored in the ``goldfive_events`` persistence table — the
-        event originates as a dict on the goldfive side (no proto
-        envelope exists yet), and this table's ingest path is strictly
-        proto-serialized via ``event.SerializeToString()``. When the
-        goldfive proto adds an InvocationCancelled variant, the persist
-        leg can collapse into the existing ``_handle_goldfive_event``
-        branch. Until then the in-memory ring is the only source of
-        truth for reconnect replay — acceptable because cancels are
-        low-volume and operator-only.
+        Sequence + emitted_at come off the parent ``Event`` envelope
+        (``goldfive.v1.Event``); only the payload-local fields
+        (invocation_id, agent_name, reason, …) are read from
+        ``payload``. ``agent_name`` arrives already canonicalized to
+        ``<client>:<bare>`` from the client sink.
         """
-        # Best-effort field reads: mirror the dict→proto conversion the
-        # client sink does, in reverse. ``agent_name`` arrives already
-        # canonicalized to ``<client>:<bare>`` from the sink.
         emitted_at_val: float | None = None
-        if msg.HasField("emitted_at"):
-            emitted_at_val = ts_to_float(msg.emitted_at)
-        record: dict[str, Any] = {
-            "run_id": msg.run_id or "",
-            "sequence": int(msg.sequence or 0),
-            "emitted_at": emitted_at_val,
-            "invocation_id": msg.invocation_id or "",
-            "agent_name": msg.agent_name or "",
-            "reason": msg.reason or "",
-            "severity": msg.severity or "",
-            "drift_id": msg.drift_id or "",
-            "drift_kind": msg.drift_kind or "",
-            "detail": msg.detail or "",
-            "tool_name": msg.tool_name or "",
-            "recorded_at": self._now(),
-        }
-        ring = self._invocation_cancels_by_session.setdefault(ctx.session_id, [])
-        ring.append(record)
-        if len(ring) > self._invocation_cancel_ring_max:
-            del ring[: len(ring) - self._invocation_cancel_ring_max]
+        if event is not None and event.HasField("emitted_at"):
+            emitted_at_val = ts_to_float(event.emitted_at)
+        sequence_val = int(getattr(event, "sequence", 0) or 0)
         self._bus.publish_invocation_cancelled(
             ctx.session_id,
-            record["run_id"],
-            sequence=record["sequence"],
-            emitted_at=record["emitted_at"],
-            invocation_id=record["invocation_id"],
-            agent_name=record["agent_name"],
-            reason=record["reason"],
-            severity=record["severity"],
-            drift_id=record["drift_id"],
-            drift_kind=record["drift_kind"],
-            detail=record["detail"],
-            tool_name=record["tool_name"],
-            recorded_at=record["recorded_at"],
+            run_id,
+            sequence=sequence_val,
+            emitted_at=emitted_at_val,
+            invocation_id=payload.invocation_id or "",
+            agent_name=payload.agent_name or "",
+            reason=payload.reason or "",
+            severity=payload.severity or "",
+            drift_id=payload.drift_id or "",
+            drift_kind=payload.drift_kind or "",
+            detail=payload.detail or "",
+            tool_name=payload.tool_name or "",
+            recorded_at=self._now(),
         )
-
-    def invocation_cancels_for_session(
-        self, session_id: str
-    ) -> list[dict[str, Any]]:
-        """Return the in-memory invocation-cancel ring (oldest first).
-
-        Symmetric to :meth:`drifts_for_session`. Called by the frontend
-        RPC during WatchSession initial burst so the cancel markers
-        reappear on reconnect.
-        """
-        return list(self._invocation_cancels_by_session.get(session_id, []))
 
     async def _on_run_completed(
         self, ctx: StreamContext, payload: Any, run_id: str

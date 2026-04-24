@@ -724,10 +724,12 @@ export class DriftRegistry {
 }
 
 // A captured goldfive InvocationCancelled event (goldfive#251 Stream C /
-// #259). Operator-only record that goldfive cooperatively cancelled one
-// agent invocation. Rich context on why (reason, severity, drift link,
-// optional tool name) so the Trajectory / Gantt / Graph views can render
-// a distinct cancel marker without inferring the intent from tea-leaves.
+// #259, promoted to a typed ``goldfive.v1.InvocationCancelled`` Event
+// payload variant in goldfive#262). Operator-only record that goldfive
+// cooperatively cancelled one agent invocation. Rich context on why
+// (reason, severity, drift link, optional tool name) so the Trajectory
+// / Gantt / Graph views can render a distinct cancel marker without
+// inferring the intent from tea-leaves.
 //
 // Not actionable from the UI (no retry / cancel-again affordance) — just
 // a record. Plays the same "intervention timeline marker" role as

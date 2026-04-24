@@ -139,7 +139,7 @@ class Goodbye(_message.Message):
     def __init__(self, reason: _Optional[str] = ...) -> None: ...
 
 class TelemetryUp(_message.Message):
-    __slots__ = ("hello", "span_start", "span_update", "span_end", "payload", "heartbeat", "control_ack", "goodbye", "goldfive_event", "invocation_cancelled")
+    __slots__ = ("hello", "span_start", "span_update", "span_end", "payload", "heartbeat", "control_ack", "goodbye", "goldfive_event")
     HELLO_FIELD_NUMBER: _ClassVar[int]
     SPAN_START_FIELD_NUMBER: _ClassVar[int]
     SPAN_UPDATE_FIELD_NUMBER: _ClassVar[int]
@@ -149,7 +149,6 @@ class TelemetryUp(_message.Message):
     CONTROL_ACK_FIELD_NUMBER: _ClassVar[int]
     GOODBYE_FIELD_NUMBER: _ClassVar[int]
     GOLDFIVE_EVENT_FIELD_NUMBER: _ClassVar[int]
-    INVOCATION_CANCELLED_FIELD_NUMBER: _ClassVar[int]
     hello: Hello
     span_start: SpanStart
     span_update: SpanUpdate
@@ -159,36 +158,7 @@ class TelemetryUp(_message.Message):
     control_ack: _control_pb2.ControlAck
     goodbye: Goodbye
     goldfive_event: _events_pb2.Event
-    invocation_cancelled: InvocationCancelled
-    def __init__(self, hello: _Optional[_Union[Hello, _Mapping]] = ..., span_start: _Optional[_Union[SpanStart, _Mapping]] = ..., span_update: _Optional[_Union[SpanUpdate, _Mapping]] = ..., span_end: _Optional[_Union[SpanEnd, _Mapping]] = ..., payload: _Optional[_Union[PayloadUpload, _Mapping]] = ..., heartbeat: _Optional[_Union[Heartbeat, _Mapping]] = ..., control_ack: _Optional[_Union[_control_pb2.ControlAck, _Mapping]] = ..., goodbye: _Optional[_Union[Goodbye, _Mapping]] = ..., goldfive_event: _Optional[_Union[_events_pb2.Event, _Mapping]] = ..., invocation_cancelled: _Optional[_Union[InvocationCancelled, _Mapping]] = ...) -> None: ...
-
-class InvocationCancelled(_message.Message):
-    __slots__ = ("run_id", "sequence", "session_id", "emitted_at", "invocation_id", "agent_name", "reason", "severity", "drift_id", "drift_kind", "detail", "tool_name")
-    RUN_ID_FIELD_NUMBER: _ClassVar[int]
-    SEQUENCE_FIELD_NUMBER: _ClassVar[int]
-    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
-    EMITTED_AT_FIELD_NUMBER: _ClassVar[int]
-    INVOCATION_ID_FIELD_NUMBER: _ClassVar[int]
-    AGENT_NAME_FIELD_NUMBER: _ClassVar[int]
-    REASON_FIELD_NUMBER: _ClassVar[int]
-    SEVERITY_FIELD_NUMBER: _ClassVar[int]
-    DRIFT_ID_FIELD_NUMBER: _ClassVar[int]
-    DRIFT_KIND_FIELD_NUMBER: _ClassVar[int]
-    DETAIL_FIELD_NUMBER: _ClassVar[int]
-    TOOL_NAME_FIELD_NUMBER: _ClassVar[int]
-    run_id: str
-    sequence: int
-    session_id: str
-    emitted_at: _timestamp_pb2.Timestamp
-    invocation_id: str
-    agent_name: str
-    reason: str
-    severity: str
-    drift_id: str
-    drift_kind: str
-    detail: str
-    tool_name: str
-    def __init__(self, run_id: _Optional[str] = ..., sequence: _Optional[int] = ..., session_id: _Optional[str] = ..., emitted_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., invocation_id: _Optional[str] = ..., agent_name: _Optional[str] = ..., reason: _Optional[str] = ..., severity: _Optional[str] = ..., drift_id: _Optional[str] = ..., drift_kind: _Optional[str] = ..., detail: _Optional[str] = ..., tool_name: _Optional[str] = ...) -> None: ...
+    def __init__(self, hello: _Optional[_Union[Hello, _Mapping]] = ..., span_start: _Optional[_Union[SpanStart, _Mapping]] = ..., span_update: _Optional[_Union[SpanUpdate, _Mapping]] = ..., span_end: _Optional[_Union[SpanEnd, _Mapping]] = ..., payload: _Optional[_Union[PayloadUpload, _Mapping]] = ..., heartbeat: _Optional[_Union[Heartbeat, _Mapping]] = ..., control_ack: _Optional[_Union[_control_pb2.ControlAck, _Mapping]] = ..., goodbye: _Optional[_Union[Goodbye, _Mapping]] = ..., goldfive_event: _Optional[_Union[_events_pb2.Event, _Mapping]] = ...) -> None: ...
 
 class Welcome(_message.Message):
     __slots__ = ("accepted", "assigned_session_id", "assigned_stream_id", "server_time", "flags", "rejection_reason")

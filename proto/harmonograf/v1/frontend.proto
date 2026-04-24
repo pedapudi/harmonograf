@@ -14,7 +14,6 @@ package harmonograf.v1;
 
 import "google/protobuf/timestamp.proto";
 import "harmonograf/v1/types.proto";
-import "harmonograf/v1/telemetry.proto";
 import "goldfive/v1/control.proto";
 import "goldfive/v1/events.proto";
 import "goldfive/v1/types.proto";
@@ -78,6 +77,14 @@ message SessionUpdate {
   // carrying a goldfive.v1.Event so the wire is a straight passthrough
   // of whatever the orchestrator emitted.
   reserved 16, 17;
+  // Reserved: was a placeholder
+  // ``harmonograf.v1.InvocationCancelled invocation_cancelled = 20``
+  // added in PR #187 to forward the dict-envelope cancel event before
+  // the upstream proto landed. Removed in PR (Wave 2 / A8) once
+  // goldfive#262 promoted the event to a typed
+  // ``goldfive.v1.InvocationCancelled`` variant carried on
+  // ``goldfive_event`` (field 19).
+  reserved 20;
   oneof kind {
     // Initial burst messages. Multiple of each may be sent before the
     // first delta. A client knows the burst is done when it sees the
@@ -112,20 +119,11 @@ message SessionUpdate {
     // Goldfive orchestration event (plan_submitted / plan_revised /
     // task_started / task_progress / task_completed / task_failed /
     // task_blocked / task_cancelled / drift_detected / run_started /
-    // run_completed / run_aborted / goal_derived). Replayed during the
-    // initial burst from persisted plans + task state, then streamed
-    // live as HarmonografSink ingest fans out deltas on the bus.
+    // run_completed / run_aborted / goal_derived /
+    // invocation_cancelled). Replayed during the initial burst from
+    // persisted plans + task state, then streamed live as
+    // HarmonografSink ingest fans out deltas on the bus.
     goldfive.v1.Event goldfive_event = 19;
-    // Operator-observability: goldfive cancelled one agent invocation
-    // cooperatively. Delivered in the same ``goldfive_event`` slot
-    // position conceptually — it carries the same envelope metadata
-    // (run_id, session_id, emitted_at) plus a fixed payload shape.
-    // Carried as a distinct oneof variant rather than a
-    // ``goldfive.v1.Event`` case because the goldfive proto envelope
-    // does not (yet) have an ``InvocationCancelled`` message — the
-    // goldfive side ships a dict, and harmonograf converts it at the
-    // client sink. See ``telemetry.proto::InvocationCancelled``.
-    InvocationCancelled invocation_cancelled = 20;
   }
 }
 

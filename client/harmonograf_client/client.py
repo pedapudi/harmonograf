@@ -392,26 +392,6 @@ class Client:
         self._events.push(env)
         self._transport.notify()
 
-    def emit_invocation_cancelled(self, msg: Any) -> None:
-        """Ship an ``InvocationCancelled`` record to the server.
-
-        ``msg`` is a ``harmonograf.v1.InvocationCancelled`` proto — the
-        dict→proto conversion happens in
-        :class:`HarmonografSink._emit_invocation_cancelled` so callers
-        here hand in an already-materialized proto. Pushed onto the
-        shared span buffer (same backpressure / reconnect semantics as
-        every other envelope) and materialized by the transport into the
-        ``TelemetryUp.invocation_cancelled`` variant on the wire (see
-        :meth:`transport._envelope_to_up`).
-        """
-        env = SpanEnvelope(
-            kind=EnvelopeKind.INVOCATION_CANCELLED,
-            span_id="",
-            payload=msg,
-        )
-        self._events.push(env)
-        self._transport.notify()
-
     def shutdown(self, flush_timeout: float = 5.0) -> None:
         if self._shutdown_called:
             return

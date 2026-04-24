@@ -23,7 +23,7 @@ import { useAnnotationStore } from '../state/annotationStore';
 import { packLanes } from '../gantt/layout';
 import type { ListSessionsResponse } from '../pb/harmonograf/v1/frontend_pb.js';
 import { SessionStatus as PbSessionStatus } from '../pb/harmonograf/v1/types_pb.js';
-import { applyGoldfiveEvent, applyInvocationCancelled } from './goldfiveEvent';
+import { applyGoldfiveEvent } from './goldfiveEvent';
 import { loadPlanHistory } from '../state/planHistoryLoader';
 
 // Translate the generated SessionStatus enum to the closed string set
@@ -518,22 +518,6 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
               // translation is testable without standing up a mocked
               // Connect transport.
               applyGoldfiveEvent(
-                kind.value,
-                store,
-                origin?.startMs ?? 0,
-                sessionId,
-              );
-              break;
-            }
-            case 'invocationCancelled': {
-              // Operator-observability marker (goldfive#251 Stream C).
-              // Delivered as its own oneof variant because the goldfive
-              // proto envelope does not (yet) have an InvocationCancelled
-              // message — the client sink materializes a harmonograf-
-              // namespaced variant from the dict envelope goldfive emits.
-              // Dispatch lives in goldfiveEvent.ts alongside the other
-              // operator-marker handlers.
-              applyInvocationCancelled(
                 kind.value,
                 store,
                 origin?.startMs ?? 0,
