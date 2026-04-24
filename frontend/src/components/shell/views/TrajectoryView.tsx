@@ -33,9 +33,13 @@ import type {
 } from '../../../state/planHistoryStore';
 import { RevisionScrubber } from './RevisionScrubber';
 import {
+  SteeringDetailBody,
   SteeringDetailPanel,
   type SteeringSelection,
 } from './SteeringDetailPanel';
+import { TrajectoryTimelineRibbon } from './TrajectoryTimelineRibbon';
+import { TrajectoryFloatingDrawer } from './TrajectoryFloatingDrawer';
+import { TaskNodeDetail } from './TaskNodeDetail';
 
 // ── Palette ────────────────────────────────────────────────────────────────
 // Aligned with GanttView's status palette so a task's status reads the same
@@ -334,6 +338,15 @@ type Selection =
   | { kind: 'drift'; seq: number }
   | null;
 
+// Drawer content union. Drives what the TrajectoryFloatingDrawer mounts
+// inside it. Task-detail clicks land the task + cumulative plan (so the
+// body can display siblings / edges without a second lookup); steering
+// clicks land a SteeringSelection. Keeping this typed at the boundary
+// prevents the drawer body from re-deriving the selection from React state.
+type DrawerContent =
+  | { type: 'task'; task: Task; plan: TaskPlan | null }
+  | { type: 'steering'; selection: SteeringSelection };
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function TrajectoryView() {
@@ -390,6 +403,26 @@ export function TrajectoryView() {
   const [steeringSelection, setSteeringSelection] =
     useState<SteeringSelection | null>(null);
 
+  // Floating-drawer state: open flag + typed content union. Opening the
+  // drawer doesn't touch the legacy `selection` / `steeringSelection` state
+  // so the (opt-in) legacy view still renders its own right-column panels
+  // when expanded.
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerContent, setDrawerContent] = useState<DrawerContent | null>(null);
+
+  // Legacy stacked-layout toggle (opt-in, persisted via uiStore →
+  // localStorage). Default false: new compact layout with unified ribbon +
+  // full-width DAG + floating drawer only. The store selectors fall back
+  // to safe defaults when the test mocks omit these fields.
+  const expandedLegacyView = useUiStore(
+    (s) => (s as { trajectoryLegacyExpanded?: boolean }).trajectoryLegacyExpanded ?? false,
+  );
+  const toggleExpandedLegacyView = useUiStore(
+    (s) =>
+      (s as { toggleTrajectoryLegacyExpanded?: () => void })
+        .toggleTrajectoryLegacyExpanded ?? (() => {}),
+  );
+
   // Plan-history primary id: same fallback as vm.planId. Used to key the
   // cumulative + supersedes + history hooks.
   const primaryPlanId = vm.planId;
@@ -432,55 +465,85 @@ export function TrajectoryView() {
     }
   };
 
+  // Ribbon selection primitive: "latest" means no pinned revision
+  // (cumulative view); a concrete number pins both the cumulative filter
+  // and the rev-index selection. Derived from the two legacy state
+  // variables so ribbon + scrubber share a single source of truth.
+  const ribbonSelected: number | 'latest' =
+    pinnedRevision !== null ? pinnedRevision : 'latest';
+
+  const onRibbonSelectRevision = (rev: number | 'latest'): void => {
+    if (rev === 'latest') {
+      setPinnedRevision(null);
+      setPinnedRevIdx(null);
+      setCompareRevIdx(null);
+      setSelection(null);
+      setSteeringSelection(null);
+      return;
+    }
+    setPinnedRevision(rev);
+    // Pinned rev number → find the corresponding index in vm.revs so the
+    // legacy Ribbon selection + rev-change handler stay coherent.
+    const idx = vm.revs.findIndex((p) => (p.revisionIndex ?? 0) === rev);
+    if (idx >= 0) onRevChange(idx, false);
+    setSteeringSelection(null);
+  };
+
+  // Centralise drawer-open so click handlers from the DAG, ribbon and
+  // legacy intervention list all route through the same spot. This is
+  // also the single place the #175 PR will want to replace when it lands
+  // richer transition wiring.
+  const openDrawerForTask = (taskId: string): void => {
+    if (!currentRev) return;
+    const planForLookup = filteredCumulative ?? currentRev;
+    const task = planForLookup.tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    setDrawerContent({ type: 'task', task, plan: planForLookup });
+    setDrawerOpen(true);
+    // Preserve the legacy `selection` so the DAG still highlights the
+    // selected node and Gantt span-selection behaviour survives.
+    setSelection({ kind: 'task', taskId, planId: currentRev.id });
+    if (task.boundSpanId) selectSpan(task.boundSpanId);
+  };
+
+  const openDrawerForSteering = (selection: SteeringSelection): void => {
+    setDrawerContent({ type: 'steering', selection });
+    setDrawerOpen(true);
+    // Mirror into the legacy state so an expanded-legacy view stays in sync.
+    setSteeringSelection(selection);
+  };
+
+  const openDrawerForIntervention = (row: InterventionRow): void => {
+    // Interventions that represent a plan revision map to a steering view
+    // of that revision; standalone drifts map to a drift selection the
+    // legacy detail pane can render. Either way the drawer surfaces it.
+    if (row.planRevisionIndex > 0) {
+      openDrawerForSteering({
+        kind: 'revision',
+        revision: row.planRevisionIndex,
+      });
+      return;
+    }
+    // No associated revision → surface the drift via legacy selection.
+    // The drawer itself has no "drift detail" body component in the slim
+    // set; falling back to opening the steering view with rev 0 would be
+    // confusing, so we only toggle the legacy selection and leave the
+    // drawer closed.
+    setSelection({ kind: 'drift', seq: 0 });
+  };
+
   return (
-    <section className="hg-panel hg-traj" data-testid="trajectory-view">
+    <section
+      className="hg-panel hg-traj"
+      data-testid="trajectory-view"
+      style={{ position: 'relative' }}
+    >
       <header className="hg-panel__header hg-traj__header">
         <h2 className="hg-panel__title">Trajectory</h2>
         <span className="hg-panel__hint">
           {vm.revs.length === 0
             ? 'no plan yet'
             : `rev ${revIdx} of ${latestIdx}${compareRev ? ` · comparing to rev ${compareRevIdx}` : ''}`}
-        </span>
-        {vm.revs.length > 1 && (
-          <div className="hg-traj__rev-chips" role="tablist" aria-label="Plan revisions">
-            {vm.revs.map((p, i) => {
-              const selected = i === revIdx;
-              const compared = i === compareRevIdx && compareRevIdx !== revIdx;
-              const sev = i > 0 ? (p.revisionSeverity || '') : '';
-              return (
-                <button
-                  key={`${p.id}-${i}`}
-                  role="tab"
-                  className="hg-traj__chip"
-                  aria-selected={selected}
-                  data-compared={compared}
-                  data-severity={sev || undefined}
-                  data-testid={`rev-chip-${i}`}
-                  onClick={(e) => onRevChange(i, e.shiftKey)}
-                  title={
-                    p.revisionReason
-                      ? `rev ${i}: ${p.revisionReason}`
-                      : `rev ${i}`
-                  }
-                >
-                  <span className="hg-traj__chip-num">rev {i}</span>
-                  {sev && <span className="hg-traj__chip-sev" />}
-                </button>
-              );
-            })}
-            {compareRev && (
-              <button
-                className="hg-traj__chip hg-traj__chip--clear"
-                onClick={() => setCompareRevIdx(null)}
-                aria-label="Clear comparison"
-              >
-                clear diff
-              </button>
-            )}
-          </div>
-        )}
-        <span className="hg-traj__hint">
-          {vm.revs.length > 1 ? 'shift-click a rev to diff against it' : ''}
         </span>
       </header>
       <div className="hg-panel__body hg-traj__body">
@@ -496,84 +559,214 @@ export function TrajectoryView() {
         )}
         {sessionId && vm.revs.length > 0 && (
           <>
-            <RevisionScrubber
+            <TrajectoryTimelineRibbon
+              revisions={planHistoryRecords}
+              interventions={interventions}
+              selectedRevision={ribbonSelected}
+              onSelectRevision={onRibbonSelectRevision}
+              onInterventionClick={openDrawerForIntervention}
+              expanded={expandedLegacyView}
+              onToggleExpanded={toggleExpandedLegacyView}
+            />
+            <DagPane
+              plan={currentRev}
+              cumulative={filteredCumulative}
               history={planHistoryRecords}
+              supersedes={supersedesMap}
               pinnedRevision={pinnedRevision}
-              onPinRevision={(rev) => {
-                setPinnedRevision(rev);
+              marks={marks}
+              compareRev={compareRev}
+              driftsOnRev={vm.driftsByRev[revIdx] ?? []}
+              delegations={vm.allDelegations}
+              selection={selection}
+              onSelectTask={openDrawerForTask}
+              onSelectSteering={openDrawerForSteering}
+              store={store}
+            />
+            {expandedLegacyView && (
+              <LegacyStackedSections
+                revs={vm.revs}
+                driftsByRev={vm.driftsByRev}
+                revIdx={revIdx}
+                compareRevIdx={compareRevIdx}
+                compareRev={compareRev}
+                onRevChange={onRevChange}
+                onClearCompare={() => setCompareRevIdx(null)}
+                planHistoryRecords={planHistoryRecords}
+                pinnedRevision={pinnedRevision}
+                setPinnedRevision={(rev) => {
+                  setPinnedRevision(rev);
+                  setSteeringSelection(null);
+                }}
+                onSelectDrift={(seq) =>
+                  setSelection({ kind: 'drift', seq })
+                }
+                interventions={interventions}
+                steeringSelection={steeringSelection}
+                setSteeringSelection={setSteeringSelection}
+                selection={selection}
+                currentRev={currentRev}
+                filteredCumulative={filteredCumulative}
+                supersedesMap={supersedesMap}
+                allDrifts={vm.allDrifts}
+                store={store}
+              />
+            )}
+          </>
+        )}
+        <TrajectoryFloatingDrawer
+          open={drawerOpen}
+          onClose={() => {
+            setDrawerOpen(false);
+            setSteeringSelection(null);
+          }}
+          title={
+            drawerContent?.type === 'steering'
+              ? 'Steering detail'
+              : drawerContent?.type === 'task'
+                ? 'Task detail'
+                : undefined
+          }
+          width={400}
+        >
+          {drawerContent?.type === 'task' && drawerContent.plan && (
+            <TaskNodeDetail
+              task={drawerContent.task}
+              plan={drawerContent.plan}
+              store={store}
+            />
+          )}
+          {drawerContent?.type === 'steering' && (
+            <SteeringDetailBody
+              selection={drawerContent.selection}
+              plan={filteredCumulative ?? currentRev}
+              history={planHistoryRecords}
+              supersedes={supersedesMap}
+              store={store}
+              onJumpToGantt={() => {
+                setDrawerOpen(false);
                 setSteeringSelection(null);
               }}
             />
-            <Ribbon
-              revs={vm.revs}
-              driftsByRev={vm.driftsByRev}
-              selectedRevIdx={revIdx}
-              comparedRevIdx={compareRevIdx}
-              onSelectRev={onRevChange}
-              onSelectDrift={(seq) => setSelection({ kind: 'drift', seq })}
-            />
-            <InterventionEntries
-              rows={interventions}
-              onJumpToRevision={(revisionIndex) => {
-                // Jump: find the rev chip with that revisionIndex and pin it.
-                const target = vm.revs.findIndex(
-                  (p) => (p.revisionIndex ?? 0) === revisionIndex,
-                );
-                if (target >= 0) onRevChange(target, false);
-              }}
-            />
-            <div className="hg-traj__split">
-              <DagPane
-                plan={currentRev}
-                cumulative={filteredCumulative}
-                history={planHistoryRecords}
-                supersedes={supersedesMap}
-                pinnedRevision={pinnedRevision}
-                marks={marks}
-                compareRev={compareRev}
-                driftsOnRev={vm.driftsByRev[revIdx] ?? []}
-                delegations={vm.allDelegations}
-                selection={selection}
-                onSelectTask={(taskId) => {
-                  if (!currentRev) return;
-                  setSelection({ kind: 'task', taskId, planId: currentRev.id });
-                  const task = currentRev.tasks.find((t) => t.id === taskId);
-                  if (task?.boundSpanId) selectSpan(task.boundSpanId);
-                }}
-                onSelectSteering={setSteeringSelection}
-                store={store}
-              />
-              {steeringSelection ? (
-                <SteeringDetailPanel
-                  selection={steeringSelection}
-                  plan={filteredCumulative ?? currentRev}
-                  history={planHistoryRecords}
-                  supersedes={supersedesMap}
-                  store={store}
-                  onClose={() => setSteeringSelection(null)}
-                  onJumpToGantt={() => {
-                    // Hand off to the app-level Gantt jump handler. Today
-                    // we simply close the panel so the user can eyeball
-                    // the drift on the existing ribbon; the sibling
-                    // `useUiStore.selectSpan` is the nav primitive most
-                    // views use. If the refine span is the closest thing
-                    // the view has to "this drift", select it.
-                    setSteeringSelection(null);
-                  }}
-                />
-              ) : (
-                <DetailPane
-                  selection={selection}
-                  plan={currentRev}
-                  drifts={vm.allDrifts}
-                  store={store}
-                />
-              )}
-            </div>
-          </>
-        )}
+          )}
+        </TrajectoryFloatingDrawer>
       </div>
     </section>
+  );
+}
+
+// ── LegacyStackedSections ──────────────────────────────────────────────────
+//
+// The old stacked layout (REVISIONS strip + REV chips + INTERVENTIONS + right
+// detail pane) rendered as an opt-in escape hatch for users who prefer it.
+// Controlled by `trajectoryLegacyExpanded` on uiStore; toggled from the new
+// ribbon's expand button. Default off (the whole point of the restructure).
+
+interface LegacyStackedSectionsProps {
+  revs: TaskPlan[];
+  driftsByRev: DriftRecord[][];
+  revIdx: number;
+  compareRevIdx: number | null;
+  compareRev: TaskPlan | null;
+  onRevChange: (i: number, shiftKey: boolean) => void;
+  onClearCompare: () => void;
+  planHistoryRecords: readonly PlanRevisionRecord[];
+  pinnedRevision: number | null;
+  setPinnedRevision: (rev: number | null) => void;
+  onSelectDrift: (seq: number) => void;
+  interventions: InterventionRow[];
+  steeringSelection: SteeringSelection | null;
+  setSteeringSelection: (sel: SteeringSelection | null) => void;
+  selection: Selection;
+  currentRev: TaskPlan | null;
+  filteredCumulative: CumulativePlan | null;
+  supersedesMap: Map<string, SupersessionLink>;
+  allDrifts: DriftRecord[];
+  store: SessionStore | null;
+}
+
+function LegacyStackedSections(props: LegacyStackedSectionsProps) {
+  const {
+    revs, driftsByRev, revIdx, compareRevIdx, compareRev, onRevChange,
+    onClearCompare, planHistoryRecords, pinnedRevision, setPinnedRevision,
+    onSelectDrift, interventions, steeringSelection, setSteeringSelection,
+    selection, currentRev, filteredCumulative, supersedesMap, allDrifts, store,
+  } = props;
+  return (
+    <div data-testid="trajectory-legacy-stack">
+      {revs.length > 1 && (
+        <div className="hg-traj__rev-chips" role="tablist" aria-label="Plan revisions">
+          {revs.map((p, i) => {
+            const selected = i === revIdx;
+            const compared = i === compareRevIdx && compareRevIdx !== revIdx;
+            const sev = i > 0 ? (p.revisionSeverity || '') : '';
+            return (
+              <button
+                key={`${p.id}-${i}`}
+                role="tab"
+                className="hg-traj__chip"
+                aria-selected={selected}
+                data-compared={compared}
+                data-severity={sev || undefined}
+                data-testid={`rev-chip-${i}`}
+                onClick={(e) => onRevChange(i, e.shiftKey)}
+                title={p.revisionReason ? `rev ${i}: ${p.revisionReason}` : `rev ${i}`}
+              >
+                <span className="hg-traj__chip-num">rev {i}</span>
+                {sev && <span className="hg-traj__chip-sev" />}
+              </button>
+            );
+          })}
+          {compareRev && (
+            <button
+              className="hg-traj__chip hg-traj__chip--clear"
+              onClick={onClearCompare}
+              aria-label="Clear comparison"
+            >
+              clear diff
+            </button>
+          )}
+        </div>
+      )}
+      <RevisionScrubber
+        history={planHistoryRecords}
+        pinnedRevision={pinnedRevision}
+        onPinRevision={setPinnedRevision}
+      />
+      <Ribbon
+        revs={revs}
+        driftsByRev={driftsByRev}
+        selectedRevIdx={revIdx}
+        comparedRevIdx={compareRevIdx}
+        onSelectRev={onRevChange}
+        onSelectDrift={onSelectDrift}
+      />
+      <InterventionEntries
+        rows={interventions}
+        onJumpToRevision={(revisionIndex) => {
+          const target = revs.findIndex((p) => (p.revisionIndex ?? 0) === revisionIndex);
+          if (target >= 0) onRevChange(target, false);
+        }}
+      />
+      {steeringSelection ? (
+        <SteeringDetailPanel
+          selection={steeringSelection}
+          plan={filteredCumulative ?? currentRev}
+          history={planHistoryRecords}
+          supersedes={supersedesMap}
+          store={store}
+          onClose={() => setSteeringSelection(null)}
+          onJumpToGantt={() => setSteeringSelection(null)}
+        />
+      ) : (
+        <DetailPane
+          selection={selection}
+          plan={currentRev}
+          drifts={allDrifts}
+          store={store}
+        />
+      )}
+    </div>
   );
 }
 

@@ -52,6 +52,10 @@ vi.mock('../../rpc/hooks', () => ({
 const uiStoreState = {
   currentSessionId: mockSessionId,
   selectSpan: vi.fn(),
+  trajectoryLegacyExpanded: false,
+  toggleTrajectoryLegacyExpanded: (): void => {
+    uiStoreState.trajectoryLegacyExpanded = !uiStoreState.trajectoryLegacyExpanded;
+  },
 };
 vi.mock('../../state/uiStore', () => ({
   useUiStore: <T,>(selector: (s: typeof uiStoreState) => T) =>
@@ -105,6 +109,7 @@ function mkPlan(tasks: Task[]): TaskPlan {
 
 beforeEach(() => {
   mockStore = new SessionStore();
+  uiStoreState.trajectoryLegacyExpanded = false;
 });
 
 afterEach(() => {
@@ -125,16 +130,13 @@ describe('<TrajectoryView /> with only rev 0 + drift storm', () => {
 
     render(<TrajectoryView />);
 
-    // Header + rev chip show.
-    expect(screen.getByText('Trajectory')).toBeInTheDocument();
+    // Header shows — multiple matches (panel title + ribbon label); the
+    // panel-title h2 is the authoritative one.
+    expect(screen.getAllByText('Trajectory').length).toBeGreaterThan(0);
 
-    // Ribbon rendered.
-    expect(screen.getByTestId('trajectory-ribbon')).toBeInTheDocument();
-    expect(screen.getByTestId('rev-segment-0')).toBeInTheDocument();
-    // Summary text from the plan surfaces.
-    expect(
-      screen.getByText(/Two-slide solar panel presentation/),
-    ).toBeInTheDocument();
+    // Unified ribbon rendered (the restructured single strip).
+    expect(screen.getByTestId('trajectory-timeline-ribbon')).toBeInTheDocument();
+    expect(screen.getByTestId('ribbon-rev-0')).toBeInTheDocument();
 
     // DAG renders each task as a node with its stable testid.
     expect(screen.getByTestId('trajectory-dag')).toBeInTheDocument();
@@ -148,7 +150,7 @@ describe('<TrajectoryView /> with only rev 0 + drift storm', () => {
     expect(cancelRow).toHaveTextContent('superseded_by_revision');
   });
 
-  it('drops UNSPECIFIED-kind drifts from the ribbon entirely', () => {
+  it('drops UNSPECIFIED-kind drifts from the unified ribbon entirely', () => {
     const plan = mkPlan([mkTask('t1', 'RUNNING')]);
     mockStore.tasks.upsertPlan(plan);
 
@@ -170,21 +172,22 @@ describe('<TrajectoryView /> with only rev 0 + drift storm', () => {
 
     render(<TrajectoryView />);
 
-    // No drift markers at all (every drift was unspec). No "+N more" chip
-    // either, since the filter drops these before the cap applies.
-    expect(screen.queryAllByTestId(/^drift-marker-/)).toHaveLength(0);
-    expect(screen.queryByTestId('drift-more-0')).not.toBeInTheDocument();
+    // No intervention dots at all (every drift was unspec) — the
+    // interventions deriver drops empty-kind drifts up front.
+    expect(screen.queryAllByTestId(/^ribbon-intervention-/)).toHaveLength(0);
 
     // Task node still renders — the ribbon never blocked it.
     expect(screen.getByTestId('task-node-t1')).toBeInTheDocument();
   });
 
-  it('caps legitimate drifts per rev and shows a +N summary chip', () => {
+  it('legacy ribbon (opt-in) caps legitimate drifts per rev and shows a +N chip', () => {
+    // The per-rev drift cap lives on the legacy Ribbon (kept as an
+    // escape hatch). The new unified ribbon renders interventions without
+    // a per-rev cap; this test therefore opts into the legacy view.
+    uiStoreState.trajectoryLegacyExpanded = true;
     const plan = mkPlan([mkTask('t1', 'RUNNING')]);
     mockStore.tasks.upsertPlan(plan);
 
-    // 60 real drifts (well above the 24 cap). Mix of severities so the
-    // ranker has something to work on.
     const severities = ['info', 'warning', 'critical'] as const;
     for (let i = 0; i < 60; i++) {
       mockStore.drifts.append({
@@ -212,7 +215,8 @@ describe('<TrajectoryView /> with only rev 0 + drift storm', () => {
   it('keeps the DAG visible even when the session has a mixed drift storm', () => {
     // This is the exact repro of the live bug: rev-0 plan, real task
     // statuses, a handful of legit drifts, and a firehose of UNSPECIFIED
-    // noise. The DAG + task markers must still render.
+    // noise. The DAG + task markers must still render, and only the
+    // legitimate drifts populate the new ribbon's intervention dots.
     const plan = mkPlan([
       mkTask('t1', 'COMPLETED'),
       mkTask('t2', 'RUNNING'),
@@ -262,8 +266,9 @@ describe('<TrajectoryView /> with only rev 0 + drift storm', () => {
     expect(screen.getByTestId('task-node-t2')).toBeInTheDocument();
     expect(screen.getByTestId('task-node-t3')).toBeInTheDocument();
 
-    // Exactly the two legitimate drift markers, no noise.
-    const markers = screen.queryAllByTestId(/^drift-marker-/);
-    expect(markers).toHaveLength(2);
+    // Exactly the two legitimate interventions surface in the new
+    // ribbon, no UNSPECIFIED noise.
+    const dots = screen.queryAllByTestId(/^ribbon-intv-/);
+    expect(dots).toHaveLength(2);
   });
 });

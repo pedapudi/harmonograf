@@ -41,7 +41,18 @@ vi.mock('../../rpc/hooks', () => ({
 const uiStoreState = {
   currentSessionId: mockSessionId as string | null,
   selectSpan: vi.fn(),
+  // Restructure: legacy stacked sections are opt-in. Default `false` so
+  // the tests exercise the new unified ribbon + floating drawer layout.
+  // Individual tests flip this via `setLegacyExpanded(true)` to exercise
+  // the escape hatch.
+  trajectoryLegacyExpanded: false,
+  toggleTrajectoryLegacyExpanded: (): void => {
+    uiStoreState.trajectoryLegacyExpanded = !uiStoreState.trajectoryLegacyExpanded;
+  },
 };
+function setLegacyExpanded(v: boolean): void {
+  uiStoreState.trajectoryLegacyExpanded = v;
+}
 vi.mock('../../state/uiStore', () => ({
   useUiStore: <T,>(selector: (s: typeof uiStoreState) => T) =>
     selector(uiStoreState),
@@ -163,6 +174,7 @@ function seedTwoRevsWithReplacement(): {
 beforeEach(() => {
   mockStore = new SessionStore();
   uiStoreState.currentSessionId = mockSessionId;
+  uiStoreState.trajectoryLegacyExpanded = false;
 });
 afterEach(() => {
   vi.clearAllMocks();
@@ -185,16 +197,12 @@ describe('<TrajectoryView /> plan-evolution + steering', () => {
     expect(superseded.getAttribute('opacity')).toBe('0.4');
     // The node is still a click target — the onClick-bearing <g> receives
     // pointer events (cursor: pointer via .hg-traj__node) even when the
-    // task isn't present in the latest rev. Verified by mousedown firing
-    // without throwing: React event wiring doesn't drop superseded nodes.
+    // task is superseded. Clicking routes through the new drawer: the
+    // cumulative plan still carries the superseded task, so the task
+    // detail body renders.
     fireEvent.click(superseded);
-    // After click the detail region reflects "Task not present in this rev"
-    // because the latest-rev view doesn't carry the superseded task body;
-    // the selection state still moved — the panel shows *something* from
-    // the detail pane family.
-    expect(
-      screen.getByText(/Task not present in this rev|detail-task/i),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('trajectory-drawer')).toBeInTheDocument();
+    expect(screen.getByTestId('task-node-detail')).toHaveTextContent('build outline');
   });
 
   it('stamps a REV N generation badge based on introducedInRevision', () => {
@@ -254,34 +262,36 @@ describe('<TrajectoryView /> plan-evolution + steering', () => {
     expect(edge).toHaveTextContent(/goldfive: off_topic/i);
   });
 
-  it('revision scrubber hides tasks introduced after the pinned revision', () => {
+  it('unified ribbon hides tasks introduced after the pinned revision', () => {
     seedTwoRevsWithReplacement();
     render(<TrajectoryView />);
     // Before scrubbing: both tasks visible.
     expect(screen.getByTestId('task-node-t1')).toBeInTheDocument();
     expect(screen.getByTestId('task-node-t1_corrected')).toBeInTheDocument();
-    // Click the REV 0 scrubber notch.
-    const notch = screen.getByTestId('scrubber-notch-0');
+    // Click the REV 0 ribbon notch (now the sole revision-pinning control
+    // in the default layout).
+    const notch = screen.getByTestId('ribbon-rev-0');
     fireEvent.click(notch);
     // After scrubbing to rev 0: rev-1 task is hidden.
     expect(screen.getByTestId('task-node-t1')).toBeInTheDocument();
     expect(screen.queryByTestId('task-node-t1_corrected')).not.toBeInTheDocument();
     // "Latest" returns the full cumulative view.
-    fireEvent.click(screen.getByTestId('scrubber-notch-latest'));
+    fireEvent.click(screen.getByTestId('ribbon-latest-btn'));
     expect(screen.getByTestId('task-node-t1_corrected')).toBeInTheDocument();
   });
 
-  it('clicking a steering arrow opens the detail panel with Trigger / Steering / Target', () => {
+  it('clicking a steering arrow opens the floating drawer with Trigger / Steering / Target body', () => {
     seedTwoRevsWithReplacement();
     render(<TrajectoryView />);
     const arrow = screen.getByTestId('steer-edge-t1_corrected');
     fireEvent.click(arrow);
-    const panel = screen.getByTestId('steering-detail-panel');
-    expect(panel).toBeInTheDocument();
+    const drawer = screen.getByTestId('trajectory-drawer');
+    expect(drawer).toBeInTheDocument();
+    const body = within(drawer).getByTestId('steering-detail-body');
     // Three sections: Trigger, Steering, Target.
-    expect(within(panel).getByTestId('steering-detail-trigger')).toBeInTheDocument();
-    expect(within(panel).getByTestId('steering-detail-steering')).toBeInTheDocument();
-    const targetSec = within(panel).getByTestId('steering-detail-target');
+    expect(within(body).getByTestId('steering-detail-trigger')).toBeInTheDocument();
+    expect(within(body).getByTestId('steering-detail-steering')).toBeInTheDocument();
+    const targetSec = within(body).getByTestId('steering-detail-target');
     // Target section names the agent explicitly — the primary UX guarantee.
     expect(
       within(targetSec).getByTestId('steering-detail-target-agent'),
@@ -291,39 +301,56 @@ describe('<TrajectoryView /> plan-evolution + steering', () => {
     ).toHaveTextContent(/research paper/);
     // Kind + reason surface in the Trigger section.
     expect(
-      within(panel).getByTestId('steering-detail-trigger'),
+      within(body).getByTestId('steering-detail-trigger'),
     ).toHaveTextContent('off_topic');
     expect(
-      within(panel).getByTestId('steering-detail-trigger'),
+      within(body).getByTestId('steering-detail-trigger'),
     ).toHaveTextContent('coordinator looped on status queries');
   });
 
-  it('clicking a supersedes edge opens the same detail panel with the old / new task pair', () => {
+  it('clicking a supersedes edge opens the drawer with old / new task pair in body', () => {
     seedTwoRevsWithReplacement();
     render(<TrajectoryView />);
     const edge = screen.getByTestId('supersedes-edge-t1');
     // SVG-native click — fireEvent dispatches to the parent <g>.
     fireEvent.click(edge);
-    const panel = screen.getByTestId('steering-detail-panel');
-    expect(panel).toBeInTheDocument();
-    expect(panel).toHaveTextContent('t1');
-    expect(panel).toHaveTextContent('t1_corrected');
+    const drawer = screen.getByTestId('trajectory-drawer');
+    expect(drawer).toBeInTheDocument();
+    const body = within(drawer).getByTestId('steering-detail-body');
+    expect(body).toHaveTextContent('t1');
+    expect(body).toHaveTextContent('t1_corrected');
   });
 
-  it('steering panel close button dismisses the panel and restores task-detail pane', () => {
+  it('drawer close button dismisses the drawer, backdrop click also closes', () => {
     seedTwoRevsWithReplacement();
     render(<TrajectoryView />);
     fireEvent.click(screen.getByTestId('steer-edge-t1_corrected'));
-    expect(screen.getByTestId('steering-detail-panel')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('steering-detail-close'));
-    expect(screen.queryByTestId('steering-detail-panel')).not.toBeInTheDocument();
+    expect(screen.getByTestId('trajectory-drawer')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('trajectory-drawer-close'));
+    expect(screen.queryByTestId('trajectory-drawer')).not.toBeInTheDocument();
+    // Re-open, then dismiss by backdrop click.
+    fireEvent.click(screen.getByTestId('steer-edge-t1_corrected'));
+    expect(screen.getByTestId('trajectory-drawer')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('trajectory-drawer-backdrop'));
+    expect(screen.queryByTestId('trajectory-drawer')).not.toBeInTheDocument();
   });
 
-  it('scrubber keyboard navigation steps through revisions and returns to Latest', () => {
+  it('drawer close via Escape key', () => {
     seedTwoRevsWithReplacement();
     render(<TrajectoryView />);
+    fireEvent.click(screen.getByTestId('steer-edge-t1_corrected'));
+    expect(screen.getByTestId('trajectory-drawer')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('trajectory-drawer')).not.toBeInTheDocument();
+  });
+
+  it('legacy scrubber keyboard navigation works when the escape hatch is expanded', () => {
+    setLegacyExpanded(true);
+    seedTwoRevsWithReplacement();
+    render(<TrajectoryView />);
+    // With the legacy stacked sections opted in, the old RevisionScrubber
+    // comes back along with its keyboard handlers.
     const scrubber = screen.getByTestId('revision-scrubber');
-    // Seed the scrubber with a pinned rev 1 first so we can verify left-arrow.
     fireEvent.click(screen.getByTestId('scrubber-notch-1'));
     // ArrowLeft → rev 0.
     fireEvent.keyDown(scrubber, { key: 'ArrowLeft' });
@@ -343,6 +370,51 @@ describe('<TrajectoryView /> plan-evolution + steering', () => {
       'aria-selected',
       'true',
     );
+  });
+
+  it('default layout hides the legacy stacked sections (ribbon-strip, intervention list, detail pane)', () => {
+    seedTwoRevsWithReplacement();
+    render(<TrajectoryView />);
+    // The old Ribbon strip (trajectory-ribbon) is gone.
+    expect(screen.queryByTestId('trajectory-ribbon')).not.toBeInTheDocument();
+    // The INTERVENTIONS list header is gone.
+    expect(screen.queryByTestId('trajectory-interventions')).not.toBeInTheDocument();
+    // The RevisionScrubber is gone.
+    expect(screen.queryByTestId('revision-scrubber')).not.toBeInTheDocument();
+    // The REV N chip tablist is gone.
+    expect(screen.queryByTestId('rev-chip-0')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('rev-chip-1')).not.toBeInTheDocument();
+    // The legacy-stack wrapper is absent.
+    expect(screen.queryByTestId('trajectory-legacy-stack')).not.toBeInTheDocument();
+    // The new unified ribbon IS present.
+    expect(screen.getByTestId('trajectory-timeline-ribbon')).toBeInTheDocument();
+  });
+
+  it('toggling the ribbon expand button brings back the legacy stacked sections', () => {
+    seedTwoRevsWithReplacement();
+    const { rerender } = render(<TrajectoryView />);
+    // Expand toggle is present on the new ribbon.
+    const toggle = screen.getByTestId('ribbon-expand-btn');
+    expect(toggle).toBeInTheDocument();
+    // Click toggles the uiStore pref; since tests mock the selector, flip
+    // it directly then re-render to observe the opt-in state.
+    setLegacyExpanded(true);
+    rerender(<TrajectoryView />);
+    expect(screen.getByTestId('trajectory-legacy-stack')).toBeInTheDocument();
+    expect(screen.getByTestId('trajectory-ribbon')).toBeInTheDocument();
+    expect(screen.getByTestId('revision-scrubber')).toBeInTheDocument();
+  });
+
+  it('clicking a task node opens the drawer with the TaskNodeDetail body', () => {
+    seedTwoRevsWithReplacement();
+    render(<TrajectoryView />);
+    const taskNode = screen.getByTestId('task-node-t1_corrected');
+    fireEvent.click(taskNode);
+    const drawer = screen.getByTestId('trajectory-drawer');
+    expect(drawer).toBeInTheDocument();
+    const detail = within(drawer).getByTestId('task-node-detail');
+    expect(detail).toHaveTextContent('research paper');
+    expect(detail).toHaveTextContent('pending');
   });
 
   it('does NOT draw a steering edge when the plan has only rev 0', () => {
