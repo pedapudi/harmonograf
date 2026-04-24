@@ -872,6 +872,7 @@ class TestMissingProtoFieldsGraceful:
         sink: HarmonografSink,
         client: Client,
         caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """One-shot debug log fires when the proto is pre-bump so
         operators can correlate 'no decision context on spans' with
@@ -882,6 +883,19 @@ class TestMissingProtoFieldsGraceful:
         # regardless of test-collection order.
         sink_mod._LOGGED_MISSING_PROTO_FIELDS = False
         caplog.set_level("DEBUG", logger=sink_mod.logger.name)
+
+        # Post-bump protos declare input_preview, so simulate the pre-bump
+        # shape by shadowing the module's hasattr to return False for that
+        # field. The diagnostic path still exists for users building against
+        # an old submodule checkout.
+        real_hasattr = hasattr
+
+        def fake_hasattr(obj: object, name: str) -> bool:
+            if name == "input_preview":
+                return False
+            return real_hasattr(obj, name)
+
+        monkeypatch.setattr(sink_mod, "hasattr", fake_hasattr, raising=False)
 
         def setup(e: ge.Event) -> None:
             e.goldfive_llm_call_start.span_id = "s-log"
