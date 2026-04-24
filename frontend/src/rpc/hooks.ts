@@ -24,6 +24,7 @@ import { packLanes } from '../gantt/layout';
 import type { ListSessionsResponse } from '../pb/harmonograf/v1/frontend_pb.js';
 import { SessionStatus as PbSessionStatus } from '../pb/harmonograf/v1/types_pb.js';
 import { applyGoldfiveEvent } from './goldfiveEvent';
+import { loadPlanHistory } from '../state/planHistoryLoader';
 
 // Translate the generated SessionStatus enum to the closed string set
 // consumers actually care about. Unknown numeric values fall through to
@@ -119,6 +120,15 @@ const statusCache = new Map<string, SessionLifecycle>();
 const lastEventCache = new Map<string, number>();
 const refCounts = new Map<string, number>();
 const abortControllers = new Map<string, AbortController>();
+// Sessions whose plan-history backfill has already been attempted for
+// this tab's lifetime. GetSessionPlanHistory is a single unary snapshot —
+// firing it once per session is sufficient; the live event stream fans
+// out plan_submitted / plan_revised deltas to the same registry from
+// that point forward (both paths dedup on (plan_id, revision_number) in
+// PlanHistoryRegistry.append). The set is keyed by sessionId rather than
+// by subscription because a second consumer re-joining the same session
+// already has the seeded registry.
+const planHistoryBackfilled = new Set<string>();
 
 function getOrCreateStore(sessionId: string): SessionStore {
   let s = storeCache.get(sessionId);
@@ -282,6 +292,31 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
               // recompute, and the burst delivers the 'session' frame
               // before any span frame.
               store.rebaseRelativeTimestamps(startMs);
+              // harmonograf: backfill PlanHistoryRegistry from the
+              // GetSessionPlanHistory snapshot once we know the session
+              // origin. On a COMPLETED session the live event stream
+              // replays the plan as a single synthesized latest snapshot,
+              // so without this unary RPC the Trajectory view's revision
+              // strip only shows the final REV N. Idempotent on
+              // (plan_id, revision_number) — if a live plan_submitted /
+              // plan_revised also lands for the same revision (live run
+              // being observed) it is deduped in planHistoryStore.append.
+              // Best-effort: the loader swallows transport errors and a
+              // client that predates the RPC short-circuits via its
+              // `typeof getSessionPlanHistory === 'function'` guard.
+              if (!planHistoryBackfilled.has(sessionId)) {
+                planHistoryBackfilled.add(sessionId);
+                void loadPlanHistory(sessionId, store, startMs).catch(
+                  (err) => {
+                    // Never fatal — a failure just means the view keeps
+                    // running off whatever the live stream produces.
+                    console.warn(
+                      '[harmonograf] loadPlanHistory failed',
+                      err,
+                    );
+                  },
+                );
+              }
               const nextStatus = lifecycleFromPb(s.status);
               if (statusCache.get(sessionId) !== nextStatus) {
                 statusCache.set(sessionId, nextStatus);
