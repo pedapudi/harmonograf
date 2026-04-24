@@ -101,6 +101,47 @@
   border-radius: 2px;
 }
 
+/* Cancel rows carry a stop glyph inside the swatch so the row reads as
+   a distinct "something stopped" marker at a glance — not just another
+   colored dot. The glyph is a unicode character (⊘), sized to fit the
+   8px swatch with no overflow. Operator-only affordance: no pointer
+   cursor change beyond the default row hover. */
+.hg-interventions-list__row[data-source='cancel'] .hg-interventions-list__swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hg-interventions-list__glyph {
+  font-size: 11px;
+  line-height: 1;
+  color: #0b0d12;
+  font-weight: 700;
+}
+
+.hg-interventions-list__row[data-source='cancel'] {
+  background: rgba(224, 94, 74, 0.06);
+}
+
+.hg-interventions-list__row[data-source='cancel']:hover {
+  background: rgba(224, 94, 74, 0.14);
+}
+
+/* Agent label on cancel rows — the short bare-name only, no compound
+   prefix. Styled as a subtle pill to keep the row visually calm. */
+.hg-interventions-list__agent {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--md-sys-color-on-surface, #e2e2e9);
+  font-variant-numeric: tabular-nums;
+}
+
 .hg-interventions-list__at {
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;

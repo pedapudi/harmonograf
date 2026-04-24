@@ -30,7 +30,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file harmonograf/v1/telemetry.proto.
  */
 export const file_harmonograf_v1_telemetry: GenFile = /*@__PURE__*/
-  fileDesc("Ch5oYXJtb25vZ3JhZi92MS90ZWxlbWV0cnkucHJvdG8SDmhhcm1vbm9ncmFmLnYxIssCCgVIZWxsbxIQCghhZ2VudF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEgwKBG5hbWUYAyABKAkSLAoJZnJhbWV3b3JrGAQgASgOMhkuaGFybW9ub2dyYWYudjEuRnJhbWV3b3JrEhkKEWZyYW1ld29ya192ZXJzaW9uGAUgASgJEjAKDGNhcGFiaWxpdGllcxgGIAMoDjIaLmhhcm1vbm9ncmFmLnYxLkNhcGFiaWxpdHkSNQoIbWV0YWRhdGEYByADKAsyIy5oYXJtb25vZ3JhZi52MS5IZWxsby5NZXRhZGF0YUVudHJ5EhQKDHJlc3VtZV90b2tlbhgIIAEoCRIVCg1zZXNzaW9uX3RpdGxlGAkgASgJGi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASIvCglTcGFuU3RhcnQSIgoEc3BhbhgBIAEoCzIULmhhcm1vbm9ncmFmLnYxLlNwYW4ijgIKClNwYW5VcGRhdGUSDwoHc3Bhbl9pZBgBIAEoCRI+CgphdHRyaWJ1dGVzGAIgAygLMiouaGFybW9ub2dyYWYudjEuU3BhblVwZGF0ZS5BdHRyaWJ1dGVzRW50cnkSKgoGc3RhdHVzGAMgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIwCgxwYXlsb2FkX3JlZnMYBCADKAsyGi5oYXJtb25vZ3JhZi52MS5QYXlsb2FkUmVmGlEKD0F0dHJpYnV0ZXNFbnRyeRILCgNrZXkYASABKAkSLQoFdmFsdWUYAiABKAsyHi5oYXJtb25vZ3JhZi52MS5BdHRyaWJ1dGVWYWx1ZToCOAEi4AIKB1NwYW5FbmQSDwoHc3Bhbl9pZBgBIAEoCRIsCghlbmRfdGltZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKgoGc3RhdHVzGAMgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIoCgVlcnJvchgEIAEoCzIZLmhhcm1vbm9ncmFmLnYxLkVycm9ySW5mbxI7CgphdHRyaWJ1dGVzGAUgAygLMicuaGFybW9ub2dyYWYudjEuU3BhbkVuZC5BdHRyaWJ1dGVzRW50cnkSMAoMcGF5bG9hZF9yZWZzGAYgAygLMhouaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlZhpRCg9BdHRyaWJ1dGVzRW50cnkSCwoDa2V5GAEgASgJEi0KBXZhbHVlGAIgASgLMh4uaGFybW9ub2dyYWYudjEuQXR0cmlidXRlVmFsdWU6AjgBIm8KDVBheWxvYWRVcGxvYWQSDgoGZGlnZXN0GAEgASgJEhIKCnRvdGFsX3NpemUYAiABKAMSDAoEbWltZRgDIAEoCRINCgVjaHVuaxgEIAEoDBIMCgRsYXN0GAUgASgIEg8KB2V2aWN0ZWQYBiABKAgi1QIKCUhlYXJ0YmVhdBIXCg9idWZmZXJlZF9ldmVudHMYASABKAMSFgoOZHJvcHBlZF9ldmVudHMYAiABKAMSHgoWZHJvcHBlZF9zcGFuc19jcml0aWNhbBgDIAEoAxIeChZidWZmZXJlZF9wYXlsb2FkX2J5dGVzGAQgASgDEhgKEHBheWxvYWRzX2V2aWN0ZWQYBSABKAMSFAoMY3B1X3NlbGZfcGN0GAYgASgBEi8KC2NsaWVudF90aW1lGAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIYChBwcm9ncmVzc19jb3VudGVyGAggASgDEhgKEGN1cnJlbnRfYWN0aXZpdHkYCSABKAkSHQoVY29udGV4dF93aW5kb3dfdG9rZW5zGAogASgDEiMKG2NvbnRleHRfd2luZG93X2xpbWl0X3Rva2VucxgLIAEoAyIZCgdHb29kYnllEg4KBnJlYXNvbhgBIAEoCSLFAwoLVGVsZW1ldHJ5VXASJgoFaGVsbG8YASABKAsyFS5oYXJtb25vZ3JhZi52MS5IZWxsb0gAEi8KCnNwYW5fc3RhcnQYAiABKAsyGS5oYXJtb25vZ3JhZi52MS5TcGFuU3RhcnRIABIxCgtzcGFuX3VwZGF0ZRgDIAEoCzIaLmhhcm1vbm9ncmFmLnYxLlNwYW5VcGRhdGVIABIrCghzcGFuX2VuZBgEIAEoCzIXLmhhcm1vbm9ncmFmLnYxLlNwYW5FbmRIABIwCgdwYXlsb2FkGAUgASgLMh0uaGFybW9ub2dyYWYudjEuUGF5bG9hZFVwbG9hZEgAEi4KCWhlYXJ0YmVhdBgGIAEoCzIZLmhhcm1vbm9ncmFmLnYxLkhlYXJ0YmVhdEgAEi4KC2NvbnRyb2xfYWNrGAcgASgLMhcuZ29sZGZpdmUudjEuQ29udHJvbEFja0gAEioKB2dvb2RieWUYCCABKAsyFy5oYXJtb25vZ3JhZi52MS5Hb29kYnllSAASLAoOZ29sZGZpdmVfZXZlbnQYCyABKAsyEi5nb2xkZml2ZS52MS5FdmVudEgAQgUKA21zZ0oECAkQCkoECAoQCyKAAgoHV2VsY29tZRIQCghhY2NlcHRlZBgBIAEoCBIbChNhc3NpZ25lZF9zZXNzaW9uX2lkGAIgASgJEhoKEmFzc2lnbmVkX3N0cmVhbV9pZBgDIAEoCRIvCgtzZXJ2ZXJfdGltZRgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMQoFZmxhZ3MYBSADKAsyIi5oYXJtb25vZ3JhZi52MS5XZWxjb21lLkZsYWdzRW50cnkSGAoQcmVqZWN0aW9uX3JlYXNvbhgGIAEoCRosCgpGbGFnc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiIAoOUGF5bG9hZFJlcXVlc3QSDgoGZGlnZXN0GAEgASgJIocBCgtGbG93Q29udHJvbBIyCgZhY3Rpb24YASABKA4yIi5oYXJtb25vZ3JhZi52MS5GbG93Q29udHJvbC5BY3Rpb24iRAoGQWN0aW9uEhYKEkFDVElPTl9VTlNQRUNJRklFRBAAEg8KC0FDVElPTl9TTE9XEAESEQoNQUNUSU9OX1JFU1VNRRACIh8KDVNlcnZlckdvb2RieWUSDgoGcmVhc29uGAEgASgJIusBCg1UZWxlbWV0cnlEb3duEioKB3dlbGNvbWUYASABKAsyFy5oYXJtb25vZ3JhZi52MS5XZWxjb21lSAASOQoPcGF5bG9hZF9yZXF1ZXN0GAIgASgLMh4uaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlcXVlc3RIABIzCgxmbG93X2NvbnRyb2wYAyABKAsyGy5oYXJtb25vZ3JhZi52MS5GbG93Q29udHJvbEgAEjcKDnNlcnZlcl9nb29kYnllGAQgASgLMh0uaGFybW9ub2dyYWYudjEuU2VydmVyR29vZGJ5ZUgAQgUKA21zZ0JCWkBnaXRodWIuY29tL3BlZGFwdWRpL2hhcm1vbm9ncmFmL2dlbi9oYXJtb25vZ3JhZi92MTtoYXJtb25vZ3JhZnYxYgZwcm90bzM", [file_google_protobuf_timestamp, file_harmonograf_v1_types, file_goldfive_v1_control, file_goldfive_v1_events]);
+  fileDesc("Ch5oYXJtb25vZ3JhZi92MS90ZWxlbWV0cnkucHJvdG8SDmhhcm1vbm9ncmFmLnYxIssCCgVIZWxsbxIQCghhZ2VudF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEgwKBG5hbWUYAyABKAkSLAoJZnJhbWV3b3JrGAQgASgOMhkuaGFybW9ub2dyYWYudjEuRnJhbWV3b3JrEhkKEWZyYW1ld29ya192ZXJzaW9uGAUgASgJEjAKDGNhcGFiaWxpdGllcxgGIAMoDjIaLmhhcm1vbm9ncmFmLnYxLkNhcGFiaWxpdHkSNQoIbWV0YWRhdGEYByADKAsyIy5oYXJtb25vZ3JhZi52MS5IZWxsby5NZXRhZGF0YUVudHJ5EhQKDHJlc3VtZV90b2tlbhgIIAEoCRIVCg1zZXNzaW9uX3RpdGxlGAkgASgJGi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASIvCglTcGFuU3RhcnQSIgoEc3BhbhgBIAEoCzIULmhhcm1vbm9ncmFmLnYxLlNwYW4ijgIKClNwYW5VcGRhdGUSDwoHc3Bhbl9pZBgBIAEoCRI+CgphdHRyaWJ1dGVzGAIgAygLMiouaGFybW9ub2dyYWYudjEuU3BhblVwZGF0ZS5BdHRyaWJ1dGVzRW50cnkSKgoGc3RhdHVzGAMgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIwCgxwYXlsb2FkX3JlZnMYBCADKAsyGi5oYXJtb25vZ3JhZi52MS5QYXlsb2FkUmVmGlEKD0F0dHJpYnV0ZXNFbnRyeRILCgNrZXkYASABKAkSLQoFdmFsdWUYAiABKAsyHi5oYXJtb25vZ3JhZi52MS5BdHRyaWJ1dGVWYWx1ZToCOAEi4AIKB1NwYW5FbmQSDwoHc3Bhbl9pZBgBIAEoCRIsCghlbmRfdGltZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKgoGc3RhdHVzGAMgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIoCgVlcnJvchgEIAEoCzIZLmhhcm1vbm9ncmFmLnYxLkVycm9ySW5mbxI7CgphdHRyaWJ1dGVzGAUgAygLMicuaGFybW9ub2dyYWYudjEuU3BhbkVuZC5BdHRyaWJ1dGVzRW50cnkSMAoMcGF5bG9hZF9yZWZzGAYgAygLMhouaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlZhpRCg9BdHRyaWJ1dGVzRW50cnkSCwoDa2V5GAEgASgJEi0KBXZhbHVlGAIgASgLMh4uaGFybW9ub2dyYWYudjEuQXR0cmlidXRlVmFsdWU6AjgBIm8KDVBheWxvYWRVcGxvYWQSDgoGZGlnZXN0GAEgASgJEhIKCnRvdGFsX3NpemUYAiABKAMSDAoEbWltZRgDIAEoCRINCgVjaHVuaxgEIAEoDBIMCgRsYXN0GAUgASgIEg8KB2V2aWN0ZWQYBiABKAgi1QIKCUhlYXJ0YmVhdBIXCg9idWZmZXJlZF9ldmVudHMYASABKAMSFgoOZHJvcHBlZF9ldmVudHMYAiABKAMSHgoWZHJvcHBlZF9zcGFuc19jcml0aWNhbBgDIAEoAxIeChZidWZmZXJlZF9wYXlsb2FkX2J5dGVzGAQgASgDEhgKEHBheWxvYWRzX2V2aWN0ZWQYBSABKAMSFAoMY3B1X3NlbGZfcGN0GAYgASgBEi8KC2NsaWVudF90aW1lGAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIYChBwcm9ncmVzc19jb3VudGVyGAggASgDEhgKEGN1cnJlbnRfYWN0aXZpdHkYCSABKAkSHQoVY29udGV4dF93aW5kb3dfdG9rZW5zGAogASgDEiMKG2NvbnRleHRfd2luZG93X2xpbWl0X3Rva2VucxgLIAEoAyIZCgdHb29kYnllEg4KBnJlYXNvbhgBIAEoCSKKBAoLVGVsZW1ldHJ5VXASJgoFaGVsbG8YASABKAsyFS5oYXJtb25vZ3JhZi52MS5IZWxsb0gAEi8KCnNwYW5fc3RhcnQYAiABKAsyGS5oYXJtb25vZ3JhZi52MS5TcGFuU3RhcnRIABIxCgtzcGFuX3VwZGF0ZRgDIAEoCzIaLmhhcm1vbm9ncmFmLnYxLlNwYW5VcGRhdGVIABIrCghzcGFuX2VuZBgEIAEoCzIXLmhhcm1vbm9ncmFmLnYxLlNwYW5FbmRIABIwCgdwYXlsb2FkGAUgASgLMh0uaGFybW9ub2dyYWYudjEuUGF5bG9hZFVwbG9hZEgAEi4KCWhlYXJ0YmVhdBgGIAEoCzIZLmhhcm1vbm9ncmFmLnYxLkhlYXJ0YmVhdEgAEi4KC2NvbnRyb2xfYWNrGAcgASgLMhcuZ29sZGZpdmUudjEuQ29udHJvbEFja0gAEioKB2dvb2RieWUYCCABKAsyFy5oYXJtb25vZ3JhZi52MS5Hb29kYnllSAASLAoOZ29sZGZpdmVfZXZlbnQYCyABKAsyEi5nb2xkZml2ZS52MS5FdmVudEgAEkMKFGludm9jYXRpb25fY2FuY2VsbGVkGAwgASgLMiMuaGFybW9ub2dyYWYudjEuSW52b2NhdGlvbkNhbmNlbGxlZEgAQgUKA21zZ0oECAkQCkoECAoQCyKRAgoTSW52b2NhdGlvbkNhbmNlbGxlZBIOCgZydW5faWQYASABKAkSEAoIc2VxdWVuY2UYAiABKAQSEgoKc2Vzc2lvbl9pZBgDIAEoCRIuCgplbWl0dGVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1pbnZvY2F0aW9uX2lkGAUgASgJEhIKCmFnZW50X25hbWUYBiABKAkSDgoGcmVhc29uGAcgASgJEhAKCHNldmVyaXR5GAggASgJEhAKCGRyaWZ0X2lkGAkgASgJEhIKCmRyaWZ0X2tpbmQYCiABKAkSDgoGZGV0YWlsGAsgASgJEhEKCXRvb2xfbmFtZRgMIAEoCSKAAgoHV2VsY29tZRIQCghhY2NlcHRlZBgBIAEoCBIbChNhc3NpZ25lZF9zZXNzaW9uX2lkGAIgASgJEhoKEmFzc2lnbmVkX3N0cmVhbV9pZBgDIAEoCRIvCgtzZXJ2ZXJfdGltZRgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMQoFZmxhZ3MYBSADKAsyIi5oYXJtb25vZ3JhZi52MS5XZWxjb21lLkZsYWdzRW50cnkSGAoQcmVqZWN0aW9uX3JlYXNvbhgGIAEoCRosCgpGbGFnc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiIAoOUGF5bG9hZFJlcXVlc3QSDgoGZGlnZXN0GAEgASgJIocBCgtGbG93Q29udHJvbBIyCgZhY3Rpb24YASABKA4yIi5oYXJtb25vZ3JhZi52MS5GbG93Q29udHJvbC5BY3Rpb24iRAoGQWN0aW9uEhYKEkFDVElPTl9VTlNQRUNJRklFRBAAEg8KC0FDVElPTl9TTE9XEAESEQoNQUNUSU9OX1JFU1VNRRACIh8KDVNlcnZlckdvb2RieWUSDgoGcmVhc29uGAEgASgJIusBCg1UZWxlbWV0cnlEb3duEioKB3dlbGNvbWUYASABKAsyFy5oYXJtb25vZ3JhZi52MS5XZWxjb21lSAASOQoPcGF5bG9hZF9yZXF1ZXN0GAIgASgLMh4uaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlcXVlc3RIABIzCgxmbG93X2NvbnRyb2wYAyABKAsyGy5oYXJtb25vZ3JhZi52MS5GbG93Q29udHJvbEgAEjcKDnNlcnZlcl9nb29kYnllGAQgASgLMh0uaGFybW9ub2dyYWYudjEuU2VydmVyR29vZGJ5ZUgAQgUKA21zZ0JCWkBnaXRodWIuY29tL3BlZGFwdWRpL2hhcm1vbm9ncmFmL2dlbi9oYXJtb25vZ3JhZi92MTtoYXJtb25vZ3JhZnYxYgZwcm90bzM", [file_google_protobuf_timestamp, file_harmonograf_v1_types, file_goldfive_v1_control, file_goldfive_v1_events]);
 
 /**
  * First message on every StreamTelemetry. The server replies with Welcome.
@@ -439,6 +439,22 @@ export type TelemetryUp = Message<"harmonograf.v1.TelemetryUp"> & {
      */
     value: Event;
     case: "goldfiveEvent";
+  } | {
+    /**
+     * Operator-observability event emitted by goldfive's ADK plugin
+     * whenever a CRITICAL drift or user-steer triggers per-invocation
+     * cancellation (goldfive#251 / #259). Carried on this harmonograf
+     * oneof instead of inside ``goldfive.v1.Event`` because goldfive's
+     * proto envelope deliberately did not mint an ``InvocationCancelled``
+     * variant — the source emitter ships a dict for forward-compat, and
+     * harmonograf converts dict→proto at the client sink. The sink keys
+     * on the envelope's ``"kind": "invocation_cancelled"`` discriminator
+     * (see ``client/harmonograf_client/sink.py::HarmonografSink.emit``).
+     *
+     * @generated from field: harmonograf.v1.InvocationCancelled invocation_cancelled = 12;
+     */
+    value: InvocationCancelled;
+    case: "invocationCancelled";
   } | { case: undefined; value?: undefined };
 };
 
@@ -448,6 +464,134 @@ export type TelemetryUp = Message<"harmonograf.v1.TelemetryUp"> & {
  */
 export const TelemetryUpSchema: GenMessage<TelemetryUp> = /*@__PURE__*/
   messageDesc(file_harmonograf_v1_telemetry, 7);
+
+/**
+ * Operator-facing record that goldfive cancelled one agent invocation
+ * cooperatively. Rich context (reason, severity, drift link, optional
+ * tool name) lands here so the harmonograf UI can render a distinct
+ * marker on the Trajectory / Gantt / Graph views without inferring the
+ * intent from tea-leaves (a drift + a silent LLM response).
+ *
+ * Operator-only: the LLM-visible tool response on the goldfive side is a
+ * minimal ``{"status": "cancelled"}`` — the rich payload lives on the
+ * sink fan-out, not on the model's call-result. Harmonograf therefore
+ * renders this as a non-actionable record (no retry / cancel-again
+ * affordance; just a detail pane on click).
+ *
+ * Wire shape mirrors the dict envelope goldfive emits verbatim so the
+ * sink's dict→proto conversion is a field-by-field copy. Field numbers
+ * are stable; reserved-safe for future additions (e.g. a structured
+ * drift link once goldfive mints a DriftDetected proto id alongside the
+ * ``drift_id`` string).
+ *
+ * @generated from message harmonograf.v1.InvocationCancelled
+ */
+export type InvocationCancelled = Message<"harmonograf.v1.InvocationCancelled"> & {
+  /**
+   * Envelope metadata — the fields the goldfive dict envelope carries
+   * alongside the payload. Preserved so the server can persist the same
+   * shape it persists for goldfive.v1.Event rows and the frontend can
+   * stamp session-relative timestamps.
+   *
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+
+  /**
+   * @generated from field: uint64 sequence = 2;
+   */
+  sequence: bigint;
+
+  /**
+   * @generated from field: string session_id = 3;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp emitted_at = 4;
+   */
+  emittedAt?: Timestamp;
+
+  /**
+   * Payload fields — see goldfive/adapters/_adk_plugin.py::
+   * _emit_invocation_cancelled for the authoritative source.
+   *
+   * ADK invocation id. Unique per agent invocation within a run —
+   * stable across retries, used as the join key when the UI wants to
+   * correlate the cancel marker with an INVOCATION span.
+   *
+   * @generated from field: string invocation_id = 5;
+   */
+  invocationId: string;
+
+  /**
+   * Agent the cancelled invocation ran under. Bare name on the goldfive
+   * side; the harmonograf sink canonicalizes it to ``<client>:<bare>``
+   * before persisting so the render path can look up the agent row
+   * without a second bare→compound pass.
+   *
+   * @generated from field: string agent_name = 6;
+   */
+  agentName: string;
+
+  /**
+   * Lowercase reason — "drift" / "user_steer" / "plan_revised" —
+   * matching the taxonomy goldfive emits. Empty string is valid on
+   * well-formed events (shouldn't happen, but tolerated).
+   *
+   * @generated from field: string reason = 7;
+   */
+  reason: string;
+
+  /**
+   * Lowercase severity — "info" / "warning" / "critical".
+   *
+   * @generated from field: string severity = 8;
+   */
+  severity: string;
+
+  /**
+   * Cross-reference to the triggering ``DriftDetected.id`` (UUID4).
+   * Empty when the cancel fired without a backing drift (user-cancel
+   * path, plan-revised path). When set, the UI links the cancel row
+   * back to the drift detail drawer.
+   *
+   * @generated from field: string drift_id = 9;
+   */
+  driftId: string;
+
+  /**
+   * Raw drift-kind name (lowercase): "off_topic" / "user_steer" /
+   * "looping_reasoning" / etc. Empty when no drift backs the cancel.
+   *
+   * @generated from field: string drift_kind = 10;
+   */
+  driftKind: string;
+
+  /**
+   * Human-readable one-liner describing WHY the cancel fired. Used as
+   * the primary body of the intervention row and the detail popover.
+   *
+   * @generated from field: string detail = 11;
+   */
+  detail: string;
+
+  /**
+   * Tool name when the cancel fired at a tool-dispatch checkpoint
+   * (goldfive#251 Stream C). Empty when the cancel fired at a different
+   * checkpoint (e.g. per-invocation before_agent_callback).
+   *
+   * @generated from field: string tool_name = 12;
+   */
+  toolName: string;
+};
+
+/**
+ * Describes the message harmonograf.v1.InvocationCancelled.
+ * Use `create(InvocationCancelledSchema)` to create a new message.
+ */
+export const InvocationCancelledSchema: GenMessage<InvocationCancelled> = /*@__PURE__*/
+  messageDesc(file_harmonograf_v1_telemetry, 8);
 
 /**
  * Sent in response to Hello. Carries the assigned session_id (which may
@@ -500,7 +644,7 @@ export type Welcome = Message<"harmonograf.v1.Welcome"> & {
  * Use `create(WelcomeSchema)` to create a new message.
  */
 export const WelcomeSchema: GenMessage<Welcome> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_telemetry, 8);
+  messageDesc(file_harmonograf_v1_telemetry, 9);
 
 /**
  * Server asks the client to re-upload a payload by digest, typically
@@ -520,7 +664,7 @@ export type PayloadRequest = Message<"harmonograf.v1.PayloadRequest"> & {
  * Use `create(PayloadRequestSchema)` to create a new message.
  */
 export const PayloadRequestSchema: GenMessage<PayloadRequest> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_telemetry, 9);
+  messageDesc(file_harmonograf_v1_telemetry, 10);
 
 /**
  * Soft hint that the client should slow down or may resume. v0 ingest does
@@ -541,7 +685,7 @@ export type FlowControl = Message<"harmonograf.v1.FlowControl"> & {
  * Use `create(FlowControlSchema)` to create a new message.
  */
 export const FlowControlSchema: GenMessage<FlowControl> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_telemetry, 10);
+  messageDesc(file_harmonograf_v1_telemetry, 11);
 
 /**
  * @generated from enum harmonograf.v1.FlowControl.Action
@@ -567,7 +711,7 @@ export enum FlowControl_Action {
  * Describes the enum harmonograf.v1.FlowControl.Action.
  */
 export const FlowControl_ActionSchema: GenEnum<FlowControl_Action> = /*@__PURE__*/
-  enumDesc(file_harmonograf_v1_telemetry, 10, 0);
+  enumDesc(file_harmonograf_v1_telemetry, 11, 0);
 
 /**
  * @generated from message harmonograf.v1.ServerGoodbye
@@ -584,7 +728,7 @@ export type ServerGoodbye = Message<"harmonograf.v1.ServerGoodbye"> & {
  * Use `create(ServerGoodbyeSchema)` to create a new message.
  */
 export const ServerGoodbyeSchema: GenMessage<ServerGoodbye> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_telemetry, 11);
+  messageDesc(file_harmonograf_v1_telemetry, 12);
 
 /**
  * TelemetryDown is the downstream oneof.
@@ -627,5 +771,5 @@ export type TelemetryDown = Message<"harmonograf.v1.TelemetryDown"> & {
  * Use `create(TelemetryDownSchema)` to create a new message.
  */
 export const TelemetryDownSchema: GenMessage<TelemetryDown> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_telemetry, 12);
+  messageDesc(file_harmonograf_v1_telemetry, 13);
 

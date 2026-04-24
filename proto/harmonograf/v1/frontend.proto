@@ -14,6 +14,7 @@ package harmonograf.v1;
 
 import "google/protobuf/timestamp.proto";
 import "harmonograf/v1/types.proto";
+import "harmonograf/v1/telemetry.proto";
 import "goldfive/v1/control.proto";
 import "goldfive/v1/events.proto";
 import "goldfive/v1/types.proto";
@@ -115,6 +116,16 @@ message SessionUpdate {
     // initial burst from persisted plans + task state, then streamed
     // live as HarmonografSink ingest fans out deltas on the bus.
     goldfive.v1.Event goldfive_event = 19;
+    // Operator-observability: goldfive cancelled one agent invocation
+    // cooperatively. Delivered in the same ``goldfive_event`` slot
+    // position conceptually — it carries the same envelope metadata
+    // (run_id, session_id, emitted_at) plus a fixed payload shape.
+    // Carried as a distinct oneof variant rather than a
+    // ``goldfive.v1.Event`` case because the goldfive proto envelope
+    // does not (yet) have an ``InvocationCancelled`` message — the
+    // goldfive side ships a dict, and harmonograf converts it at the
+    // client sink. See ``telemetry.proto::InvocationCancelled``.
+    InvocationCancelled invocation_cancelled = 20;
   }
 }
 

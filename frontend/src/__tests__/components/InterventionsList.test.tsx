@@ -19,6 +19,8 @@ function row(over: Partial<InterventionRow>): InterventionRow {
     annotationId: '',
     driftKind: 'looping_reasoning',
     triggerEventId: '',
+    targetAgentId: '',
+    driftId: '',
     ...over,
   };
 }
@@ -99,5 +101,56 @@ describe('<InterventionsList />', () => {
     render(<InterventionsList rows={[r]} />);
     const el = screen.getByTestId('interventions-list-row-a');
     expect(el.tagName.toLowerCase()).toBe('div');
+  });
+
+  it('cancel rows render the stop glyph + bare agent label', () => {
+    render(
+      <InterventionsList
+        rows={[
+          row({
+            key: 'c1',
+            atMs: 12_345,
+            source: 'cancel',
+            kind: 'CANCELLED',
+            severity: 'critical',
+            bodyOrReason: 'assistant veered off task',
+            targetAgentId: 'presentation-orchestrated-abc:researcher_agent',
+            driftId: 'drift-1',
+            driftKind: 'off_topic',
+            outcome: 'recorded',
+          }),
+        ]}
+      />,
+    );
+    const rowEl = screen.getByTestId('interventions-list-row-c1');
+    expect(rowEl.getAttribute('data-source')).toBe('cancel');
+    // Stop glyph rendered inside the swatch so the row reads as terminal.
+    expect(rowEl.textContent).toContain('⊘');
+    // Bare agent label surfaces without the compound prefix.
+    const agent = screen.getByTestId('interventions-list-row-c1-agent');
+    expect(agent.textContent).toBe('researcher_agent');
+    // Severity pill rendered for critical (info is suppressed; we
+    // check the severity pill directly).
+    expect(rowEl.textContent).toContain('critical');
+    // Body surfaces the directive detail.
+    expect(rowEl.textContent).toContain('assistant veered off task');
+    // Outcome suppressed on cancel rows — the marker is the outcome.
+    expect(rowEl.textContent).not.toContain('→');
+  });
+
+  it('cancel row is clickable and fires onRowClick with the row', () => {
+    const onRowClick = vi.fn();
+    const r = row({
+      key: 'c1',
+      atMs: 1000,
+      source: 'cancel',
+      kind: 'CANCELLED',
+      bodyOrReason: 'cancelled',
+      targetAgentId: 'agent_x',
+      driftId: 'd1',
+    });
+    render(<InterventionsList rows={[r]} onRowClick={onRowClick} />);
+    fireEvent.click(screen.getByTestId('interventions-list-row-c1'));
+    expect(onRowClick).toHaveBeenCalledWith(r);
   });
 });

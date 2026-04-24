@@ -10,7 +10,7 @@
 
 import { useState } from 'react';
 import type { InterventionRow } from '../../lib/interventions';
-import { SOURCE_COLOR } from '../../lib/interventions';
+import { SOURCE_COLOR, SOURCE_GLYPH } from '../../lib/interventions';
 import './InterventionsList.css';
 
 interface InterventionsListProps {
@@ -85,8 +85,21 @@ export function InterventionsList({ rows, onRowClick }: InterventionsListProps) 
         <ul className="hg-interventions-list__rows">
           {rows.map((row) => {
             const color = SOURCE_COLOR[row.source] ?? SOURCE_COLOR.goldfive;
+            const glyph =
+              SOURCE_GLYPH[row.source] ?? SOURCE_GLYPH.goldfive;
             const clickable = !!onRowClick;
             const Tag = clickable ? 'button' : 'div';
+            // Cancel rows carry a short agent label on the main line so
+            // operators can identify which invocation was cancelled
+            // without drilling into the detail pane. Other rows leave
+            // the agent label blank (the drift/annotation row already
+            // surfaces its attribution via the drift detail drawer).
+            const agentLabel =
+              row.source === 'cancel' && row.targetAgentId
+                ? row.targetAgentId.includes(':')
+                  ? row.targetAgentId.split(':').pop() ?? ''
+                  : row.targetAgentId
+                : '';
             return (
               <li key={row.key} className="hg-interventions-list__row-item">
                 <Tag
@@ -100,7 +113,13 @@ export function InterventionsList({ rows, onRowClick }: InterventionsListProps) 
                     className="hg-interventions-list__swatch"
                     style={{ background: color }}
                     aria-hidden="true"
-                  />
+                  >
+                    {row.source === 'cancel' ? (
+                      <span className="hg-interventions-list__glyph" aria-hidden="true">
+                        {glyph}
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="hg-interventions-list__at">{fmtAt(row.atMs)}</span>
                   <span className="hg-interventions-list__kind">{row.kind}</span>
                   {row.severity && row.severity !== 'info' && (
@@ -111,12 +130,20 @@ export function InterventionsList({ rows, onRowClick }: InterventionsListProps) 
                       {row.severity}
                     </span>
                   )}
+                  {agentLabel && (
+                    <span
+                      className="hg-interventions-list__agent"
+                      data-testid={`interventions-list-row-${row.key}-agent`}
+                    >
+                      {agentLabel}
+                    </span>
+                  )}
                   {row.bodyOrReason && (
                     <span className="hg-interventions-list__body" title={row.bodyOrReason}>
                       {row.bodyOrReason}
                     </span>
                   )}
-                  {row.outcome && (
+                  {row.outcome && row.source !== 'cancel' && (
                     <span className="hg-interventions-list__outcome">
                       {fmtOutcome(row.outcome)}
                     </span>

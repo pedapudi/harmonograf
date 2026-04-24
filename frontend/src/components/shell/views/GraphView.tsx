@@ -83,8 +83,10 @@ type DriftSeverity = 'info' | 'warning' | 'critical' | '';
 
 interface InterventionGlyph {
   id: string;
-  // Column index the glyph sits on (goldfive col for goldfive-authored
-  // drifts, user col for user-authored ones).
+  // Column index the glyph sits on. For drift glyphs: goldfive col for
+  // goldfive-authored drifts, user col for user-authored ones. For
+  // cancel glyphs: the cancelled agent's own column (each cancel lands
+  // on the lifeline whose invocation was cancelled).
   agentIdx: number;
   yMs: number;
   severity: DriftSeverity;
@@ -93,9 +95,12 @@ interface InterventionGlyph {
   // Composite identity for jumping to the underlying record.
   driftSeq: number;
   // Plan revision this drift triggered (if any) — surfaces the steering
-  // panel's detail when clicked.
+  // panel's detail when clicked. 0 on cancel glyphs.
   revisionIndex: number;
   authoredBy: string; // 'user' | 'goldfive' | ''
+  // Glyph variant — 'drift' reuses the existing chevron; 'cancel' is
+  // the stop-glyph rendered for InvocationCancelled markers.
+  variant: 'drift' | 'cancel';
 }
 
 interface SteeringArrow {
@@ -432,6 +437,40 @@ function computeSequence(store: SessionStore): SeqLayout {
       driftSeq: drift.seq,
       revisionIndex: revIndex,
       authoredBy: drift.authoredBy || (isUser ? 'user' : 'goldfive'),
+      variant: 'drift',
+    });
+  }
+
+  // InvocationCancelled glyphs — each cancel lands on the cancelled
+  // agent's own lifeline (its own column index), not on the goldfive
+  // lane. This matches the design constraint: a cancel is an event
+  // that happened *to* that agent's invocation.
+  for (const cancel of store.invocationCancels.list()) {
+    const cancelCol = colIdx.get(cancel.agentId);
+    if (cancelCol === undefined) continue;
+    const sev: DriftSeverity =
+      cancel.severity === 'info' ||
+      cancel.severity === 'warning' ||
+      cancel.severity === 'critical'
+        ? (cancel.severity as DriftSeverity)
+        : '';
+    glyphs.push({
+      id: `cancel-gly-${cancel.seq}`,
+      agentIdx: cancelCol,
+      yMs: cancel.recordedAtMs,
+      severity: sev,
+      kind: cancel.reason || 'cancelled',
+      detail:
+        cancel.detail ||
+        (cancel.reason && cancel.driftKind
+          ? `cancelled (${cancel.reason} → ${cancel.driftKind})`
+          : cancel.reason
+            ? `cancelled (${cancel.reason})`
+            : 'cancelled'),
+      driftSeq: -1 - cancel.seq, // negative so it doesn't collide with drift seq
+      revisionIndex: 0,
+      authoredBy: 'goldfive',
+      variant: 'cancel',
     });
   }
 
@@ -643,7 +682,13 @@ export function GraphView() {
     // detail panel so newly-landed refines show up on the overlay without
     // waiting for the next span tick.
     const u6 = watch.store.planHistory.subscribe(() => setTick((n) => n + 1));
-    return () => { u1(); u2(); u3(); u4(); u5(); u6(); };
+    // InvocationCancelled markers (goldfive#251 Stream C). Same role as
+    // the drift subscription: repaint the sequence-diagram overlay when
+    // a new cancel marker lands.
+    const u7 = watch.store.invocationCancels.subscribe(() =>
+      setTick((n) => n + 1),
+    );
+    return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); };
   }, [sessionId, watch.store]);
 
   // ── Viewport handlers (depend on refs, not reactive state) ──────────────
@@ -1851,6 +1896,43 @@ export function GraphView() {
               : g.severity === 'info' ? '#8aa6d6'
               : '#9aa3b4';
             const clickable = g.revisionIndex > 0;
+            if (g.variant === 'cancel') {
+              // Cancel glyph: a circle with a diagonal slash (the ⊘ stop
+              // symbol) so it reads as a terminal marker distinct from
+              // the drift diamond. Operator-only — no click-through to
+              // a separate panel beyond the hover tooltip (the cancel
+              // detail lives alongside the drift drawer when a drift
+              // backs it; see InterventionsList for click routing).
+              const r = 6;
+              return (
+                <g
+                  key={g.id}
+                  data-testid={`cancel-glyph-${Math.abs(g.driftSeq) - 1}`}
+                  data-severity={g.severity || undefined}
+                  data-variant="cancel"
+                >
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={r}
+                    fill="#e05e4a"
+                    stroke="var(--md-sys-color-surface, #10131a)"
+                    strokeWidth={1.2}
+                  />
+                  <line
+                    x1={cx - r + 1.4}
+                    y1={cy + r - 1.4}
+                    x2={cx + r - 1.4}
+                    y2={cy - r + 1.4}
+                    stroke="#0b0d12"
+                    strokeWidth={1.6}
+                  />
+                  <title>
+                    {`CANCELLED${g.kind ? ' · ' + g.kind : ''}${g.severity ? ' · ' + g.severity : ''}${g.detail ? '\n' + g.detail : ''}`}
+                  </title>
+                </g>
+              );
+            }
             const r = 5;
             return (
               <g

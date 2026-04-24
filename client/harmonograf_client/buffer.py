@@ -50,6 +50,13 @@ class EnvelopeKind(enum.Enum):
     # Goldfive orchestration event; payload is a goldfive.v1.Event proto
     # (issue #2 migration).
     GOLDFIVE_EVENT = "goldfive_event"
+    # Harmonograf-local operator-observability variant carrying an
+    # ``InvocationCancelled`` message. Routed on its own oneof slot on
+    # the wire (``TelemetryUp.invocation_cancelled``) because the event
+    # originates as a dict on the goldfive side — goldfive's proto
+    # envelope does not yet have an InvocationCancelled variant. See
+    # ``sink.py::HarmonografSink._emit_dict_event``.
+    INVOCATION_CANCELLED = "invocation_cancelled"
 
 
 @dataclasses.dataclass

@@ -30,23 +30,35 @@
 // kind/severity/outcome strings the server produced.
 
 import type { Annotation } from '../state/annotationStore';
-import type { DriftRecord, SessionStore } from '../gantt/index';
+import type {
+  DriftRecord,
+  InvocationCancelRecord,
+  SessionStore,
+} from '../gantt/index';
 import type { TaskPlan } from '../gantt/types';
 
 // Stable source taxonomy used by the UI. Anything else renders as "goldfive"
 // grey so new kinds emitted by the server don't crash the view.
-export type InterventionSource = 'user' | 'drift' | 'goldfive';
+//
+// ``cancel`` is the source tag for InvocationCancelled markers — an
+// operator-observability record that goldfive cooperatively cancelled an
+// agent invocation (goldfive#251 Stream C / #259). Distinct from `drift`
+// because a cancel is a consequence of a drift, not a drift itself; the
+// two rows coexist in the timeline (the drift explains WHY and the
+// cancel records WHAT happened to the invocation).
+export type InterventionSource = 'user' | 'drift' | 'goldfive' | 'cancel';
 
 export interface InterventionRow {
   // Stable key for React lists — composed from source + (annotation id /
-  // drift seq / plan id + rev index).
+  // drift seq / plan id + rev index / cancel seq).
   key: string;
   // Session-relative ms, mirroring Span.startMs. Callers that only have
   // wall-clock should align against the session createdAt in the outer
   // component since we don't have a way to reference it from here.
   atMs: number;
   source: InterventionSource;
-  // Human-readable label ("STEER" / "LOOPING_REASONING" / "CASCADE_CANCEL").
+  // Human-readable label ("STEER" / "LOOPING_REASONING" / "CASCADE_CANCEL"
+  // / "CANCELLED").
   kind: string;
   bodyOrReason: string;
   author: string;
@@ -59,6 +71,17 @@ export interface InterventionRow {
   // a plan revision (or that the row _is_, for drift/annotation rows).
   // Strict dedup key.
   triggerEventId: string;
+  // Agent the marker attributes to. Populated for cancel rows (the agent
+  // whose invocation was cancelled); empty on annotation / drift / plan
+  // rows where the attribution lives on the source record's own agentId
+  // field (those consumers read through DriftRecord directly). Exposed
+  // on the intervention row so the renderer can surface the agent name
+  // in the compact list line without crawling back to the source store.
+  targetAgentId: string;
+  // For cancel rows: the id of the drift that triggered the cancel.
+  // Empty when no drift backed it (user-cancel path, plan-revised path)
+  // or when this row isn't a cancel.
+  driftId: string;
 }
 
 // Drift kinds emitted by goldfive when the user pulled the trigger. Mirrors
@@ -94,6 +117,11 @@ export interface DeriveInput {
   annotations: readonly Annotation[];
   drifts: readonly DriftRecord[];
   plans: readonly TaskPlan[]; // every plan rev ever seen, chronological
+  // goldfive#251 Stream C: invocation-cancellation markers. Distinct
+  // from drifts (a cancel is the *consequence* of a drift, not a drift
+  // itself). Optional so callers that don't have a SessionStore handy
+  // can still derive over the existing three sources.
+  cancels?: readonly InvocationCancelRecord[];
   // Opt-in Tier-2 legacy time-window fallback for plan-revision
   // attribution (pre-#99 behaviour). Default 0 / undefined disables.
   // Provided by the caller (app runtime context) — never read from
@@ -123,6 +151,8 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
       // harmonograf#99: the annotation's id IS the strict join key for
       // a downstream PlanRevised refine.
       triggerEventId: ann.id,
+      targetAgentId: '',
+      driftId: '',
     });
   }
 
@@ -146,6 +176,8 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
       annotationId: dr.annotationId || '',
       driftKind,
       triggerEventId: trig,
+      targetAgentId: dr.agentId || '',
+      driftId: dr.driftId || '',
     });
   }
 
@@ -172,6 +204,51 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
       annotationId: '',
       driftKind: source === 'goldfive' ? '' : revKind,
       triggerEventId: plan.triggerEventId || '',
+      targetAgentId: '',
+      driftId: '',
+    });
+  }
+
+  // InvocationCancelled — operator-only record. Sourced separately from
+  // drifts because a cancel is the consequence of a drift, not a drift
+  // itself; both rows coexist (the drift explains WHY and the cancel
+  // records WHAT happened). Body format is prompt-injection-safe
+  // directive copy: "{agent_name} cancelled ({reason})" rather than
+  // "{agent_name} failed to …".
+  for (const cr of input.cancels ?? []) {
+    const reason = (cr.reason || '').toLowerCase();
+    const driftKind = (cr.driftKind || '').toLowerCase();
+    // Default body is the human-readable ``detail`` the goldfive side
+    // stamped; fall back to a directive one-liner when the emitter didn't
+    // populate detail (shouldn't happen in practice but the UI must
+    // render something).
+    const body =
+      cr.detail ||
+      (reason && driftKind
+        ? `cancelled (${reason} → ${driftKind})`
+        : reason
+          ? `cancelled (${reason})`
+          : 'cancelled');
+    rows.push({
+      key: `cancel:${cr.seq}`,
+      atMs: cr.recordedAtMs,
+      source: 'cancel',
+      kind: 'CANCELLED',
+      bodyOrReason: body,
+      author: '',
+      outcome: 'recorded',
+      planRevisionIndex: 0,
+      severity: cr.severity || '',
+      annotationId: '',
+      driftKind,
+      // triggerEventId is deliberately empty on cancel rows — the
+      // cancel marker is meant to render *alongside* its triggering
+      // drift, not merge into it. ``driftId`` still carries the
+      // backlink so the renderer can hover/click through to the
+      // drift's detail drawer.
+      triggerEventId: '',
+      targetAgentId: cr.agentId || '',
+      driftId: cr.driftId || '',
     });
   }
 
@@ -428,6 +505,7 @@ export function deriveInterventionsFromStore(
     annotations,
     drifts: store.drifts.list(),
     plans: allRevs,
+    cancels: store.invocationCancels.list(),
     legacyPlanAttributionWindowMs: opts.legacyPlanAttributionWindowMs,
   });
 }
@@ -443,17 +521,35 @@ export const SEVERITY_WEIGHT: Record<string, number> = {
 };
 
 export function markerRadiusFor(row: InterventionRow): number {
-  // Non-drift rows render at the "info" weight; only drift severities can
-  // grow the marker. This keeps the strip calm when only user STEERs fire.
-  if (row.source !== 'drift') return SEVERITY_WEIGHT.info;
+  // Non-drift / non-cancel rows render at the "info" weight; drift and
+  // cancel severities can grow the marker so high-severity cancels read
+  // as heavier on the strip (they're the most consequential marker).
+  if (row.source !== 'drift' && row.source !== 'cancel')
+    return SEVERITY_WEIGHT.info;
   return SEVERITY_WEIGHT[row.severity] ?? SEVERITY_WEIGHT.info;
 }
 
 // Palette keyed by source — aligns with the palette note in issue #69:
-//   user-blue, drift-amber, goldfive-grey.
+//   user-blue, drift-amber, goldfive-grey, cancel-red.
 // Centralized so the planning and trajectory views render uniformly.
+// Cancel rows use a distinct red so the stop-glyph reads at a glance as
+// a terminal, operator-only marker (critical cancels intensify in the
+// renderer via the severity weight, not via the palette swatch).
 export const SOURCE_COLOR: Record<InterventionSource, string> = {
   user: '#5b8def',
   drift: '#f59e0b',
   goldfive: '#8d9199',
+  cancel: '#e05e4a',
+};
+
+// Glyph character keyed by source — so the compact list renders a
+// source-discriminating leading symbol even before the row's text kicks
+// in. Cancel is the stop / cancel symbol (U+2298 CIRCLED DIVISION SLASH),
+// mirroring the lane markers on the Gantt and Graph views. Other sources
+// default to a small middle dot so the column aligns across rows.
+export const SOURCE_GLYPH: Record<InterventionSource, string> = {
+  user: '·',
+  drift: '·',
+  goldfive: '·',
+  cancel: '⊘',
 };

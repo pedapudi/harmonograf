@@ -54,6 +54,13 @@ DELTA_DELEGATION_OBSERVED = "delegation_observed"
 # LIVE ACTIVITY panel even when INVOCATION spans are still stuck RUNNING
 # in the DB (orphan-span cleanup is a belt-and-suspenders layer on top).
 DELTA_SESSION_ENDED = "session_ended"
+# Operator-observability: goldfive cooperatively cancelled one agent
+# invocation (goldfive#251 Stream C / #259). Carries the dict-sourced
+# harmonograf proto variant verbatim; the frontend renders a distinct
+# cancel marker on the Trajectory / Gantt / Graph views. Plays the
+# same "intervention timeline marker" role as DELTA_DRIFT but with a
+# stop-glyph rather than a drift chevron.
+DELTA_INVOCATION_CANCELLED = "invocation_cancelled"
 
 
 @dataclass
@@ -373,6 +380,53 @@ class SessionBus:
                     "current_agent_id": current_agent_id,
                     "annotation_id": annotation_id,
                     "drift_id": drift_id,
+                    "recorded_at": recorded_at,
+                },
+            )
+        )
+
+    def publish_invocation_cancelled(
+        self,
+        session_id: str,
+        run_id: str,
+        *,
+        sequence: int = 0,
+        emitted_at: float | None = None,
+        invocation_id: str = "",
+        agent_name: str = "",
+        reason: str = "",
+        severity: str = "",
+        drift_id: str = "",
+        drift_kind: str = "",
+        detail: str = "",
+        tool_name: str = "",
+        recorded_at: float | None = None,
+    ) -> None:
+        """Publish an ``invocation_cancelled`` record onto the session bus.
+
+        Fields mirror the wire ``InvocationCancelled`` message (see
+        ``telemetry.proto``). ``recorded_at`` is the ingest-side wall
+        clock; ``emitted_at`` is the goldfive-side wall clock from the
+        envelope — kept separately so the frontend can use either (the
+        frontend.py translator prefers ``emitted_at`` and falls back to
+        ``recorded_at``, matching the DELTA_DRIFT pattern).
+        """
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_INVOCATION_CANCELLED,
+                {
+                    "run_id": run_id,
+                    "sequence": int(sequence or 0),
+                    "emitted_at": emitted_at,
+                    "invocation_id": invocation_id,
+                    "agent_name": agent_name,
+                    "reason": reason,
+                    "severity": severity,
+                    "drift_id": drift_id,
+                    "drift_kind": drift_kind,
+                    "detail": detail,
+                    "tool_name": tool_name,
                     "recorded_at": recorded_at,
                 },
             )
