@@ -68,9 +68,27 @@ function synthesizeDriftSpan(
   taskId: string,
   targetAgentId: string,
   recordedAtMs: number,
+  triggerInput?: string,
 ): void {
   const spanKind: SpanKind = actorId === USER_ACTOR_ID ? 'USER_MESSAGE' : 'CUSTOM';
   const id = `drift-${actorId}-${recordedAtMs}-${kind}`;
+  const attributes: Span['attributes'] = {
+    'drift.kind': { kind: 'string', value: kind },
+    'drift.severity': { kind: 'string', value: severity },
+    'drift.detail': { kind: 'string', value: detail },
+    'drift.target_task_id': { kind: 'string', value: taskId },
+    'drift.target_agent_id': { kind: 'string', value: targetAgentId },
+    'harmonograf.synthetic_span': { kind: 'bool', value: true },
+  };
+  // harmonograf#196 forward-compat: goldfive#feat/judge-observability-events
+  // adds DriftDetected.trigger_input — the reasoning snippet / activity
+  // summary that triggered the judge. Carry it on the synthesized span as
+  // a string attribute when present so the intervention detail panel can
+  // surface richer context post-submodule-bump. Attribute is simply absent
+  // (not empty-string) when the field is missing on the pre-merge wire.
+  if (triggerInput) {
+    attributes['drift.trigger_input'] = { kind: 'string', value: triggerInput };
+  }
   const span: Span = {
     id,
     sessionId: sessionId ?? '',
@@ -82,12 +100,159 @@ function synthesizeDriftSpan(
     startMs: recordedAtMs,
     endMs: recordedAtMs,
     links: [],
+    attributes,
+    payloadRefs: [],
+    error: null,
+    lane: -1,
+    replaced: false,
+  };
+  store.spans.append(span);
+}
+
+// Synthesize a "refine" span on the goldfive actor row for each PlanRevised
+// event so the Gantt + Trajectory views surface goldfive's decision-making
+// as first-class activity — not just an implicit new plan revision. Pairs
+// with the DriftDetected span (same row) and the forthcoming
+// ReasoningJudgeInvoked span (same row) to build a readable timeline of
+// orchestrator decisions.
+//
+// The span name reads `refine: <kind>` (or `refine: <reason prefix>`
+// if the drift kind is empty). Target agent / task attribution is pulled
+// from (a) the forward-compat ``targetAgentId`` field if present on the
+// generated stubs, otherwise (b) the revisionKind alone — which the UI
+// will treat as "refine with no explicit target" and skip the steering
+// arrow for.
+function synthesizeRefineSpan(
+  store: SessionStore,
+  sessionId: string | null,
+  revisionIndex: number,
+  revisionKind: string,
+  revisionSeverity: string,
+  revisionReason: string,
+  recordedAtMs: number,
+  targetAgentId: string,
+  refineInputSummary: string,
+  refineOutputSummary: string,
+): void {
+  const id = `refine-${recordedAtMs}-${revisionIndex}`;
+  const nameCore = revisionKind || 'refine';
+  const attributes: Span['attributes'] = {
+    'refine.index': { kind: 'string', value: String(revisionIndex) },
+    'refine.kind': { kind: 'string', value: revisionKind },
+    'refine.severity': { kind: 'string', value: revisionSeverity },
+    'refine.reason': { kind: 'string', value: revisionReason },
+    'refine.target_agent_id': { kind: 'string', value: targetAgentId },
+    'harmonograf.synthetic_span': { kind: 'bool', value: true },
+  };
+  if (refineInputSummary) {
+    attributes['refine.input_summary'] = {
+      kind: 'string',
+      value: refineInputSummary,
+    };
+  }
+  if (refineOutputSummary) {
+    attributes['refine.output_summary'] = {
+      kind: 'string',
+      value: refineOutputSummary,
+    };
+  }
+  const span: Span = {
+    id,
+    sessionId: sessionId ?? '',
+    agentId: GOLDFIVE_ACTOR_ID,
+    parentSpanId: null,
+    kind: 'CUSTOM',
+    status: 'COMPLETED',
+    name: `refine: ${nameCore}`,
+    startMs: recordedAtMs,
+    endMs: recordedAtMs,
+    links: [],
+    attributes,
+    payloadRefs: [],
+    error: null,
+    lane: -1,
+    replaced: false,
+  };
+  store.spans.append(span);
+}
+
+// Synthesize a USER_MESSAGE span on the user actor row for each RunStarted
+// event, carrying the goal summary as the span name. This is the best
+// pre-merge substitute for a dedicated conversation-turn event —
+// `RunStarted.goal_summary` is a single-line natural-language distillation
+// of what the user asked for. When a richer per-turn event ships later
+// the same row can absorb those too; the user-lane pattern already exists.
+function synthesizeUserGoalSpan(
+  store: SessionStore,
+  sessionId: string | null,
+  runId: string,
+  goalSummary: string,
+  recordedAtMs: number,
+): void {
+  if (!goalSummary) return;
+  const id = `user-goal-${runId || recordedAtMs}`;
+  const span: Span = {
+    id,
+    sessionId: sessionId ?? '',
+    agentId: USER_ACTOR_ID,
+    parentSpanId: null,
+    kind: 'USER_MESSAGE',
+    status: 'COMPLETED',
+    name: goalSummary,
+    startMs: recordedAtMs,
+    endMs: recordedAtMs,
+    links: [],
     attributes: {
-      'drift.kind': { kind: 'string', value: kind },
-      'drift.severity': { kind: 'string', value: severity },
-      'drift.detail': { kind: 'string', value: detail },
-      'drift.target_task_id': { kind: 'string', value: taskId },
-      'drift.target_agent_id': { kind: 'string', value: targetAgentId },
+      'user.goal_summary': { kind: 'string', value: goalSummary },
+      'user.run_id': { kind: 'string', value: runId },
+      'harmonograf.synthetic_span': { kind: 'bool', value: true },
+    },
+    payloadRefs: [],
+    error: null,
+    lane: -1,
+    replaced: false,
+  };
+  store.spans.append(span);
+}
+
+// Forward-compat: synthesize a "judge" span on the goldfive actor row
+// when a goldfive.v1.ReasoningJudgeInvoked event arrives. The stub may
+// not exist on the pre-merge submodule — callers guard the call path
+// with a string-case check on the oneof so a missing case does not crash
+// ingest. Once the submodule bumps the generated ``Event.payload.case``
+// union includes 'reasoningJudgeInvoked' and TS narrows automatically.
+function synthesizeJudgeSpan(
+  store: SessionStore,
+  sessionId: string | null,
+  verdict: string,
+  severity: string,
+  reasoning: string,
+  currentAgentId: string,
+  currentTaskId: string,
+  recordedAtMs: number,
+): void {
+  const id = `judge-${recordedAtMs}-${verdict || 'on_task'}`;
+  const name =
+    verdict && verdict !== 'on_task'
+      ? `judge: ${verdict}${severity ? ` (${severity})` : ''}`
+      : 'judge: on_task';
+  const span: Span = {
+    id,
+    sessionId: sessionId ?? '',
+    agentId: GOLDFIVE_ACTOR_ID,
+    parentSpanId: null,
+    kind: 'CUSTOM',
+    status: 'COMPLETED',
+    name,
+    startMs: recordedAtMs,
+    endMs: recordedAtMs,
+    links: [],
+    attributes: {
+      'judge.verdict': { kind: 'string', value: verdict },
+      'judge.severity': { kind: 'string', value: severity },
+      'judge.reasoning': { kind: 'string', value: reasoning },
+      'judge.target_agent_id': { kind: 'string', value: currentAgentId },
+      'judge.target_task_id': { kind: 'string', value: currentTaskId },
       'harmonograf.synthetic_span': { kind: 'bool', value: true },
     },
     payloadRefs: [],
@@ -214,6 +379,48 @@ export function applyGoldfiveEvent(
           store.agents.ensureAgent(id, bareAgentName(id));
         }
       }
+      // harmonograf#196 Gantt lane: synthesize a "refine: <kind>" span on
+      // the goldfive actor row for every PlanRevised event so the lane
+      // reads as a readable orchestrator timeline (drift → refine → judge)
+      // instead of only drift rows. Skip the initial plan (planSubmitted /
+      // revision_index == 0) — that's the baseline, not a steering move.
+      if (payload.case === 'planRevised') {
+        const pr = payload.value;
+        ensureSyntheticActor(store, GOLDFIVE_ACTOR_ID);
+        const emittedAbsMs = tsToMsAbs(event.emittedAt);
+        const emittedMs = emittedAbsMs ? emittedAbsMs - sessionStartMs : 0;
+        const revKind = driftKindToString(pr.driftKind as unknown as number);
+        const revSev = driftSeverityToString(pr.severity as unknown as number);
+        // Forward-compat reads: goldfive#feat/judge-observability-events
+        // adds PlanRevised.target_agent_id / refine_input_summary /
+        // refine_output_summary. Pre-merge these fields are undefined on
+        // the generated stubs, so read through `unknown` + a string guard
+        // instead of relying on TS to know about them. When the stubs
+        // regenerate with the new fields the reads land naturally.
+        const pru = pr as unknown as Record<string, unknown>;
+        const targetAgent =
+          typeof pru.targetAgentId === 'string' ? (pru.targetAgentId as string) : '';
+        const refineInput =
+          typeof pru.refineInputSummary === 'string'
+            ? (pru.refineInputSummary as string)
+            : '';
+        const refineOutput =
+          typeof pru.refineOutputSummary === 'string'
+            ? (pru.refineOutputSummary as string)
+            : '';
+        synthesizeRefineSpan(
+          store,
+          sessionId,
+          pr.revisionIndex,
+          revKind,
+          revSev,
+          pr.reason || '',
+          emittedMs,
+          targetAgent,
+          refineInput,
+          refineOutput,
+        );
+      }
       return;
     }
     case 'taskStarted':
@@ -318,6 +525,14 @@ export function applyGoldfiveEvent(
         ? USER_ACTOR_ID
         : GOLDFIVE_ACTOR_ID;
       ensureSyntheticActor(store, actorId);
+      // Forward-compat: goldfive#feat/judge-observability-events adds
+      // DriftDetected.trigger_input (the reasoning snippet / activity
+      // summary that produced the drift). Read through `unknown` + string
+      // guard so ingest stays green on the pre-merge submodule pin. Once
+      // the stubs regenerate the field lands naturally.
+      const du = d as unknown as Record<string, unknown>;
+      const triggerInput =
+        typeof du.triggerInput === 'string' ? (du.triggerInput as string) : '';
       synthesizeDriftSpan(
         store,
         sessionId,
@@ -328,11 +543,32 @@ export function applyGoldfiveEvent(
         d.currentTaskId,
         d.currentAgentId,
         emittedMs,
+        triggerInput,
       );
       return;
     }
+    case 'runStarted': {
+      // harmonograf#196 user lane: synthesize a USER_MESSAGE span on the
+      // user actor row carrying `goal_summary` — the pre-merge substitute
+      // for a per-turn user-prompt event. Once goldfive ships a dedicated
+      // ConversationTurn event with per-turn user text, the same row can
+      // absorb those too.
+      const r = payload.value;
+      if (r.goalSummary) {
+        ensureSyntheticActor(store, USER_ACTOR_ID);
+        const emittedAbsMs = tsToMsAbs(event.emittedAt);
+        const emittedMs = emittedAbsMs ? emittedAbsMs - sessionStartMs : 0;
+        synthesizeUserGoalSpan(
+          store,
+          sessionId,
+          r.runId || '',
+          r.goalSummary,
+          emittedMs,
+        );
+      }
+      return;
+    }
     case 'taskProgress':
-    case 'runStarted':
     case 'goalDerived':
     case 'runCompleted':
     case 'runAborted':
@@ -346,6 +582,45 @@ export function applyGoldfiveEvent(
     case 'agentInvocationStarted':
     case 'agentInvocationCompleted':
       return;
+    // harmonograf#196 forward-compat: goldfive#feat/judge-observability-events
+    // adds a `reasoningJudgeInvoked` oneof case (the orchestrator's LLM-as-
+    // judge fires on each reasoning step and classifies it on-task / drift).
+    // The case string is matched as a wide string because the generated
+    // union on the current submodule pin doesn't include it yet — once the
+    // submodule bumps the `payload.case` type narrows automatically and this
+    // branch becomes reachable through the normal switch.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    case 'reasoningJudgeInvoked' as any: {
+      ensureSyntheticActor(store, GOLDFIVE_ACTOR_ID);
+      const emittedAbsMs = tsToMsAbs(event.emittedAt);
+      const emittedMs = emittedAbsMs ? emittedAbsMs - sessionStartMs : 0;
+      const ju = payload.value as unknown as Record<string, unknown>;
+      const verdict = typeof ju.verdict === 'string' ? (ju.verdict as string) : '';
+      const severityRaw = ju.severity;
+      const severity =
+        typeof severityRaw === 'string'
+          ? severityRaw
+          : typeof severityRaw === 'number'
+            ? driftSeverityToString(severityRaw)
+            : '';
+      const reasoning =
+        typeof ju.reasoning === 'string' ? (ju.reasoning as string) : '';
+      const currentAgentId =
+        typeof ju.currentAgentId === 'string' ? (ju.currentAgentId as string) : '';
+      const currentTaskId =
+        typeof ju.currentTaskId === 'string' ? (ju.currentTaskId as string) : '';
+      synthesizeJudgeSpan(
+        store,
+        sessionId,
+        verdict,
+        severity,
+        reasoning,
+        currentAgentId,
+        currentTaskId,
+        emittedMs,
+      );
+      return;
+    }
     case 'delegationObserved': {
       // DelegationObserved carries the coordinator→sub_agent edge that the
       // telemetry plugin only records as a generic TOOL_CALL span on the

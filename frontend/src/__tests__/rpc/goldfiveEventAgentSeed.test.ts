@@ -165,7 +165,11 @@ describe('planSubmitted seeds the agent registry from task assignees', () => {
     expect(store.agents.get(`${CLIENT}:verify_agent`)?.name).toBe(
       'verify_agent',
     );
-    expect(store.agents.size).toBe(3);
+    // harmonograf#196: PlanRevised now synthesizes the goldfive actor row so
+    // the refine span has a lane to land on. Count the three plan-seeded
+    // rows directly rather than rely on size.
+    expect(store.agents.size).toBe(4);
+    expect(store.agents.get('__goldfive__')).toBeTruthy();
   });
 
   it('skips tasks with an empty assignee (no synthetic empty-id row)', () => {

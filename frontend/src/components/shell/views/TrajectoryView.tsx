@@ -1,8 +1,9 @@
 import './views.css';
+import type React from 'react';
 import { useEffect, useState } from 'react';
 import { useUiStore } from '../../../state/uiStore';
 import { useSessionWatch } from '../../../rpc/hooks';
-import type { Task, TaskEdge, TaskPlan, TaskStatus } from '../../../gantt/types';
+import type { Span, Task, TaskEdge, TaskPlan, TaskStatus } from '../../../gantt/types';
 import type {
   DelegationRecord,
   DriftRecord,
@@ -15,6 +16,10 @@ import {
   SOURCE_COLOR,
   type InterventionRow,
 } from '../../../lib/interventions';
+import {
+  resolveDriftDetail,
+  type InterventionDetail,
+} from '../../../lib/interventionDetail';
 
 // ── Palette ────────────────────────────────────────────────────────────────
 // Aligned with GanttView's status palette so a task's status reads the same
@@ -646,6 +651,80 @@ function buildDelegationsByTaskId(
   return m;
 }
 
+// harmonograf#196: which task on the current rev should the steering
+// arrow land on. Target priority:
+//   1. Post-merge goldfive stamps PlanRevised.target_agent_id — pick the
+//      first task on the rev whose assignee matches. When multiple
+//      tasks share an assignee, prefer the task still RUNNING or
+//      PENDING (the one the steering most likely applies to).
+//   2. Pre-merge fallback: the drift carried on the same trigger as the
+//      revision identifies a current_agent_id — goldfiveEvent.ts stamps
+//      that onto the synthesized refine span. Here we accept the plan's
+//      revisionKind as a hint when the explicit field is missing: no
+//      target → no steering arrow (we degrade gracefully).
+function findSteeringTargetTask(
+  plan: TaskPlan,
+  targetAgentId: string,
+): Task | null {
+  if (!targetAgentId) return null;
+  const matches = plan.tasks.filter((t) => t.assigneeAgentId === targetAgentId);
+  if (matches.length === 0) return null;
+  // Prefer an active task; otherwise the first task — keeps the arrow stable
+  // across status transitions.
+  const active = matches.find(
+    (t) => t.status === 'RUNNING' || t.status === 'PENDING',
+  );
+  return active ?? matches[0];
+}
+
+// Look up the synthesized "refine" span on the goldfive actor row for a
+// given plan revision. The synthesizer (rpc/goldfiveEvent.ts) stamps
+// `refine.index = String(revIdx)` so we can pick the exact rev even when
+// multiple refines land inside the same ms.
+function findRefineSpanForPlan(
+  store: SessionStore,
+  plan: TaskPlan,
+): Span | null {
+  const revIdx = plan.revisionIndex ?? 0;
+  if (revIdx <= 0) return null;
+  const scratch: Span[] = [];
+  // Match by `refine.index` on the goldfive row — the synth span's
+  // startMs is the event's emittedAt, not the plan's createdAt, so the
+  // time window has to be wide enough to tolerate clock skew.
+  store.spans.queryAgent('__goldfive__', 0, Number.POSITIVE_INFINITY, scratch);
+  for (const s of scratch) {
+    if (!s.name.startsWith('refine:')) continue;
+    const attr = s.attributes['refine.index'];
+    if (attr && attr.kind === 'string' && attr.value === String(revIdx)) {
+      return s;
+    }
+  }
+  return null;
+}
+
+function readRefineAttr(span: Span | null, key: string): string {
+  if (!span) return '';
+  const attr = span.attributes[key];
+  if (!attr || attr.kind !== 'string') return '';
+  return attr.value;
+}
+
+// The user-goal span is the USER_MESSAGE span the ingest synthesizer
+// stamps on the user actor row from RunStarted.goal_summary. There is at
+// most one per run; pick the earliest (earliest RunStarted).
+function findUserGoalSpan(store: SessionStore): Span | null {
+  const scratch: Span[] = [];
+  store.spans.queryAgent('__user__', 0, Number.POSITIVE_INFINITY, scratch);
+  let chosen: Span | null = null;
+  for (const s of scratch) {
+    if (s.kind !== 'USER_MESSAGE') continue;
+    const marker = s.attributes['user.goal_summary'];
+    if (!marker) continue;
+    if (!chosen || s.startMs < chosen.startMs) chosen = s;
+  }
+  return chosen;
+}
+
 function DagPane(props: DagProps) {
   const {
     plan,
@@ -664,6 +743,37 @@ function DagPane(props: DagProps) {
   if (!plan || !layout) {
     return <div className="hg-traj__dag hg-traj__dag--empty">No plan to render.</div>;
   }
+
+  // harmonograf#196 steering arrow: find the current rev's refine target
+  // and, if one exists, draw a distinct arrow from a small "goldfive"
+  // gutter node on the DAG's left edge to the matching task node. The
+  // target agent lives on the synthesized refine span the ingest layer
+  // stamps on the goldfive actor row at plan.createdAtMs.
+  const revIdx = plan.revisionIndex ?? 0;
+  const refineSpan = store && revIdx > 0 ? findRefineSpanForPlan(store, plan) : null;
+  const steerTargetAgent = refineSpan ? readRefineAttr(refineSpan, 'refine.target_agent_id') : '';
+  const steerKind = refineSpan ? readRefineAttr(refineSpan, 'refine.kind') : plan.revisionKind || '';
+  const steerReason = refineSpan ? readRefineAttr(refineSpan, 'refine.reason') : plan.revisionReason || '';
+  const steerTargetTask = steerTargetAgent
+    ? findSteeringTargetTask(plan, steerTargetAgent)
+    : null;
+  // Gutter node coordinates — small circles in the left margin of the
+  // DAG's SVG viewport. Chosen so they never overlap the first-layer
+  // task column (which starts at DAG_PAD + 0 = 24). The goldfive node
+  // sits mid-height (steering origin); the user node sits higher and
+  // points to the first layer-0 task (representing the RunStarted goal
+  // that seeded the plan).
+  const GOLDFIVE_NODE = { cx: 12, cy: layout.height / 2, r: 7 };
+  const USER_NODE = { cx: 12, cy: 16, r: 7 };
+
+  // User → first-task arrow: represents "this plan exists because the
+  // user asked for <goal>". Only drawn on the initial rev (rev 0) so
+  // rev 1+ panes don't accumulate a user arrow on every refine.
+  const userGoalSpan = store ? findUserGoalSpan(store) : null;
+  const userGoalSummary = userGoalSpan?.name || '';
+  const firstLayerTask = revIdx === 0
+    ? plan.tasks.find((t) => layout.nodeById.get(t.id)?.layer === 0) ?? null
+    : null;
 
   // Removed-task cards (only when in diff/compare mode). These sit to the right
   // of the DAG so the user can see what the refine dropped without corrupting
@@ -693,7 +803,166 @@ function DagPane(props: DagProps) {
           >
             <path d="M0,0 L10,5 L0,10 z" fill="#8d9199" />
           </marker>
+          {/* Distinct marker for steering edges so it reads different
+              from delegation at a glance — same shape, goldfive color. */}
+          <marker
+            id="traj-steer-arrow"
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="9"
+            markerHeight="9"
+            orient="auto-start-reverse"
+          >
+            <path d="M0,0 L10,5 L0,10 z" fill="#80deea" />
+          </marker>
+          {/* User-origin arrow: warm neutral so it reads distinctly from
+              both delegation (grey) and steering (goldfive-teal). */}
+          <marker
+            id="traj-user-arrow"
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="9"
+            markerHeight="9"
+            orient="auto-start-reverse"
+          >
+            <path d="M0,0 L10,5 L0,10 z" fill="#d0bcff" />
+          </marker>
         </defs>
+
+        {/* user → first-layer task arrow: drawn only on rev 0. Represents
+            "this plan was seeded by the user's goal". */}
+        {firstLayerTask && userGoalSpan && (() => {
+          const targetNode = layout.nodeById.get(firstLayerTask.id);
+          if (!targetNode) return null;
+          const x1 = USER_NODE.cx + USER_NODE.r;
+          const y1 = USER_NODE.cy;
+          const x2 = targetNode.x;
+          const y2 = targetNode.y + targetNode.h / 2;
+          const mx = (x1 + x2) / 2;
+          const d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+          return (
+            <g data-testid="trajectory-user-edge">
+              <path
+                d={d}
+                fill="none"
+                stroke="#d0bcff"
+                strokeWidth={1.5}
+                strokeDasharray="5,3"
+                opacity={0.7}
+                markerEnd="url(#traj-user-arrow)"
+              />
+              <title>{userGoalSummary ? `user goal: ${userGoalSummary}` : 'user goal'}</title>
+            </g>
+          );
+        })()}
+        {userGoalSpan && (
+          <g
+            className="hg-traj__user-gutter"
+            data-testid="trajectory-user-gutter"
+          >
+            <circle
+              cx={USER_NODE.cx}
+              cy={USER_NODE.cy}
+              r={USER_NODE.r}
+              fill="#d0bcff"
+              opacity={0.85}
+            />
+            <text
+              x={USER_NODE.cx}
+              y={USER_NODE.cy + 3}
+              textAnchor="middle"
+              fontSize={9}
+              fill="#0b0d12"
+              fontWeight={700}
+            >
+              u
+            </text>
+            <title>{userGoalSummary ? `user: ${userGoalSummary}` : 'user'}</title>
+          </g>
+        )}
+
+        {/* steering edges: goldfive gutter → target task. Rendered before
+            task edges so delegation / dependency arrows draw on top, but
+            the dashed goldfive color + the distinct marker keep it
+            readable. Only drawn on non-zero revs with a target. */}
+        {steerTargetTask && (
+          <g
+            className="hg-traj__steer-edges"
+            data-testid="trajectory-steer-edges"
+          >
+            {(() => {
+              const targetNode = layout.nodeById.get(steerTargetTask.id);
+              if (!targetNode) return null;
+              const x1 = GOLDFIVE_NODE.cx + GOLDFIVE_NODE.r;
+              const y1 = GOLDFIVE_NODE.cy;
+              const x2 = targetNode.x;
+              const y2 = targetNode.y + targetNode.h / 2;
+              const mx = (x1 + x2) / 2;
+              const d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+              const label =
+                steerKind || steerReason || `rev ${plan.revisionIndex ?? 0}`;
+              return (
+                <g data-testid={`steer-edge-${steerTargetTask.id}`}>
+                  <path
+                    className="hg-traj__steer-edge"
+                    d={d}
+                    fill="none"
+                    stroke="#80deea"
+                    strokeWidth={1.5}
+                    strokeDasharray="5,3"
+                    opacity={0.75}
+                    markerEnd="url(#traj-steer-arrow)"
+                  />
+                  <text
+                    className="hg-traj__steer-label"
+                    x={(x1 + x2) / 2}
+                    y={(y1 + y2) / 2 - 4}
+                    textAnchor="middle"
+                    fontSize={10}
+                    fill="#80deea"
+                    opacity={0.9}
+                  >
+                    <title>
+                      {`goldfive steered ${steerTargetTask.assigneeAgentId || '(agent)'}` +
+                        (steerReason ? `\nreason: ${steerReason}` : '') +
+                        (steerKind ? `\nkind: ${steerKind}` : '')}
+                    </title>
+                    {truncate(label, 28)}
+                  </text>
+                </g>
+              );
+            })()}
+          </g>
+        )}
+
+        {/* goldfive gutter node: the origin of the steering arrow, only
+            rendered on revs that have a target to arrow to. */}
+        {steerTargetTask && (
+          <g
+            className="hg-traj__goldfive-gutter"
+            data-testid="trajectory-goldfive-gutter"
+          >
+            <circle
+              cx={GOLDFIVE_NODE.cx}
+              cy={GOLDFIVE_NODE.cy}
+              r={GOLDFIVE_NODE.r}
+              fill="#80deea"
+              opacity={0.85}
+            />
+            <text
+              x={GOLDFIVE_NODE.cx}
+              y={GOLDFIVE_NODE.cy + 3}
+              textAnchor="middle"
+              fontSize={9}
+              fill="#0b0d12"
+              fontWeight={700}
+            >
+              g5
+            </text>
+          </g>
+        )}
 
         {/* edges behind nodes */}
         <g className="hg-traj__edges">
@@ -1072,6 +1341,16 @@ function DetailPane(props: DetailPaneProps) {
         </aside>
       );
     }
+    // Resolve the richer intervention detail so the pane can surface
+    // Trigger / Steering / Target sections — the three questions a
+    // human operator asks at each drift marker: what did goldfive see,
+    // what did it do about it, and which agent got steered.
+    const plans = plan ? [plan] : [];
+    // Walk every rev visible through the selection context so cross-rev
+    // triggerEventId matches work (the trigger-event is stamped on the
+    // PlanRevised, not the drift row).
+    const allPlans = store ? collectAllPlanRevs(store) : plans;
+    const detail = resolveDriftDetail(d, allPlans, store);
     return (
       <aside className="hg-traj__detail" data-testid="detail-drift">
         <header>
@@ -1084,7 +1363,6 @@ function DetailPane(props: DetailPaneProps) {
             {d.severity || 'unspec'}
           </span>
         </header>
-        {d.detail && <p className="hg-traj__detail-desc">{d.detail}</p>}
         <dl className="hg-traj__detail-meta">
           <dt>observed</dt>
           <dd>{fmtTime(d.recordedAtMs)}</dd>
@@ -1093,10 +1371,118 @@ function DetailPane(props: DetailPaneProps) {
           <dt>agent</dt>
           <dd>{d.agentId || '—'}</dd>
         </dl>
+        <InterventionDetailSections detail={detail} store={store} />
       </aside>
     );
   }
   return null;
+}
+
+// Walk every plan in the store and gather every revision snapshot. The
+// resolver needs the full rev history because a drift's triggering
+// PlanRevised can live under any plan_id (goldfive often mints fresh
+// plan ids on refine — same behaviour the main VM builder guards
+// against).
+function collectAllPlanRevs(store: SessionStore): TaskPlan[] {
+  const out: TaskPlan[] = [];
+  const seen = new Set<TaskPlan>();
+  for (const live of store.tasks.listPlans()) {
+    for (const snap of store.tasks.allRevsForPlan(live.id)) {
+      if (seen.has(snap)) continue;
+      seen.add(snap);
+      out.push(snap);
+    }
+  }
+  return out;
+}
+
+// Trigger / Steering / Target panel (harmonograf#196). Each section is
+// hidden when its data is empty — so drift rows that have no matching
+// PlanRevised don't render an empty "Steering" block.
+function InterventionDetailSections({
+  detail,
+  store,
+}: {
+  detail: InterventionDetail;
+  store: SessionStore | null;
+}): React.ReactNode {
+  const agentName = (id: string): string => {
+    if (!id) return '';
+    return store?.agents.get(id)?.name || bareAgentName(id) || id;
+  };
+  return (
+    <section
+      className="hg-traj__detail-intervention"
+      data-testid="detail-drift-intervention"
+      aria-label="Intervention context"
+      style={{ marginTop: 10, fontSize: 12 }}
+    >
+      {detail.trigger && (
+        <DetailSection
+          label="Trigger"
+          body={detail.trigger}
+          testId="detail-drift-trigger"
+        />
+      )}
+      {detail.steering && (
+        <DetailSection
+          label="Steering"
+          body={detail.steering}
+          testId="detail-drift-steering"
+        />
+      )}
+      {detail.targetAgentId && (
+        <div
+          className="hg-traj__detail-target"
+          data-testid="detail-drift-target"
+          style={{ marginTop: 6, display: 'flex', gap: 6, alignItems: 'baseline' }}
+        >
+          <strong style={{ opacity: 0.65, textTransform: 'uppercase', fontSize: 10 }}>
+            Target
+          </strong>
+          <span title={detail.targetAgentId}>{agentName(detail.targetAgentId)}</span>
+          {detail.targetTaskId && (
+            <code style={{ opacity: 0.7, fontSize: 10 }}>{detail.targetTaskId}</code>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DetailSection({
+  label,
+  body,
+  testId,
+}: {
+  label: string;
+  body: string;
+  testId: string;
+}): React.ReactNode {
+  return (
+    <div
+      data-testid={testId}
+      style={{
+        marginTop: 6,
+        padding: '6px 8px',
+        background: 'rgba(255,255,255,0.03)',
+        borderRadius: 4,
+      }}
+    >
+      <strong
+        style={{
+          display: 'block',
+          fontSize: 10,
+          opacity: 0.65,
+          textTransform: 'uppercase',
+          marginBottom: 2,
+        }}
+      >
+        {label}
+      </strong>
+      <div style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>{body}</div>
+    </div>
+  );
 }
 
 function truncate(s: string, n: number): string {
