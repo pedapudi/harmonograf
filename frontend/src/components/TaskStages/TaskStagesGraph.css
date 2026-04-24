@@ -33,8 +33,11 @@
   cursor: pointer;
 }
 
+/* Card rect: fill comes inline from STATUS_FILL (one orthogonal axis —
+   execution status). Border is uniform; no dashed variant, no opacity
+   dimming for "future" cards (those are hidden entirely). Rev provenance
+   is surfaced via the corner chip, not cross-axis fill encoding. */
 .hg-stages__card-rect {
-  fill: var(--md-sys-color-surface-container-high, #262931);
   stroke: var(--md-sys-color-outline-variant, #43474e);
   stroke-width: 1;
 }
@@ -79,32 +82,6 @@
   }
 }
 
-.hg-stages__progress {
-  stroke: var(--md-sys-color-outline-variant, #43474e);
-  stroke-width: 1;
-}
-
-.hg-stages__progress--none {
-  fill: rgba(141, 145, 153, 0.25);
-}
-
-.hg-stages__progress--partial {
-  fill: rgba(91, 141, 239, 0.45);
-  stroke: #5b8def;
-}
-
-.hg-stages__progress--done {
-  fill: rgba(76, 175, 80, 0.55);
-  stroke: #4caf50;
-}
-
-.hg-stages__progress-text {
-  font-size: 9px;
-  font-weight: 600;
-  fill: var(--md-sys-color-on-surface, #e2e2e9);
-  pointer-events: none;
-}
-
 .hg-stages__edge {
   fill: none;
   stroke: var(--md-sys-color-outline, #8d9199);
@@ -112,55 +89,9 @@
   opacity: 0.75;
 }
 
-/* Cumulative-DAG additions (harmonograf plan-evolution). */
-
-.hg-stages__card--muted {
-  opacity: 0.55;
-}
-
-.hg-stages__card--superseded .hg-stages__card-rect {
-  stroke-dasharray: 3 3;
-  fill: var(--md-sys-color-surface-container, #1c1f26);
-}
-
-.hg-stages__card--superseded {
-  opacity: 0.4;
-}
-
-.hg-stages__card--superseded:hover,
-.hg-stages__card--muted:hover {
-  opacity: 0.85;
-}
-
-.hg-stages__supersedes-path {
-  fill: none;
-  stroke-width: 1.2;
-  stroke-dasharray: 4 3;
-  opacity: 0.85;
-}
-
-.hg-stages__supersedes:hover .hg-stages__supersedes-path {
-  stroke-width: 2;
-  opacity: 1;
-}
-
-.hg-stages__supersedes-label {
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  pointer-events: none;
-  user-select: none;
-}
-
-.hg-stages__gen-badge-text {
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  pointer-events: none;
-  user-select: none;
-}
-
-/* Scrubber styling. Small horizontal strip with clickable notches. */
+/* Scrubber styling retained for callers of the exported RevisionScrubber
+   component in the Trajectory view (which owns its own scrubber). The
+   Gantt plan subview no longer renders a local scrubber. */
 
 .hg-scrubber {
   display: flex;

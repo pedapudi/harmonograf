@@ -272,6 +272,14 @@ interface UiState {
   trajectoryLegacyExpanded: boolean;
   toggleTrajectoryLegacyExpanded: () => void;
 
+  // Plan-revision selection shared by the Trajectory view and the Gantt's
+  // plan subview. `null` means "latest" (cumulative, no pin). A concrete
+  // integer pins both surfaces to that revision — the Trajectory view
+  // filters its cumulative DAG, and the Gantt plan subview mirrors the
+  // same selection (read-only from its side). Single source of truth.
+  selectedRevision: number | null;
+  setSelectedRevision: (rev: number | null) => void;
+
   // Sequence diagram (GraphView) zoom + pan state. `null` means "no explicit
   // viewport saved yet" — the view will fit-to-content on mount. Persisted to
   // localStorage so the viewport survives reloads and session switches.
@@ -444,6 +452,11 @@ export const useUiStore = create<UiState>((set) => ({
       writeTrajectoryLegacyExpanded(next);
       return { trajectoryLegacyExpanded: next };
     }),
+
+  // Ephemeral — intentionally NOT persisted. A pinned rev is a transient
+  // inspection mode, not a preference; reload → back to Latest.
+  selectedRevision: null,
+  setSelectedRevision: (rev) => set({ selectedRevision: rev }),
   setAgentsPaused: (paused, ts) =>
     set((s) => {
       // When pausing, freeze at the session-relative "now" from the renderer

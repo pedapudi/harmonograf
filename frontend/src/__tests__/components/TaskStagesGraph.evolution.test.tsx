@@ -25,6 +25,7 @@ import {
   type CumulativePlan,
   type SupersessionLink,
 } from '../../state/planHistory';
+import { useUiStore } from '../../state/uiStore';
 
 function mkTask(id: string, status: TaskStatus = 'PENDING', title?: string): Task {
   return {
@@ -178,7 +179,7 @@ describe('<TaskStagesGraph /> cumulative mode (collapsed chains)', () => {
     expect(cards.length).toBe(2);
   });
 
-  it('attaches a RevisionHistoryBadge to the multi-member chain card only', () => {
+  it('attaches one corner rev chip per canonical card (singletons and chains alike)', () => {
     const store = seedTwoRevPlan();
     const cum = __internal.deriveCumulative('plan-1', store.tasks.allRevsForPlan('plan-1'));
     const supersedes = __internal.deriveSupersedes(
@@ -192,15 +193,21 @@ describe('<TaskStagesGraph /> cumulative mode (collapsed chains)', () => {
         supersedesMap={supersedes}
       />,
     );
-    // One chain-badge slot for the {t2,t3} canonical card. t1 is
-    // singleton so has no badge.
-    const badges = container.querySelectorAll('[data-testid^="chain-badge-for-"]');
-    expect(badges.length).toBe(1);
-    // The canonical of the {t2,t3} chain is t3 (latest member).
-    expect(badges[0].getAttribute('data-testid')).toBe('chain-badge-for-t3');
+    // After the plan-view redesign every canonical card carries a
+    // single corner chip — singleton t1 (muted R0 label) and the
+    // {t2,t3} canonical t3 (R0→R1 chain label). One axis, one chip.
+    const chips = container.querySelectorAll('[data-testid^="rev-chip-for-"]');
+    expect(chips.length).toBe(2);
+    const byTask = new Map<string, Element>();
+    chips.forEach((c) => {
+      const id = c.getAttribute('data-testid')!.replace('rev-chip-for-', '');
+      byTask.set(id, c);
+    });
+    expect(byTask.has('t1')).toBe(true);
+    expect(byTask.has('t3')).toBe(true);
   });
 
-  it('renders one generation badge per collapsed card', () => {
+  it('no longer renders the retired REV N generation badge', () => {
     const store = seedTwoRevPlan();
     const cum = __internal.deriveCumulative('plan-1', store.tasks.allRevsForPlan('plan-1'));
     const supersedes = __internal.deriveSupersedes(
@@ -214,8 +221,10 @@ describe('<TaskStagesGraph /> cumulative mode (collapsed chains)', () => {
         supersedesMap={supersedes}
       />,
     );
-    const badges = container.querySelectorAll('g.hg-stages__gen-badge');
-    expect(badges.length).toBe(2);
+    // The R0→R1 arrow badge + separate "REV 1" gen-badge are gone;
+    // provenance collapses onto the single corner chip.
+    expect(container.querySelectorAll('g.hg-stages__gen-badge').length).toBe(0);
+    expect(container.querySelectorAll('[data-testid="gen-badge"]').length).toBe(0);
   });
 
   it('no longer renders visible "supersedes-edge" elements (chain badge replaces them)', () => {
@@ -242,7 +251,10 @@ describe('<TaskPlanPanel /> integration (collapsed chains)', () => {
     const plan = store.tasks.getPlan('plan-1')!;
     render(<TaskPlanPanel sessionId="sess-1" plan={plan} />);
     expect(screen.getByTestId('task-stages-graph')).toBeInTheDocument();
-    expect(screen.getByTestId('plan-revision-scrubber')).toBeInTheDocument();
+    // Post-redesign: the Gantt subview no longer owns a local scrubber.
+    // Rev selection lives in the Trajectory view; the subview mirrors
+    // the shared `selectedRevision` state instead.
+    expect(screen.queryByTestId('plan-revision-scrubber')).toBeNull();
     // cumulative → t1 + {t2,t3}-chain = 2 cards after collapse.
     const cards = document
       .querySelector('[data-testid="task-stages-graph"]')!
@@ -250,36 +262,46 @@ describe('<TaskPlanPanel /> integration (collapsed chains)', () => {
     expect(cards.length).toBe(2);
   });
 
-  it('revision scrubber hides chains whose earliest member is introduced after the pinned rev', () => {
+  it('shared selectedRevision pinning hides chains whose earliest member is introduced after the pinned rev', () => {
     const store = seedThreeRevPlan();
     const plan = store.tasks.getPlan('plan-1')!;
+    // Simulate the Trajectory view (or ribbon) pinning rev 0 via the
+    // shared uiStore slice. The Gantt subview has no local control; it
+    // reads this on render.
+    useUiStore.getState().setSelectedRevision(0);
     render(<TaskPlanPanel sessionId="sess-3" plan={plan} />);
-    // Click rev 0. t1 was intro'd at rev 0 → visible. t2 (rev 1) + t3
-    // (rev 2) are singleton chains whose firstRev > 0 → hidden (not
-    // rendered at all, per filterCollapsedAtRevision contract).
-    fireEvent.click(screen.getByTestId('scrubber-notch-0'));
+    // t1 was intro'd at rev 0 → visible. t2 (rev 1) + t3 (rev 2) are
+    // singleton chains whose firstRev > 0 → hidden entirely (no ghost).
     const cards = document
       .querySelector('[data-testid="task-stages-graph"]')!
       .querySelectorAll('g.hg-stages__card');
     expect(cards.length).toBe(1);
+    // The sync-hint callout mirrors the Trajectory selection.
+    expect(screen.getByTestId('plan-sync-hint').textContent).toContain(
+      'REV 0',
+    );
+    // Restore latest so other tests start clean.
+    useUiStore.getState().setSelectedRevision(null);
   });
 
-  it('Latest-only toggle drops the cumulative rendering (no chain badges, no gen badges)', () => {
+  it('Latest-only toggle drops the cumulative rendering (no rev chips, no gen badges)', () => {
     const store = seedTwoRevPlan();
     const plan = store.tasks.getPlan('plan-1')!;
     render(<TaskPlanPanel sessionId="sess-1" plan={plan} />);
     // Switch to Latest only.
     const toggle = screen.getByTestId('task-plan-view-toggle') as HTMLSelectElement;
     fireEvent.change(toggle, { target: { value: 'latest' } });
-    // Latest only → just t1 + t3 (the live rev 1 shape). No gen badges,
-    // no chain badges (singleton tasks don't get a badge).
+    // Latest only → just t1 + t3 (the live rev 1 shape). No rev chips
+    // (Latest-only has no rev meta to surface), no legacy gen badges.
     const cards = document
       .querySelector('[data-testid="task-stages-graph"]')!
       .querySelectorAll('g.hg-stages__card');
     expect(cards.length).toBe(2);
     expect(
-      document.querySelectorAll('[data-testid^="chain-badge-for-"]'),
+      document.querySelectorAll('[data-testid^="rev-chip-for-"]'),
     ).toHaveLength(0);
     expect(document.querySelectorAll('g.hg-stages__gen-badge')).toHaveLength(0);
+    // Restore the default so later describes aren't stuck on 'latest'.
+    fireEvent.change(toggle, { target: { value: 'cumulative' } });
   });
 });

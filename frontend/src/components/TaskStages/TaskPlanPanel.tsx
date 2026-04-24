@@ -1,13 +1,18 @@
 // TaskPlanPanel (harmonograf plan-evolution).
 //
-// Wraps a plan's revision scrubber + cumulative DAG + steering-detail
-// side panel into a single component. Consumed by GanttView's bottom
-// task panel. One <TaskPlanPanel /> per plan.
+// Wraps a plan's cumulative DAG + steering-detail side panel into a single
+// component. Consumed by GanttView's bottom task panel. One <TaskPlanPanel />
+// per plan.
 //
-// The component itself is thin glue: it pulls revision history via
-// state/planHistory hooks, routes scrubber state + side-panel selection
-// into local React state, and hands the actual drawing to
-// <TaskStagesGraph />.
+// Rev selection: this panel is a READ-ONLY mirror of the Trajectory view's
+// `selectedRevision` slice on `useUiStore`. There is no local scrubber — if
+// the user wants to pick a different revision they do it from the Trajectory
+// view's ribbon / scrubber and both surfaces update. Consolidated per the
+// plan-view redesign so there's a single source of truth.
+//
+// The component itself is thin glue: it pulls cumulative + supersedes + rev
+// history via state/planHistory hooks, reads the shared `selectedRevision`,
+// and hands the actual drawing to <TaskStagesGraph />.
 
 import { useState } from 'react';
 import type { Task, TaskPlan } from '../../gantt/types';
@@ -30,81 +35,6 @@ interface TaskPlanPanelProps {
   // Optional jump-to-Gantt callback invoked when the user clicks the
   // "Jump to this drift in Gantt" button in the steering detail panel.
   onJumpToDrift?: (atMs: number) => void;
-}
-
-// Revision scrubber. Renders one notch per revision plus a "Latest" notch.
-// `selected === null` means latest; any integer filters to "tasks
-// introduced at-or-before this rev".
-interface RevisionScrubberProps {
-  revisions: ReadonlyArray<{ revisionIndex: number; revisionKind: string }>;
-  selected: number | null;
-  onSelect: (rev: number | null) => void;
-}
-
-function RevisionScrubber({ revisions, selected, onSelect }: RevisionScrubberProps) {
-  // Keyboard-accessible: Home / End / ←/→ walk through notches.
-  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const order: Array<number | null> = [
-      ...revisions.map((r) => r.revisionIndex),
-      null,
-    ];
-    const idx = order.indexOf(selected);
-    if (idx < 0) return;
-    if (e.key === 'ArrowRight') {
-      onSelect(order[Math.min(order.length - 1, idx + 1)]);
-      e.preventDefault();
-    } else if (e.key === 'ArrowLeft') {
-      onSelect(order[Math.max(0, idx - 1)]);
-      e.preventDefault();
-    } else if (e.key === 'Home') {
-      onSelect(order[0]);
-      e.preventDefault();
-    } else if (e.key === 'End') {
-      onSelect(order[order.length - 1]);
-      e.preventDefault();
-    }
-  };
-  return (
-    <div
-      className="hg-scrubber"
-      role="toolbar"
-      aria-label="Plan revision scrubber"
-      tabIndex={0}
-      onKeyDown={onKeyDown}
-      data-testid="plan-revision-scrubber"
-    >
-      <div className="hg-scrubber__label">Rev</div>
-      <div className="hg-scrubber__track">
-        {revisions.map((r) => {
-          const isSel = selected === r.revisionIndex;
-          const label = r.revisionKind
-            ? `REV ${r.revisionIndex}: ${r.revisionKind}`
-            : `REV ${r.revisionIndex}`;
-          return (
-            <button
-              key={r.revisionIndex}
-              type="button"
-              className={`hg-scrubber__notch${isSel ? ' hg-scrubber__notch--selected' : ''}`}
-              onClick={() => onSelect(r.revisionIndex)}
-              data-testid={`scrubber-notch-${r.revisionIndex}`}
-              aria-pressed={isSel}
-            >
-              {label}
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          className={`hg-scrubber__notch${selected === null ? ' hg-scrubber__notch--selected' : ''}`}
-          onClick={() => onSelect(null)}
-          data-testid="scrubber-notch-latest"
-          aria-pressed={selected === null}
-        >
-          Latest
-        </button>
-      </div>
-    </div>
-  );
 }
 
 // Steering-detail side panel. Opens when the user clicks a supersedes
@@ -187,6 +117,83 @@ function SteeringDetailPanel({
   );
 }
 
+// Plan-summary block. Mixed-case body wrapping to up to 3 lines with an
+// inline "show more" expander when the text overflows. Lead-in "Plan" is
+// rendered as an unobtrusive label. Per the redesign we no longer shout
+// the summary in ALL CAPS on a single truncated line.
+interface PlanSummaryProps {
+  summary: string;
+}
+
+// CSS -webkit-line-clamp driven, so the 3-line cap is a rendering
+// invariant rather than a character count. The expander becomes visible
+// when the scrollHeight exceeds the clamped client height.
+function PlanSummary({ summary }: PlanSummaryProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const bodyRef = (node: HTMLDivElement | null): void => {
+    if (!node) return;
+    // scrollHeight > clientHeight ⇒ the clamp is actually truncating.
+    // Run synchronously in the ref so layout data is fresh per render.
+    const hasOverflow = node.scrollHeight > node.clientHeight + 1;
+    if (hasOverflow !== overflows) setOverflows(hasOverflow);
+  };
+  return (
+    <div
+      data-testid="plan-summary"
+      style={{ display: 'flex', flexDirection: 'column', gap: 2 }}
+    >
+      <div
+        style={{
+          fontSize: 9,
+          letterSpacing: 0.6,
+          textTransform: 'uppercase',
+          color: 'var(--md-sys-color-on-surface-variant, #9da3b4)',
+          fontWeight: 600,
+        }}
+      >
+        Plan
+      </div>
+      <div
+        ref={bodyRef}
+        data-testid="plan-summary-body"
+        data-expanded={expanded ? 'true' : 'false'}
+        style={{
+          fontSize: 11,
+          lineHeight: 1.4,
+          color: 'var(--md-sys-color-on-surface, #e2e2e9)',
+          // Mixed case — textTransform stays at its default ('none').
+          whiteSpace: 'normal',
+          overflow: 'hidden',
+          display: expanded ? 'block' : '-webkit-box',
+          WebkitLineClamp: expanded ? 'unset' : 3,
+          WebkitBoxOrient: 'vertical',
+        }}
+      >
+        {summary}
+      </div>
+      {overflows && (
+        <button
+          type="button"
+          data-testid="plan-summary-toggle"
+          onClick={() => setExpanded((v) => !v)}
+          style={{
+            alignSelf: 'flex-start',
+            background: 'transparent',
+            border: 'none',
+            padding: 0,
+            fontSize: 10,
+            color: 'var(--md-sys-color-primary, #a8c8ff)',
+            cursor: 'pointer',
+          }}
+        >
+          {expanded ? 'show less' : 'show more'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function TaskPlanPanel({
   sessionId,
   plan,
@@ -201,7 +208,11 @@ export function TaskPlanPanel({
   const supersedesMap = useSupersedesMap(sessionId, plan.id);
   const taskPlanView = useUiStore((s) => s.taskPlanView);
   const setTaskPlanView = useUiStore((s) => s.setTaskPlanView);
-  const [scrubberSelection, setScrubberSelection] = useState<number | null>(null);
+  // Shared with TrajectoryView. Read-only from this panel's perspective —
+  // the Trajectory ribbon/scrubber is the single authoring surface.
+  const selectedRevision = useUiStore(
+    (s) => (s as { selectedRevision?: number | null }).selectedRevision ?? null,
+  );
   const [openLinkId, setOpenLinkId] = useState<string | null>(null);
   // Resolve the currently-open supersedes link every render from the
   // live map so (a) it drops automatically when the map no longer
@@ -213,12 +224,19 @@ export function TaskPlanPanel({
     ? supersedesMap.get(openLinkId) ?? null
     : null;
 
-  // Hide the scrubber when there's only the initial rev — nothing to scrub.
-  const showScrubber = taskPlanView === 'cumulative' && history.length > 1;
-
   // The "Latest only" path bypasses the cumulative renderer entirely;
   // the old behaviour is preserved — see TaskStagesGraphProps legacy signature.
   const isCumulative = taskPlanView === 'cumulative' && cumulative !== null;
+
+  // Inline hint text. Shown only when the panel has >1 rev to speak of
+  // (otherwise there's nothing for the Trajectory view to drive) and
+  // only in cumulative mode. Mirrors the shared `selectedRevision`.
+  const syncHint =
+    isCumulative && history.length > 1
+      ? selectedRevision === null
+        ? 'Showing Latest (synced with Trajectory view)'
+        : `Showing REV ${selectedRevision} (synced with Trajectory view)`
+      : null;
 
   // Resolve the target agent from the replacement task, falling back to
   // the drift's agent id via the supersedesMap entry.
@@ -236,6 +254,8 @@ export function TaskPlanPanel({
     return rev ? rev.revisedAtMs : null;
   };
 
+  const summaryText = plan.summary || plan.id;
+
   return (
     <div
       style={{ display: 'flex', flexDirection: 'column', position: 'relative' }}
@@ -244,26 +264,28 @@ export function TaskPlanPanel({
       <div
         style={{
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           gap: 8,
-          padding: '2px 10px',
-          fontSize: 10,
-          color: 'var(--md-sys-color-on-surface-variant, #9da3b4)',
-          textTransform: 'uppercase',
-          letterSpacing: 0.5,
+          padding: '4px 10px',
+          color: 'var(--md-sys-color-on-surface-variant, #c3c6cf)',
         }}
       >
-        <span style={{ flex: 1 }}>
-          Plan: {plan.summary || plan.id}
-          {isCumulative && history.length > 0
-            ? ` · ${history.length} rev${history.length === 1 ? '' : 's'}`
-            : ''}
-        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <PlanSummary summary={summaryText} />
+        </div>
         <label
-          style={{ display: 'flex', alignItems: 'center', gap: 4 }}
-          title="Cumulative shows all revisions with grey-muted superseded tasks; Latest shows only the current plan."
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            fontSize: 10,
+            color: 'var(--md-sys-color-on-surface-variant, #9da3b4)',
+            flexShrink: 0,
+            marginTop: 2,
+          }}
+          title="Cumulative shows all revisions as a union DAG; Latest shows only the current plan."
         >
-          <span style={{ textTransform: 'none' }}>Show:</span>
+          <span>Show:</span>
           <select
             data-testid="task-plan-view-toggle"
             value={taskPlanView}
@@ -277,7 +299,6 @@ export function TaskPlanPanel({
               border: '1px solid var(--md-sys-color-outline-variant, #43474e)',
               borderRadius: 4,
               padding: '1px 4px',
-              textTransform: 'none',
             }}
           >
             <option value="cumulative">Cumulative</option>
@@ -285,22 +306,24 @@ export function TaskPlanPanel({
           </select>
         </label>
       </div>
-      {showScrubber && (
-        <RevisionScrubber
-          revisions={history.map((h) => ({
-            revisionIndex: h.revisionIndex,
-            revisionKind: h.revisionKind,
-          }))}
-          selected={scrubberSelection}
-          onSelect={setScrubberSelection}
-        />
+      {syncHint && (
+        <div
+          data-testid="plan-sync-hint"
+          style={{
+            fontSize: 10,
+            padding: '0 10px 4px',
+            color: 'var(--md-sys-color-on-surface-variant, #9da3b4)',
+            fontStyle: 'italic',
+          }}
+        >
+          {syncHint}
+        </div>
       )}
       <TaskStagesGraph
         plan={plan}
         cumulative={isCumulative ? cumulative : null}
         supersedesMap={isCumulative ? supersedesMap : undefined}
-        revisionFilter={isCumulative ? scrubberSelection : null}
-        revisionFilterMode="mute"
+        revisionFilter={isCumulative ? selectedRevision : null}
         selectedTaskId={selectedTaskId}
         agentColorFor={agentColorFor}
         agentNameFor={agentNameFor}

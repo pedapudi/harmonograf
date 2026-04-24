@@ -397,7 +397,18 @@ export function TrajectoryView() {
 
   // harmonograf#197: scrubber pins the cumulative view to a specific
   // revision number (tasks introduced after are hidden); null → "Latest".
-  const [pinnedRevision, setPinnedRevision] = useState<number | null>(null);
+  //
+  // Lifted into the shared uiStore so the Gantt's plan subview can mirror
+  // the same selection (single source of truth). Test mocks that don't
+  // include the slice fall back to a no-op setter + null value.
+  const pinnedRevision = useUiStore(
+    (s) => (s as { selectedRevision?: number | null }).selectedRevision ?? null,
+  );
+  const setPinnedRevision = useUiStore(
+    (s) =>
+      (s as { setSelectedRevision?: (rev: number | null) => void })
+        .setSelectedRevision ?? (() => {}),
+  );
   // Steering-arrow / supersedes-edge click target. Separate from
   // `selection` so the arrow panel can coexist with a task-detail selection.
   const [steeringSelection, setSteeringSelection] =
