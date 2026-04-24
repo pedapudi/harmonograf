@@ -5,6 +5,7 @@
 import type { Agent, ContextWindowSample, Task, TaskPlan, TaskStatus } from './types';
 import { SpanIndex, type DirtyRect } from './spatialIndex';
 import { hasThinking } from '../lib/thinking';
+import { PlanHistoryRegistry } from '../state/planHistoryStore';
 
 export type { DirtyRect } from './spatialIndex';
 export { SpanIndex } from './spatialIndex';
@@ -836,6 +837,13 @@ export class SessionStore {
   readonly drifts = new DriftRegistry();
   readonly delegations = new DelegationRegistry();
   readonly contextSeries = new ContextSeriesRegistry();
+  // Accumulator for every revision of every plan observed in this
+  // session. Fed by the `planSubmitted` / `planRevised` event handlers
+  // and by the optional `GetSessionPlanHistory` RPC loader so the Task
+  // / Plan panel and Trajectory view can render plans as evolving
+  // artifacts (generation badges, annotated supersedes edges, historic
+  // nodes) without mining the rolling snapshot buffer on `tasks`.
+  readonly planHistory = new PlanHistoryRegistry();
 
   // Scan the span index for TOOL_CALL spans whose name is one of the
   // harmonograf reporting tools and project them as OrchestrationEvents.
@@ -988,6 +996,7 @@ export class SessionStore {
     this.drifts.clear();
     this.delegations.clear();
     this.contextSeries.clear();
+    this.planHistory.clear();
     this.nowMs = 0;
   }
 }
