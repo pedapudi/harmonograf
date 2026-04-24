@@ -465,6 +465,18 @@ export function TrajectoryView() {
     compareRevIdx !== null && compareRevIdx !== revIdx
       ? vm.revs[Math.min(compareRevIdx, latestIdx)] ?? null
       : null;
+  // Header math reconciles with the scrubber: revision INDICES from the
+  // plan history, not array positions. A session with R0 + R2 (R1 missing,
+  // e.g. because a refine produced a new plan_id and the prior was kept)
+  // should read "rev 2 of 2", not "rev 1 of 1". Falls back to the array
+  // index when revisionIndex is missing on a TaskPlan.
+  const highestRevisionIndex = vm.revs.reduce(
+    (max, p, i) => Math.max(max, p.revisionIndex ?? i),
+    0,
+  );
+  const currentRevisionIndex = currentRev?.revisionIndex ?? revIdx;
+  const compareRevisionIndex =
+    compareRev?.revisionIndex ?? compareRevIdx ?? null;
   // Only produce diff marks when the user has explicitly pinned a compare
   // rev — otherwise every task would be flagged "added" against a null prev.
   const marks =
@@ -561,7 +573,7 @@ export function TrajectoryView() {
         <span className="hg-panel__hint">
           {vm.revs.length === 0
             ? 'no plan yet'
-            : `rev ${revIdx} of ${latestIdx}${compareRev ? ` · comparing to rev ${compareRevIdx}` : ''}`}
+            : `rev ${currentRevisionIndex} of ${highestRevisionIndex}${compareRev ? ` · comparing to rev ${compareRevisionIndex}` : ''}`}
         </span>
       </header>
       <div className="hg-panel__body hg-traj__body">
