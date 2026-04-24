@@ -202,10 +202,75 @@ export class PlanHistoryRegistry {
     };
   }
 
+  /**
+   * Build the per-plan supersession map, keyed by the OLD task id.
+   *
+   * Two-pass:
+   *
+   *   Pass 1 (authoritative): walk every revision. For each task `t`
+   *   whose `t.supersedes` is non-empty, emit a SupersessionLink from
+   *   `t.supersedes` → `t.id`, stamped with the kind/reason/trigger of
+   *   the revision in which `t` first appears. This is the goldfive
+   *   refine LLM's explicit signal (goldfive#237) and always wins over
+   *   the heuristic.
+   *
+   *   Pass 2 (fallback): for each revision transition prev → next,
+   *   compute dropped = prev \ next and trulyNew = next ids never seen
+   *   before. Any dropped id that Pass 1 DID NOT pair gets a
+   *   positional-heuristic pairing against the first unpaired trulyNew
+   *   id, in original list order. Dropped ids beyond the unpaired-new
+   *   count get an empty newTaskId so renderers can still draw a
+   *   dangling "retired" edge.
+   *
+   * The heuristic is brittle when a revision's drop count ≠ add count
+   * and mispairs across unrelated tasks — it remains only to cover
+   * legacy plans / tasks where the LLM did not set `supersedes`.
+   */
   supersedesMap(planId: string): Map<string, SupersessionLink> {
     const out = new Map<string, SupersessionLink>();
     const arr = this.revisions.get(planId);
-    if (!arr || arr.length < 2) return out;
+    if (!arr || arr.length === 0) return out;
+
+    // Pass 1 — authoritative. Track when each task id first appears so we
+    // can stamp the SupersessionLink with the revision that introduced
+    // the replacement (not subsequent carry-through revisions).
+    const firstSeenIn = new Map<string, number>(); // task id → arr index
+    for (let i = 0; i < arr.length; i++) {
+      for (const t of arr[i].plan.tasks) {
+        if (!firstSeenIn.has(t.id)) firstSeenIn.set(t.id, i);
+      }
+    }
+    const pairedOldIds = new Set<string>();
+    const pairedNewIds = new Set<string>();
+    for (let i = 0; i < arr.length; i++) {
+      const rec = arr[i];
+      for (const t of rec.plan.tasks) {
+        if (!t.supersedes) continue;
+        // Only emit once, at the revision the replacement first appears.
+        if (firstSeenIn.get(t.id) !== i) continue;
+        // Guard against a task claiming to supersede itself.
+        if (t.supersedes === t.id) continue;
+        // Don't overwrite if a later revision restates the link — first
+        // authoritative pairing wins. (Shouldn't happen in practice.)
+        if (out.has(t.supersedes)) continue;
+        out.set(t.supersedes, {
+          oldTaskId: t.supersedes,
+          newTaskId: t.id,
+          revision: rec.revision,
+          kind: rec.kind,
+          reason: rec.reason,
+          triggerEventId: rec.triggerEventId,
+        });
+        pairedOldIds.add(t.supersedes);
+        pairedNewIds.add(t.id);
+      }
+    }
+
+    if (arr.length < 2) return out;
+
+    // Pass 2 — positional heuristic fallback for any dropped ids that
+    // Pass 1 didn't pair. Walk transitions prev → next in order so that
+    // earlier revisions get their dedicated pool of unpaired-new ids.
     const everSeen = new Set<string>();
     for (const t of arr[0].plan.tasks) everSeen.add(t.id);
     for (let i = 1; i < arr.length; i++) {
@@ -214,15 +279,23 @@ export class PlanHistoryRegistry {
       const nextIds = new Set(next.tasks.map((t) => t.id));
       const dropped: string[] = [];
       for (const t of prev.tasks) {
-        if (!nextIds.has(t.id)) dropped.push(t.id);
+        if (!nextIds.has(t.id) && !pairedOldIds.has(t.id)) {
+          dropped.push(t.id);
+        }
       }
       const trulyNew: string[] = [];
       for (const t of next.tasks) {
-        if (!everSeen.has(t.id)) trulyNew.push(t.id);
+        if (everSeen.has(t.id)) continue;
+        if (pairedNewIds.has(t.id)) continue;
+        trulyNew.push(t.id);
       }
       const pairs = Math.min(dropped.length, trulyNew.length);
       const rec = arr[i];
       for (let k = 0; k < dropped.length; k++) {
+        // Skip any old id that Pass 1 paired since the last pass (e.g.
+        // if a replacement's `supersedes` targeted something dropped in
+        // this same transition and Pass 1 picked it up above).
+        if (pairedOldIds.has(dropped[k])) continue;
         out.set(dropped[k], {
           oldTaskId: dropped[k],
           newTaskId: k < pairs ? trulyNew[k] : '',

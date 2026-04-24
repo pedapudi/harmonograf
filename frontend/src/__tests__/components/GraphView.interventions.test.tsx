@@ -106,6 +106,7 @@ function plan(id: string, revisionIndex: number, triggerEventId = '', revisionKi
         predictedStartMs: 0,
         predictedDurationMs: 0,
         boundSpanId: '',
+        supersedes: '',
       },
     ],
     edges: [],

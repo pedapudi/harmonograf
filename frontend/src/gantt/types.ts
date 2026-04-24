@@ -121,6 +121,12 @@ export interface Task {
   // the TaskStagesGraph tooltip, the Drawer Task Overview section, and
   // the TrajectoryView task-delta list.
   cancelReason?: string;
+  /** goldfive proto field (goldfive#237): id of the task this one
+   *  supersedes, empty if none. Populated by the refine LLM on
+   *  replacement tasks. Used by PlanHistoryRegistry.supersedesMap as the
+   *  authoritative chain; the positional heuristic is the fallback only
+   *  for revisions that pre-date the field or where the LLM omitted it. */
+  supersedes: string;
 }
 
 export interface TaskEdge {
