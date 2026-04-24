@@ -631,6 +631,11 @@ export interface DriftRecord {
   // PlanRevised row triggered by this autonomous drift onto the drift
   // row (the PlanRevised.trigger_event_id will match).
   driftId: string;
+  // Forward-compat (goldfive/tmp/goldfive-steer-unify): drift authorship.
+  // "user" (user_steer / user_cancel / user_pause), "goldfive" (anything
+  // the orchestrator minted itself), or "" when the producing goldfive
+  // build predates the field. Surfaced in the intervention detail pane.
+  authoredBy?: string;
 }
 
 // Drift registry — in-memory list of DriftDetected events received during
