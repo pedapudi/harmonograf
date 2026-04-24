@@ -1,0 +1,214 @@
+/* TrajectoryTimelineRibbon styles. Mirrors the visual language of the
+   sibling RevisionScrubber in views.css (dark chrome, mono labels, soft
+   tick marks) but compresses four stacked sections into one ~76px band. */
+
+.hg-traj-ribbon {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 76px;
+  padding: 8px 14px;
+  background: #1b1d22;
+  border: 1px solid #2a2d34;
+  border-radius: 8px;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #c8ccd4;
+}
+
+/* Left edge — label + rev/intervention count. */
+.hg-traj-ribbon__lead {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 0 0 auto;
+  min-width: 110px;
+}
+
+.hg-traj-ribbon__title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #e4e7ec;
+}
+
+.hg-traj-ribbon__count {
+  font-size: 10px;
+  opacity: 0.6;
+  margin-top: 2px;
+}
+
+/* Main band. Markers are absolutely positioned by percentage so they
+   reflow with the container width. */
+.hg-traj-ribbon__track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 56px;
+}
+
+.hg-traj-ribbon__baseline {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    #3a3e46 10%,
+    #3a3e46 90%,
+    transparent 100%
+  );
+  transform: translateY(-0.5px);
+  pointer-events: none;
+}
+
+/* Revision notches. Positioned by `left:` inline style; we translate
+   -50% so the dot centres on the timestamp coordinate. */
+.hg-traj-ribbon__rev,
+.hg-traj-ribbon__latest {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.hg-traj-ribbon__latest {
+  right: 0;
+  left: auto;
+  transform: translate(0, -50%);
+}
+
+.hg-traj-ribbon__rev-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #5b8def;
+  background: transparent;
+  box-shadow: 0 0 0 2px #1b1d22;
+}
+
+.hg-traj-ribbon__rev[data-selected='true'] .hg-traj-ribbon__rev-dot,
+.hg-traj-ribbon__latest[data-selected='true'] .hg-traj-ribbon__rev-dot {
+  background: #5b8def;
+  border-color: #9ab4ff;
+  box-shadow: 0 0 0 2px #1b1d22, 0 0 6px rgba(91, 141, 239, 0.5);
+}
+
+.hg-traj-ribbon__rev-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+}
+
+.hg-traj-ribbon__rev[data-selected='true'] .hg-traj-ribbon__rev-label,
+.hg-traj-ribbon__latest[data-selected='true'] .hg-traj-ribbon__rev-label {
+  opacity: 1;
+  color: #e4e7ec;
+}
+
+.hg-traj-ribbon__rev:focus-visible,
+.hg-traj-ribbon__latest:focus-visible,
+.hg-traj-ribbon__intv:focus-visible {
+  outline: 2px solid #9ab4ff;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Intervention glyphs. Triangle rendered as unicode so we don't need an
+   SVG sprite; colour comes from the inline `color` style driven by
+   severity. Positioned above the baseline so it doesn't collide with
+   the revision dot. */
+.hg-traj-ribbon__intv {
+  position: absolute;
+  top: calc(50% - 16px);
+  transform: translate(-50%, 0);
+  background: transparent;
+  border: none;
+  padding: 2px 4px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  color: currentColor;
+}
+
+.hg-traj-ribbon__intv-glyph {
+  display: inline-block;
+  text-shadow: 0 0 2px #1b1d22;
+}
+
+/* Popover. Absolute-positioned above the marker; doesn't affect layout. */
+.hg-traj-ribbon__popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #2a2d34;
+  color: #e4e7ec;
+  border: 1px solid #3a3e46;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 11px;
+  white-space: nowrap;
+  max-width: 320px;
+  pointer-events: none;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.hg-traj-ribbon__popover-at {
+  display: block;
+  margin-top: 2px;
+  opacity: 0.6;
+  font-size: 10px;
+}
+
+/* Right edge — Latest button and expand toggle. */
+.hg-traj-ribbon__tail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.hg-traj-ribbon__latest-btn {
+  background: #5b8def;
+  color: #0f1013;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hg-traj-ribbon__latest-btn:hover {
+  background: #7ca3f1;
+}
+
+.hg-traj-ribbon__expand {
+  background: transparent;
+  color: #c8ccd4;
+  border: 1px solid #3a3e46;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.hg-traj-ribbon__expand[aria-pressed='true'] {
+  background: #2a2d34;
+  color: #e4e7ec;
+}
