@@ -723,6 +723,91 @@ export class DriftRegistry {
   }
 }
 
+// A captured goldfive InvocationCancelled event (goldfive#251 Stream C /
+// #259). Operator-only record that goldfive cooperatively cancelled one
+// agent invocation. Rich context on why (reason, severity, drift link,
+// optional tool name) so the Trajectory / Gantt / Graph views can render
+// a distinct cancel marker without inferring the intent from tea-leaves.
+//
+// Not actionable from the UI (no retry / cancel-again affordance) — just
+// a record. Plays the same "intervention timeline marker" role as
+// DriftRecord but with a stop/cancel glyph.
+export interface InvocationCancelRecord {
+  seq: number;              // monotonic per session, assigned on arrival
+  runId: string;
+  invocationId: string;
+  agentId: string;          // canonicalized <client>:<bare> on the wire
+  reason: string;           // 'drift' | 'user_steer' | 'plan_revised' | ''
+  severity: string;         // 'info' | 'warning' | 'critical' | ''
+  driftId: string;          // backlink to the triggering DriftRecord, empty when no drift backs it
+  driftKind: string;        // raw lowercase drift-kind when a drift backed it
+  detail: string;           // human-readable 1-liner
+  toolName: string;         // non-empty when the cancel fired at tool-dispatch
+  // Session-relative ms + authoritative wall clock — mirrors DriftRecord
+  // so that reconnect / live-race rebasing works the same way (see
+  // harmonograf#127 for the wider problem being solved).
+  recordedAtMs: number;
+  recordedAtAbsoluteMs: number;
+}
+
+// Registry of per-session invocation-cancel records. Lives alongside
+// DriftRegistry and plays the same "append on ingest, rebase on session
+// start, render as a timeline marker" role.
+export class InvocationCancelRegistry {
+  private cancels: InvocationCancelRecord[] = [];
+  private listeners = new Set<() => void>();
+  private nextSeq = 0;
+
+  list(): readonly InvocationCancelRecord[] {
+    return this.cancels;
+  }
+
+  append(
+    c: Omit<InvocationCancelRecord, 'seq' | 'recordedAtAbsoluteMs'> &
+      Partial<Pick<InvocationCancelRecord, 'recordedAtAbsoluteMs'>>,
+  ): void {
+    const recordedAtAbsoluteMs = c.recordedAtAbsoluteMs ?? c.recordedAtMs;
+    this.cancels.push({
+      ...c,
+      recordedAtAbsoluteMs,
+      seq: this.nextSeq++,
+    });
+    this.emit();
+  }
+
+  // Symmetric to DriftRegistry.rebase — re-derives session-relative ms
+  // from the authoritative absolute once the session start is known.
+  rebase(sessionStartMs: number): void {
+    if (this.cancels.length === 0) return;
+    let changed = false;
+    for (const c of this.cancels) {
+      if (!c.recordedAtAbsoluteMs) continue;
+      const next = c.recordedAtAbsoluteMs - sessionStartMs;
+      if (c.recordedAtMs !== next) {
+        c.recordedAtMs = next;
+        changed = true;
+      }
+    }
+    if (changed) this.emit();
+  }
+
+  clear(): void {
+    if (this.cancels.length === 0) return;
+    this.cancels = [];
+    this.nextSeq = 0;
+    this.emit();
+  }
+
+  subscribe(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  private emit(): void {
+    for (const fn of this.listeners) fn();
+  }
+}
+
 // A captured goldfive DelegationObserved event. Emitted when a coordinator
 // agent invokes `AgentTool(sub_agent)` — goldfive observes the tool call on
 // its registry-dispatch side and fans out a DelegationObserved event so
@@ -847,6 +932,7 @@ export class SessionStore {
   readonly spans = new SpanIndex();
   readonly tasks = new TaskRegistry();
   readonly drifts = new DriftRegistry();
+  readonly invocationCancels = new InvocationCancelRegistry();
   readonly delegations = new DelegationRegistry();
   readonly contextSeries = new ContextSeriesRegistry();
   // Accumulator for every revision of every plan observed in this
@@ -994,6 +1080,7 @@ export class SessionStore {
   // registry short-circuits when nothing moves.
   rebaseRelativeTimestamps(sessionStartMs: number): void {
     this.drifts.rebase(sessionStartMs);
+    this.invocationCancels.rebase(sessionStartMs);
     this.delegations.rebase(sessionStartMs);
   }
 

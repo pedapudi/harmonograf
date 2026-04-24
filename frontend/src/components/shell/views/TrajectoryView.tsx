@@ -366,12 +366,19 @@ export function TrajectoryView() {
     // user STEERs / HUMAN_RESPONSEs immediately surface as intervention
     // entries in the trajectory.
     const un5 = useAnnotationStore.subscribe(() => setTick((n) => n + 1));
+    // InvocationCancelled markers (goldfive#251) — operator-observability
+    // records that a cancel fired. Re-derive intervention rows so the
+    // trajectory view picks up new cancel markers live.
+    const un6 = store.invocationCancels.subscribe(() =>
+      setTick((n) => n + 1),
+    );
     return () => {
       un1();
       un2();
       un3();
       un4();
       un5();
+      un6();
     };
   }, [store]);
 

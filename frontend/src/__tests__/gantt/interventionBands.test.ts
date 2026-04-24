@@ -52,6 +52,8 @@ function mkRow(over: Partial<InterventionRow>): InterventionRow {
     annotationId: '',
     driftKind: 'looping_reasoning',
     triggerEventId: '',
+    targetAgentId: '',
+    driftId: '',
     ...over,
   };
 }
@@ -160,6 +162,63 @@ describe('GanttRenderer intervention bands — live rendering', () => {
       mkRow({ key: 'c', atMs: 1_800_800 }),
     ]);
     drawOverlay(renderer);
+    expect(renderer.lastInterventionBandCount).toBe(1);
+  });
+
+  // ─── InvocationCancelled bands (goldfive#251 Stream C) ──────────────────
+  it('cancel-source rows render as their own band on the Gantt', () => {
+    const store = new SessionStore();
+    const renderer = new GanttRenderer(store);
+    renderer.attach(stubCanvas(), stubCanvas(), stubCanvas());
+    renderer.resize(1200, 200, 1);
+    renderer.setViewport({
+      endMs: 60_000,
+      windowMs: 60_000,
+      liveFollow: false,
+      replay: false,
+    });
+    renderer.setInterventions([
+      mkRow({
+        key: 'c1',
+        atMs: 10_000,
+        source: 'cancel',
+        kind: 'CANCELLED',
+        severity: 'critical',
+      }),
+    ]);
+    drawOverlay(renderer);
+    expect(renderer.lastInterventionBandCount).toBe(1);
+  });
+
+  it('cancel wins over drift in a cluster pickSource race', () => {
+    const store = new SessionStore();
+    const renderer = new GanttRenderer(store);
+    renderer.attach(stubCanvas(), stubCanvas(), stubCanvas());
+    renderer.resize(1200, 200, 1);
+    // Wide viewport so the rows cluster into one band — pickSource
+    // promotes cancel over drift so the final cluster colour reads
+    // as the terminal marker, not the upstream drift.
+    renderer.setViewport({
+      endMs: 3_600_000,
+      windowMs: 3_600_000,
+      liveFollow: false,
+      replay: false,
+    });
+    renderer.setInterventions([
+      mkRow({ key: 'd', atMs: 1_800_000, source: 'drift', kind: 'OFF_TOPIC' }),
+      mkRow({
+        key: 'c',
+        atMs: 1_800_400,
+        source: 'cancel',
+        kind: 'CANCELLED',
+        severity: 'critical',
+      }),
+    ]);
+    drawOverlay(renderer);
+    // Merged into a single band; the renderer's instrumentation
+    // doesn't expose the cluster's source directly, but the count
+    // confirms the cluster pass fired. (Source is exercised via the
+    // unit test on pickSource and via the SOURCE_COLOR palette.)
     expect(renderer.lastInterventionBandCount).toBe(1);
   });
 });

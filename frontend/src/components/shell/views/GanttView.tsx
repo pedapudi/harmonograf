@@ -85,10 +85,18 @@ export function GanttView() {
     // round-trip per marker.
     const un = watch.store.tasks.subscribe(() => setTick((t) => t + 1));
     const unDrift = watch.store.drifts.subscribe(() => setTick((t) => t + 1));
+    // InvocationCancelled markers (goldfive#251) — same role as the
+    // drift subscription: re-derive the intervention list when a new
+    // cancel marker lands, so the Gantt band + InterventionsList row
+    // reflect the arrival without a ListInterventions round-trip.
+    const unCancel = watch.store.invocationCancels.subscribe(() =>
+      setTick((t) => t + 1),
+    );
     const unAnn = useAnnotationStore.subscribe(() => setTick((t) => t + 1));
     return () => {
       un();
       unDrift();
+      unCancel();
       unAnn();
     };
   }, [watch?.store]);

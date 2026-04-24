@@ -782,6 +782,8 @@ class Transport:
             return telemetry_pb2.TelemetryUp(span_end=payload)
         if env.kind is EnvelopeKind.GOLDFIVE_EVENT:
             return telemetry_pb2.TelemetryUp(goldfive_event=payload)
+        if env.kind is EnvelopeKind.INVOCATION_CANCELLED:
+            return telemetry_pb2.TelemetryUp(invocation_cancelled=payload)
         return None
 
     def _build_hello(
@@ -1135,6 +1137,10 @@ def _session_id_of_envelope(env: SpanEnvelope) -> str:
             return ""
         return getattr(span, "session_id", "") or ""
     if env.kind is EnvelopeKind.GOLDFIVE_EVENT:
+        return getattr(payload, "session_id", "") or ""
+    if env.kind is EnvelopeKind.INVOCATION_CANCELLED:
+        # Dict-sourced harmonograf variant — carries session_id verbatim
+        # at the top level of the proto (mirrors the goldfive envelope).
         return getattr(payload, "session_id", "") or ""
     return ""
 

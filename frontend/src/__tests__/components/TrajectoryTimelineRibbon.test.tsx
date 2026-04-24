@@ -43,6 +43,8 @@ function intv(over: Partial<InterventionRow>): InterventionRow {
     annotationId: '',
     driftKind: '',
     triggerEventId: '',
+    targetAgentId: '',
+    driftId: '',
     ...over,
   };
 }

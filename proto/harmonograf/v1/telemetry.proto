@@ -156,7 +156,83 @@ message TelemetryUp {
     // on the event's payload oneof; frontend WatchSession fans it out
     // as typed deltas.
     goldfive.v1.Event goldfive_event = 11;
+    // Operator-observability event emitted by goldfive's ADK plugin
+    // whenever a CRITICAL drift or user-steer triggers per-invocation
+    // cancellation (goldfive#251 / #259). Carried on this harmonograf
+    // oneof instead of inside ``goldfive.v1.Event`` because goldfive's
+    // proto envelope deliberately did not mint an ``InvocationCancelled``
+    // variant — the source emitter ships a dict for forward-compat, and
+    // harmonograf converts dict→proto at the client sink. The sink keys
+    // on the envelope's ``"kind": "invocation_cancelled"`` discriminator
+    // (see ``client/harmonograf_client/sink.py::HarmonografSink.emit``).
+    InvocationCancelled invocation_cancelled = 12;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Operator-observability: invocation cancellation (goldfive#251 / #259)
+// ---------------------------------------------------------------------------
+
+// Operator-facing record that goldfive cancelled one agent invocation
+// cooperatively. Rich context (reason, severity, drift link, optional
+// tool name) lands here so the harmonograf UI can render a distinct
+// marker on the Trajectory / Gantt / Graph views without inferring the
+// intent from tea-leaves (a drift + a silent LLM response).
+//
+// Operator-only: the LLM-visible tool response on the goldfive side is a
+// minimal ``{"status": "cancelled"}`` — the rich payload lives on the
+// sink fan-out, not on the model's call-result. Harmonograf therefore
+// renders this as a non-actionable record (no retry / cancel-again
+// affordance; just a detail pane on click).
+//
+// Wire shape mirrors the dict envelope goldfive emits verbatim so the
+// sink's dict→proto conversion is a field-by-field copy. Field numbers
+// are stable; reserved-safe for future additions (e.g. a structured
+// drift link once goldfive mints a DriftDetected proto id alongside the
+// ``drift_id`` string).
+message InvocationCancelled {
+  // Envelope metadata — the fields the goldfive dict envelope carries
+  // alongside the payload. Preserved so the server can persist the same
+  // shape it persists for goldfive.v1.Event rows and the frontend can
+  // stamp session-relative timestamps.
+  string run_id = 1;
+  uint64 sequence = 2;
+  string session_id = 3;
+  google.protobuf.Timestamp emitted_at = 4;
+
+  // Payload fields — see goldfive/adapters/_adk_plugin.py::
+  // _emit_invocation_cancelled for the authoritative source.
+  //
+  // ADK invocation id. Unique per agent invocation within a run —
+  // stable across retries, used as the join key when the UI wants to
+  // correlate the cancel marker with an INVOCATION span.
+  string invocation_id = 5;
+  // Agent the cancelled invocation ran under. Bare name on the goldfive
+  // side; the harmonograf sink canonicalizes it to ``<client>:<bare>``
+  // before persisting so the render path can look up the agent row
+  // without a second bare→compound pass.
+  string agent_name = 6;
+  // Lowercase reason — "drift" / "user_steer" / "plan_revised" —
+  // matching the taxonomy goldfive emits. Empty string is valid on
+  // well-formed events (shouldn't happen, but tolerated).
+  string reason = 7;
+  // Lowercase severity — "info" / "warning" / "critical".
+  string severity = 8;
+  // Cross-reference to the triggering ``DriftDetected.id`` (UUID4).
+  // Empty when the cancel fired without a backing drift (user-cancel
+  // path, plan-revised path). When set, the UI links the cancel row
+  // back to the drift detail drawer.
+  string drift_id = 9;
+  // Raw drift-kind name (lowercase): "off_topic" / "user_steer" /
+  // "looping_reasoning" / etc. Empty when no drift backs the cancel.
+  string drift_kind = 10;
+  // Human-readable one-liner describing WHY the cancel fired. Used as
+  // the primary body of the intervention row and the detail popover.
+  string detail = 11;
+  // Tool name when the cancel fired at a tool-dispatch checkpoint
+  // (goldfive#251 Stream C). Empty when the cancel fired at a different
+  // checkpoint (e.g. per-invocation before_agent_callback).
+  string tool_name = 12;
 }
 
 // ---------------------------------------------------------------------------

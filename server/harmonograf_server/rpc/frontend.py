@@ -31,6 +31,7 @@ from harmonograf_server.bus import (
     DELTA_DRIFT,
     DELTA_GOAL_DERIVED,
     DELTA_HEARTBEAT,
+    DELTA_INVOCATION_CANCELLED,
     DELTA_RUN_ABORTED,
     DELTA_RUN_COMPLETED,
     DELTA_RUN_STARTED,
@@ -66,7 +67,7 @@ from goldfive.v1 import types_pb2 as goldfive_types_pb2
 from goldfive.pb.goldfive.v1 import control_pb2 as gf_control_pb2
 from harmonograf_server.ingest import IngestPipeline
 from harmonograf_server.interventions import list_interventions, record_to_pb
-from harmonograf_server.pb import frontend_pb2, types_pb2
+from harmonograf_server.pb import frontend_pb2, telemetry_pb2, types_pb2
 from harmonograf_server.storage import (
     Agent,
     Annotation,
@@ -352,6 +353,45 @@ class FrontendServicerMixin:
                     if ts is not None:
                         ev.emitted_at.CopyFrom(ts)
                 yield frontend_pb2.SessionUpdate(goldfive_event=ev)
+
+            # 4b.2. Invocation cancellations — replay the per-session ring
+            # so the cancel markers on Trajectory / Gantt / Graph reappear
+            # on reconnect. Same sibling rationale as drifts: the event is
+            # dict-sourced, not persisted in ``goldfive_events``. When the
+            # goldfive proto adds an InvocationCancelled variant the ring
+            # can collapse into the drift-style replay path above.
+            try:
+                cancel_records = self._ingest.invocation_cancels_for_session(
+                    session_id
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("invocation_cancels_for_session failed: %s", exc)
+                cancel_records = []
+            for cr in cancel_records:
+                cmsg = telemetry_pb2.InvocationCancelled(
+                    run_id=cr.get("run_id", "") or "",
+                    sequence=int(cr.get("sequence", 0) or 0),
+                    session_id=session_id,
+                    invocation_id=cr.get("invocation_id", "") or "",
+                    agent_name=cr.get("agent_name", "") or "",
+                    reason=cr.get("reason", "") or "",
+                    severity=cr.get("severity", "") or "",
+                    drift_id=cr.get("drift_id", "") or "",
+                    drift_kind=cr.get("drift_kind", "") or "",
+                    detail=cr.get("detail", "") or "",
+                    tool_name=cr.get("tool_name", "") or "",
+                )
+                # Prefer the goldfive-side emitted_at (clock that fired
+                # the cancel); fall back to the ingest-side recorded_at
+                # when absent so the UI always has a timestamp to render.
+                ts_val = cr.get("emitted_at")
+                if not isinstance(ts_val, (int, float)):
+                    ts_val = cr.get("recorded_at")
+                if isinstance(ts_val, (int, float)):
+                    ts = float_to_ts(float(ts_val))
+                    if ts is not None:
+                        cmsg.emitted_at.CopyFrom(ts)
+                yield frontend_pb2.SessionUpdate(invocation_cancelled=cmsg)
 
             # 4c. Context window samples — replay the most recent per-agent
             # series so the Gantt context-window lane renders immediately
@@ -1070,6 +1110,32 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
         ev.task_progress.fraction = float(p.get("fraction", 0.0) or 0.0)
         ev.task_progress.detail = p.get("detail", "") or ""
         return frontend_pb2.SessionUpdate(goldfive_event=ev)
+    if delta.kind == DELTA_INVOCATION_CANCELLED:
+        p = delta.payload
+        cmsg = telemetry_pb2.InvocationCancelled(
+            run_id=p.get("run_id", "") or "",
+            sequence=int(p.get("sequence", 0) or 0),
+            session_id=delta.session_id,
+            invocation_id=p.get("invocation_id", "") or "",
+            agent_name=p.get("agent_name", "") or "",
+            reason=p.get("reason", "") or "",
+            severity=p.get("severity", "") or "",
+            drift_id=p.get("drift_id", "") or "",
+            drift_kind=p.get("drift_kind", "") or "",
+            detail=p.get("detail", "") or "",
+            tool_name=p.get("tool_name", "") or "",
+        )
+        # Prefer the goldfive-side emitted_at; fall back to ingest-side
+        # recorded_at so the frontend always has a timestamp to render
+        # (mirrors the DELTA_DRIFT emittedAt stamping).
+        ts_val = p.get("emitted_at")
+        if not isinstance(ts_val, (int, float)):
+            ts_val = p.get("recorded_at")
+        if isinstance(ts_val, (int, float)):
+            ts = float_to_ts(float(ts_val))
+            if ts is not None:
+                cmsg.emitted_at.CopyFrom(ts)
+        return frontend_pb2.SessionUpdate(invocation_cancelled=cmsg)
     if delta.kind == DELTA_AGENT_INVOCATION_STARTED:
         p = delta.payload
         ev = goldfive_events_pb2.Event(run_id=p.get("run_id", ""))

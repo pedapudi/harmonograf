@@ -1652,6 +1652,9 @@ export class GanttRenderer {
       a: InterventionRow['source'],
       b: InterventionRow['source'],
     ): InterventionRow['source'] => {
+      // Cancel is the most terminal marker — surfaces on top of any
+      // other source in a cluster so operators see it first.
+      if (a === 'cancel' || b === 'cancel') return 'cancel';
       if (a === 'user' || b === 'user') return 'user';
       if (a === 'drift' || b === 'drift') return 'drift';
       return 'goldfive';

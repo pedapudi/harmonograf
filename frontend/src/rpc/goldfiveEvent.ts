@@ -31,6 +31,7 @@ import {
   DriftSeverity as GoldfiveDriftSeverityEnum,
 } from '../pb/goldfive/v1/types_pb.js';
 import type { Event as GoldfiveEvent } from '../pb/goldfive/v1/events_pb.js';
+import type { InvocationCancelled as InvocationCancelledPb } from '../pb/harmonograf/v1/telemetry_pb.js';
 import { useApprovalsStore } from '../state/approvalsStore';
 import {
   USER_ACTOR_ID,
@@ -653,4 +654,128 @@ export function applyGoldfiveEvent(
       return;
     }
   }
+}
+
+// Synthesize a cancel marker span on the cancelled agent's lane so the
+// Gantt renderer shows a stop glyph at the cancellation time without
+// special-casing the cancel registry in the renderer. The span name
+// reads "cancelled: <reason>" so the default Gantt label path reads
+// naturally, and ``harmonograf.cancel_marker = true`` lets downstream
+// consumers (custom renderers) pick these out if needed.
+//
+// Same pattern as synthesizeDriftSpan (drifts land as synthesized
+// spans on the __goldfive__ row). The difference: cancels land on the
+// CANCELLED AGENT's row, not on the goldfive row — because a cancel is
+// an event that happened to a specific agent's invocation, and the UI
+// reads better when the marker sits on that lane.
+function synthesizeCancelSpan(
+  store: SessionStore,
+  sessionId: string | null,
+  agentId: string,
+  reason: string,
+  severity: string,
+  driftKind: string,
+  detail: string,
+  toolName: string,
+  invocationId: string,
+  driftId: string,
+  recordedAtMs: number,
+): void {
+  if (!agentId) return;
+  const id = `cancel-${agentId}-${recordedAtMs}-${invocationId || 'x'}`;
+  const attributes: Span['attributes'] = {
+    'cancel.reason': { kind: 'string', value: reason },
+    'cancel.severity': { kind: 'string', value: severity },
+    'cancel.drift_kind': { kind: 'string', value: driftKind },
+    'cancel.detail': { kind: 'string', value: detail },
+    'cancel.invocation_id': { kind: 'string', value: invocationId },
+    'cancel.drift_id': { kind: 'string', value: driftId },
+    'harmonograf.synthetic_span': { kind: 'bool', value: true },
+    'harmonograf.cancel_marker': { kind: 'bool', value: true },
+  };
+  if (toolName) {
+    attributes['cancel.tool_name'] = { kind: 'string', value: toolName };
+  }
+  const span: Span = {
+    id,
+    sessionId: sessionId ?? '',
+    agentId,
+    parentSpanId: null,
+    kind: 'CUSTOM',
+    status: 'COMPLETED',
+    name: reason ? `cancelled: ${reason}` : 'cancelled',
+    startMs: recordedAtMs,
+    endMs: recordedAtMs,
+    links: [],
+    attributes,
+    payloadRefs: [],
+    error: null,
+    lane: -1,
+    replaced: false,
+  };
+  store.spans.append(span);
+}
+
+// Operator-observability: an InvocationCancelled envelope landed on the
+// WatchSession stream. Unlike goldfive events, this arrives as its own
+// oneof variant (harmonograf.v1.InvocationCancelled) because the
+// goldfive proto envelope doesn't yet mint an InvocationCancelled
+// message — the sink materializes it from a dict payload goldfive emits
+// alongside the cancellation. Translated straight into an
+// InvocationCancelRecord on the session store so the Trajectory / Gantt
+// / Graph views can render a cancel marker without crawling spans.
+//
+// Agent-agnostic: ``agentId`` is read verbatim from the event (already
+// canonicalized <client>:<bare> by the client sink). No special-casing
+// of any particular agent ("coordinator", etc.) — the renderer looks
+// up the agent's lane/lifeline by id.
+export function applyInvocationCancelled(
+  event: InvocationCancelledPb,
+  store: SessionStore,
+  sessionStartMs: number,
+  sessionId: string | null = null,
+): void {
+  const recordedAbsMs = tsToMsAbs(event.emittedAt);
+  // When the envelope didn't carry emitted_at (shouldn't happen on a
+  // well-formed event but the sink tolerates pre-bump servers), fall
+  // back to "now" so the marker renders at the ingest moment rather
+  // than the session start.
+  const abs = recordedAbsMs || Date.now();
+  const recordedMs = abs - sessionStartMs;
+  const agentId = event.agentName || '';
+  store.invocationCancels.append({
+    runId: event.runId || '',
+    invocationId: event.invocationId || '',
+    agentId,
+    reason: event.reason || '',
+    severity: event.severity || '',
+    driftId: event.driftId || '',
+    driftKind: event.driftKind || '',
+    detail: event.detail || '',
+    toolName: event.toolName || '',
+    recordedAtMs: recordedMs,
+    recordedAtAbsoluteMs: abs,
+  });
+  // Ensure the cancelled-agent's row exists so the Gantt lane renders
+  // even if no spans have been emitted for that agent yet (the cancel
+  // could have fired at the before_agent_callback checkpoint, before
+  // the first span). Bare name is derived from the compound id so the
+  // row label reads cleanly — the agent may be an ADK sub-agent whose
+  // real framework-emitted spans land via the normal plugin path.
+  if (agentId) {
+    store.agents.ensureAgent(agentId, bareAgentName(agentId));
+  }
+  synthesizeCancelSpan(
+    store,
+    sessionId,
+    agentId,
+    event.reason || '',
+    event.severity || '',
+    event.driftKind || '',
+    event.detail || '',
+    event.toolName || '',
+    event.invocationId || '',
+    event.driftId || '',
+    recordedMs,
+  );
 }
