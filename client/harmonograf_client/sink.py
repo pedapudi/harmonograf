@@ -7,6 +7,46 @@ transport's backpressure, reconnect, and heartbeat semantics — nothing new on
 the wire except the ``goldfive_event`` variant introduced in the Phase A proto
 migration (issue #2).
 
+Goldfive agent-row display-name (harmonograf#156, Issue A)
+----------------------------------------------------------
+The server auto-registers a new agent row on the first span emitted against
+a ``(session_id, agent_id)`` it has not seen. Display name is resolved in
+``ingest.py::_register_agent_if_new`` with precedence
+``hgraf.agent.name → span.name → agent_id``. The very first translated span
+on the ``<client>:goldfive`` row used to be whichever goldfive-internal call
+ran first (``goal_derive`` in practice), so the row was mislabeled and every
+subsequent judge/refine span joined a ``goal_derive``-named row.
+
+The fix stamps ``hgraf.agent.name=goldfive`` and ``hgraf.agent.kind=goldfive``
+on the FIRST translated SpanStart emitted in this sink's lifetime. Subsequent
+translations skip the stamp — the row is already registered server-side and
+re-stamping would burn bytes without changing behaviour (see the equivalent
+first-sight gating in
+:meth:`HarmonografTelemetryPlugin._stamp_agent_attrs`).
+
+There is no dedicated ``AgentRegister`` wire primitive today; the first-span
+harvest is the only registration hook. Adding one (plus a
+``FRAMEWORK_GOLDFIVE`` enum value) is tracked as a follow-up on #156.
+
+Goldfive decision-context attributes (harmonograf#156, Issue B)
+---------------------------------------------------------------
+A parallel goldfive PR extends ``GoldfiveLLMCallStart`` /
+``GoldfiveLLMCallEnd`` / ``ReasoningJudgeInvoked`` with decision-context
+fields (``input_preview``, ``output_preview``, ``target_agent_id``,
+``target_task_id``, ``decision_summary``). The sink stamps each non-empty
+field onto the translated span with a ``goldfive.`` prefix so the frontend
+can render click-through detail panels uniformly.
+
+``target_agent_id`` is canonicalized via :meth:`_compound` so bare goldfive
+agent names become ``<client>:<bare>`` ids — matching the rewrite pattern
+:meth:`_canonicalize_agent_ids` applies to pass-through events.
+
+Forward-compat: ``hasattr(event, 'input_preview')`` guards every read so the
+sink continues to work both before and after the goldfive submodule bump
+that lands the new proto fields. A one-shot debug log fires when the proto
+is missing the fields so operators can correlate "no decision context on
+spans" with "goldfive submodule needs bump".
+
 Module identity: harmonograf's generated ``telemetry_pb2`` imports
 ``goldfive.v1.events_pb2`` via the same module grafted onto ``goldfive.pb``,
 so ``TelemetryUp.goldfive_event`` shares its class with whatever goldfive's
@@ -90,11 +130,19 @@ Rewrite rules:
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from google.protobuf import timestamp_pb2
 
 from .client import Client
+
+logger = logging.getLogger(__name__)
+
+# One-shot flag: True after we've logged the "goldfive proto missing
+# decision-context fields" warning once per process. Keeps the log from
+# firing on every translated event when the submodule is pre-bump.
+_LOGGED_MISSING_PROTO_FIELDS: bool = False
 
 # Events whose translation-to-span semantics the sink owns. Anything else
 # passes through ``emit_goldfive_event`` as before.
@@ -154,6 +202,11 @@ class HarmonografSink:
     def __init__(self, client: Client) -> None:
         self._client = client
         self._closed = False
+        # First-translated-SpanStart stamps ``hgraf.agent.{name,kind}`` so
+        # the server registers the ``<client>:goldfive`` row with a
+        # human-readable name (harmonograf#156 Issue A). Subsequent
+        # translations skip the stamp — the row is already registered.
+        self._goldfive_agent_registered: bool = False
 
     @property
     def client(self) -> Client:
@@ -301,6 +354,9 @@ class HarmonografSink:
         """``GoldfiveLLMCallStart`` → ``SpanStart``."""
         start = event_pb.goldfive_llm_call_start
         span_id = start.span_id or self._derive_span_id(event_pb)
+        attrs = self._llm_call_attributes(event_pb, start)
+        self._stamp_decision_context(attrs, start, is_end=False)
+        self._maybe_stamp_agent_registration(attrs)
         self._client.emit_span_start(
             kind="LLM_CALL",
             name=start.name or "goldfive_llm_call",
@@ -308,7 +364,7 @@ class HarmonografSink:
             start_time=_ts_from_nanos(start.start_time_ns),
             agent_id=self._goldfive_agent_id(),
             session_id=event_pb.session_id or None,
-            attributes=self._llm_call_attributes(event_pb, start),
+            attributes=attrs,
         )
 
     def _emit_llm_call_end(self, event_pb: Any) -> None:
@@ -330,6 +386,7 @@ class HarmonografSink:
             attributes["goldfive.call_name"] = end.name
         if wire_status:
             attributes["goldfive.status"] = wire_status
+        self._stamp_decision_context(attributes, end, is_end=True)
         self._client.emit_span_end(
             span_id,
             status=status,
@@ -409,6 +466,15 @@ class HarmonografSink:
             # Run id is handy for debugging cross-session judge lookups.
             "judge.run_id": event_pb.run_id or "",
         }
+        # Goldfive PR extending the judge event with decision-context
+        # fields (harmonograf#156 Issue B): stamp the same ``goldfive.*``
+        # prefix used on the LLM call pair so frontend reads keys
+        # consistently regardless of the source oneof. ``is_end=True`` is
+        # a lie at the read layer — the judge pair collapses both
+        # preview/summary onto the SpanStart since there is no separate
+        # End record to carry ``output_preview``/``decision_summary``.
+        self._stamp_decision_context(attrs, ju, is_end=True)
+        self._maybe_stamp_agent_registration(attrs)
         session_id = event_pb.session_id or None
         agent_id = self._goldfive_agent_id()
         span_id = self._derive_span_id(event_pb)
@@ -438,6 +504,83 @@ class HarmonografSink:
         if start.name:
             attrs["goldfive.call_name"] = start.name
         return attrs
+
+    def _maybe_stamp_agent_registration(self, attrs: dict[str, Any]) -> None:
+        """Stamp ``hgraf.agent.{name,kind}`` on the first translated span.
+
+        Harmonograf has no dedicated agent-registration wire primitive;
+        the server derives an agent row's display name from the first
+        span's ``hgraf.agent.name`` attribute (with fall-through to
+        ``span.name`` and ``agent_id``). Without this stamp the
+        ``<client>:goldfive`` row would be labeled with whichever
+        goldfive-internal LLM call fired first (typically
+        ``goal_derive``) — see harmonograf#156.
+
+        First-sight gated by :attr:`_goldfive_agent_registered` so the
+        stamp lands exactly once per sink instance. The server's
+        ``seen_routes`` cache short-circuits re-registers anyway, but
+        keeping the client side tight avoids bloating every span frame
+        with redundant attribute entries.
+        """
+        if self._goldfive_agent_registered:
+            return
+        attrs["hgraf.agent.name"] = "goldfive"
+        attrs["hgraf.agent.kind"] = "goldfive"
+        self._goldfive_agent_registered = True
+
+    def _stamp_decision_context(
+        self, attrs: dict[str, Any], payload: Any, *, is_end: bool
+    ) -> None:
+        """Stamp goldfive decision-context fields as ``goldfive.*`` attributes.
+
+        The sibling goldfive PR (goldfive-span-context) extends the three
+        LLM-call-flavored event payloads with:
+
+        * ``input_preview`` — truncated input shown to the LLM (both Start and End)
+        * ``output_preview`` — truncated model output (End only)
+        * ``target_agent_id`` — bare or compound id of the subject agent
+          (canonicalized to compound via :meth:`_compound`)
+        * ``target_task_id`` — task this call is deciding on
+        * ``decision_summary`` — one-line summary of the decision (End only)
+
+        Empty strings are skipped to avoid attribute-map clutter. Fields
+        missing from the proto (pre-submodule-bump) are detected via
+        ``hasattr`` and skipped — a one-shot debug log fires so operators
+        can correlate.
+
+        ``is_end`` scopes which fields are read: Start events don't carry
+        ``output_preview``/``decision_summary`` on the goldfive proto, so
+        we don't probe them there. (The judge-span path passes
+        ``is_end=True`` because its terminal-only event carries both.)
+        """
+        # Probe a single field to detect pre-bump protos. Only one field
+        # is needed; the sibling PR lands all five atomically.
+        if not hasattr(payload, "input_preview"):
+            global _LOGGED_MISSING_PROTO_FIELDS
+            if not _LOGGED_MISSING_PROTO_FIELDS:
+                logger.debug(
+                    "GoldfiveLLMCallStart/End proto missing input_preview field; "
+                    "awaiting goldfive submodule bump"
+                )
+                _LOGGED_MISSING_PROTO_FIELDS = True
+            return
+
+        input_preview = getattr(payload, "input_preview", "") or ""
+        if input_preview:
+            attrs["goldfive.input_preview"] = input_preview
+        target_agent_id = getattr(payload, "target_agent_id", "") or ""
+        if target_agent_id:
+            attrs["goldfive.target_agent_id"] = self._compound(target_agent_id)
+        target_task_id = getattr(payload, "target_task_id", "") or ""
+        if target_task_id:
+            attrs["goldfive.target_task_id"] = target_task_id
+        if is_end:
+            output_preview = getattr(payload, "output_preview", "") or ""
+            if output_preview:
+                attrs["goldfive.output_preview"] = output_preview
+            decision_summary = getattr(payload, "decision_summary", "") or ""
+            if decision_summary:
+                attrs["goldfive.decision_summary"] = decision_summary
 
     def _derive_span_id(self, event_pb: Any) -> str:
         """Fallback span id when the event doesn't carry its own.
