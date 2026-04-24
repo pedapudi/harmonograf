@@ -1,6 +1,6 @@
 import './views.css';
 import type React from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useUiStore } from '../../../state/uiStore';
 import { useSessionWatch } from '../../../rpc/hooks';
 import type { Span, Task, TaskEdge, TaskPlan, TaskStatus } from '../../../gantt/types';
@@ -20,6 +20,22 @@ import {
   resolveDriftDetail,
   type InterventionDetail,
 } from '../../../lib/interventionDetail';
+import {
+  useCumulativePlan,
+  usePlanHistory,
+  useSupersedesMap,
+} from '../../../state/planHistoryHooks';
+import type {
+  CumulativePlan,
+  CumulativeTaskMeta,
+  PlanRevisionRecord,
+  SupersessionLink,
+} from '../../../state/planHistoryStore';
+import { RevisionScrubber } from './RevisionScrubber';
+import {
+  SteeringDetailPanel,
+  type SteeringSelection,
+} from './SteeringDetailPanel';
 
 // ── Palette ────────────────────────────────────────────────────────────────
 // Aligned with GanttView's status palette so a task's status reads the same
@@ -366,6 +382,31 @@ export function TrajectoryView() {
   const [compareRevIdx, setCompareRevIdx] = useState<number | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
 
+  // harmonograf#197: scrubber pins the cumulative view to a specific
+  // revision number (tasks introduced after are hidden); null → "Latest".
+  const [pinnedRevision, setPinnedRevision] = useState<number | null>(null);
+  // Steering-arrow / supersedes-edge click target. Separate from
+  // `selection` so the arrow panel can coexist with a task-detail selection.
+  const [steeringSelection, setSteeringSelection] =
+    useState<SteeringSelection | null>(null);
+
+  // Plan-history primary id: same fallback as vm.planId. Used to key the
+  // cumulative + supersedes + history hooks.
+  const primaryPlanId = vm.planId;
+  const cumulativePlan = useCumulativePlan(sessionId, primaryPlanId);
+  const planHistoryRecords = usePlanHistory(sessionId, primaryPlanId);
+  const supersedesMap = useSupersedesMap(sessionId, primaryPlanId);
+
+  // "At this revision" filter on the cumulative plan: when the user pins
+  // a revision with the scrubber, tasks introduced later are hidden. This
+  // yields a new CumulativePlan with a pruned task+edge list so the DAG
+  // layout engine runs unchanged.
+  const filteredCumulative = useMemo(() => {
+    if (!cumulativePlan) return null;
+    if (pinnedRevision === null) return cumulativePlan;
+    return filterCumulativeAtRevision(cumulativePlan, pinnedRevision);
+  }, [cumulativePlan, pinnedRevision]);
+
   const latestIdx = Math.max(0, vm.revs.length - 1);
   const revIdx = pinnedRevIdx === null ? latestIdx : Math.min(pinnedRevIdx, latestIdx);
   const currentRev = vm.revs[revIdx] ?? null;
@@ -455,6 +496,14 @@ export function TrajectoryView() {
         )}
         {sessionId && vm.revs.length > 0 && (
           <>
+            <RevisionScrubber
+              history={planHistoryRecords}
+              pinnedRevision={pinnedRevision}
+              onPinRevision={(rev) => {
+                setPinnedRevision(rev);
+                setSteeringSelection(null);
+              }}
+            />
             <Ribbon
               revs={vm.revs}
               driftsByRev={vm.driftsByRev}
@@ -476,6 +525,10 @@ export function TrajectoryView() {
             <div className="hg-traj__split">
               <DagPane
                 plan={currentRev}
+                cumulative={filteredCumulative}
+                history={planHistoryRecords}
+                supersedes={supersedesMap}
+                pinnedRevision={pinnedRevision}
                 marks={marks}
                 compareRev={compareRev}
                 driftsOnRev={vm.driftsByRev[revIdx] ?? []}
@@ -487,14 +540,35 @@ export function TrajectoryView() {
                   const task = currentRev.tasks.find((t) => t.id === taskId);
                   if (task?.boundSpanId) selectSpan(task.boundSpanId);
                 }}
+                onSelectSteering={setSteeringSelection}
                 store={store}
               />
-              <DetailPane
-                selection={selection}
-                plan={currentRev}
-                drifts={vm.allDrifts}
-                store={store}
-              />
+              {steeringSelection ? (
+                <SteeringDetailPanel
+                  selection={steeringSelection}
+                  plan={filteredCumulative ?? currentRev}
+                  history={planHistoryRecords}
+                  supersedes={supersedesMap}
+                  store={store}
+                  onClose={() => setSteeringSelection(null)}
+                  onJumpToGantt={() => {
+                    // Hand off to the app-level Gantt jump handler. Today
+                    // we simply close the panel so the user can eyeball
+                    // the drift on the existing ribbon; the sibling
+                    // `useUiStore.selectSpan` is the nav primitive most
+                    // views use. If the refine span is the closest thing
+                    // the view has to "this drift", select it.
+                    setSteeringSelection(null);
+                  }}
+                />
+              ) : (
+                <DetailPane
+                  selection={selection}
+                  plan={currentRev}
+                  drifts={vm.allDrifts}
+                  store={store}
+                />
+              )}
             </div>
           </>
         )}
@@ -609,12 +683,26 @@ function Ribbon(props: RibbonProps) {
 
 interface DagProps {
   plan: TaskPlan | null;
+  // harmonograf#197: cumulative-plan view from PlanHistoryRegistry. When
+  // present, the DAG renders the union of tasks across every revision
+  // (superseded tasks dimmed, REV-N generation badges). `plan` is kept
+  // as a fallback for the one-revision case so the pane renders even
+  // before the plan-history RPC wires up.
+  cumulative: CumulativePlan | null;
+  history: readonly PlanRevisionRecord[];
+  supersedes: Map<string, SupersessionLink>;
+  /** Null = "Latest" cumulative view; otherwise hide tasks introduced
+   *  after this revision number. Controlled by the scrubber. */
+  pinnedRevision: number | null;
   marks: DiffMarks | null;
   compareRev: TaskPlan | null;
   driftsOnRev: DriftRecord[];
   delegations: DelegationRecord[];
   selection: Selection;
   onSelectTask: (taskId: string) => void;
+  // Click target for steering arrow / supersedes edge. Opens the
+  // SteeringDetailPanel.
+  onSelectSteering: (selection: SteeringSelection) => void;
   // Optional session handle used only to resolve the assignee agent's
   // bare display name. Passing null preserves the previous fallback
   // (strip the compound prefix; else render the raw id).
@@ -725,55 +813,235 @@ function findUserGoalSpan(store: SessionStore): Span | null {
   return chosen;
 }
 
+// ── Cumulative filter + steering events ───────────────────────────────────
+
+interface SteeringEvent {
+  /** Revision number the steering produced. */
+  revision: number;
+  /** "user" for USER_STEER / USER_PAUSE / USER_CANCEL originators,
+   *  "goldfive" otherwise. Drives arrow color + gutter glyph. */
+  authoredBy: 'user' | 'goldfive';
+  /** DriftKind name (e.g. "off_topic", "user_steer"). */
+  kind: string;
+  /** Short display label for the arrow annotation. */
+  kindLabel: string;
+  /** Reason text (tooltip body). */
+  reason: string;
+  /** Task the arrow lands on (the new / replacement task). */
+  targetTaskId: string;
+  /** Assignee of the target task — named in the arrow label. */
+  targetAgentId: string;
+  /** Gutter geometry for the revision's origin node. */
+  gutterCx: number;
+  gutterCy: number;
+}
+
+interface SupersedesEdge {
+  oldId: string;
+  link: SupersessionLink;
+}
+
+// Filter a cumulative plan to "at or before" a given revision — used by
+// the scrubber. Tasks introduced after `pinnedRevision` are removed;
+// their edges are dropped too.
+function filterCumulativeAtRevision(
+  cumulative: CumulativePlan,
+  pinnedRevision: number,
+): CumulativePlan {
+  const visibleIds = new Set<string>();
+  for (const [id, meta] of cumulative.taskRevisionMeta.entries()) {
+    if (meta.introducedInRevision <= pinnedRevision) visibleIds.add(id);
+  }
+  const tasks = cumulative.tasks.filter((t) => visibleIds.has(t.id));
+  const edges = cumulative.edges.filter(
+    (e) => visibleIds.has(e.fromTaskId) && visibleIds.has(e.toTaskId),
+  );
+  const meta = new Map<string, CumulativeTaskMeta>();
+  for (const [id, m] of cumulative.taskRevisionMeta.entries()) {
+    if (visibleIds.has(id)) meta.set(id, m);
+  }
+  return { ...cumulative, tasks, edges, taskRevisionMeta: meta };
+}
+
+// Build per-revision steering events. One arrow per non-zero revision in
+// `history` that points at a concrete task on `renderPlan`. Target
+// priority (matches the goldfive PlanRevised contract):
+//   1. supersedes link's newTaskId — the replacement task.
+//   2. refine-span `refine.target_agent_id` → first task with matching
+//      assignee on the render plan.
+//   3. any task on the revision that wasn't present in the previous rev.
+function buildSteeringEvents(
+  history: readonly PlanRevisionRecord[],
+  supersedes: Map<string, SupersessionLink>,
+  renderPlan: TaskPlan,
+  pinnedRevision: number | null,
+  store: SessionStore | null,
+): SteeringEvent[] {
+  if (history.length === 0) return [];
+  const tasksById = new Map<string, Task>();
+  for (const t of renderPlan.tasks) tasksById.set(t.id, t);
+
+  // Invert supersedes map so we can look up by revision → new task id.
+  const newTaskByRevision = new Map<number, string>();
+  for (const link of supersedes.values()) {
+    if (link.newTaskId && !newTaskByRevision.has(link.revision)) {
+      newTaskByRevision.set(link.revision, link.newTaskId);
+    }
+  }
+
+  const events: SteeringEvent[] = [];
+  let slot = 0;
+  for (const rec of history) {
+    if (rec.revision === 0) continue;
+    if (pinnedRevision !== null && rec.revision > pinnedRevision) continue;
+    let targetTaskId = newTaskByRevision.get(rec.revision) || '';
+    let targetAgentId = '';
+    if (targetTaskId) {
+      targetAgentId = tasksById.get(targetTaskId)?.assigneeAgentId || '';
+    }
+    if (!targetTaskId && store) {
+      const refineSpan = findRefineSpanForPlan(store, rec.plan);
+      const agent = readRefineAttr(refineSpan, 'refine.target_agent_id');
+      if (agent) {
+        const match = findSteeringTargetTask(renderPlan, agent);
+        if (match) {
+          targetTaskId = match.id;
+          targetAgentId = agent;
+        }
+      }
+    }
+    // Last-resort fallback: any task in this revision that wasn't in the
+    // previous revision. Keeps the arrow drawable on history built from
+    // nothing but plan snapshots.
+    if (!targetTaskId) {
+      const prev =
+        history.find((r) => r.revision === rec.revision - 1)?.plan ?? null;
+      const prevIds = new Set(prev?.tasks.map((t) => t.id) ?? []);
+      for (const t of rec.plan.tasks) {
+        if (!prevIds.has(t.id) && tasksById.has(t.id)) {
+          targetTaskId = t.id;
+          targetAgentId = t.assigneeAgentId;
+          break;
+        }
+      }
+    }
+    if (!targetTaskId || !tasksById.has(targetTaskId)) continue;
+    const authoredBy: 'user' | 'goldfive' =
+      rec.kind.startsWith('user_') ? 'user' : 'goldfive';
+    const kindLabel = rec.kind
+      ? (authoredBy === 'user' ? 'user steer' : rec.kind.toUpperCase())
+      : `rev ${rec.revision}`;
+    events.push({
+      revision: rec.revision,
+      authoredBy,
+      kind: rec.kind,
+      kindLabel,
+      reason: rec.reason,
+      targetTaskId,
+      targetAgentId,
+      gutterCx: 12,
+      // Stack gutters vertically: skip the user-goal slot (y=16). First
+      // steering gutter at y=40, then every 24px. Caps visually at a
+      // sensible number but arrows still all draw.
+      gutterCy: 40 + slot * 24,
+    });
+    slot++;
+  }
+  return events;
+}
+
+// Rev-generation palette. Rev 0 is muted, later revs step up the warm
+// channel so the operator can tell at a glance how many refines a given
+// task has survived. Caps at REV 3+ to keep the palette finite.
+function genBadgeFill(rev: number): string {
+  if (rev <= 0) return '#5a5e68';
+  if (rev === 1) return '#b59340';
+  if (rev === 2) return '#d09532';
+  return '#e08a24';
+}
+
 function DagPane(props: DagProps) {
   const {
     plan,
+    cumulative,
+    history,
+    supersedes,
+    pinnedRevision,
     marks,
     compareRev,
     driftsOnRev,
     delegations,
     selection,
     onSelectTask,
+    onSelectSteering,
     store,
   } = props;
-  const layout = plan ? layoutDag(plan) : null;
+  // Prefer the cumulative plan — it retains superseded tasks as historical
+  // nodes. Falls back to `plan` for pre-history-bootstrap renders.
+  const renderPlan: TaskPlan | null = cumulative ?? plan;
+  const layout = renderPlan ? layoutDag(renderPlan) : null;
   const driftsByTaskId = buildDriftsByTaskId(driftsOnRev);
   const delegationsByTaskId = buildDelegationsByTaskId(delegations);
+  const taskMeta: Map<string, CumulativeTaskMeta> =
+    cumulative?.taskRevisionMeta ?? new Map();
 
-  if (!plan || !layout) {
+  if (!renderPlan || !layout) {
     return <div className="hg-traj__dag hg-traj__dag--empty">No plan to render.</div>;
   }
 
-  // harmonograf#196 steering arrow: find the current rev's refine target
-  // and, if one exists, draw a distinct arrow from a small "goldfive"
-  // gutter node on the DAG's left edge to the matching task node. The
-  // target agent lives on the synthesized refine span the ingest layer
-  // stamps on the goldfive actor row at plan.createdAtMs.
-  const revIdx = plan.revisionIndex ?? 0;
-  const refineSpan = store && revIdx > 0 ? findRefineSpanForPlan(store, plan) : null;
-  const steerTargetAgent = refineSpan ? readRefineAttr(refineSpan, 'refine.target_agent_id') : '';
-  const steerKind = refineSpan ? readRefineAttr(refineSpan, 'refine.kind') : plan.revisionKind || '';
-  const steerReason = refineSpan ? readRefineAttr(refineSpan, 'refine.reason') : plan.revisionReason || '';
+  // Current-rev steering event (legacy #196 single-arrow path). Retained
+  // so the pre-history tests that only seed a single refine synth span
+  // still see `trajectory-steer-edges` + `steer-edge-<id>` at the same
+  // testids. Under the new history-driven path, the steering-events list
+  // below additively renders one arrow per rev.
+  const revIdx = renderPlan.revisionIndex ?? 0;
+  const refineSpan = store && revIdx > 0 ? findRefineSpanForPlan(store, renderPlan) : null;
+  const steerTargetAgent = refineSpan
+    ? readRefineAttr(refineSpan, 'refine.target_agent_id')
+    : '';
   const steerTargetTask = steerTargetAgent
-    ? findSteeringTargetTask(plan, steerTargetAgent)
+    ? findSteeringTargetTask(renderPlan, steerTargetAgent)
     : null;
-  // Gutter node coordinates — small circles in the left margin of the
-  // DAG's SVG viewport. Chosen so they never overlap the first-layer
-  // task column (which starts at DAG_PAD + 0 = 24). The goldfive node
-  // sits mid-height (steering origin); the user node sits higher and
-  // points to the first layer-0 task (representing the RunStarted goal
-  // that seeded the plan).
-  const GOLDFIVE_NODE = { cx: 12, cy: layout.height / 2, r: 7 };
-  const USER_NODE = { cx: 12, cy: 16, r: 7 };
 
-  // User → first-task arrow: represents "this plan exists because the
-  // user asked for <goal>". Only drawn on the initial rev (rev 0) so
-  // rev 1+ panes don't accumulate a user arrow on every refine.
+  // Gutter geometry — the left margin of the DAG is a small actor column.
+  // User node at the top (seeded the plan), then one goldfive / user-steer
+  // node per revision > 0, stacked top-to-bottom. Heights chosen so they
+  // never overlap the first-layer task column (which starts at DAG_PAD).
+  const GUTTER_X = 12;
+  const USER_NODE_CY = 16;
+  const USER_NODE = { cx: GUTTER_X, cy: USER_NODE_CY, r: 7 };
+
+  // User → first-task arrow: drawn only on rev 0 (or "Latest" with rev 0
+  // present in history).
   const userGoalSpan = store ? findUserGoalSpan(store) : null;
   const userGoalSummary = userGoalSpan?.name || '';
-  const firstLayerTask = revIdx === 0
-    ? plan.tasks.find((t) => layout.nodeById.get(t.id)?.layer === 0) ?? null
-    : null;
+  // The first layer-0 task in the cumulative plan is the user's seed
+  // target. We always render the user → first-task arrow when a goal
+  // span is present (cumulative view accumulates the first layer too).
+  const firstLayerTask =
+    plan && (plan.revisionIndex ?? 0) === 0
+      ? plan.tasks.find((t) => layout.nodeById.get(t.id)?.layer === 0) ?? null
+      : renderPlan.tasks.find((t) => layout.nodeById.get(t.id)?.layer === 0) ?? null;
+
+  // Compute the per-revision steering events that will arrow to a target
+  // task node. One entry per non-zero revision in the history the user
+  // hasn't scrubbed past.
+  const steeringEvents = buildSteeringEvents(
+    history,
+    supersedes,
+    renderPlan,
+    pinnedRevision,
+    store,
+  );
+
+  // Supersedes edges: old task → new task, dashed + muted. The
+  // supersedes map keys on the old (superseded) task id and points at
+  // the new task id (or "" when the old task was dropped outright).
+  const supersedesEdges: SupersedesEdge[] = [];
+  for (const [oldId, link] of supersedes.entries()) {
+    if (pinnedRevision !== null && link.revision > pinnedRevision) continue;
+    supersedesEdges.push({ oldId, link });
+  }
 
   // Removed-task cards (only when in diff/compare mode). These sit to the right
   // of the DAG so the user can see what the refine dropped without corrupting
@@ -883,37 +1151,137 @@ function DagPane(props: DagProps) {
           </g>
         )}
 
-        {/* steering edges: goldfive gutter → target task. Rendered before
-            task edges so delegation / dependency arrows draw on top, but
-            the dashed goldfive color + the distinct marker keep it
-            readable. Only drawn on non-zero revs with a target. */}
-        {steerTargetTask && (
+        {/* supersedes edges: dashed muted edge from the superseded (old)
+            task node to its replacement. Labeled with the drift kind so
+            the DAG itself communicates "why the plan changed here". */}
+        {supersedesEdges.length > 0 && (
+          <g
+            className="hg-traj__supersedes-edges"
+            data-testid="trajectory-supersedes-edges"
+          >
+            {supersedesEdges.map(({ oldId, link }) => {
+              const from = layout.nodeById.get(oldId);
+              const to = link.newTaskId
+                ? layout.nodeById.get(link.newTaskId)
+                : null;
+              if (!from || !to) return null;
+              const x1 = from.x + from.w;
+              const y1 = from.y + from.h / 2;
+              const x2 = to.x;
+              const y2 = to.y + to.h / 2;
+              const mx = (x1 + x2) / 2;
+              const d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+              const label = link.kind
+                ? (link.kind.startsWith('user_')
+                    ? `user steer`
+                    : `goldfive: ${link.kind}`)
+                : 'supersedes';
+              return (
+                <g
+                  key={`sup-${oldId}`}
+                  data-testid={`supersedes-edge-${oldId}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectSteering({
+                      kind: 'supersedes',
+                      revision: link.revision,
+                      oldTaskId: oldId,
+                      targetTaskId: link.newTaskId || undefined,
+                    });
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <path
+                    className="hg-traj__supersedes-edge"
+                    d={d}
+                    fill="none"
+                    stroke="#8d9199"
+                    strokeWidth={1.25}
+                    strokeDasharray="3,3"
+                    opacity={0.6}
+                    markerEnd="url(#traj-arrow)"
+                  />
+                  <text
+                    className="hg-traj__supersedes-label"
+                    x={mx}
+                    y={(y1 + y2) / 2 - 4}
+                    textAnchor="middle"
+                    fontSize={9}
+                    fill="#8d9199"
+                    opacity={0.75}
+                  >
+                    <title>
+                      {`${label}${link.reason ? `\nreason: ${link.reason}` : ''}`}
+                    </title>
+                    {truncate(label, 24)}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
+        )}
+
+        {/* Per-revision steering arrows: one entry in steeringEvents per
+            PlanRevised in the history. Each arrow originates at a per-rev
+            gutter node on the DAG's left edge and lands on the new /
+            replacement task node with a short tail label naming the target
+            agent. Authored-by-user events use a dashed-purple style; goldfive
+            events use the teal steering style. */}
+        {steeringEvents.length > 0 && (
           <g
             className="hg-traj__steer-edges"
             data-testid="trajectory-steer-edges"
           >
-            {(() => {
-              const targetNode = layout.nodeById.get(steerTargetTask.id);
+            {steeringEvents.map((ev) => {
+              const targetNode = layout.nodeById.get(ev.targetTaskId);
               if (!targetNode) return null;
-              const x1 = GOLDFIVE_NODE.cx + GOLDFIVE_NODE.r;
-              const y1 = GOLDFIVE_NODE.cy;
+              const x1 = ev.gutterCx + 7;
+              const y1 = ev.gutterCy;
               const x2 = targetNode.x;
               const y2 = targetNode.y + targetNode.h / 2;
               const mx = (x1 + x2) / 2;
               const d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
-              const label =
-                steerKind || steerReason || `rev ${plan.revisionIndex ?? 0}`;
+              const stroke = ev.authoredBy === 'user' ? '#d0bcff' : '#80deea';
+              const markerRef = ev.authoredBy === 'user' ? 'traj-user-arrow' : 'traj-steer-arrow';
+              // Label: "<kind> → <agent>" — names the target agent in the
+              // visual itself, as the user explicitly requested.
+              const agentName =
+                store?.agents.get(ev.targetAgentId)?.name ||
+                bareAgentName(ev.targetAgentId) ||
+                ev.targetAgentId ||
+                '(agent)';
+              const label = `${ev.kindLabel} → ${truncate(agentName, 14)}`;
+              const tooltip =
+                (ev.authoredBy === 'user'
+                  ? `user steered ${agentName}`
+                  : `goldfive steered ${agentName}`) +
+                (ev.reason ? `\nreason: ${ev.reason}` : '') +
+                (ev.kind ? `\nkind: ${ev.kind}` : '') +
+                `\nrev: ${ev.revision}`;
               return (
-                <g data-testid={`steer-edge-${steerTargetTask.id}`}>
+                <g
+                  key={`se-${ev.revision}-${ev.targetTaskId}`}
+                  data-testid={`steer-edge-${ev.targetTaskId}`}
+                  data-authored-by={ev.authoredBy}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectSteering({
+                      kind: 'revision',
+                      revision: ev.revision,
+                      targetTaskId: ev.targetTaskId,
+                    });
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
                   <path
                     className="hg-traj__steer-edge"
                     d={d}
                     fill="none"
-                    stroke="#80deea"
-                    strokeWidth={1.5}
-                    strokeDasharray="5,3"
-                    opacity={0.75}
-                    markerEnd="url(#traj-steer-arrow)"
+                    stroke={stroke}
+                    strokeWidth={1.75}
+                    strokeDasharray={ev.authoredBy === 'user' ? '6,3' : '5,3'}
+                    opacity={0.85}
+                    markerEnd={`url(#${markerRef})`}
                   />
                   <text
                     className="hg-traj__steer-label"
@@ -921,39 +1289,75 @@ function DagPane(props: DagProps) {
                     y={(y1 + y2) / 2 - 4}
                     textAnchor="middle"
                     fontSize={10}
-                    fill="#80deea"
-                    opacity={0.9}
+                    fill={stroke}
+                    opacity={0.95}
                   >
-                    <title>
-                      {`goldfive steered ${steerTargetTask.assigneeAgentId || '(agent)'}` +
-                        (steerReason ? `\nreason: ${steerReason}` : '') +
-                        (steerKind ? `\nkind: ${steerKind}` : '')}
-                    </title>
-                    {truncate(label, 28)}
+                    <title>{tooltip}</title>
+                    {truncate(label, 32)}
                   </text>
                 </g>
               );
-            })()}
+            })}
           </g>
         )}
 
-        {/* goldfive gutter node: the origin of the steering arrow, only
-            rendered on revs that have a target to arrow to. */}
+        {/* Per-revision gutter nodes — one teal "g5" circle (or purple "u")
+            per steering event, stacked along the left edge. Also render
+            a single legacy goldfive gutter node for the pre-history path
+            so the existing trajectory-goldfive-gutter testid keeps working. */}
+        {steeringEvents.length > 0 && (
+          <g
+            className="hg-traj__gutter-stack"
+            data-testid="trajectory-gutter-stack"
+          >
+            {steeringEvents.map((ev) => (
+              <g
+                key={`gutter-${ev.revision}`}
+                className="hg-traj__gutter-node"
+                data-testid={`gutter-node-${ev.revision}`}
+                data-authored-by={ev.authoredBy}
+              >
+                <circle
+                  cx={ev.gutterCx}
+                  cy={ev.gutterCy}
+                  r={7}
+                  fill={ev.authoredBy === 'user' ? '#d0bcff' : '#80deea'}
+                  opacity={0.9}
+                />
+                <text
+                  x={ev.gutterCx}
+                  y={ev.gutterCy + 3}
+                  textAnchor="middle"
+                  fontSize={9}
+                  fill="#0b0d12"
+                  fontWeight={700}
+                >
+                  {ev.authoredBy === 'user' ? 'u' : 'g5'}
+                </text>
+                <title>
+                  {`rev ${ev.revision}: ${ev.authoredBy === 'user' ? 'user steer' : 'goldfive steer'}`}
+                </title>
+              </g>
+            ))}
+          </g>
+        )}
+
+        {/* Legacy single-gutter compatibility (preserves #196 testid). */}
         {steerTargetTask && (
           <g
             className="hg-traj__goldfive-gutter"
             data-testid="trajectory-goldfive-gutter"
           >
             <circle
-              cx={GOLDFIVE_NODE.cx}
-              cy={GOLDFIVE_NODE.cy}
-              r={GOLDFIVE_NODE.r}
+              cx={GUTTER_X}
+              cy={layout.height / 2}
+              r={7}
               fill="#80deea"
               opacity={0.85}
             />
             <text
-              x={GOLDFIVE_NODE.cx}
-              y={GOLDFIVE_NODE.cy + 3}
+              x={GUTTER_X}
+              y={layout.height / 2 + 3}
               textAnchor="middle"
               fontSize={9}
               fill="#0b0d12"
@@ -1009,6 +1413,12 @@ function DagPane(props: DagProps) {
               if (d.severity === 'warning' && worst !== 'critical') worst = 'warning';
               else if (!worst) worst = d.severity;
             }
+            // harmonograf#197: generation metadata from the cumulative plan.
+            // Tasks the latest rev dropped render at reduced opacity with a
+            // muted border; every node carries a REV-N corner badge.
+            const meta = taskMeta.get(t.id);
+            const isSuperseded = meta?.isSuperseded ?? false;
+            const introducedIn = meta?.introducedInRevision ?? 0;
             return (
               <g
                 key={t.id}
@@ -1016,6 +1426,9 @@ function DagPane(props: DagProps) {
                 data-selected={isSelected}
                 data-added={isAdded}
                 data-modified={isMod}
+                data-superseded={isSuperseded || undefined}
+                data-generation={introducedIn}
+                opacity={isSuperseded ? 0.4 : 1}
                 transform={`translate(${n.x}, ${n.y})`}
                 onClick={() => onSelectTask(t.id)}
                 data-testid={`task-node-${t.id}`}
@@ -1028,6 +1441,8 @@ function DagPane(props: DagProps) {
                   height={n.h}
                   rx={8}
                   ry={8}
+                  stroke={isSuperseded ? '#6b6e76' : undefined}
+                  strokeDasharray={isSuperseded ? '4,2' : undefined}
                 />
                 <rect
                   className="hg-traj__node-bar"
@@ -1042,6 +1457,36 @@ function DagPane(props: DagProps) {
                 <text className="hg-traj__node-title" x={16} y={22}>
                   {truncate(t.title || t.id, 22)}
                 </text>
+                {/* Generation badge: small text in top-right corner. Muted
+                    tint for rev 0, stronger for rev 1, 2, 3+. Shifted
+                    left when a drift pill already occupies the corner. */}
+                <g
+                  className="hg-traj__node-gen"
+                  transform={`translate(${drifts.length > 0 ? n.w - 44 : n.w - 24}, 10)`}
+                  data-testid={`task-node-${t.id}-rev-badge`}
+                  data-rev={introducedIn}
+                >
+                  <rect
+                    x={-2}
+                    y={-9}
+                    width={24}
+                    height={14}
+                    rx={3}
+                    ry={3}
+                    fill={genBadgeFill(introducedIn)}
+                    opacity={0.85}
+                  />
+                  <text
+                    x={10}
+                    y={1}
+                    textAnchor="middle"
+                    fontSize={9}
+                    fontWeight={600}
+                    fill="#0b0d12"
+                  >
+                    {`R${introducedIn}`}
+                  </text>
+                </g>
                 <text className="hg-traj__node-sub" x={16} y={42}>
                   {t.status.toLowerCase()}
                   {t.assigneeAgentId
@@ -1117,7 +1562,7 @@ function DagPane(props: DagProps) {
           </ul>
         </aside>
       )}
-      <TaskDeltaList plan={plan} />
+      <TaskDeltaList plan={renderPlan} />
     </div>
   );
 }
