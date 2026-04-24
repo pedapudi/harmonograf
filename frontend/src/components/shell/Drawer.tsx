@@ -139,7 +139,17 @@ export function Drawer() {
         </div>
         <CurrentTaskSection sessionId={sessionId} selectedSpan={span} />
         {span ? (
-          <DrawerTabs key={span.id} span={span} sessionId={sessionId} />
+          isJudgeSpan(span) && store ? (
+            <JudgeDrawerPanel
+              key={span.id}
+              span={span}
+              store={store}
+              sessionId={sessionId}
+              onClose={close}
+            />
+          ) : (
+            <DrawerTabs key={span.id} span={span} sessionId={sessionId} />
+          )
         ) : (
           <div className="hg-drawer__body">
             <p>Select a span on the Gantt to inspect it.</p>
@@ -195,6 +205,140 @@ function DrawerTabs({ span, sessionId }: { span: Span; sessionId: string | null 
         )}
       </div>
     </>
+  );
+}
+
+// --- Judge drawer panel ----------------------------------------------------
+//
+// When the selected span is a goldfive LLM-as-judge invocation we bypass
+// the generic tab strip (Summary / Task / Payload / …) and mount the
+// JudgeInvocationDetail component in its `drawer` variant instead. The
+// ordinary drawer tabs are not useful here — the span has no payload,
+// no trajectory children of its own, and the "Task" tab would point at
+// the wrong task context (the subject's, not the judge's).
+//
+// Section A (what was being judged) wants the plan's task title +
+// description and the session's goal summaries. We pull both from the
+// SessionStore synchronously: task lookup via tasks.findPlanForTask,
+// goals via the USER_MESSAGE spans stamped by the goldfive event sink
+// (see rpc/goldfiveEvent.ts:synthesizeUserGoalSpan). When a piece is
+// missing we pass undefined / [] and the component renders a fallback
+// placeholder or omits the row.
+
+function JudgeDrawerPanel({
+  span,
+  store,
+  sessionId,
+  onClose,
+}: {
+  span: Span;
+  store: SessionStore;
+  sessionId: string | null;
+  onClose: () => void;
+}) {
+  // Keep the panel live — plan revisions arrive asynchronously, so the
+  // steering-outcome link only materializes after the PlanRevised event
+  // reaches the store. Bumping the version on task mutations retriggers
+  // resolveJudgeDetail so the link pops in without a reselection.
+  const [, bump] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => {
+    return store.tasks.subscribe(() => bump());
+  }, [store]);
+  void sessionId;
+
+  const detail = useMemo(() => {
+    const plans: TaskPlan[] = [];
+    const seen = new Set<TaskPlan>();
+    for (const live of store.tasks.listPlans()) {
+      for (const snap of store.tasks.allRevsForPlan(live.id)) {
+        if (seen.has(snap)) continue;
+        seen.add(snap);
+        plans.push(snap);
+      }
+    }
+    return resolveJudgeDetail(span, plans);
+  }, [span, store]);
+
+  // Resolve the task's title / description (Section A). The judge span
+  // carries `judge.target_task_id`, which interventionDetail also
+  // surfaces as detail.taskId; look it up in the live plans.
+  const taskLookup = detail.taskId
+    ? store.tasks.findPlanForTask(detail.taskId)
+    : undefined;
+  const taskTitle = taskLookup?.task.title || undefined;
+  const taskDescription = taskLookup?.task.description || undefined;
+
+  // Resolve the session's goal summaries (Section A). Goals arrive as
+  // USER_MESSAGE spans on the __user__ actor, one per RunStarted. We
+  // de-duplicate by text (a user can re-kick the same goal) and keep
+  // earliest-first order so the list reads chronologically.
+  const goals = useMemo(() => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const scratch: Span[] = [];
+    store.spans.queryAgent('__user__', 0, Number.POSITIVE_INFINITY, scratch);
+    scratch.sort((a, b) => a.startMs - b.startMs);
+    for (const s of scratch) {
+      if (s.kind !== 'USER_MESSAGE') continue;
+      const marker = s.attributes['user.goal_summary'];
+      if (!marker || marker.kind !== 'string') continue;
+      const text = marker.value.trim();
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      out.push(text);
+    }
+    return out;
+  }, [store]);
+
+  const selectSpan = useUiStore((s) => s.selectSpan);
+
+  return (
+    <div
+      className="hg-drawer__body hg-drawer__body--judge"
+      data-testid="drawer-judge-panel"
+    >
+      <JudgeInvocationDetail
+        detail={detail}
+        variant="drawer"
+        resolveAgentName={(id) =>
+          store.agents.get(id)?.name || bareAgentName(id) || id
+        }
+        onFocusAgent={(id) => {
+          useUiStore.getState().setFocusedAgent(id);
+        }}
+        onFocusTask={(id) => {
+          useUiStore.getState().selectTask(id);
+        }}
+        onOpenSteering={(_planId, _revIdx) => {
+          // Jump into the refine: span on the goldfive lane so the user
+          // lands on the existing plan-revision detail panel. The refine
+          // synthesizer stamps `refine.index = <revIdx>` on a
+          // __goldfive__ span (see rpc/goldfiveEvent.ts).
+          void _planId;
+          const spans: Span[] = [];
+          store.spans.queryAgent(
+            '__goldfive__',
+            0,
+            Number.POSITIVE_INFINITY,
+            spans,
+          );
+          const targetRefine = spans.find(
+            (s) =>
+              s.name.startsWith('refine:') &&
+              s.attributes['refine.index']?.kind === 'string' &&
+              s.attributes['refine.index'].value === String(_revIdx),
+          );
+          if (targetRefine) {
+            selectSpan(targetRefine.id);
+          } else {
+            onClose();
+          }
+        }}
+        taskTitle={taskTitle}
+        taskDescription={taskDescription}
+        goals={goals}
+      />
+    </div>
   );
 }
 

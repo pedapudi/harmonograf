@@ -252,11 +252,16 @@ function PopoverCard({
     void post({ sessionId, spanId: span.id, body: text, kind: 'COMMENT' }).catch(() => {});
   };
 
-  // Judge popovers + generic goldfive popovers carry more content
-  // (reasoning input, raw response, steering outcome, input/output
-  // previews); widen them so the sections don't truncate the reader's
-  // eye on typical laptops.
-  const popoverWidth = judgeMode || goldfiveMode ? POPOVER_WIDTH + 80 : POPOVER_WIDTH;
+  // Judge popovers carry the most content (verdict banner + reasoning
+  // input + context row — banner alone needs ~380px to stay single-line
+  // on a typical laptop). Generic goldfive popovers are less heavy but
+  // still carry decision summary + target row + input/output previews;
+  // widen them moderately. Everything else stays compact.
+  const popoverWidth = judgeMode
+    ? POPOVER_WIDTH + 100
+    : goldfiveMode
+      ? POPOVER_WIDTH + 80
+      : POPOVER_WIDTH;
 
   return (
     <div
@@ -292,14 +297,24 @@ function PopoverCard({
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: 8,
-          marginBottom: 4,
+          marginBottom: judgeMode ? 8 : 4,
         }}
       >
         <div
           data-testid="span-popover-title"
-          style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          style={{
+            fontWeight: 600,
+            fontSize: 13,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
         >
-          {goldfiveInfo ? goldfiveInfo.callName : span.name}
+          {judgeMode
+            ? 'Judge invocation'
+            : goldfiveInfo
+              ? goldfiveInfo.callName
+              : span.name}
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
           <IconButton
@@ -315,79 +330,66 @@ function PopoverCard({
           </IconButton>
         </div>
       </div>
-      <div
-        data-testid="span-popover-summary"
-        style={{ opacity: 0.85, lineHeight: 1.5, marginBottom: 6 }}
-      >
-        {goldfiveInfo ? goldfiveInfo.decisionSummary : summary}
-      </div>
-      {goldfiveInfo && (goldfiveInfo.targetAgentId || goldfiveInfo.targetTaskId) && (
-        <div
-          data-testid="span-popover-goldfive-context"
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '2px 10px',
-            marginBottom: 6,
-            fontSize: 11,
-            opacity: 0.85,
-          }}
-        >
-          {goldfiveInfo.targetAgentId && (
-            <span data-testid="span-popover-goldfive-target-agent">
-              <span style={{ opacity: 0.6 }}>target </span>
-              {goldfiveInfo.targetAgentId}
-            </span>
+      {!judgeMode && (
+        <>
+          <div
+            data-testid="span-popover-summary"
+            style={{ opacity: 0.85, lineHeight: 1.5, marginBottom: 6 }}
+          >
+            {goldfiveInfo ? goldfiveInfo.decisionSummary : summary}
+          </div>
+          {goldfiveInfo && (goldfiveInfo.targetAgentId || goldfiveInfo.targetTaskId) && (
+            <div
+              data-testid="span-popover-goldfive-context"
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '2px 10px',
+                marginBottom: 6,
+                fontSize: 11,
+                opacity: 0.85,
+              }}
+            >
+              {goldfiveInfo.targetAgentId && (
+                <span data-testid="span-popover-goldfive-target-agent">
+                  <span style={{ opacity: 0.6 }}>target </span>
+                  {goldfiveInfo.targetAgentId}
+                </span>
+              )}
+              {goldfiveInfo.targetTaskId && (
+                <span data-testid="span-popover-goldfive-target-task">
+                  <span style={{ opacity: 0.6 }}>task </span>
+                  <code style={{ fontSize: 10 }}>{goldfiveInfo.targetTaskId}</code>
+                </span>
+              )}
+            </div>
           )}
-          {goldfiveInfo.targetTaskId && (
-            <span data-testid="span-popover-goldfive-target-task">
-              <span style={{ opacity: 0.6 }}>task </span>
-              <code style={{ fontSize: 10 }}>{goldfiveInfo.targetTaskId}</code>
-            </span>
-          )}
-        </div>
+          <div style={{ opacity: 0.85, lineHeight: 1.5 }}>
+            <div>
+              <span style={{ opacity: 0.7 }}>kind </span>
+              {span.kind}
+              <span style={{ opacity: 0.7, marginLeft: 8 }}>status </span>
+              {span.status}
+            </div>
+            <div>
+              <span style={{ opacity: 0.7 }}>agent </span>
+              {agentName}
+            </div>
+            <div>
+              <span style={{ opacity: 0.7 }}>duration </span>
+              {duration}
+            </div>
+          </div>
+        </>
       )}
-      <div style={{ opacity: 0.85, lineHeight: 1.5 }}>
-        <div>
-          <span style={{ opacity: 0.7 }}>kind </span>
-          {span.kind}
-          <span style={{ opacity: 0.7, marginLeft: 8 }}>status </span>
-          {span.status}
-        </div>
-        <div>
-          <span style={{ opacity: 0.7 }}>agent </span>
-          {agentName}
-        </div>
-        <div>
-          <span style={{ opacity: 0.7 }}>duration </span>
-          {duration}
-        </div>
-      </div>
       {judgeMode && judgeDetail && (
-        <div style={{ marginTop: 10 }}>
+        <div data-testid="span-popover-judge-body">
           <JudgeInvocationDetail
             detail={judgeDetail}
-            resolveAgentName={(id) => store.agents.get(id)?.name || bareAgentName(id) || id}
-            onFocusAgent={(id) => {
-              useUiStore.getState().setFocusedAgent(id);
-            }}
-            onFocusTask={(id) => {
-              useUiStore.getState().selectTask(id);
-            }}
-            onOpenSteering={(_planId, _revIdx) => {
-              // Today the intervention-detail panel lives in TrajectoryView;
-              // the cleanest hand-off is to surface the plan revision there.
-              // The PlanRevised event is already rendered as a separate
-              // "refine:" span on the goldfive lane (goldfiveEvent.ts), so
-              // we select that span — clicking opens its own popover with
-              // the existing Trigger/Steering/Target panel for plan revs.
-              void _planId;
-              void _revIdx;
-              // Leave close-before-open so the popover doesn't visually
-              // stack; the user can click the refine span to see its
-              // details.
-              onClose();
-            }}
+            variant="popover"
+            resolveAgentName={(id) =>
+              store.agents.get(id)?.name || bareAgentName(id) || id
+            }
           />
         </div>
       )}
@@ -491,11 +493,13 @@ function PopoverCard({
           </>
         )}
         <ActionButton onClick={copyId}>Copy id</ActionButton>
-        {(!judgeMode || goldfiveMode) && (
-          <ActionButton onClick={openInDrawer} primary>
-            Open drawer
-          </ActionButton>
-        )}
+        {/* Both judge and non-judge popovers open the inspector drawer;
+            judge spans route to the JudgeDrawerPanel (Drawer.tsx), and
+            generic goldfive spans route to GoldfiveSpanDetail inside the
+            Summary tab via useGoldfiveDetailSection. */}
+        <ActionButton onClick={openInDrawer} primary>
+          Open drawer
+        </ActionButton>
       </div>
       {!judgeMode && !goldfiveMode && steerOpen && (
         <div
