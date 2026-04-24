@@ -34,6 +34,7 @@ function mkTask(id: string, status: TaskStatus = 'PENDING', title?: string): Tas
     predictedStartMs: 0,
     predictedDurationMs: 0,
     boundSpanId: '',
+    supersedes: '',
   };
 }
 

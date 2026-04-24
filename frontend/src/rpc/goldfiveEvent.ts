@@ -314,6 +314,9 @@ export function convertGoldfiveTask(t: GoldfiveTask): Task {
     predictedStartMs: Number(t.predictedStartMs),
     predictedDurationMs: Number(t.predictedDurationMs),
     boundSpanId: t.boundSpanId ?? '',
+    // goldfive#237: authoritative supersession link set by the refine LLM
+    // on replacement tasks. Defaults to '' on original / legacy plans.
+    supersedes: t.supersedes ?? '',
   };
 }
 

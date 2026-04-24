@@ -25,6 +25,7 @@ function task(id: string, status: TaskStatus): Task {
     predictedStartMs: 0,
     predictedDurationMs: 0,
     boundSpanId: '',
+    supersedes: '',
   };
 }
 

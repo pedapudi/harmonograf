@@ -12,6 +12,7 @@ function mkTask(id: string): Task {
     predictedStartMs: 0,
     predictedDurationMs: 0,
     boundSpanId: '',
+    supersedes: '',
   };
 }
 

@@ -33,6 +33,7 @@ function mkTask(id: string, overrides: Partial<Task> = {}): Task {
     predictedStartMs: 0,
     predictedDurationMs: 0,
     boundSpanId: '',
+    supersedes: '',
     ...overrides,
   };
 }

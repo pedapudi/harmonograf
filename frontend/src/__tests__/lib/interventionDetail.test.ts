@@ -320,6 +320,7 @@ describe('interventionDetail', () => {
       predictedDurationMs: 0,
       boundSpanId: '',
       cancelReason: 'upstream_failed:t0',
+      supersedes: '',
     };
     const detail = resolveTaskCancelDetail(task);
     expect(detail.steering).toBe('upstream_failed:t0');
@@ -338,6 +339,7 @@ describe('interventionDetail', () => {
       predictedStartMs: 0,
       predictedDurationMs: 0,
       boundSpanId: '',
+      supersedes: '',
     };
     const detail = resolveTaskCancelDetail(task);
     expect(detail.steering).toBe('');
