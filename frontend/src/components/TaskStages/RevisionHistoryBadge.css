@@ -1,0 +1,152 @@
+/* RevisionHistoryBadge — compact supersedes-chain provenance pill.
+   Lives on each collapsed DAG node; expands inline to reveal the
+   predecessor trail. Reuses the severity / rev palette from views.css
+   (hg-traj__chip tokens) — do not introduce new colour tokens here. */
+
+.hg-rev-badge {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #c8ccd4;
+  line-height: 1.2;
+}
+
+.hg-rev-badge--singleton {
+  opacity: 0.7;
+}
+
+.hg-rev-badge__chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 10px;
+  border: 1px solid var(--md-sys-color-outline, #5a5e68);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.hg-rev-badge__chip--neutral {
+  color: #9ba0aa;
+  border-color: #3a3e46;
+}
+
+.hg-rev-badge__chip--chain {
+  color: #dbe3ff;
+  background: #2b3447;
+  border-color: #4b5770;
+}
+
+.hg-rev-badge__chip--history {
+  color: #c3c6cf;
+  background: transparent;
+  border-color: #3a3e46;
+}
+
+/* Toggle button — keeps pill + chevron + summary on one line. */
+.hg-rev-badge__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.hg-rev-badge__toggle:focus-visible {
+  outline: 2px solid #9ab4ff;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.hg-rev-badge__chevron {
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+.hg-rev-badge__chevron[data-open='true'] {
+  opacity: 1;
+}
+
+.hg-rev-badge__summary {
+  font-size: 10px;
+  opacity: 0.6;
+  margin-left: 2px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+/* Expanded history list. Appears below the pill on its own line. */
+.hg-rev-badge__history {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+}
+
+.hg-rev-badge__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  /* Predecessors are superseded — dim them so the eye lands on the canonical. */
+  opacity: 0.65;
+}
+
+.hg-rev-badge__row--pinned {
+  opacity: 1;
+  background: rgba(91, 141, 239, 0.12);
+}
+
+.hg-rev-badge__row--clickable:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.hg-rev-badge__row-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+.hg-rev-badge__row-btn:focus-visible {
+  outline: 2px solid #9ab4ff;
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+.hg-rev-badge__title {
+  font-size: 11px;
+  color: #c8ccd4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 22ch;
+}
+
+.hg-rev-badge__pinned-tag {
+  font-size: 10px;
+  color: #9ab4ff;
+  font-style: italic;
+}

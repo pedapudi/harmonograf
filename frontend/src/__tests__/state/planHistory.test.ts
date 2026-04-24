@@ -35,6 +35,7 @@ function mkTask(
     predictedStartMs: 0,
     predictedDurationMs: 0,
     boundSpanId: '',
+    supersedes: '',
     ...overrides,
   };
 }

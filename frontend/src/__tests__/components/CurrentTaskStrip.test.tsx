@@ -35,6 +35,7 @@ function task(id: string, status: TaskStatus, title = id, agent = 'agent-a'): Ta
     predictedStartMs: 0,
     predictedDurationMs: 0,
     boundSpanId: '',
+    supersedes: '',
   };
 }
 

@@ -205,6 +205,7 @@ describe('<GoldfiveSpanDetail />', () => {
           predictedStartMs: 0,
           predictedDurationMs: 0,
           boundSpanId: '',
+          supersedes: '',
         },
       ],
       edges: [],

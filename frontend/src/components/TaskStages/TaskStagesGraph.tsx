@@ -1,30 +1,100 @@
 import { useMemo } from 'react';
 import type { Task, TaskEdge, TaskPlan } from '../../gantt/types';
 import { computeStages } from '../../gantt/stages';
-import type {
-  CumulativePlan,
-  SupersessionLink,
-  TaskRevisionMeta,
-} from '../../state/planHistory';
+import type { CumulativePlan as StoreCumulativePlan } from '../../state/planHistoryStore';
+import {
+  collapseCumulativePlan,
+  filterCollapsedAtRevision,
+  type CollapsedCumulativePlan,
+  type TaskRevisionChain,
+} from './collapsedLayout';
+import { RevisionHistoryBadge } from './RevisionHistoryBadge';
 import './TaskStagesGraph.css';
+
+/** Structural shape consumed by this component. Matches both
+ *  `state/planHistory.CumulativePlan` (legacy, uses `planId`) and
+ *  `state/planHistoryStore.CumulativePlan` (extends TaskPlan, uses
+ *  `id`). We accept either and normalise into the store shape before
+ *  handing off to `collapseCumulativePlan`. */
+export interface CumulativePlanInput {
+  /** Legacy id field (planHistory.ts). */
+  planId?: string;
+  /** TaskPlan-inherited id field (planHistoryStore.ts). */
+  id?: string;
+  tasks: Task[];
+  edges: TaskEdge[];
+  taskRevisionMeta: Map<
+    string,
+    { introducedInRevision: number; lastModifiedInRevision?: number; isSuperseded: boolean }
+  >;
+}
+
+/** Minimal SupersessionLink shape consumed by collapseCumulativePlan.
+ *  Both producers supply these; the extra fields the store/legacy
+ *  types carry (authoredBy, reason, kind) are unused by the collapse
+ *  pass and safely ignored. */
+export interface SupersessionLinkInput {
+  oldTaskId: string;
+  newTaskId: string;
+  revision: number;
+  kind: string;
+  reason: string;
+  triggerEventId: string;
+}
+
+/** Convert a `CumulativePlanInput` into the strict store shape the
+ *  collapse pass expects. Copies arrays/maps shallowly — the caller
+ *  retains ownership of the originals. */
+function adaptCumulative(input: CumulativePlanInput): StoreCumulativePlan {
+  const id = input.id ?? input.planId ?? '';
+  const meta = new Map<
+    string,
+    { introducedInRevision: number; lastModifiedInRevision: number; isSuperseded: boolean }
+  >();
+  for (const [k, v] of input.taskRevisionMeta) {
+    meta.set(k, {
+      introducedInRevision: v.introducedInRevision,
+      lastModifiedInRevision:
+        v.lastModifiedInRevision ?? v.introducedInRevision,
+      isSuperseded: v.isSuperseded,
+    });
+  }
+  return {
+    id,
+    invocationSpanId: '',
+    plannerAgentId: '',
+    createdAtMs: 0,
+    summary: '',
+    tasks: input.tasks,
+    edges: input.edges,
+    revisionReason: '',
+    taskRevisionMeta: meta,
+  };
+}
 
 interface TaskStagesGraphProps {
   // Legacy single-plan path — still used by "Latest only" mode and by
   // pre-existing tests. When `cumulative` is passed we ignore this.
   plan: TaskPlan;
   // Cumulative-DAG path (harmonograf plan-evolution). When present the
-  // renderer draws every task across every revision, grey-muting the
-  // ones whose `isSuperseded === true`, and paints dashed "supersedes"
-  // edges between old and new tasks.
-  cumulative?: CumulativePlan | null;
-  supersedesMap?: Map<string, SupersessionLink>;
+  // renderer collapses supersedes chains into single positional slots:
+  // one canonical card per chain, with a RevisionHistoryBadge surfacing
+  // the predecessor trail inline on the card.
+  cumulative?: CumulativePlanInput | null;
+  supersedesMap?: Map<string, SupersessionLinkInput>;
   // Revision scrubber: when set to a non-null integer, tasks whose
   // `introducedInRevision > revisionFilter` are muted (or hidden, see
   // `revisionFilterMode`). Passing null = "Latest" (no filter).
   revisionFilter?: number | null;
   revisionFilterMode?: 'mute' | 'hide';
   onTaskClick?: (task: Task) => void;
-  onSupersedesEdgeClick?: (link: SupersessionLink) => void;
+  // Retained for signature compatibility with TaskPlanPanel and legacy
+  // call sites. After the chain-collapse refactor the renderer no longer
+  // paints visible supersedes edges — the RevisionHistoryBadge's
+  // onClickMember surfaces predecessor detail instead. This prop is
+  // therefore unreachable from this view and will not fire; it's kept so
+  // existing callers don't need a simultaneous update.
+  onSupersedesEdgeClick?: (link: SupersessionLinkInput) => void;
   selectedTaskId?: string | null;
   agentColorFor?: (agentId: string) => string | null;
   agentNameFor?: (agentId: string) => string;
@@ -57,26 +127,6 @@ function generationColor(rev: number): { fill: string; text: string } {
   return GENERATION_PALETTE[Math.min(rev, GENERATION_PALETTE.length - 1)];
 }
 
-// Drift-kind → edge colour lookup. Autonomous goldfive kinds stay in a
-// warm hue; user-origin kinds sit in a cooler hue. Unknown kinds fall
-// back to a neutral outline.
-function edgeKindColor(kind: string): string {
-  const k = (kind || '').toLowerCase();
-  if (k.startsWith('user_')) return '#8bd17c';          // cool green (user)
-  if (k === 'off_topic' || k === 'off-topic') return '#f0a860';
-  if (k === 'missing_work' || k === 'missing-work') return '#e76c6c';
-  if (k === 'cascade_cancel') return '#c08cd6';
-  if (k) return '#d8a468';                              // other goldfive
-  return '#8d9199';                                      // unknown
-}
-
-function edgeAnnotation(link: SupersessionLink): string {
-  const kind = link.kind || '';
-  if (!kind) return 'superseded';
-  const author = link.authoredBy || (kind.toLowerCase().startsWith('user_') ? 'user' : 'goldfive');
-  return `${author}: ${kind.toLowerCase()}`;
-}
-
 const COLUMN_WIDTH = 140;
 const CARD_WIDTH = 120;
 const CARD_HEIGHT = 38;
@@ -88,6 +138,10 @@ const AGENT_STRIPE_W = 4;
 
 interface LaidOutCard {
   task: Task;
+  /** Chain this card represents. Always non-null. For non-cumulative
+   *  ("latest-only") mode or for singleton tasks, a synthetic 1-member
+   *  chain is created so downstream rendering is uniform. */
+  chain: TaskRevisionChain;
   x: number;
   y: number;
   stage: number;
@@ -95,19 +149,34 @@ interface LaidOutCard {
   muted: boolean;    // superseded OR scrubber-filtered (mute mode)
 }
 
-// Synthesize a TaskPlan shape from a CumulativePlan so we can reuse
+// Synthesize a TaskPlan shape from a task + edge list so we can reuse
 // computeStages() directly. The returned plan is purely for layout —
 // no other code reads it.
-function cumulativeAsPlan(cum: CumulativePlan): TaskPlan {
+function asLayoutPlan(
+  id: string,
+  tasks: readonly Task[],
+  edges: readonly TaskEdge[],
+): TaskPlan {
   return {
-    id: cum.planId,
+    id,
     invocationSpanId: '',
     plannerAgentId: '',
     createdAtMs: 0,
     summary: '',
-    tasks: cum.tasks,
-    edges: cum.edges,
+    tasks: [...tasks],
+    edges: [...edges],
     revisionReason: '',
+  };
+}
+
+/** Wrap a legacy per-task plan (non-cumulative) into synthetic singleton
+ *  chains so downstream rendering can use the same `LaidOutCard.chain`
+ *  structure. Revision is 0 for every task; no predecessors. */
+function singletonChainFor(task: Task): TaskRevisionChain {
+  return {
+    canonical: task,
+    members: [task],
+    revisions: [0],
   };
 }
 
@@ -116,21 +185,74 @@ export function TaskStagesGraph({
   cumulative,
   supersedesMap,
   revisionFilter = null,
-  revisionFilterMode = 'mute',
+  // Prop retained for backward compatibility; the collapsed layout's
+  // filter has a single "hide + mute" contract (see layout useMemo).
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  revisionFilterMode: _revisionFilterMode = 'mute',
   onTaskClick,
-  onSupersedesEdgeClick,
+  // `onSupersedesEdgeClick` kept in the prop signature for backward
+  // compatibility; never fires from this renderer (see prop docstring).
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  onSupersedesEdgeClick: _onSupersedesEdgeClick,
   selectedTaskId = null,
   agentColorFor,
   agentNameFor,
 }: TaskStagesGraphProps) {
   const layout = useMemo(() => {
-    const sourcePlan: TaskPlan = cumulative ? cumulativeAsPlan(cumulative) : plan;
+    // Build the source task/edge list the layout works on.
+    //
+    // Cumulative mode with a supersedesMap → collapse the plan into one
+    // canonical task per chain, rewrite edges to anchor on canonicals,
+    // and carry each card's chain so the RevisionHistoryBadge can
+    // surface the predecessor trail.
+    //
+    // Non-cumulative (legacy) mode → one card per task, synthetic
+    // singleton chains so the badge path is a uniform no-op.
+    let sourceTasks: readonly Task[];
+    let sourceEdges: readonly TaskEdge[];
+    let chainForTaskId: Map<string, TaskRevisionChain>;
+    let collapsed: CollapsedCumulativePlan | null = null;
+    let hiddenChainIds: ReadonlySet<string> = new Set();
+    let mutedChainIds: ReadonlySet<string> = new Set();
+
+    if (cumulative && supersedesMap) {
+      const storeShape = adaptCumulative(cumulative);
+      // `supersedesMap` from the legacy producer carries an extra
+      // `authoredBy` field the store shape doesn't — the collapse pass
+      // ignores it, so a structural cast is safe here.
+      collapsed = collapseCumulativePlan(
+        storeShape,
+        supersedesMap as unknown as Map<
+          string,
+          import('../../state/planHistoryStore').SupersessionLink
+        >,
+      );
+      const filtered = filterCollapsedAtRevision(collapsed, revisionFilter);
+      hiddenChainIds = filtered.hiddenChainIds;
+      mutedChainIds = filtered.mutedChainIds;
+      sourceTasks = collapsed.chains.map((c) => c.canonical);
+      sourceEdges = collapsed.edges;
+      chainForTaskId = new Map();
+      for (const c of collapsed.chains) {
+        chainForTaskId.set(c.canonical.id, c);
+      }
+    } else {
+      sourceTasks = plan.tasks;
+      sourceEdges = plan.edges;
+      chainForTaskId = new Map();
+      for (const t of plan.tasks) {
+        chainForTaskId.set(t.id, singletonChainFor(t));
+      }
+    }
+
+    // `cumulative` may be the legacy shape (`planId`) or the store
+    // shape (`id`); fall back to the incoming plan id.
+    const sourcePlanId = cumulative?.id ?? cumulative?.planId ?? plan.id;
+    const sourcePlan = asLayoutPlan(sourcePlanId, sourceTasks, sourceEdges);
     const stages = computeStages(sourcePlan);
     if (stages.length === 0) return null;
 
-    const revMeta: Map<string, TaskRevisionMeta> | null = cumulative
-      ? cumulative.taskRevisionMeta
-      : null;
+    const revMeta = cumulative?.taskRevisionMeta ?? null;
 
     const cards = new Map<string, LaidOutCard>();
     let maxRows = 0;
@@ -139,17 +261,19 @@ export function TaskStagesGraph({
       stageTasks.forEach((task, rowIdx) => {
         const x = SIDE_PADDING + stageIdx * COLUMN_WIDTH + COL_PADDING;
         const y = TOP_PADDING + rowIdx * (CARD_HEIGHT + CARD_GAP);
-        const meta = revMeta?.get(task.id);
-        let hidden = false;
-        let muted = Boolean(meta?.isSuperseded);
-        if (revisionFilter !== null && meta) {
-          const introduced = meta.introducedInRevision;
-          if (introduced > revisionFilter) {
-            if (revisionFilterMode === 'hide') hidden = true;
-            else muted = true;
-          }
-        }
-        cards.set(task.id, { task, x, y, stage: stageIdx, hidden, muted });
+        const chain =
+          chainForTaskId.get(task.id) ?? singletonChainFor(task);
+        const hidden = hiddenChainIds.has(task.id);
+        const muted = mutedChainIds.has(task.id);
+        cards.set(task.id, {
+          task,
+          chain,
+          x,
+          y,
+          stage: stageIdx,
+          hidden,
+          muted,
+        });
       });
     });
 
@@ -160,8 +284,7 @@ export function TaskStagesGraph({
 
     // Plan-DAG edges (solid). Only keep forward edges — same rule as before.
     const planEdges: Array<{ from: LaidOutCard; to: LaidOutCard }> = [];
-    const edgeSource: ReadonlyArray<TaskEdge> = sourcePlan.edges;
-    for (const e of edgeSource) {
+    for (const e of sourceEdges) {
       const from = cards.get(e.fromTaskId);
       const to = cards.get(e.toTaskId);
       if (!from || !to) continue;
@@ -170,28 +293,28 @@ export function TaskStagesGraph({
       planEdges.push({ from, to });
     }
 
-    // Supersedes edges (dashed, one per supersession link).
-    const supersedesEdges: Array<{
-      from: LaidOutCard;
-      to: LaidOutCard;
-      link: SupersessionLink;
-    }> = [];
-    if (supersedesMap) {
-      for (const link of supersedesMap.values()) {
-        const from = cards.get(link.oldTaskId);
-        const to = link.newTaskId ? cards.get(link.newTaskId) : undefined;
-        if (!from || !to) continue;
-        if (from.hidden || to.hidden) continue;
-        supersedesEdges.push({ from, to, link });
-      }
-    }
-
-    return { stages, cards, width, height, planEdges, supersedesEdges };
-  }, [plan, cumulative, supersedesMap, revisionFilter, revisionFilterMode]);
+    return {
+      stages,
+      cards,
+      width,
+      height,
+      planEdges,
+      revMeta,
+      collapsed,
+    };
+    // `revisionFilterMode` is accepted in the prop signature for
+    // backward compatibility but is no longer consulted: the new
+    // collapsed-layout path uses `filterCollapsedAtRevision`, which has
+    // a single "hide when not yet born, mute when canonical post-pin"
+    // contract. Intentionally omitted from the dep list.
+  }, [plan, cumulative, supersedesMap, revisionFilter]);
 
   if (!layout) return null;
-  const { stages, cards, width, height, planEdges, supersedesEdges } = layout;
-  const revMeta = cumulative?.taskRevisionMeta;
+  const { stages, cards, width, height, planEdges, revMeta } = layout;
+
+  const handleBadgeMemberClick = (member: Task) => {
+    onTaskClick?.(member);
+  };
 
   return (
     <div className="hg-stages" data-testid="task-stages-graph">
@@ -213,17 +336,6 @@ export function TaskStagesGraph({
           >
             <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--md-sys-color-outline, #8d9199)" />
           </marker>
-          <marker
-            id="hg-stages-supersedes-arrow"
-            viewBox="0 0 10 10"
-            refX={9}
-            refY={5}
-            markerWidth={6}
-            markerHeight={6}
-            orient="auto-start-reverse"
-          >
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="#d8a468" />
-          </marker>
         </defs>
 
         {stages.map((_, stageIdx) => {
@@ -244,7 +356,10 @@ export function TaskStagesGraph({
         {stages.map((stageTasks, stageIdx) => {
           const x = SIDE_PADDING + stageIdx * COLUMN_WIDTH + COLUMN_WIDTH / 2;
           // Progress badge counts only NON-superseded tasks so the N/M
-          // reflects the live plan, not historical noise.
+          // reflects the live plan, not historical noise. After chain
+          // collapse, each stage task IS the canonical (non-superseded
+          // by definition) — keep the read so the legacy non-cumulative
+          // path still filters properly.
           const visible = stageTasks.filter((t) => {
             const m = revMeta?.get(t.id);
             return !m || !m.isSuperseded;
@@ -309,52 +424,13 @@ export function TaskStagesGraph({
           );
         })}
 
-        {supersedesEdges.map(({ from, to, link }, i) => {
-          const x1 = from.x + CARD_WIDTH;
-          const y1 = from.y + CARD_HEIGHT / 2;
-          const x2 = to.x;
-          const y2 = to.y + CARD_HEIGHT / 2;
-          const dx = Math.max(30, (x2 - x1) * 0.5);
-          const d = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
-          const color = edgeKindColor(link.kind);
-          const label = edgeAnnotation(link);
-          // Label anchors near the midpoint of the edge. Offset by -6 so
-          // the annotation text sits above the curve.
-          const mx = (x1 + x2) / 2;
-          const my = (y1 + y2) / 2 - 6;
-          return (
-            <g
-              key={`sedge-${link.oldTaskId}-${link.newTaskId}-${i}`}
-              className="hg-stages__supersedes"
-              data-testid="supersedes-edge"
-              data-kind={link.kind || ''}
-              onClick={(e) => {
-                e.stopPropagation();
-                onSupersedesEdgeClick?.(link);
-              }}
-              style={{ cursor: onSupersedesEdgeClick ? 'pointer' : 'default' }}
-            >
-              <title>{link.reason || link.kind || 'superseded'}</title>
-              <path
-                className="hg-stages__supersedes-path"
-                d={d}
-                stroke={color}
-                markerEnd="url(#hg-stages-supersedes-arrow)"
-              />
-              <text
-                className="hg-stages__supersedes-label"
-                x={mx}
-                y={my}
-                textAnchor="middle"
-                fill={color}
-              >
-                {label}
-              </text>
-            </g>
-          );
-        })}
+        {/* NOTE: visible "supersedes" edges (dashed old→new lines) have
+            been retired; the RevisionHistoryBadge rendered below surfaces
+            the same information inline on each canonical card. See
+            onSupersedesEdgeClick prop docstring for the compatibility
+            shim. */}
 
-        {Array.from(cards.values()).map(({ task, x, y, muted, hidden }) => {
+        {Array.from(cards.values()).map(({ task, chain, x, y, muted, hidden }) => {
           if (hidden) return null;
           const dotColor = STATUS_DOT[task.status];
           const title = task.title || '(untitled)';
@@ -392,6 +468,7 @@ export function TaskStagesGraph({
               transform={`translate(${x}, ${y})`}
               onClick={() => onTaskClick?.(task)}
               data-superseded={meta?.isSuperseded ? 'true' : 'false'}
+              data-chain-size={chain.members.length}
             >
               <title>{tooltipText}</title>
               <rect
@@ -457,6 +534,49 @@ export function TaskStagesGraph({
           );
         })}
       </svg>
+
+      {/* RevisionHistoryBadge overlay: absolutely positioned HTML atop the
+          SVG so the pill can open/close and render its predecessor trail
+          without breaking the SVG layout or existing card testids. One
+          overlay per multi-member chain card. */}
+      <div
+        className="hg-stages__badge-overlay"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width,
+          height,
+          pointerEvents: 'none',
+        }}
+        data-testid="task-stages-badge-overlay"
+      >
+        {Array.from(cards.values())
+          .filter((c) => !c.hidden && c.chain.members.length > 1)
+          .map(({ task, chain, x, y }) => (
+            <div
+              key={`badge-${task.id}`}
+              className="hg-stages__badge-slot"
+              style={{
+                position: 'absolute',
+                // Anchor near the card's top-right corner. x + CARD_WIDTH
+                // places the right edge; we let the pill overflow a touch
+                // so it visually sits atop the status dot without
+                // colliding with the generation badge.
+                left: x + CARD_WIDTH - 60,
+                top: y - 10,
+                pointerEvents: 'auto',
+              }}
+              data-testid={`chain-badge-for-${task.id}`}
+            >
+              <RevisionHistoryBadge
+                chain={chain}
+                currentRevision={revisionFilter}
+                onClickMember={handleBadgeMemberClick}
+              />
+            </div>
+          ))}
+      </div>
     </div>
   );
 }

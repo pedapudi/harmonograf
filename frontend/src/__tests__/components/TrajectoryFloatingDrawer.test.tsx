@@ -40,6 +40,7 @@ function mkTask(overrides: Partial<Task> = {}): Task {
     predictedDurationMs: 0,
     boundSpanId: 'span-abcdef12',
     cancelReason: '',
+    supersedes: '',
     ...overrides,
   };
 }

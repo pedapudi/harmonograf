@@ -62,6 +62,7 @@ function mkTask(
     predictedDurationMs: 0,
     boundSpanId: '',
     cancelReason,
+    supersedes: '',
   };
 }
 

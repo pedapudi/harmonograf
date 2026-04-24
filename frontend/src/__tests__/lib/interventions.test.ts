@@ -172,6 +172,7 @@ describe('deriveInterventions', () => {
               predictedStartMs: 0,
               predictedDurationMs: 0,
               boundSpanId: '',
+              supersedes: '',
             },
             {
               id: 't2',
@@ -182,6 +183,7 @@ describe('deriveInterventions', () => {
               predictedStartMs: 0,
               predictedDurationMs: 0,
               boundSpanId: '',
+              supersedes: '',
             },
           ],
         }),

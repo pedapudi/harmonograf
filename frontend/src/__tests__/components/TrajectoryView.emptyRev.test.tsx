@@ -87,6 +87,7 @@ function mkTask(id: string, status: Task['status'], title = id): Task {
     predictedDurationMs: 0,
     boundSpanId: '',
     cancelReason: '',
+    supersedes: '',
   };
 }
 
