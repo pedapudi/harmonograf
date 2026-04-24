@@ -37,6 +37,7 @@ from harmonograf_server.storage.base import (
     Task,
     TaskEdge,
     TaskPlan,
+    TaskPlanRevision,
     TaskStatus,
     ContextWindowSample,
     GoldfiveEventRecord,
@@ -137,6 +138,39 @@ CREATE TABLE IF NOT EXISTS task_plans (
     trigger_event_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_task_plans_session ON task_plans(session_id);
+
+-- harmonograf: task_plan_revisions sibling table.
+--
+-- ``task_plans`` upserts on ``id`` alone, so every ``plan_revised`` event
+-- overwrites the prior row. ``GetSessionPlanHistory`` reads from that
+-- table and consequently silently degrades to "latest only" — UI shows
+-- "1 revision" when 3 exist (proof: session 331d64d3-...).
+--
+-- This table is the append-only sibling: one row per ``(plan_id,
+-- revision_index)``, carrying the full plan as a serialized JSON
+-- envelope (``snapshot_json``) so the RPC handler can round-trip back
+-- to ``goldfive.v1.Plan`` without re-walking other tables. ``task_plans``
+-- stays untouched as the latest-snapshot row for current-state queries
+-- (Gantt, span-to-task binding); zero schema change to that table, zero
+-- cascade impact on ``tasks``.
+--
+-- Upsert semantics on (plan_id, revision_index) keep replays /
+-- reconnects idempotent.
+CREATE TABLE IF NOT EXISTS task_plan_revisions (
+    plan_id TEXT NOT NULL,
+    revision_index INTEGER NOT NULL,
+    session_id TEXT NOT NULL,
+    revision_reason TEXT NOT NULL DEFAULT '',
+    revision_kind TEXT NOT NULL DEFAULT '',
+    revision_severity TEXT NOT NULL DEFAULT '',
+    trigger_event_id TEXT NOT NULL DEFAULT '',
+    emitted_at REAL NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    PRIMARY KEY (plan_id, revision_index),
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_task_plan_revisions_session
+    ON task_plan_revisions(session_id, emitted_at);
 
 CREATE TABLE IF NOT EXISTS tasks (
     plan_id TEXT NOT NULL,
@@ -429,6 +463,10 @@ class SqliteStore(Store):
             )
             await self.db.execute(
                 "DELETE FROM task_plans WHERE session_id = ?", (session_id,)
+            )
+            await self.db.execute(
+                "DELETE FROM task_plan_revisions WHERE session_id = ?",
+                (session_id,),
             )
             await self.db.execute(
                 "DELETE FROM context_window_samples WHERE session_id = ?",
@@ -1127,6 +1165,101 @@ class SqliteStore(Store):
                 cancel_reason=new_reason,
             )
             return t
+
+    # task plan revisions ------------------------------------------------
+    async def put_task_plan_revision(
+        self, revision: TaskPlanRevision
+    ) -> TaskPlanRevision:
+        async with self._lock:
+            await self.db.execute(
+                """
+                INSERT INTO task_plan_revisions (
+                    plan_id, revision_index, session_id,
+                    revision_reason, revision_kind, revision_severity,
+                    trigger_event_id, emitted_at, snapshot_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(plan_id, revision_index) DO UPDATE SET
+                    session_id=excluded.session_id,
+                    revision_reason=excluded.revision_reason,
+                    revision_kind=excluded.revision_kind,
+                    revision_severity=excluded.revision_severity,
+                    trigger_event_id=excluded.trigger_event_id,
+                    emitted_at=excluded.emitted_at,
+                    snapshot_json=excluded.snapshot_json
+                """,
+                (
+                    revision.plan_id,
+                    int(revision.revision_index),
+                    revision.session_id,
+                    revision.revision_reason or "",
+                    revision.revision_kind or "",
+                    revision.revision_severity or "",
+                    revision.trigger_event_id or "",
+                    float(revision.emitted_at),
+                    revision.snapshot_json,
+                ),
+            )
+            await self.db.commit()
+            return await self._fetch_task_plan_revision(
+                revision.plan_id, int(revision.revision_index)
+            )  # type: ignore[return-value]
+
+    async def _fetch_task_plan_revision(
+        self, plan_id: str, revision_index: int
+    ) -> Optional[TaskPlanRevision]:
+        async with self.db.execute(
+            "SELECT * FROM task_plan_revisions WHERE plan_id = ? AND revision_index = ?",
+            (plan_id, int(revision_index)),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        return TaskPlanRevision(
+            plan_id=row["plan_id"],
+            revision_index=int(row["revision_index"]),
+            session_id=row["session_id"],
+            revision_reason=row["revision_reason"] or "",
+            revision_kind=row["revision_kind"] or "",
+            revision_severity=row["revision_severity"] or "",
+            trigger_event_id=row["trigger_event_id"] or "",
+            emitted_at=float(row["emitted_at"]),
+            snapshot_json=row["snapshot_json"],
+        )
+
+    async def get_task_plan_revision(
+        self, plan_id: str, revision_index: int
+    ) -> Optional[TaskPlanRevision]:
+        async with self._lock:
+            return await self._fetch_task_plan_revision(plan_id, revision_index)
+
+    async def list_task_plan_revisions_for_session(
+        self, session_id: str
+    ) -> list[TaskPlanRevision]:
+        async with self._lock:
+            async with self.db.execute(
+                """
+                SELECT * FROM task_plan_revisions
+                WHERE session_id = ?
+                ORDER BY emitted_at ASC, plan_id ASC, revision_index ASC
+                """,
+                (session_id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        return [
+            TaskPlanRevision(
+                plan_id=r["plan_id"],
+                revision_index=int(r["revision_index"]),
+                session_id=r["session_id"],
+                revision_reason=r["revision_reason"] or "",
+                revision_kind=r["revision_kind"] or "",
+                revision_severity=r["revision_severity"] or "",
+                trigger_event_id=r["trigger_event_id"] or "",
+                emitted_at=float(r["emitted_at"]),
+                snapshot_json=r["snapshot_json"],
+            )
+            for r in rows
+        ]
 
     # context window samples ----------------------------------------------
     async def append_context_window_sample(

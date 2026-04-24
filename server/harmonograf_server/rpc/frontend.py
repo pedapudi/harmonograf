@@ -54,7 +54,12 @@ from harmonograf_server.convert import (
     _ANNOTATION_KIND_TO_PB,
     _drift_kind_string_to_pb,
     _drift_severity_string_to_pb,
+    _drift_kind_pb_to_string,
+    _drift_severity_pb_to_string,
     float_to_ts,
+    goldfive_pb_plan_to_storage,
+    plan_from_snapshot_json,
+    plan_to_snapshot_json,
     py_to_attr_value,
     storage_agent_to_pb,
     storage_plan_to_goldfive_pb,
@@ -77,6 +82,8 @@ from harmonograf_server.storage import (
     Span,
     Store,
     Task,
+    TaskPlan,
+    TaskPlanRevision,
     TaskStatus,
 )
 
@@ -800,20 +807,28 @@ class FrontendServicerMixin:
     ) -> frontend_pb2.GetSessionPlanHistoryResponse:
         """Return every persisted plan revision for one session.
 
-        See ``docs/design/01`` § plan-history and issue #158. The response
-        is a chronological list (``task_plans.created_at`` ascending) of
-        ``PlanRevision`` records, each carrying the full ``goldfive.v1.Plan``
-        snapshot plus denormalized revision metadata
-        (``revision_number`` / ``revision_reason`` / ``revision_kind`` /
-        ``revision_trigger_event_id`` / ``emitted_at``).
+        Reads from the ``task_plan_revisions`` sibling table. The previous
+        implementation read from ``task_plans`` which upserts on the bare
+        ``plan_id`` and consequently silently degrades to "latest only"
+        whenever a session emits more than one ``plan_revised`` event for
+        the same plan. The sibling table is append-only on
+        ``(plan_id, revision_index)`` and stores the full plan as a
+        serialized snapshot so this handler can rebuild every
+        ``goldfive.v1.Plan`` proto without touching ``task_plans`` /
+        ``tasks``.
 
-        Data-shape note: ``task_plans`` already denormalizes every revision
-        field at ingest time (see ``ingest._on_plan_revised``). No join
-        against ``goldfive_events`` is required — the handler reads only
-        ``list_task_plans_for_session``. A WARNING is logged when a non-
-        zero revision carries an empty ``revision_kind`` (corrupt or
-        legacy data); the revision is still returned with empty trigger
-        fields so the frontend can degrade gracefully rather than crash.
+        Lazy migration: existing DBs may have ``plan_revised`` events in
+        ``goldfive_events`` but no ``task_plan_revisions`` rows (because
+        the table didn't exist when those sessions ran). When the count
+        of revision rows comes back lower than the count of plan-revision
+        events for the session, we replay the events into the new table
+        on this query and re-read. Subsequent queries are O(table-read)
+        again because the upsert is idempotent.
+
+        Backwards compat: each revision still includes the upper-case
+        ``DriftKind`` name on the wire (so the frontend can keep its
+        switch-on-string code) and a corrupt-row WARNING for
+        revision_index>0 with empty revision_kind.
         """
         if not request.session_id:
             await context.abort(
@@ -829,46 +844,237 @@ class FrontendServicerMixin:
             return frontend_pb2.GetSessionPlanHistoryResponse()
 
         try:
-            plans = await self._store.list_task_plans_for_session(
+            revisions = await self._store.list_task_plan_revisions_for_session(
                 request.session_id
             )
         except Exception as exc:  # noqa: BLE001 — defensive: RPC must not 500
             logger.warning(
-                "list_task_plans_for_session failed session_id=%s: %s",
+                "list_task_plan_revisions_for_session failed session_id=%s: %s",
                 request.session_id,
                 exc,
             )
-            plans = []
-        # Storage guarantees ``ORDER BY created_at``; re-sort defensively so
-        # in-memory/test backends that don't order stay deterministic.
-        plans = sorted(plans, key=lambda p: p.created_at)
+            revisions = []
+
+        # Lazy migration: pre-existing sessions have plan_revised /
+        # plan_submitted events on disk but no rows in task_plan_revisions.
+        # Compare revision-row count to the event count for this session; if
+        # the events table has more, replay them now. This pays the
+        # migration cost only on the first query that needs it, never at
+        # startup, and is idempotent on subsequent queries because
+        # ``put_task_plan_revision`` upserts on ``(plan_id, revision_index)``.
+        try:
+            expected = await self._count_plan_revision_events(request.session_id)
+        except Exception as exc:  # noqa: BLE001 — defensive
+            logger.debug(
+                "count_plan_revision_events failed session_id=%s: %s",
+                request.session_id,
+                exc,
+            )
+            expected = 0
+        if expected > len(revisions):
+            try:
+                await self._backfill_task_plan_revisions(request.session_id)
+                revisions = await self._store.list_task_plan_revisions_for_session(
+                    request.session_id
+                )
+            except Exception as exc:  # noqa: BLE001 — defensive
+                logger.warning(
+                    "task_plan_revisions backfill failed session_id=%s: %s",
+                    request.session_id,
+                    exc,
+                )
+
+        # Storage already orders by emitted_at; re-sort defensively for
+        # deterministic responses across backends. Stable secondary key on
+        # (plan_id, revision_index) keeps two-rev-same-emitted-at tied.
+        revisions = sorted(
+            revisions,
+            key=lambda r: (r.emitted_at, r.plan_id, int(r.revision_index)),
+        )
 
         resp = frontend_pb2.GetSessionPlanHistoryResponse()
-        for plan in plans:
-            # Every persisted revision has its metadata on the TaskPlan row
-            # (harmonograf#99). Non-zero revisions missing ``revision_kind``
-            # are corrupt/legacy — log once and still emit the revision.
-            if plan.revision_index and not plan.revision_kind:
+        for rev in revisions:
+            # Non-zero revisions missing ``revision_kind`` are corrupt/legacy —
+            # log once and still emit the revision with empty trigger fields
+            # so the frontend can degrade gracefully rather than crash.
+            if rev.revision_index and not rev.revision_kind:
                 logger.warning(
                     "plan %s on session %s has revision_index=%d but empty "
                     "revision_kind — returning with empty trigger fields",
-                    plan.id,
+                    rev.plan_id,
                     request.session_id,
-                    plan.revision_index,
+                    rev.revision_index,
                 )
+            try:
+                plan = plan_from_snapshot_json(rev.snapshot_json)
+            except Exception as exc:  # noqa: BLE001 — corrupt snapshot: skip row
+                logger.warning(
+                    "task_plan_revisions snapshot decode failed plan_id=%s "
+                    "revision_index=%d: %s",
+                    rev.plan_id,
+                    rev.revision_index,
+                    exc,
+                )
+                continue
+            # Carry session_id forward — older snapshot envelopes might miss it.
+            if not plan.session_id:
+                plan.session_id = request.session_id
             revision = resp.revisions.add()
             revision.plan.CopyFrom(storage_plan_to_goldfive_pb(plan))
-            revision.revision_number = int(plan.revision_index)
-            revision.revision_reason = plan.revision_reason or ""
+            revision.revision_number = int(rev.revision_index)
+            revision.revision_reason = rev.revision_reason or ""
             # ``revision_kind`` on the wire is the upper-case DriftKind name
             # (e.g. ``"USER_STEER"``) so downstream consumers can switch on
             # it without a lowercase-vs-enum mapping table. Empty on revision 0.
-            revision.revision_kind = _plan_revision_kind_name(plan.revision_kind)
-            revision.revision_trigger_event_id = plan.trigger_event_id or ""
-            emitted = float_to_ts(plan.created_at)
+            revision.revision_kind = _plan_revision_kind_name(rev.revision_kind)
+            revision.revision_trigger_event_id = rev.trigger_event_id or ""
+            emitted = float_to_ts(rev.emitted_at)
             if emitted is not None:
                 revision.emitted_at.CopyFrom(emitted)
         return resp
+
+    async def _count_plan_revision_events(self, session_id: str) -> int:
+        """Total ``plan_submitted`` + ``plan_revised`` events for a session.
+
+        Used by ``GetSessionPlanHistory``'s lazy-migration trigger. We
+        accept an under-count: ``list_goldfive_events`` filters server-side
+        by kind, and de-dup is implicit on
+        ``(session_id, run_id, sequence)``.
+        """
+
+        submitted = await self._store.list_goldfive_events(
+            session_id, kind="plan_submitted"
+        )
+        revised = await self._store.list_goldfive_events(
+            session_id, kind="plan_revised"
+        )
+        return len(submitted) + len(revised)
+
+    async def _backfill_task_plan_revisions(self, session_id: str) -> None:
+        """Replay persisted ``plan_submitted`` / ``plan_revised`` events
+        for ``session_id`` into ``task_plan_revisions``.
+
+        Idempotent — every write upserts on ``(plan_id, revision_index)``.
+        Safe to call when ``task_plan_revisions`` is partially populated;
+        already-present rows are overwritten with identical (or
+        snapshot-identical) data. Errors on individual events are logged
+        and skipped so a single corrupt envelope doesn't poison the rest
+        of the migration.
+        """
+
+        submitted = await self._store.list_goldfive_events(
+            session_id, kind="plan_submitted"
+        )
+        revised = await self._store.list_goldfive_events(
+            session_id, kind="plan_revised"
+        )
+        ordered = sorted(
+            list(submitted) + list(revised),
+            key=lambda r: (r.recorded_at, r.run_id, int(r.sequence)),
+        )
+        for rec in ordered:
+            try:
+                event = goldfive_events_pb2.Event()
+                event.ParseFromString(rec.payload_bytes or b"")
+            except Exception as exc:  # noqa: BLE001 — defensive
+                logger.debug(
+                    "backfill: parse failed session_id=%s seq=%d: %s",
+                    session_id,
+                    rec.sequence,
+                    exc,
+                )
+                continue
+            if rec.kind == "plan_submitted":
+                pb_plan = event.plan_submitted.plan
+                event_trigger_id = ""
+                event_kind_str = ""
+                event_severity_str = ""
+                event_reason = ""
+                event_revision_index: Optional[int] = None
+            elif rec.kind == "plan_revised":
+                pb_plan = event.plan_revised.plan
+                event_trigger_id = (
+                    getattr(event.plan_revised, "trigger_event_id", "") or ""
+                )
+                event_kind_str = _drift_kind_pb_to_string(
+                    event.plan_revised.drift_kind
+                )
+                event_severity_str = _drift_severity_pb_to_string(
+                    event.plan_revised.severity
+                )
+                event_reason = event.plan_revised.reason or ""
+                event_revision_index = int(event.plan_revised.revision_index or 0)
+            else:
+                continue
+            if not pb_plan.id:
+                continue
+            created_at = (
+                ts_to_float(pb_plan.created_at)
+                if pb_plan.HasField("created_at")
+                else float(rec.recorded_at)
+            )
+            try:
+                stored = goldfive_pb_plan_to_storage(
+                    pb_plan,
+                    session_id=session_id,
+                    created_at=created_at,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "backfill: plan_to_storage failed session_id=%s seq=%d: %s",
+                    session_id,
+                    rec.sequence,
+                    exc,
+                )
+                continue
+            # Apply the same event-level overrides ``_on_plan_revised`` would
+            # have used at live ingest time, so a row backfilled from a
+            # PlanRevised envelope ends up with the same revision metadata
+            # the live path produces.
+            if not stored.revision_kind and event_kind_str:
+                stored.revision_kind = event_kind_str
+            if not stored.revision_severity and event_severity_str:
+                stored.revision_severity = event_severity_str
+            if not stored.revision_reason and event_reason:
+                stored.revision_reason = event_reason
+            if (
+                event_revision_index is not None
+                and not int(stored.revision_index or 0)
+            ):
+                stored.revision_index = event_revision_index
+            if event_trigger_id and not stored.trigger_event_id:
+                stored.trigger_event_id = event_trigger_id
+            try:
+                snapshot = plan_to_snapshot_json(stored)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "backfill: snapshot encode failed session_id=%s seq=%d: %s",
+                    session_id,
+                    rec.sequence,
+                    exc,
+                )
+                continue
+            try:
+                await self._store.put_task_plan_revision(
+                    TaskPlanRevision(
+                        plan_id=stored.id,
+                        revision_index=int(stored.revision_index or 0),
+                        session_id=session_id,
+                        revision_reason=stored.revision_reason or "",
+                        revision_kind=stored.revision_kind or "",
+                        revision_severity=stored.revision_severity or "",
+                        trigger_event_id=stored.trigger_event_id or "",
+                        emitted_at=float(stored.created_at or 0.0),
+                        snapshot_json=snapshot,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "backfill: put_task_plan_revision failed session_id=%s seq=%d: %s",
+                    session_id,
+                    rec.sequence,
+                    exc,
+                )
 
     # ---- GetStats -----------------------------------------------------
 

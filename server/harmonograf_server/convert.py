@@ -5,6 +5,8 @@ so every translation lives here.
 
 from __future__ import annotations
 
+import base64
+import json
 from typing import Any, Optional
 
 from google.protobuf.timestamp_pb2 import Timestamp
@@ -524,6 +526,66 @@ def storage_plan_to_goldfive_pb(plan: TaskPlan) -> Any:
     if created is not None:
         pb.created_at.CopyFrom(created)
     return pb
+
+
+def plan_to_snapshot_json(plan: TaskPlan) -> str:
+    """Serialize a ``TaskPlan`` to the JSON string stored in
+    ``task_plan_revisions.snapshot_json``.
+
+    The wire form is a tiny envelope around the serialized
+    ``goldfive.v1.Plan`` proto:
+
+    .. code-block:: json
+
+       {
+         "v": 1,
+         "session_id": "<sid>",
+         "invocation_span_id": "<sid or empty>",
+         "planner_agent_id": "<aid or empty>",
+         "created_at": <unix-seconds-float>,
+         "plan_pb_b64": "<base64-encoded goldfive.v1.Plan bytes>"
+       }
+
+    Storing the proto wire bytes (rather than a hand-marshalled JSON of
+    every field) means the snapshot round-trips through the same
+    ``storage_plan_to_goldfive_pb`` / ``goldfive_pb_plan_to_storage``
+    converters used by the rest of the server. New fields on the Plan
+    proto pick up automatically; we never need a snapshot-schema
+    migration.
+    """
+
+    pb = storage_plan_to_goldfive_pb(plan)
+    payload = {
+        "v": 1,
+        "session_id": plan.session_id,
+        "invocation_span_id": plan.invocation_span_id or "",
+        "planner_agent_id": plan.planner_agent_id or "",
+        "created_at": float(plan.created_at),
+        "plan_pb_b64": base64.b64encode(pb.SerializeToString()).decode("ascii"),
+    }
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+
+def plan_from_snapshot_json(snapshot: str) -> TaskPlan:
+    """Inverse of :func:`plan_to_snapshot_json`.
+
+    Decodes the embedded ``goldfive.v1.Plan`` and re-clothes it with
+    the harmonograf-side bookkeeping (``session_id`` /
+    ``invocation_span_id`` / ``planner_agent_id`` / ``created_at``)
+    captured at write time.
+    """
+
+    payload = json.loads(snapshot)
+    pb_bytes = base64.b64decode(payload["plan_pb_b64"])
+    plan_pb = goldfive_types_pb2.Plan()
+    plan_pb.ParseFromString(pb_bytes)
+    return goldfive_pb_plan_to_storage(
+        plan_pb,
+        session_id=str(payload.get("session_id") or ""),
+        created_at=float(payload.get("created_at") or 0.0),
+        invocation_span_id=str(payload.get("invocation_span_id") or ""),
+        planner_agent_id=str(payload.get("planner_agent_id") or ""),
+    )
 
 
 def storage_agent_to_pb(agent: Agent) -> types_pb2.Agent:
