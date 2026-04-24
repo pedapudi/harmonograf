@@ -470,6 +470,110 @@ async def test_plan_revised_increments_revision_metadata(pipeline, store):
     assert len(plan_deltas) >= 2
 
 
+# ---- task_plan_revisions sibling-table ingest path ----------------------
+#
+# These tests exercise the bug Option B fixes: ``task_plans`` upserts on
+# ``id`` alone and so silently overwrites prior revisions. The sibling
+# ``task_plan_revisions`` table keyed on ``(plan_id, revision_index)``
+# must keep them all, so ``GetSessionPlanHistory`` can rebuild every
+# revision the planner emitted.
+
+
+@pytest.mark.asyncio
+async def test_plan_submitted_writes_revision_zero_to_sibling_table(
+    pipeline, store
+):
+    pipe, _, _ = pipeline
+    await _ensure_session(store)
+
+    initial = _make_event()
+    initial.plan_submitted.plan.CopyFrom(_plan_pb(plan_id="plan-Z"))
+    await pipe.handle_message(_stream_ctx(), _wrap(initial))
+
+    rows = await store.list_task_plan_revisions_for_session("sess_gf")
+    assert [r.revision_index for r in rows] == [0]
+    assert rows[0].plan_id == "plan-Z"
+    assert rows[0].snapshot_json  # non-empty serialized envelope
+
+
+@pytest.mark.asyncio
+async def test_plan_revised_keeps_all_revisions_in_sibling_table(
+    pipeline, store
+):
+    """Each PlanRevised event for the same plan_id must produce a row.
+
+    Reproduces session 331d64d3-...: 3 plan_revised events should yield
+    4 sibling rows (R0 + R1 + R2 + R3), not 1.
+    """
+
+    pipe, _, _ = pipeline
+    await _ensure_session(store)
+
+    initial = _make_event()
+    initial.plan_submitted.plan.CopyFrom(_plan_pb(plan_id="plan-R"))
+    await pipe.handle_message(_stream_ctx(), _wrap(initial))
+
+    for i, drift in enumerate(
+        [gt.DRIFT_KIND_TOOL_ERROR, gt.DRIFT_KIND_USER_STEER, gt.DRIFT_KIND_LOOPING_REASONING],
+        start=1,
+    ):
+        revised = _make_event(sequence=i, event_id=f"e-r{i}")
+        plan_pb = _plan_pb(
+            plan_id="plan-R", task_ids=[f"t{j}" for j in range(1, 2 + i)]
+        )
+        plan_pb.revision_index = i
+        revised.plan_revised.plan.CopyFrom(plan_pb)
+        revised.plan_revised.drift_kind = drift
+        revised.plan_revised.severity = gt.DRIFT_SEVERITY_WARNING
+        revised.plan_revised.reason = f"reason-r{i}"
+        revised.plan_revised.revision_index = i
+        revised.plan_revised.trigger_event_id = f"trig-{i}"
+        await pipe.handle_message(_stream_ctx(), _wrap(revised))
+
+    rows = await store.list_task_plan_revisions_for_session("sess_gf")
+    assert [r.revision_index for r in rows] == [0, 1, 2, 3]
+    # All four share plan_id — confirming the (plan_id, revision_index)
+    # composite primary key keeps them distinct.
+    assert {r.plan_id for r in rows} == {"plan-R"}
+    # Trigger ids land on every non-zero revision.
+    assert rows[0].trigger_event_id == ""
+    assert rows[1].trigger_event_id == "trig-1"
+    assert rows[2].trigger_event_id == "trig-2"
+    assert rows[3].trigger_event_id == "trig-3"
+    # task_plans (latest snapshot) still holds only the latest, by design.
+    latest = await store.get_task_plan("plan-R")
+    assert latest is not None
+    assert latest.revision_index == 3
+
+
+@pytest.mark.asyncio
+async def test_plan_revised_replay_is_idempotent_on_sibling_table(
+    pipeline, store
+):
+    """A duplicate PlanRevised envelope (reconnect / replay) upserts on
+    ``(plan_id, revision_index)`` and does not produce duplicate rows."""
+
+    pipe, _, _ = pipeline
+    await _ensure_session(store)
+
+    initial = _make_event()
+    initial.plan_submitted.plan.CopyFrom(_plan_pb(plan_id="plan-Q"))
+    await pipe.handle_message(_stream_ctx(), _wrap(initial))
+
+    revised = _make_event(sequence=1, event_id="e-rev")
+    plan_pb = _plan_pb(plan_id="plan-Q", task_ids=["t1", "t2", "t3"])
+    plan_pb.revision_index = 1
+    revised.plan_revised.plan.CopyFrom(plan_pb)
+    revised.plan_revised.drift_kind = gt.DRIFT_KIND_TOOL_ERROR
+    revised.plan_revised.revision_index = 1
+    await pipe.handle_message(_stream_ctx(), _wrap(revised))
+    # Replay the same envelope (reconnect path).
+    await pipe.handle_message(_stream_ctx(), _wrap(revised))
+
+    rows = await store.list_task_plan_revisions_for_session("sess_gf")
+    assert [r.revision_index for r in rows] == [0, 1]
+
+
 # ---- task status transitions --------------------------------------------
 
 

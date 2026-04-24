@@ -27,6 +27,7 @@ from harmonograf_server.storage.base import (
     Store,
     Task,
     TaskPlan,
+    TaskPlanRevision,
     TaskStatus,
     ContextWindowSample,
     GoldfiveEventRecord,
@@ -45,6 +46,9 @@ class InMemoryStore(Store):
         self._payloads: dict[str, PayloadRecord] = {}
         self._payload_refcount: dict[str, int] = {}
         self._task_plans: dict[str, TaskPlan] = {}
+        # (plan_id, revision_index) -> TaskPlanRevision. Append-only sibling
+        # to ``_task_plans`` (which is latest-only). See base.TaskPlanRevision.
+        self._task_plan_revisions: dict[tuple[str, int], TaskPlanRevision] = {}
         # session_id -> agent_id -> list[ContextWindowSample] (append-only).
         self._ctx_samples: dict[str, dict[str, list[ContextWindowSample]]] = {}
         # session_id -> list[GoldfiveEventRecord] (append-only, in wire order).
@@ -136,6 +140,13 @@ class InMemoryStore(Store):
             ]
             for pid in plan_ids:
                 del self._task_plans[pid]
+            rev_keys = [
+                k
+                for k, rev in self._task_plan_revisions.items()
+                if rev.session_id == session_id
+            ]
+            for k in rev_keys:
+                del self._task_plan_revisions[k]
             self._ctx_samples.pop(session_id, None)
             return True
 
@@ -434,6 +445,34 @@ class InMemoryStore(Store):
                         t.cancel_reason = cancel_reason
                     return copy.deepcopy(t)
             return None
+
+    # task plan revisions ------------------------------------------------
+    async def put_task_plan_revision(
+        self, revision: TaskPlanRevision
+    ) -> TaskPlanRevision:
+        async with self._lock:
+            key = (revision.plan_id, int(revision.revision_index))
+            self._task_plan_revisions[key] = copy.deepcopy(revision)
+            return copy.deepcopy(revision)
+
+    async def get_task_plan_revision(
+        self, plan_id: str, revision_index: int
+    ) -> Optional[TaskPlanRevision]:
+        async with self._lock:
+            rev = self._task_plan_revisions.get((plan_id, int(revision_index)))
+            return copy.deepcopy(rev) if rev else None
+
+    async def list_task_plan_revisions_for_session(
+        self, session_id: str
+    ) -> list[TaskPlanRevision]:
+        async with self._lock:
+            out = [
+                copy.deepcopy(r)
+                for r in self._task_plan_revisions.values()
+                if r.session_id == session_id
+            ]
+        out.sort(key=lambda r: (r.emitted_at, r.plan_id, r.revision_index))
+        return out
 
     # stats ---------------------------------------------------------------
     async def append_context_window_sample(

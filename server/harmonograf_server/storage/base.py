@@ -205,6 +205,25 @@ class TaskPlan:
     trigger_event_id: str = ""
 
 
+# Sibling of TaskPlan — `task_plans` upserts on `id` alone, so every
+# `plan_revised` event overwrites the prior revision and ``GetSessionPlanHistory``
+# silently degrades to "latest only". TaskPlanRevision rows are append-only,
+# keyed by (plan_id, revision_index), and carry the full plan as serialized
+# JSON so the RPC handler can round-trip back to ``goldfive.v1.Plan`` without
+# re-walking other tables. See harmonograf#: task_plan_revisions.
+@dataclass
+class TaskPlanRevision:
+    plan_id: str
+    revision_index: int
+    session_id: str
+    emitted_at: float
+    snapshot_json: str
+    revision_reason: str = ""
+    revision_kind: str = ""
+    revision_severity: str = ""
+    trigger_event_id: str = ""
+
+
 @dataclass
 class ContextWindowSample:
     session_id: str
@@ -426,6 +445,33 @@ class Store(ABC):
         *,
         cancel_reason: str = "",
     ) -> Optional[Task]: ...
+
+    # task plan revisions --------------------------------------------------
+    #
+    # Sibling table to ``task_plans``. ``put_task_plan`` upserts on the bare
+    # ``plan_id``, so every ``plan_revised`` event overwrites the prior row
+    # and the plan-history RPC silently collapses to "latest only". This
+    # interface exposes the per-revision history that ``task_plans`` lost.
+    #
+    # ``put_task_plan_revision`` is upsert-on-(plan_id, revision_index) so
+    # reconnect / replay is idempotent. ``snapshot_json`` is the
+    # authoritative wire form — round-tripped through the same converters
+    # ``storage_plan_to_goldfive_pb`` uses elsewhere — so reading a revision
+    # back never needs to touch the latest-snapshot ``task_plans`` row.
+    @abstractmethod
+    async def put_task_plan_revision(
+        self, revision: "TaskPlanRevision"
+    ) -> "TaskPlanRevision": ...
+
+    @abstractmethod
+    async def list_task_plan_revisions_for_session(
+        self, session_id: str
+    ) -> list["TaskPlanRevision"]: ...
+
+    @abstractmethod
+    async def get_task_plan_revision(
+        self, plan_id: str, revision_index: int
+    ) -> Optional["TaskPlanRevision"]: ...
 
     # context window samples ----------------------------------------------
     @abstractmethod

@@ -31,6 +31,7 @@ from harmonograf_server.storage import (
     Task,
     TaskEdge,
     TaskPlan,
+    TaskPlanRevision,
     TaskStatus,
     make_store,
 )
@@ -484,6 +485,122 @@ async def test_update_task_status_unknown_task(store):
 
 
 # ---- stats + cascade ------------------------------------------------------
+
+
+# ---- task plan revisions (Option B sibling table) -------------------------
+
+
+def _rev(
+    plan_id: str,
+    revision_index: int,
+    *,
+    session_id: str = "sess_1",
+    emitted_at: float = 100.0,
+    snapshot_json: str = '{"v":1}',
+    revision_kind: str = "",
+    revision_reason: str = "",
+    revision_severity: str = "",
+    trigger_event_id: str = "",
+) -> TaskPlanRevision:
+    return TaskPlanRevision(
+        plan_id=plan_id,
+        revision_index=revision_index,
+        session_id=session_id,
+        emitted_at=emitted_at,
+        snapshot_json=snapshot_json,
+        revision_kind=revision_kind,
+        revision_reason=revision_reason,
+        revision_severity=revision_severity,
+        trigger_event_id=trigger_event_id,
+    )
+
+
+async def test_task_plan_revision_round_trip(store):
+    await store.create_session(_sess())
+    rev = _rev("plan-A", 0, snapshot_json='{"v":1,"x":1}')
+    stored = await store.put_task_plan_revision(rev)
+    assert stored.plan_id == "plan-A"
+    assert stored.revision_index == 0
+    fetched = await store.get_task_plan_revision("plan-A", 0)
+    assert fetched is not None
+    assert fetched.snapshot_json == '{"v":1,"x":1}'
+
+
+async def test_task_plan_revision_upsert_is_idempotent(store):
+    """Re-emitting the same (plan_id, revision_index) replaces the row."""
+
+    await store.create_session(_sess())
+    await store.put_task_plan_revision(
+        _rev("plan-A", 0, snapshot_json='{"first":true}', revision_reason="initial")
+    )
+    await store.put_task_plan_revision(
+        _rev(
+            "plan-A",
+            0,
+            snapshot_json='{"second":true}',
+            revision_reason="enriched",
+            trigger_event_id="trig-X",
+        )
+    )
+    rows = await store.list_task_plan_revisions_for_session("sess_1")
+    assert len(rows) == 1
+    assert rows[0].snapshot_json == '{"second":true}'
+    assert rows[0].revision_reason == "enriched"
+    assert rows[0].trigger_event_id == "trig-X"
+
+
+async def test_list_task_plan_revisions_session_scoped_and_ordered(store):
+    await store.create_session(_sess("s_a"))
+    await store.create_session(_sess("s_b"))
+    # Insert out of emitted_at order to prove the list orders chronologically.
+    await store.put_task_plan_revision(
+        _rev("plan-A", 2, session_id="s_a", emitted_at=300.0)
+    )
+    await store.put_task_plan_revision(
+        _rev("plan-A", 0, session_id="s_a", emitted_at=100.0)
+    )
+    await store.put_task_plan_revision(
+        _rev("plan-A", 1, session_id="s_a", emitted_at=200.0)
+    )
+    await store.put_task_plan_revision(
+        _rev("plan-B", 0, session_id="s_b", emitted_at=150.0)
+    )
+    a_rows = await store.list_task_plan_revisions_for_session("s_a")
+    assert [r.revision_index for r in a_rows] == [0, 1, 2]
+    b_rows = await store.list_task_plan_revisions_for_session("s_b")
+    assert [r.plan_id for r in b_rows] == ["plan-B"]
+
+
+async def test_task_plan_revision_distinct_revisions_share_plan_id(store):
+    """The exact bug Option B fixes: same plan_id, different revision_index
+    must NOT collide. ``put_task_plan`` upserts on plan_id alone and
+    silently drops earlier revisions; this sibling table keeps them all."""
+
+    await store.create_session(_sess())
+    await store.put_task_plan_revision(
+        _rev("plan-A", 0, snapshot_json='{"r":0}', emitted_at=100.0)
+    )
+    await store.put_task_plan_revision(
+        _rev("plan-A", 1, snapshot_json='{"r":1}', emitted_at=110.0)
+    )
+    await store.put_task_plan_revision(
+        _rev("plan-A", 2, snapshot_json='{"r":2}', emitted_at=120.0)
+    )
+    rows = await store.list_task_plan_revisions_for_session("sess_1")
+    assert [r.revision_index for r in rows] == [0, 1, 2]
+    assert [r.snapshot_json for r in rows] == ['{"r":0}', '{"r":1}', '{"r":2}']
+
+
+async def test_task_plan_revision_get_missing_returns_none(store):
+    assert await store.get_task_plan_revision("nope", 0) is None
+
+
+async def test_delete_session_clears_task_plan_revisions(store):
+    await store.create_session(_sess())
+    await store.put_task_plan_revision(_rev("plan-A", 0))
+    await store.put_task_plan_revision(_rev("plan-A", 1, emitted_at=110.0))
+    assert await store.delete_session("sess_1") is True
+    assert await store.list_task_plan_revisions_for_session("sess_1") == []
 
 
 async def test_delete_session_cascade_full(store):

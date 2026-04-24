@@ -51,6 +51,7 @@ from harmonograf_server.storage.base import (
     Store,
     Task,
     TaskPlan,
+    TaskPlanRevision,
     TaskStatus,
 )
 
@@ -202,6 +203,21 @@ class PostgresStore(Store):
         *,
         cancel_reason: str = "",
     ) -> Optional[Task]:
+        raise NotImplementedError(_NOT_IMPLEMENTED)
+
+    async def put_task_plan_revision(
+        self, revision: TaskPlanRevision
+    ) -> TaskPlanRevision:
+        raise NotImplementedError(_NOT_IMPLEMENTED)
+
+    async def list_task_plan_revisions_for_session(
+        self, session_id: str
+    ) -> list[TaskPlanRevision]:
+        raise NotImplementedError(_NOT_IMPLEMENTED)
+
+    async def get_task_plan_revision(
+        self, plan_id: str, revision_index: int
+    ) -> Optional[TaskPlanRevision]:
         raise NotImplementedError(_NOT_IMPLEMENTED)
 
     async def append_context_window_sample(self, sample: ContextWindowSample) -> None:

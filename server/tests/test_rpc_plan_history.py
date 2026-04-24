@@ -29,6 +29,7 @@ import pytest_asyncio
 
 from harmonograf_server.bus import SessionBus
 from harmonograf_server.control_router import ControlRouter
+from harmonograf_server.convert import plan_to_snapshot_json
 from harmonograf_server.ingest import IngestPipeline
 from harmonograf_server.pb import (
     frontend_pb2,
@@ -40,6 +41,7 @@ from harmonograf_server.storage import (
     SessionStatus,
     Task,
     TaskPlan,
+    TaskPlanRevision,
     TaskStatus,
     make_store,
 )
@@ -92,6 +94,29 @@ def _make_task(tid: str, status: TaskStatus = TaskStatus.PENDING) -> Task:
     )
 
 
+async def _seed_plan(store, plan: TaskPlan) -> None:
+    """Seed both ``task_plans`` (latest snapshot) and ``task_plan_revisions``
+    (per-revision history) the way ``ingest._upsert_plan`` /
+    ``_on_plan_revised`` would. ``GetSessionPlanHistory`` reads from the
+    revisions table now (post-Option-B fix); tests must populate it
+    explicitly because the test fixtures don't go through ingest."""
+
+    await store.put_task_plan(plan)
+    await store.put_task_plan_revision(
+        TaskPlanRevision(
+            plan_id=plan.id,
+            revision_index=int(plan.revision_index or 0),
+            session_id=plan.session_id,
+            revision_reason=plan.revision_reason or "",
+            revision_kind=plan.revision_kind or "",
+            revision_severity=plan.revision_severity or "",
+            trigger_event_id=plan.trigger_event_id or "",
+            emitted_at=float(plan.created_at),
+            snapshot_json=plan_to_snapshot_json(plan),
+        )
+    )
+
+
 async def _call(stack, session_id: str):
     ch = grpc.aio.insecure_channel(f"127.0.0.1:{stack['port']}")
     try:
@@ -120,7 +145,7 @@ async def test_single_plan_submitted_one_revision_no_trigger(rpc_stack):
     store = rpc_stack["store"]
     sid = "sess_single"
     await _seed_session(store, sid, created_at=100.0)
-    await store.put_task_plan(
+    await _seed_plan(store, 
         TaskPlan(
             id="p0",
             session_id=sid,
@@ -150,7 +175,7 @@ async def test_plan_submitted_plus_plan_revised_two_revisions(rpc_stack):
     store = rpc_stack["store"]
     sid = "sess_revised"
     await _seed_session(store, sid, created_at=100.0)
-    await store.put_task_plan(
+    await _seed_plan(store, 
         TaskPlan(
             id="p0",
             session_id=sid,
@@ -161,7 +186,7 @@ async def test_plan_submitted_plus_plan_revised_two_revisions(rpc_stack):
             revision_index=0,
         )
     )
-    await store.put_task_plan(
+    await _seed_plan(store, 
         TaskPlan(
             id="p1",
             session_id=sid,
@@ -198,7 +223,7 @@ async def test_multi_revision_chronological_order(rpc_stack):
     sid = "sess_multi"
     await _seed_session(store, sid, created_at=0.0)
     # Insert out of order to prove the handler sorts by created_at.
-    await store.put_task_plan(
+    await _seed_plan(store, 
         TaskPlan(
             id="p2",
             session_id=sid,
@@ -212,7 +237,7 @@ async def test_multi_revision_chronological_order(rpc_stack):
             trigger_event_id="drift_cascade",
         )
     )
-    await store.put_task_plan(
+    await _seed_plan(store, 
         TaskPlan(
             id="p0",
             session_id=sid,
@@ -223,7 +248,7 @@ async def test_multi_revision_chronological_order(rpc_stack):
             revision_index=0,
         )
     )
-    await store.put_task_plan(
+    await _seed_plan(store, 
         TaskPlan(
             id="p1",
             session_id=sid,
@@ -256,7 +281,7 @@ async def test_corrupt_revision_missing_kind_logs_and_returns(rpc_stack, caplog)
     store = rpc_stack["store"]
     sid = "sess_corrupt"
     await _seed_session(store, sid)
-    await store.put_task_plan(
+    await _seed_plan(store, 
         TaskPlan(
             id="p0",
             session_id=sid,
@@ -267,7 +292,7 @@ async def test_corrupt_revision_missing_kind_logs_and_returns(rpc_stack, caplog)
             revision_index=0,
         )
     )
-    await store.put_task_plan(
+    await _seed_plan(store, 
         TaskPlan(
             id="p1",
             session_id=sid,
@@ -332,6 +357,85 @@ async def test_rpc_unknown_session_is_not_found(rpc_stack):
 # ---------------------------------------------------------------------------
 
 
+async def test_lazy_migration_backfills_from_goldfive_events(rpc_stack):
+    """Pre-Option-B sessions have ``plan_submitted`` / ``plan_revised``
+    rows in ``goldfive_events`` but no ``task_plan_revisions``. The
+    handler must replay them into the new table on first query.
+
+    Drives the real ingest path so ``goldfive_events`` is populated with
+    real wire bytes; then wipes ``task_plan_revisions`` and re-queries
+    to confirm the lazy backfill rebuilds the table from the persisted
+    envelopes.
+    """
+
+    from goldfive.v1 import events_pb2 as ge
+    from goldfive.v1 import types_pb2 as gt
+    from harmonograf_server.ingest import StreamContext
+    from harmonograf_server.pb import telemetry_pb2
+
+    store = rpc_stack["store"]
+    sid = "sess_lazy"
+    await _seed_session(store, sid, created_at=0.0)
+    pipe = rpc_stack["servicer"]._ingest
+
+    def _wrap(evt: ge.Event) -> telemetry_pb2.TelemetryUp:
+        return telemetry_pb2.TelemetryUp(goldfive_event=evt)
+
+    def _stream_ctx() -> StreamContext:
+        return StreamContext(
+            stream_id="s1",
+            agent_id="a1",
+            session_id=sid,
+            connected_at=0.0,
+            last_heartbeat=0.0,
+            seen_routes={(sid, "a1")},
+        )
+
+    # Drive PlanSubmitted + 2 PlanRevised through ingest. This populates
+    # both ``task_plan_revisions`` (the new path) and ``goldfive_events``
+    # (the audit log we'll lazily migrate from below).
+    base = ge.Event(event_id="e0", run_id="run-1", sequence=0)
+    plan = gt.Plan(id="plan-L")
+    plan.tasks.add(id="t1")
+    base.plan_submitted.plan.CopyFrom(plan)
+    await pipe.handle_message(_stream_ctx(), _wrap(base))
+
+    for i in (1, 2):
+        evt = ge.Event(event_id=f"e{i}", run_id="run-1", sequence=i)
+        rp = gt.Plan(id="plan-L", revision_index=i)
+        for j in range(1, 2 + i):
+            rp.tasks.add(id=f"t{j}")
+        evt.plan_revised.plan.CopyFrom(rp)
+        evt.plan_revised.drift_kind = gt.DRIFT_KIND_TOOL_ERROR
+        evt.plan_revised.severity = gt.DRIFT_SEVERITY_WARNING
+        evt.plan_revised.reason = f"reason-r{i}"
+        evt.plan_revised.revision_index = i
+        evt.plan_revised.trigger_event_id = f"trig-{i}"
+        await pipe.handle_message(_stream_ctx(), _wrap(evt))
+
+    # Sanity: live-ingest path already populated the sibling table.
+    pre = await store.list_task_plan_revisions_for_session(sid)
+    assert [r.revision_index for r in pre] == [0, 1, 2]
+
+    # Simulate a pre-Option-B DB by wiping the sibling table while
+    # leaving ``goldfive_events`` (and ``task_plans``) intact.
+    store._task_plan_revisions.clear()  # type: ignore[attr-defined]
+    assert await store.list_task_plan_revisions_for_session(sid) == []
+
+    # The RPC should detect (events > revisions), replay the events,
+    # and return all 3 revisions on the first query.
+    resp = await _call(rpc_stack, sid)
+    assert [r.revision_number for r in resp.revisions] == [0, 1, 2]
+    assert [r.plan.id for r in resp.revisions] == ["plan-L", "plan-L", "plan-L"]
+    assert resp.revisions[1].revision_kind == "TOOL_ERROR"
+    assert resp.revisions[1].revision_trigger_event_id == "trig-1"
+    assert resp.revisions[2].revision_trigger_event_id == "trig-2"
+
+    # Second query is now a plain table read — backfill should not run again.
+    post = await store.list_task_plan_revisions_for_session(sid)
+    assert [r.revision_index for r in post] == [0, 1, 2]
+
+
 async def test_rpc_reflects_ingested_plan_revisions(rpc_stack):
     """Seed the store the way ingest._on_plan_submitted/revised would."""
 
@@ -340,7 +444,7 @@ async def test_rpc_reflects_ingested_plan_revisions(rpc_stack):
     await _seed_session(store, sid, created_at=0.0)
     # Simulate what ingest does: PlanSubmitted is a r0 plan; PlanRevised is
     # a subsequent plan with revision metadata copied from the envelope.
-    await store.put_task_plan(
+    await _seed_plan(store, 
         TaskPlan(
             id="plan_r0",
             session_id=sid,
@@ -352,7 +456,7 @@ async def test_rpc_reflects_ingested_plan_revisions(rpc_stack):
             revision_index=0,
         )
     )
-    await store.put_task_plan(
+    await _seed_plan(store, 
         TaskPlan(
             id="plan_r1",
             session_id=sid,

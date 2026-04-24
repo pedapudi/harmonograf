@@ -33,6 +33,7 @@ from harmonograf_server.convert import (
     goldfive_pb_plan_to_storage,
     hello_to_agent,
     pb_span_to_storage,
+    plan_to_snapshot_json,
     span_status_from_pb,
     task_status_from_pb,
     ts_to_float,
@@ -51,6 +52,7 @@ from harmonograf_server.storage import (
     SpanStatus,
     Store,
     TaskPlan,
+    TaskPlanRevision,
     TaskStatus,
 )
 
@@ -979,7 +981,59 @@ class IngestPipeline:
             for k, v in overwrites.items():
                 setattr(stored, k, v)
             await self._store.put_task_plan(stored)
+            # Mirror enriched metadata into the per-revision snapshot row.
+            # The first write inside ``_upsert_plan`` may have lacked the
+            # event-level overwrites (revision_kind / severity / reason /
+            # trigger_event_id) that PlanRevised carries; the upsert on
+            # (plan_id, revision_index) replaces the snapshot we just wrote.
+            await self._persist_plan_revision(stored)
             self._bus.publish_task_plan(stored)
+
+    async def _persist_plan_revision(self, stored: TaskPlan) -> None:
+        """Write one row to ``task_plan_revisions`` for ``stored``.
+
+        Idempotent on ``(plan_id, revision_index)`` so reconnect /
+        replay collapses on the same row, and so PlanRevised's
+        post-enrichment second call replaces the in-flight snapshot
+        from the initial ``_upsert_plan`` write.
+
+        Errors are logged and swallowed — the live ``task_plans`` write
+        already succeeded, and a degraded plan-history table is strictly
+        better than an aborted ingest path that would also lose the
+        latest-snapshot update on the bus.
+        """
+
+        try:
+            snapshot = plan_to_snapshot_json(stored)
+        except Exception as exc:  # noqa: BLE001 — defensive, never crash ingest
+            logger.warning(
+                "plan_to_snapshot_json failed for plan_id=%s revision_index=%d: %s",
+                stored.id,
+                int(stored.revision_index or 0),
+                exc,
+            )
+            return
+        try:
+            await self._store.put_task_plan_revision(
+                TaskPlanRevision(
+                    plan_id=stored.id,
+                    revision_index=int(stored.revision_index or 0),
+                    session_id=stored.session_id,
+                    revision_reason=stored.revision_reason or "",
+                    revision_kind=stored.revision_kind or "",
+                    revision_severity=stored.revision_severity or "",
+                    trigger_event_id=stored.trigger_event_id or "",
+                    emitted_at=float(stored.created_at or 0.0),
+                    snapshot_json=snapshot,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — defensive
+            logger.warning(
+                "put_task_plan_revision failed for plan_id=%s revision_index=%d: %s",
+                stored.id,
+                int(stored.revision_index or 0),
+                exc,
+            )
 
     async def _upsert_plan(
         self, ctx: StreamContext, pb_plan: Any, *, run_id: str
@@ -1010,6 +1064,14 @@ class IngestPipeline:
         # ``goldfive_pb_plan_to_storage`` above), which is the stream's Hello
         # agent_id — always the compound client-root id. No rewrite needed.
         stored = await self._store.put_task_plan(stored)
+        # task_plan_revisions sibling: append-only history keyed on
+        # (plan_id, revision_index). R0 (plan_submitted) is included so
+        # downstream chain-collapse algorithms have the base revision.
+        # PlanRevised re-runs this through ``_persist_plan_revision``
+        # after it folds in event-level metadata (revision_kind / reason
+        # / trigger_event_id); the (plan_id, revision_index) upsert
+        # replaces this row's snapshot with the enriched one.
+        await self._persist_plan_revision(stored)
         # Refresh the task index for span-to-task binding lookups on the
         # hot path. A re-emitted plan with the same id replaces previous
         # index entries so stale task ids are pruned.
