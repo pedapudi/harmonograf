@@ -38,7 +38,7 @@ describe('<TaskStagesGraph />', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders one column per stage with "N/M" progress badges', () => {
+  it('renders one column per stage with a plain "Stage N" header (no ambiguous X/Y counter)', () => {
     const plan = mkPlan(
       [
         mkTask('t1', 'COMPLETED'),
@@ -50,7 +50,7 @@ describe('<TaskStagesGraph />', () => {
         ['t2', 't3'],
       ],
     );
-    render(<TaskStagesGraph plan={plan} />);
+    const { container } = render(<TaskStagesGraph plan={plan} />);
 
     expect(screen.getByTestId('task-stages-graph')).toBeInTheDocument();
 
@@ -61,9 +61,11 @@ describe('<TaskStagesGraph />', () => {
       'Stage 2',
     ]);
 
-    expect(screen.getByText('1/1')).toBeInTheDocument();
-    const zeroOfOne = screen.getAllByText('0/1');
-    expect(zeroOfOne.length).toBeGreaterThanOrEqual(2);
+    // The "0/1" / "1/1" progress counter has been removed — its unit was
+    // ambiguous and card fill already encodes progress.
+    expect(screen.queryByText('1/1')).toBeNull();
+    expect(screen.queryByText('0/1')).toBeNull();
+    expect(container.querySelectorAll('.hg-stages__progress').length).toBe(0);
   });
 
   it('fires onTaskClick when a card is clicked', () => {

@@ -169,7 +169,7 @@ describe('<TaskStagesGraph /> acceptance — 5-revision supersedes chain collaps
     expect(cards.length).toBe(3);
   });
 
-  it('A-chain card carries a RevisionHistoryBadge covering all 5 members', () => {
+  it('A-chain card carries a corner rev chip covering all 5 members', () => {
     const { cumulative, supersedes } = seedFiveRevSession();
     const { container } = render(
       <TaskStagesGraph
@@ -178,21 +178,18 @@ describe('<TaskStagesGraph /> acceptance — 5-revision supersedes chain collaps
         supersedesMap={supersedes}
       />,
     );
-    // Canonical of the A chain is A4 (latest).
-    const aBadgeSlot = container.querySelector(
-      '[data-testid="chain-badge-for-A4"]',
+    // Canonical of the A chain is A4 (latest). The rev-chip overlay
+    // anchors to the canonical's card.
+    const aChip = container.querySelector(
+      '[data-testid="rev-chip-for-A4"]',
     );
-    expect(aBadgeSlot).toBeTruthy();
-    // Chain size: 5 members — check the card's data attribute we added
-    // to the card <g>. The badge itself renders "R0→R1→R2→R3→R4"
-    // inside its label span.
-    const aCard = container.querySelector(
-      'g.hg-stages__card[data-chain-size="5"]',
-    );
-    expect(aCard).toBeTruthy();
+    expect(aChip).toBeTruthy();
+    // The chip itself is a RevisionHistoryBadge; for a multi-member
+    // chain its pill text is "R0→R1→R2→R3→R4".
+    expect(aChip!.textContent).toContain('R0→R1→R2→R3→R4');
   });
 
-  it('B-chain card carries a badge with 2 members; C is a singleton (no badge)', () => {
+  it('each canonical card carries exactly one corner rev chip (chains and singletons alike)', () => {
     const { cumulative, supersedes } = seedFiveRevSession();
     const { container } = render(
       <TaskStagesGraph
@@ -201,17 +198,20 @@ describe('<TaskStagesGraph /> acceptance — 5-revision supersedes chain collaps
         supersedesMap={supersedes}
       />,
     );
-    // Canonical of B chain is B1.
-    expect(container.querySelector('[data-testid="chain-badge-for-B1"]')).toBeTruthy();
-    // Canonical of C chain is C0, singleton → NO badge.
-    expect(container.querySelector('[data-testid="chain-badge-for-C0"]')).toBeNull();
-    // Exactly two chain badges overall (A and B chains).
+    // Canonicals: A4 (chain of 5), B1 (chain of 2), C0 (singleton).
+    // All three render a single corner chip (one axis, one chip).
+    expect(container.querySelector('[data-testid="rev-chip-for-A4"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="rev-chip-for-B1"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="rev-chip-for-C0"]')).toBeTruthy();
     expect(
-      container.querySelectorAll('[data-testid^="chain-badge-for-"]').length,
-    ).toBe(2);
+      container.querySelectorAll('[data-testid^="rev-chip-for-"]').length,
+    ).toBe(3);
+    // Singleton chip renders the introduction rev as a muted label.
+    const cChip = container.querySelector('[data-testid="rev-chip-for-C0"]');
+    expect(cChip!.textContent).toContain('R0');
   });
 
-  it('clicking a predecessor row in the expanded A badge fires onTaskClick with that predecessor id', () => {
+  it('clicking a predecessor row in the expanded A chip fires onTaskClick with that predecessor id', () => {
     const { cumulative, supersedes } = seedFiveRevSession();
     const handleTaskClick = vi.fn();
     const { container } = render(
@@ -222,17 +222,17 @@ describe('<TaskStagesGraph /> acceptance — 5-revision supersedes chain collaps
         onTaskClick={handleTaskClick}
       />,
     );
-    // Expand the A-chain badge.
-    const aBadge = container.querySelector('[data-testid="chain-badge-for-A4"]');
-    expect(aBadge).toBeTruthy();
-    // The badge pill exposes a toggle button when members.length > 1.
-    const toggle = aBadge!.querySelector('button');
+    // Expand the A-chain chip.
+    const aChip = container.querySelector('[data-testid="rev-chip-for-A4"]');
+    expect(aChip).toBeTruthy();
+    // The chip pill exposes a toggle button when members.length > 1.
+    const toggle = aChip!.querySelector('button');
     expect(toggle).toBeTruthy();
     fireEvent.click(toggle!);
     // Expanded trail renders role="list" with one item per PREDECESSOR
     // (canonical is excluded — it's the card itself). 5 members →
     // 4 predecessor rows (newest-first per component contract).
-    const list = aBadge!.querySelector('[role="list"]');
+    const list = aChip!.querySelector('[role="list"]');
     expect(list).toBeTruthy();
     const items = list!.querySelectorAll('[role="listitem"]');
     expect(items.length).toBe(4);
@@ -248,7 +248,7 @@ describe('<TaskStagesGraph /> acceptance — 5-revision supersedes chain collaps
     expect(clickedTask.id).toBe('A0');
   });
 
-  it('pinning to R2 via revisionFilter: A-chain and B-chain stay visible (born at R0); C stays visible', () => {
+  it('pinning to R2 via revisionFilter: future-rev canonicals are HIDDEN (not muted); B + C stay visible', () => {
     const { cumulative, supersedes } = seedFiveRevSession();
     const { container } = render(
       <TaskStagesGraph
@@ -258,25 +258,17 @@ describe('<TaskStagesGraph /> acceptance — 5-revision supersedes chain collaps
         revisionFilter={2}
       />,
     );
-    // All three chains are born at/before R2 (firstRev=0 for all of
-    // them). LAY's `filterCollapsedAtRevision` muting trade-off: when a
-    // chain's latest canonical is introduced > pinned rev the chain is
-    // MUTED but still rendered. For the A chain, latest canonical A4
-    // was introduced at R4 > 2 → muted. B chain canonical B1 introduced
-    // at R2 → not muted. C canonical C0 introduced at R0 → not muted.
+    // Plan-view redesign: chains whose canonical was introduced after
+    // the pin are HIDDEN (not muted / ghost-dashed). A-chain canonical
+    // A4 was introduced at R4, pin R2 → hidden entirely. B canonical B1
+    // (R2) and C canonical C0 (R0) remain visible. 2 cards, not 3.
     const cards = container.querySelectorAll('g.hg-stages__card');
-    expect(cards.length).toBe(3);
-    const mutedCards = Array.from(cards).filter((c) =>
-      c.classList.contains('hg-stages__card--muted'),
+    expect(cards.length).toBe(2);
+    // No `--muted` / `--superseded` class variants exist anymore; verify
+    // no card carries either (legacy styles removed).
+    const anyMuted = container.querySelector(
+      'g.hg-stages__card--muted, g.hg-stages__card--superseded',
     );
-    // A chain is muted (canonical = A4 @ R4, pinned R2); B + C are not.
-    // This is the current LAY contract: muted, not canonical-swapped to
-    // the R2-era member. A follow-up issue can tighten this to swap the
-    // displayed canonical to the newest member ≤ R — tracked in the
-    // collapsedLayout docstring.
-    expect(mutedCards.length).toBe(1);
-    expect(mutedCards[0].querySelector('title')?.textContent).toContain(
-      'Research topic v5',
-    );
+    expect(anyMuted).toBeNull();
   });
 });
