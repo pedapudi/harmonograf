@@ -53,7 +53,16 @@ function readStringAttr(span: Span | null, key: string): string {
 function findRefineSpan(store: SessionStore | null, revision: number): Span | null {
   if (!store || revision <= 0) return null;
   const spans: Span[] = [];
-  store.spans.queryAgent('__goldfive__', 0, Number.POSITIVE_INFINITY, spans);
+  // Resolve the canonical goldfive actor id at query time: after the
+  // harmonograf#goldfive-unify merge, refine spans live on either the
+  // legacy `__goldfive__` row or the compound `<client>:goldfive` one,
+  // whichever survived the alias collapse.
+  store.spans.queryAgent(
+    store.resolveGoldfiveActorId(),
+    0,
+    Number.POSITIVE_INFINITY,
+    spans,
+  );
   for (const s of spans) {
     if (!s.name.startsWith('refine:')) continue;
     const attr = s.attributes['refine.index'];

@@ -374,4 +374,159 @@ describe('goldfive lane synthesis (harmonograf#196)', () => {
     store.spans.queryAgent(GOLDFIVE_ACTOR_ID, 0, 1_000_000, spans as never);
     expect(spans).toHaveLength(0);
   });
+
+  // harmonograf#goldfive-unify: the sink (PR #159) ships goldfive LLM / judge
+  // spans on a compound `<client>:goldfive` agent id. Legacy frontend
+  // synthesizers used `__goldfive__`. Without unification the Graph view
+  // rendered goldfive twice. These tests pin the single-row invariant in
+  // both arrival orders (sink-first, synth-first).
+  describe('goldfive actor alias', () => {
+    function seedCompoundGoldfiveSpan(s: SessionStore, id: string) {
+      // A minimal sink-translated span on the compound id. We don't go
+      // through convertSpan — the test is asserting the alias merge, not
+      // the proto boundary.
+      s.spans.append({
+        id,
+        sessionId: 'sess-1',
+        agentId: 'client-42:goldfive',
+        parentSpanId: null,
+        kind: 'LLM_CALL',
+        status: 'COMPLETED',
+        name: 'judge_reasoning',
+        startMs: 100,
+        endMs: 110,
+        links: [],
+        attributes: {
+          'goldfive.call_name': { kind: 'string', value: 'judge_reasoning' },
+        },
+        payloadRefs: [],
+        error: null,
+        lane: -1,
+        replaced: false,
+      });
+      s.agents.upsert({
+        id: 'client-42:goldfive',
+        name: 'goldfive',
+        framework: 'UNKNOWN',
+        capabilities: [],
+        status: 'CONNECTED',
+        connectedAtMs: 100,
+        currentActivity: '',
+        stuck: false,
+        taskReport: '',
+        taskReportAt: 0,
+        metadata: {},
+      });
+    }
+
+    it('sink-first: a DriftDetected synthesized AFTER a compound :goldfive row lands on that row (no __goldfive__ duplicate)', () => {
+      seedCompoundGoldfiveSpan(store, 'judge-1');
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev',
+          runId: 'run-1',
+          sequence: 1n,
+          emittedAt: ts(30),
+          payload: {
+            case: 'driftDetected',
+            value: create(DriftDetectedSchema, {
+              kind: DriftKind.LOOPING_REASONING,
+              severity: DriftSeverity.WARNING,
+              detail: 'loop',
+              currentTaskId: 't1',
+              currentAgentId: 'agent-a',
+              id: 'drift-1',
+            }),
+          },
+        }),
+        store,
+        0,
+      );
+      // Only ONE goldfive row exists — the compound one.
+      expect(store.agents.get('client-42:goldfive')).toBeTruthy();
+      expect(store.agents.get(GOLDFIVE_ACTOR_ID)).toBeFalsy();
+      // The drift span landed on the compound row, NOT on __goldfive__.
+      const onCompound: Array<ReturnType<typeof store.spans.get>> = [];
+      store.spans.queryAgent('client-42:goldfive', 0, 1_000_000, onCompound as never);
+      expect(onCompound.map((s) => s?.name)).toContain('looping_reasoning');
+      const onLegacy: Array<ReturnType<typeof store.spans.get>> = [];
+      store.spans.queryAgent(GOLDFIVE_ACTOR_ID, 0, 1_000_000, onLegacy as never);
+      expect(onLegacy).toHaveLength(0);
+    });
+
+    it('synth-first: calling mergeGoldfiveAlias AFTER a DriftDetected has seeded __goldfive__ moves spans onto the compound row', () => {
+      // Drift arrives first — synthesizer creates __goldfive__ + a drift span.
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev',
+          runId: 'run-1',
+          sequence: 0n,
+          emittedAt: ts(30),
+          payload: {
+            case: 'driftDetected',
+            value: create(DriftDetectedSchema, {
+              kind: DriftKind.LOOPING_REASONING,
+              severity: DriftSeverity.WARNING,
+              detail: 'loop',
+              currentTaskId: 't1',
+              currentAgentId: 'agent-a',
+              id: 'drift-1',
+            }),
+          },
+        }),
+        store,
+        0,
+      );
+      expect(store.agents.get(GOLDFIVE_ACTOR_ID)).toBeTruthy();
+      // Sink span lands later — call mergeGoldfiveAlias (what hooks.ts does).
+      seedCompoundGoldfiveSpan(store, 'judge-1');
+      const canonical = store.mergeGoldfiveAlias();
+      expect(canonical).toBe('client-42:goldfive');
+      expect(store.agents.get(GOLDFIVE_ACTOR_ID)).toBeFalsy();
+      // The original synthesized drift span now lives on the compound row.
+      const onCompound: Array<ReturnType<typeof store.spans.get>> = [];
+      store.spans.queryAgent('client-42:goldfive', 0, 1_000_000, onCompound as never);
+      expect(onCompound.map((s) => s?.name)).toEqual(
+        expect.arrayContaining(['looping_reasoning', 'judge_reasoning']),
+      );
+    });
+
+    it('resolveGoldfiveActorId returns the compound id when present, legacy otherwise', () => {
+      expect(store.resolveGoldfiveActorId()).toBe(GOLDFIVE_ACTOR_ID);
+      seedCompoundGoldfiveSpan(store, 'judge-1');
+      expect(store.resolveGoldfiveActorId()).toBe('client-42:goldfive');
+    });
+
+    it('mergeGoldfiveAlias is idempotent and safe when only __goldfive__ exists', () => {
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev',
+          runId: 'run-1',
+          sequence: 0n,
+          emittedAt: ts(30),
+          payload: {
+            case: 'driftDetected',
+            value: create(DriftDetectedSchema, {
+              kind: DriftKind.LOOPING_REASONING,
+              severity: DriftSeverity.WARNING,
+              detail: 'loop',
+              currentTaskId: 't1',
+              currentAgentId: 'agent-a',
+              id: 'drift-1',
+            }),
+          },
+        }),
+        store,
+        0,
+      );
+      // No compound row yet — merge is a no-op and returns the legacy id.
+      expect(store.mergeGoldfiveAlias()).toBe(GOLDFIVE_ACTOR_ID);
+      expect(store.agents.get(GOLDFIVE_ACTOR_ID)).toBeTruthy();
+      // Double-call after a later compound arrival is idempotent.
+      seedCompoundGoldfiveSpan(store, 'judge-1');
+      expect(store.mergeGoldfiveAlias()).toBe('client-42:goldfive');
+      expect(store.mergeGoldfiveAlias()).toBe('client-42:goldfive');
+      expect(store.agents.get(GOLDFIVE_ACTOR_ID)).toBeFalsy();
+    });
+  });
 });

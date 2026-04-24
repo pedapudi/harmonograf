@@ -72,8 +72,12 @@ function findRefineSpan(
   const revIdx = plan.revisionIndex ?? 0;
   if (revIdx <= 0) return null;
   const spans: Span[] = [];
+  // After harmonograf#goldfive-unify the goldfive actor row may be
+  // either the legacy `__goldfive__` id (pre-sink-merge) or a compound
+  // `<client>:goldfive` id. resolveGoldfiveActorId picks whichever one
+  // exists in the registry.
   store.spans.queryAgent(
-    '__goldfive__',
+    store.resolveGoldfiveActorId(),
     0,
     Number.POSITIVE_INFINITY,
     spans,
@@ -91,7 +95,9 @@ function findDriftSpan(
   drift: DriftRecord,
 ): Span | null {
   if (!store) return null;
-  const actor = drift.kind && drift.kind.startsWith('user_') ? '__user__' : '__goldfive__';
+  const actor = drift.kind && drift.kind.startsWith('user_')
+    ? '__user__'
+    : store.resolveGoldfiveActorId();
   const spans: Span[] = [];
   store.spans.queryAgent(
     actor,

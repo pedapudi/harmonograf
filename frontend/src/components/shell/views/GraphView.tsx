@@ -3,11 +3,15 @@ import { useEffect, useMemo, useCallback, useRef, useState } from 'react';
 import type React from 'react';
 import { useUiStore, type TaskPlanMode } from '../../../state/uiStore';
 import { useSessionWatch, sendStatusQuery } from '../../../rpc/hooks';
-import { colorForAgent } from '../../../theme/agentColors';
+import { colorForAgent, USER_ACTOR_ID } from '../../../theme/agentColors';
 import type { Span, Task, TaskPlan } from '../../../gantt/types';
-import type { SessionStore } from '../../../gantt/index';
+import type { DriftRecord, SessionStore } from '../../../gantt/index';
 import { bareAgentName } from '../../../gantt/index';
 import { hasThinking } from '../../../lib/thinking';
+import {
+  SteeringDetailPanel,
+  type SteeringSelection,
+} from './SteeringDetailPanel';
 import {
   DEFAULT_VIEWPORT,
   MIN_SCALE,
@@ -71,11 +75,50 @@ interface ActivationBox {
                        // plus any reasoning text carrier (see #107).
 }
 
+// Goldfive interventions overlaid on the sequence diagram. Distinct from
+// the topology arrows so the renderer can style them differently and the
+// viewer can tell a "delegation" (call edge) apart from a "steering"
+// (orchestrator-authored plan change). See fix B of harmonograf#192.
+type DriftSeverity = 'info' | 'warning' | 'critical' | '';
+
+interface InterventionGlyph {
+  id: string;
+  // Column index the glyph sits on (goldfive col for goldfive-authored
+  // drifts, user col for user-authored ones).
+  agentIdx: number;
+  yMs: number;
+  severity: DriftSeverity;
+  kind: string;
+  detail: string;
+  // Composite identity for jumping to the underlying record.
+  driftSeq: number;
+  // Plan revision this drift triggered (if any) — surfaces the steering
+  // panel's detail when clicked.
+  revisionIndex: number;
+  authoredBy: string; // 'user' | 'goldfive' | ''
+}
+
+interface SteeringArrow {
+  id: string;
+  fromCol: number;
+  toCol: number;
+  yMs: number;
+  kind: 'steer' | 'user-steer';
+  label: string;
+  severity: DriftSeverity;
+  revisionIndex: number;
+  driftSeq: number | null;
+}
+
 interface SeqLayout {
   agentIds: string[];      // ordered columns
   arrows: SeqArrow[];
   activations: ActivationBox[];
   totalMs: number;         // duration of entire session in ms
+  // Goldfive intervention overlays. Empty when no drifts/plan revisions
+  // have landed yet — the graph still renders cleanly without them.
+  glyphs: InterventionGlyph[];
+  steerArrows: SteeringArrow[];
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -331,7 +374,154 @@ function computeSequence(store: SessionStore): SeqLayout {
     if (end > totalMs) totalMs = end;
   }
 
-  return { agentIds, arrows, activations, totalMs };
+  // ── Goldfive interventions overlay ────────────────────────────────────────
+  // Drift glyphs (markers on goldfive's / user's column) + steering arrows
+  // (goldfive→target-agent on plan_revised, user→goldfive on USER_STEER).
+  // The goldfive row is the survivor of the __goldfive__ / <client>:goldfive
+  // alias collapse; SessionStore exposes the canonical id via
+  // resolveGoldfiveActorId() so we never duplicate the intervention overlay
+  // when both ids happen to be live in the registry mid-burst.
+  const goldfiveId = store.resolveGoldfiveActorId();
+  const goldfiveCol = colIdx.get(goldfiveId);
+  const userCol = colIdx.get(USER_ACTOR_ID);
+
+  const glyphs: InterventionGlyph[] = [];
+  const steerArrows: SteeringArrow[] = [];
+
+  const driftsList = store.drifts.list();
+  // Index drifts by their driftId so we can resolve the triggering drift
+  // for each plan revision (used to find the target agent + severity of
+  // the resulting steer arrow).
+  const driftById = new Map<string, DriftRecord>();
+  for (const d of driftsList) {
+    if (d.driftId) driftById.set(d.driftId, d);
+  }
+
+  // Plan revisions the user can click through — we need emittedAtMs per
+  // revision, which lives on the planHistory registry (TaskRegistry carries
+  // only createdAtMs). Join via (planId, revisionIndex).
+  const planHistory = store.planHistory;
+
+  for (const drift of driftsList) {
+    const sev: DriftSeverity =
+      (drift.severity === 'info' ||
+      drift.severity === 'warning' ||
+      drift.severity === 'critical'
+        ? drift.severity
+        : '') as DriftSeverity;
+    const isUser =
+      drift.authoredBy === 'user' ||
+      (!!drift.kind && drift.kind.startsWith('user_'));
+    const col = isUser ? userCol : goldfiveCol;
+    if (col === undefined) continue;
+    // Find the plan rev triggered by this drift (for click-through).
+    let revIndex = 0;
+    for (const plan of store.tasks.listPlans()) {
+      if (plan.triggerEventId && plan.triggerEventId === drift.driftId) {
+        revIndex = plan.revisionIndex ?? 0;
+        break;
+      }
+    }
+    glyphs.push({
+      id: `gly-${drift.seq}`,
+      agentIdx: col,
+      yMs: drift.recordedAtMs,
+      severity: sev,
+      kind: drift.kind || 'drift',
+      detail: drift.detail || '',
+      driftSeq: drift.seq,
+      revisionIndex: revIndex,
+      authoredBy: drift.authoredBy || (isUser ? 'user' : 'goldfive'),
+    });
+  }
+
+  // Steering arrows: one per plan_revised with revisionIndex > 0 AND a
+  // resolvable target agent. Target comes from the refine span's stamped
+  // `refine.target_agent_id` (post-judge-observability bump) OR from the
+  // triggering drift's `current_agent_id` when that attribute is absent.
+  if (goldfiveCol !== undefined) {
+    // Pre-index goldfive-lane refine spans by revisionIndex so we can
+    // read back target_agent_id without a nested scan.
+    const goldfiveSpans: Span[] = [];
+    store.spans.queryAgent(goldfiveId, 0, Number.POSITIVE_INFINITY, goldfiveSpans);
+    const refineByRev = new Map<number, Span>();
+    for (const s of goldfiveSpans) {
+      if (!s.name.startsWith('refine:')) continue;
+      const attr = s.attributes['refine.index'];
+      if (attr?.kind === 'string') {
+        const n = Number(attr.value);
+        if (Number.isFinite(n)) refineByRev.set(n, s);
+      }
+    }
+
+    for (const plan of store.tasks.listPlans()) {
+      const revIdx = plan.revisionIndex ?? 0;
+      if (revIdx <= 0) continue;
+      const refineSpan = refineByRev.get(revIdx);
+      const refineTargetAttr = refineSpan?.attributes['refine.target_agent_id'];
+      const refineTarget =
+        refineTargetAttr?.kind === 'string' ? refineTargetAttr.value : '';
+      const triggeringDrift = plan.triggerEventId
+        ? driftById.get(plan.triggerEventId)
+        : undefined;
+      const targetAgent = refineTarget || triggeringDrift?.agentId || '';
+      if (!targetAgent) continue;
+      const targetCol = colIdx.get(targetAgent);
+      if (targetCol === undefined || targetCol === goldfiveCol) continue;
+      // Timestamp: prefer the refine span (matches the emittedAt of
+      // the plan_revised event), else fall back to the plan's createdAt
+      // (close enough for visual ordering when the refine synth didn't run).
+      const yMs = refineSpan?.startMs ?? plan.createdAtMs ?? 0;
+      const sev: DriftSeverity =
+        triggeringDrift?.severity === 'info' ||
+        triggeringDrift?.severity === 'warning' ||
+        triggeringDrift?.severity === 'critical'
+          ? (triggeringDrift.severity as DriftSeverity)
+          : '';
+      const labelKind =
+        plan.revisionKind || triggeringDrift?.kind || plan.revisionReason || 'refine';
+      steerArrows.push({
+        id: `steer-${plan.id}-${revIdx}`,
+        fromCol: goldfiveCol,
+        toCol: targetCol,
+        yMs,
+        kind: 'steer',
+        label: `refine: ${labelKind}`,
+        severity: sev,
+        revisionIndex: revIdx,
+        driftSeq: triggeringDrift?.seq ?? null,
+      });
+    }
+
+    // User steer arrows: `__user__` → goldfive, one per USER_STEER drift.
+    if (userCol !== undefined) {
+      for (const drift of driftsList) {
+        if (!drift.kind || !drift.kind.startsWith('user_')) continue;
+        const sev: DriftSeverity =
+          drift.severity === 'info' ||
+          drift.severity === 'warning' ||
+          drift.severity === 'critical'
+            ? (drift.severity as DriftSeverity)
+            : '';
+        steerArrows.push({
+          id: `user-steer-${drift.seq}`,
+          fromCol: userCol,
+          toCol: goldfiveCol,
+          yMs: drift.recordedAtMs,
+          kind: 'user-steer',
+          label: 'user steer',
+          severity: sev,
+          revisionIndex: 0,
+          driftSeq: drift.seq,
+        });
+      }
+    }
+  }
+  // Touch planHistory so the hot-path re-evaluation captures subscriber
+  // changes; the actual join is already done via triggerEventId above.
+  void planHistory;
+
+  return { agentIds, arrows, activations, totalMs, glyphs, steerArrows };
 }
 
 // ─── Status colors ────────────────────────────────────────────────────────────
@@ -366,6 +556,11 @@ export function GraphView() {
     x: number;
     y: number;
   } | null>(null);
+  // Goldfive intervention detail panel — opened by clicking a glyph or
+  // steering arrow on the overlay. Hover preview uses a lightweight title
+  // tooltip; click opens the full three-section panel.
+  const [steeringSelection, setSteeringSelection] =
+    useState<SteeringSelection | null>(null);
 
   // ─── Viewport state (zoom + pan) ────────────────────────────────────────
   // `viewport` is the live, reactive state; `viewportRef` mirrors it so the
@@ -441,7 +636,14 @@ export function GraphView() {
     // arrows lag or never appear until another store (spans/tasks/agents)
     // happens to tick.
     const u4 = watch.store.delegations.subscribe(() => setTick((n) => n + 1));
-    return () => { u1(); u2(); u3(); u4(); };
+    // Goldfive drift events drive intervention glyphs + steering arrows
+    // on the graph overlay (fix B of harmonograf#goldfive-unify).
+    const u5 = watch.store.drifts.subscribe(() => setTick((n) => n + 1));
+    // Plan-history revisions feed the steering-arrow + intervention
+    // detail panel so newly-landed refines show up on the overlay without
+    // waiting for the next span tick.
+    const u6 = watch.store.planHistory.subscribe(() => setTick((n) => n + 1));
+    return () => { u1(); u2(); u3(); u4(); u5(); u6(); };
   }, [sessionId, watch.store]);
 
   // ── Viewport handlers (depend on refs, not reactive state) ──────────────
@@ -719,7 +921,8 @@ export function GraphView() {
   }
 
   const nowMs = watch.store.nowMs;
-  const { agentIds, arrows, activations, totalMs } = layout;
+  const { agentIds, arrows, activations, totalMs, glyphs, steerArrows } =
+    layout;
 
   // Scale: pixels per millisecond
   const effectiveTotalMs = Math.max(totalMs, 1000);
@@ -1567,6 +1770,118 @@ export function GraphView() {
               </g>
             );
           })}
+
+          {/* ── Goldfive steering arrows (fix B of harmonograf#goldfive-unify) ── */}
+          {/* Distinct style from delegation/transfer arrows so the viewer can */}
+          {/* tell a call-edge apart from an orchestrator-authored plan change. */}
+          {/* Dashed line; amber for warning, red for critical, grey for info. */}
+          {steerArrows.map((sa) => {
+            const x1 = colCx(sa.fromCol);
+            const x2 = colCx(sa.toCol);
+            const y = timeY(sa.yMs);
+            const isLeft = x2 < x1;
+            const sevColor =
+              sa.severity === 'critical' ? '#e06070'
+              : sa.severity === 'warning' ? '#f59e0b'
+              : sa.severity === 'info' ? '#8aa6d6'
+              : sa.kind === 'user-steer' ? '#d0bcff' : '#80deea';
+            const startX = x1 + (isLeft ? -ACT_W / 2 : ACT_W / 2);
+            const endX = x2 + (isLeft ? ACT_W / 2 : -ACT_W / 2);
+            const labelX = (startX + endX) / 2;
+            const labelY = y - 8;
+            const truncLabel = sa.label.length > 24 ? sa.label.slice(0, 23) + '…' : sa.label;
+            return (
+              <g
+                key={sa.id}
+                style={{ cursor: 'pointer' }}
+                data-testid={`steering-arrow-${sa.id}`}
+                data-severity={sa.severity || undefined}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (sa.revisionIndex > 0) {
+                    setSteeringSelection({
+                      kind: 'revision',
+                      revision: sa.revisionIndex,
+                    });
+                  }
+                }}
+              >
+                <line
+                  x1={startX} y1={y} x2={endX} y2={y}
+                  stroke={sevColor} strokeWidth={2}
+                  strokeDasharray="5 3"
+                />
+                {/* Arrow head */}
+                <polygon
+                  points={`${endX - (isLeft ? -8 : 8)},${y - 4} ${endX},${y} ${endX - (isLeft ? -8 : 8)},${y + 4}`}
+                  fill={sevColor}
+                />
+                <rect
+                  x={labelX - 54} y={labelY - 8}
+                  width={108} height={14}
+                  rx={3}
+                  fill="var(--md-sys-color-surface, #10131a)"
+                  opacity={0.85}
+                />
+                <text
+                  x={labelX} y={labelY}
+                  textAnchor="middle" dominantBaseline="middle"
+                  fill={sevColor}
+                  fontSize={9.5}
+                >
+                  {truncLabel}
+                </text>
+                <title>
+                  {`${sa.label}${sa.severity ? ' · ' + sa.severity : ''}`}
+                </title>
+              </g>
+            );
+          })}
+
+          {/* ── Intervention glyphs on goldfive's / user's timeline ── */}
+          {/* Small diamond anchored on the actor's lifeline at drift.recordedAtMs. */}
+          {/* Color by severity; click opens the SteeringDetailPanel if the drift */}
+          {/* triggered a plan revision, otherwise shows the hover tooltip only. */}
+          {glyphs.map((g) => {
+            const cx = colCx(g.agentIdx);
+            const cy = timeY(g.yMs);
+            const sevColor =
+              g.severity === 'critical' ? '#e06070'
+              : g.severity === 'warning' ? '#f59e0b'
+              : g.severity === 'info' ? '#8aa6d6'
+              : '#9aa3b4';
+            const clickable = g.revisionIndex > 0;
+            const r = 5;
+            return (
+              <g
+                key={g.id}
+                data-testid={`drift-glyph-${g.driftSeq}`}
+                data-severity={g.severity || undefined}
+                data-authored-by={g.authoredBy || undefined}
+                style={{ cursor: clickable ? 'pointer' : 'default' }}
+                onClick={(e) => {
+                  if (!clickable) return;
+                  e.stopPropagation();
+                  setSteeringSelection({
+                    kind: 'revision',
+                    revision: g.revisionIndex,
+                  });
+                }}
+              >
+                {/* Diamond glyph — visually distinct from the circular */}
+                {/* thinking-dot and square activation boxes. */}
+                <polygon
+                  points={`${cx},${cy - r} ${cx + r},${cy} ${cx},${cy + r} ${cx - r},${cy}`}
+                  fill={sevColor}
+                  stroke="var(--md-sys-color-surface, #10131a)"
+                  strokeWidth={1}
+                />
+                <title>
+                  {`${g.kind}${g.severity ? ' · ' + g.severity : ''}${g.detail ? '\n' + g.detail : ''}`}
+                </title>
+              </g>
+            );
+          })}
           </g>
         </svg>
 
@@ -1691,6 +2006,36 @@ export function GraphView() {
               />
             </svg>
           </div>
+        {steeringSelection && (() => {
+          // Locate the plan that owns this revision. The Graph view is
+          // plan-agnostic (it spans all agents in the session), so we
+          // walk the PlanHistoryRegistry plan-by-plan until we find one
+          // carrying the selected revision. Single-plan sessions resolve
+          // on the first iteration.
+          let plan: TaskPlan | null = null;
+          let history: readonly import('../../../state/planHistoryStore').PlanRevisionRecord[] = [];
+          let supersedes: Map<string, import('../../../state/planHistoryStore').SupersessionLink> = new Map();
+          for (const pid of watch.store.planHistory.planIds()) {
+            const recs = watch.store.planHistory.historyFor(pid);
+            if (recs.some((r) => r.revision === steeringSelection.revision)) {
+              plan = watch.store.tasks.getPlan(pid) ?? null;
+              history = recs;
+              supersedes = watch.store.planHistory.supersedesMap(pid);
+              break;
+            }
+          }
+          return (
+            <SteeringDetailPanel
+              selection={steeringSelection}
+              plan={plan}
+              history={history}
+              supersedes={supersedes}
+              store={watch.store}
+              onClose={() => setSteeringSelection(null)}
+              onJumpToGantt={() => setSteeringSelection(null)}
+            />
+          );
+        })()}
         {hoveredTask && (
           <div
             style={{

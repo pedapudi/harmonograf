@@ -778,8 +778,15 @@ function findRefineSpanForPlan(
   const scratch: Span[] = [];
   // Match by `refine.index` on the goldfive row — the synth span's
   // startMs is the event's emittedAt, not the plan's createdAt, so the
-  // time window has to be wide enough to tolerate clock skew.
-  store.spans.queryAgent('__goldfive__', 0, Number.POSITIVE_INFINITY, scratch);
+  // time window has to be wide enough to tolerate clock skew. Resolve
+  // the canonical actor id at query time so post-goldfive-unify
+  // sessions (compound `<client>:goldfive`) match the same way.
+  store.spans.queryAgent(
+    store.resolveGoldfiveActorId(),
+    0,
+    Number.POSITIVE_INFINITY,
+    scratch,
+  );
   for (const s of scratch) {
     if (!s.name.startsWith('refine:')) continue;
     const attr = s.attributes['refine.index'];

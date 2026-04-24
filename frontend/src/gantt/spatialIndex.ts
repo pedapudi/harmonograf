@@ -184,6 +184,48 @@ export class SpanIndex {
     this.globalMaxEndMs = 0;
     this.emit({ agentId: null, t0: 0, t1: Number.POSITIVE_INFINITY });
   }
+
+  // Move every span currently keyed on `fromAgentId` over to `toAgentId`.
+  // Used by AgentRegistry.mergeIntoAgent when the sink-translated
+  // `<client>:goldfive` compound row arrives AFTER the frontend
+  // synthesizer has already populated the legacy `__goldfive__` row
+  // (harmonograf#goldfive-unify). Idempotent: a no-op when `fromAgentId`
+  // has no spans or equals `toAgentId`.
+  reassignAgent(fromAgentId: string, toAgentId: string): void {
+    if (!fromAgentId || !toAgentId || fromAgentId === toAgentId) return;
+    const src = this.agents.get(fromAgentId);
+    if (!src || src.spans.length === 0) {
+      this.agents.delete(fromAgentId);
+      return;
+    }
+    let dst = this.agents.get(toAgentId);
+    if (!dst) {
+      dst = { spans: [], maxEndPrefix: [], minStartMs: src.minStartMs };
+      this.agents.set(toAgentId, dst);
+    }
+    for (const span of src.spans) {
+      span.agentId = toAgentId;
+      // Merge-insert keeping dst.spans sorted by startMs. Scan from the
+      // end since both sides tend to arrive in time order.
+      const last = dst.spans[dst.spans.length - 1];
+      if (!last || span.startMs >= last.startMs) {
+        dst.spans.push(span);
+      } else {
+        let lo = 0;
+        let hi = dst.spans.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >>> 1;
+          if (dst.spans[mid].startMs <= span.startMs) lo = mid + 1;
+          else hi = mid;
+        }
+        dst.spans.splice(lo, 0, span);
+      }
+    }
+    if (src.minStartMs < dst.minStartMs) dst.minStartMs = src.minStartMs;
+    dst.maxEndPrefix.length = 0;
+    this.agents.delete(fromAgentId);
+    this.emit({ agentId: toAgentId, t0: 0, t1: Number.POSITIVE_INFINITY });
+  }
 }
 
 export interface DirtyRect {
