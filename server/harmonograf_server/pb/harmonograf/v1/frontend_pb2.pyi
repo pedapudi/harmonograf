@@ -4,6 +4,7 @@ from google.protobuf import timestamp_pb2 as _timestamp_pb2
 from harmonograf.v1 import types_pb2 as _types_pb2
 from goldfive.v1 import control_pb2 as _control_pb2
 from goldfive.v1 import events_pb2 as _events_pb2
+from goldfive.v1 import types_pb2 as _types_pb2_1
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
@@ -394,3 +395,31 @@ class GetStatsResponse(_message.Message):
     active_telemetry_streams: int
     active_control_streams: int
     def __init__(self, session_count: _Optional[int] = ..., live_session_count: _Optional[int] = ..., agent_count: _Optional[int] = ..., span_count: _Optional[int] = ..., annotation_count: _Optional[int] = ..., payload_count: _Optional[int] = ..., payload_bytes: _Optional[int] = ..., disk_bytes: _Optional[int] = ..., data_dir: _Optional[str] = ..., active_telemetry_streams: _Optional[int] = ..., active_control_streams: _Optional[int] = ...) -> None: ...
+
+class GetSessionPlanHistoryRequest(_message.Message):
+    __slots__ = ("session_id",)
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    def __init__(self, session_id: _Optional[str] = ...) -> None: ...
+
+class GetSessionPlanHistoryResponse(_message.Message):
+    __slots__ = ("revisions",)
+    REVISIONS_FIELD_NUMBER: _ClassVar[int]
+    revisions: _containers.RepeatedCompositeFieldContainer[PlanRevision]
+    def __init__(self, revisions: _Optional[_Iterable[_Union[PlanRevision, _Mapping]]] = ...) -> None: ...
+
+class PlanRevision(_message.Message):
+    __slots__ = ("plan", "revision_number", "revision_reason", "revision_kind", "revision_trigger_event_id", "emitted_at")
+    PLAN_FIELD_NUMBER: _ClassVar[int]
+    REVISION_NUMBER_FIELD_NUMBER: _ClassVar[int]
+    REVISION_REASON_FIELD_NUMBER: _ClassVar[int]
+    REVISION_KIND_FIELD_NUMBER: _ClassVar[int]
+    REVISION_TRIGGER_EVENT_ID_FIELD_NUMBER: _ClassVar[int]
+    EMITTED_AT_FIELD_NUMBER: _ClassVar[int]
+    plan: _types_pb2_1.Plan
+    revision_number: int
+    revision_reason: str
+    revision_kind: str
+    revision_trigger_event_id: str
+    emitted_at: _timestamp_pb2.Timestamp
+    def __init__(self, plan: _Optional[_Union[_types_pb2_1.Plan, _Mapping]] = ..., revision_number: _Optional[int] = ..., revision_reason: _Optional[str] = ..., revision_kind: _Optional[str] = ..., revision_trigger_event_id: _Optional[str] = ..., emitted_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
