@@ -225,22 +225,25 @@ class HarmonografSink:
         Two wire shapes are accepted:
 
         * ``goldfive.v1.Event`` protobuf — the primary path (everything in
-          the ``Event.payload`` oneof).
-        * ``dict`` envelopes keyed on ``"kind"`` — goldfive ships a subset
-          of operator-observability events as dicts when the proto schema
-          has no matching message (e.g. ``invocation_cancelled`` from
-          goldfive#259 / Stream C of #251). These route through
-          :meth:`_emit_dict_event` which materializes a harmonograf-local
-          proto variant and forwards via a dedicated transport slot —
-          keeping the dict out of the goldfive-proto-only ingest path so a
-          pre-bump server doesn't choke on ``WhichOneof`` calls against a
-          dict.
+          the ``Event.payload`` oneof, including ``invocation_cancelled``
+          since goldfive#262).
+        * ``dict`` envelopes keyed on ``"kind"`` — goldfive may still ship
+          forward-compat operator-observability events as dicts when the
+          proto schema has no matching message yet. These route through
+          :meth:`_emit_dict_event` which logs and drops (no dict-typed
+          variants are ingested today). ``invocation_cancelled`` was the
+          only such variant prior to goldfive#262 / harmonograf PR#187,
+          and the typed proto path now handles it via the ``Event.payload``
+          oneof.
         """
         if self._closed:
             return
-        # Dict envelope (goldfive#251 InvocationCancelled). Route BEFORE
-        # the proto-oneof probe — dicts don't have ``WhichOneof``, and
-        # the caller below assumes proto semantics.
+        # Dict envelope (forward-compat). Route BEFORE the proto-oneof
+        # probe — dicts don't have ``WhichOneof``, and the proto path
+        # below assumes proto semantics. Today no dict kinds are ingested
+        # (goldfive#262 promoted ``invocation_cancelled`` to a typed
+        # ``goldfive.v1.InvocationCancelled`` variant); the branch is
+        # retained as the landing point for future dict-only events.
         if isinstance(event_pb, dict):
             self._emit_dict_event(event_pb)
             return
@@ -258,83 +261,25 @@ class HarmonografSink:
         self._client.emit_goldfive_event(event_pb)
 
     # ------------------------------------------------------------------
-    # Dict envelope translation (goldfive#251 Stream C)
+    # Dict envelope translation
     # ------------------------------------------------------------------
 
     def _emit_dict_event(self, event: dict) -> None:
-        """Materialize a dict envelope into a harmonograf proto variant.
+        """Forward-compat slot for dict-only goldfive events.
 
         Dispatches on ``event["kind"]``. Unknown kinds are logged at DEBUG
         and dropped — observability events must never raise.
 
-        Today only ``invocation_cancelled`` is handled; future dict-only
-        events land additional branches here. The dispatch table is
-        intentionally explicit (not a registry) so the sink stays a thin
-        translator and never speculates about payload shape.
+        No dict kinds are forwarded today: ``invocation_cancelled`` was
+        the only variant ever routed through here (goldfive#251 Stream C
+        / #259), and goldfive#262 promoted it to a typed
+        ``goldfive.v1.InvocationCancelled`` variant carried on the proto
+        envelope. The branch is kept so future dict-only events have an
+        explicit landing point without re-introducing the proto-vs-dict
+        probe in :meth:`emit`.
         """
         kind = event.get("kind", "") or ""
-        if kind == "invocation_cancelled":
-            self._emit_invocation_cancelled(event)
-            return
         logger.debug("ignoring unknown dict goldfive event kind=%r", kind)
-
-    def _emit_invocation_cancelled(self, event: dict) -> None:
-        """Convert a goldfive ``invocation_cancelled`` dict → proto.
-
-        Field-by-field copy of the envelope goldfive emits — see
-        ``goldfive/adapters/_adk_plugin.py::_emit_invocation_cancelled``
-        for the authoritative source. The ``agent_name`` field is
-        canonicalized to the compound ``<client>:<bare>`` form so the
-        server stores an already-canonical id (same rule as every other
-        event flowing through :meth:`_canonicalize_agent_ids`).
-
-        Timing:
-
-        * ``emitted_at`` is read from the envelope's
-          ``{"seconds": int, "nanos": int}`` pair when present; missing
-          / zero values leave the field unset and the server stamps
-          wall-clock on receipt (matches the fall-through for other
-          envelopes that forget to populate ``emitted_at``).
-
-        ``sequence`` is an unsigned wire int but goldfive emits a Python
-        int — coerced via ``max(0, int(...))`` so a negative value (e.g.
-        ``session.next_sequence()`` raised and the goldfive side fell
-        back to -1) doesn't wrap into an enormous uint64.
-        """
-        telemetry_pb2 = self._client._telemetry_pb2  # type: ignore[attr-defined]
-        payload = event.get("payload", {}) or {}
-        agent_name = str(payload.get("agent_name", "") or "")
-        if agent_name:
-            agent_name = self._compound(agent_name)
-
-        emitted_at = event.get("emitted_at") or {}
-        seconds_val: int = 0
-        nanos_val: int = 0
-        if isinstance(emitted_at, dict):
-            try:
-                seconds_val = int(emitted_at.get("seconds", 0) or 0)
-                nanos_val = int(emitted_at.get("nanos", 0) or 0)
-            except (TypeError, ValueError):
-                seconds_val = 0
-                nanos_val = 0
-
-        msg = telemetry_pb2.InvocationCancelled(
-            run_id=str(event.get("run_id", "") or ""),
-            sequence=max(0, int(event.get("sequence", 0) or 0)),
-            session_id=str(event.get("session_id", "") or ""),
-            invocation_id=str(payload.get("invocation_id", "") or ""),
-            agent_name=agent_name,
-            reason=str(payload.get("reason", "") or ""),
-            severity=str(payload.get("severity", "") or ""),
-            drift_id=str(payload.get("drift_id", "") or ""),
-            drift_kind=str(payload.get("drift_kind", "") or ""),
-            detail=str(payload.get("detail", "") or ""),
-            tool_name=str(payload.get("tool_name", "") or ""),
-        )
-        if seconds_val or nanos_val:
-            msg.emitted_at.seconds = seconds_val
-            msg.emitted_at.nanos = nanos_val
-        self._client.emit_invocation_cancelled(msg)
 
     async def close(self) -> None:
         """Mark the sink as closed. Does *not* shut down the underlying client.

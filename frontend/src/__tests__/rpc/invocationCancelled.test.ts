@@ -2,18 +2,25 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { create } from '@bufbuild/protobuf';
 import { TimestampSchema } from '@bufbuild/protobuf/wkt';
 import { SessionStore } from '../../gantt/index';
-import { applyInvocationCancelled } from '../../rpc/goldfiveEvent';
-import { InvocationCancelledSchema } from '../../pb/harmonograf/v1/telemetry_pb';
+import { applyGoldfiveEvent, applyInvocationCancelled } from '../../rpc/goldfiveEvent';
+import {
+  EventSchema,
+  InvocationCancelledSchema,
+} from '../../pb/goldfive/v1/events_pb';
 import { deriveInterventionsFromStore } from '../../lib/interventions';
 
-// Tests the WatchSession dispatch for the new
-// ``SessionUpdate.invocation_cancelled`` oneof variant (goldfive#251
-// Stream C). Covers: record ingestion onto the session store,
-// session-relative-ms derivation from emitted_at, agent row
-// auto-registration so the Gantt has a lane to render on, synthesized
-// cancel marker span, and intervention-row derivation.
+// Tests the WatchSession dispatch for the typed
+// ``goldfive.v1.InvocationCancelled`` payload variant on the goldfive
+// Event envelope (goldfive#262 / harmonograf Wave 2 / A8). Covers:
+// record ingestion onto the session store, session-relative-ms
+// derivation from ``Event.emitted_at``, agent row auto-registration so
+// the Gantt has a lane to render on, the synthesized cancel marker
+// span, intervention-row derivation, and that the dispatcher routes
+// ``payload.case === 'invocationCancelled'`` to the same helper as the
+// direct call (regression for the case where the cancel arrives on a
+// goldfive Event rather than via a dedicated SessionUpdate slot).
 
-function mkCancelPb(over: Partial<{
+function mkCancelEvent(over: Partial<{
   runId: string;
   sequence: bigint;
   sessionId: string;
@@ -35,10 +42,7 @@ function mkCancelPb(over: Partial<{
           nanos: over.emittedAtNanos ?? 0,
         })
       : undefined;
-  return create(InvocationCancelledSchema, {
-    runId: over.runId ?? 'run-1',
-    sequence: over.sequence ?? 5n,
-    sessionId: over.sessionId ?? 'sess-c',
+  const payload = create(InvocationCancelledSchema, {
     invocationId: over.invocationId ?? 'inv-42',
     agentName:
       over.agentName ?? 'presentation-orchestrated-abc:researcher_agent',
@@ -48,7 +52,16 @@ function mkCancelPb(over: Partial<{
     driftKind: over.driftKind ?? 'off_topic',
     detail: over.detail ?? 'assistant veered off task',
     toolName: over.toolName ?? '',
+  });
+  return create(EventSchema, {
+    runId: over.runId ?? 'run-1',
+    sequence: over.sequence ?? 5n,
+    sessionId: over.sessionId ?? 'sess-c',
     emittedAt,
+    payload: {
+      case: 'invocationCancelled',
+      value: payload,
+    },
   });
 }
 
@@ -60,8 +73,10 @@ describe('applyInvocationCancelled', () => {
   });
 
   it('appends an InvocationCancelRecord to the store', () => {
-    const pb = mkCancelPb({ emittedAtSecs: 1000, emittedAtNanos: 0 });
-    applyInvocationCancelled(pb, store, 0, 'sess-c');
+    const ev = mkCancelEvent({ emittedAtSecs: 1000, emittedAtNanos: 0 });
+    const payload = ev.payload;
+    if (payload.case !== 'invocationCancelled') throw new Error('bad fixture');
+    applyInvocationCancelled(payload.value, ev, store, 0, 'sess-c');
     const list = store.invocationCancels.list();
     expect(list).toHaveLength(1);
     const r = list[0];
@@ -78,20 +93,24 @@ describe('applyInvocationCancelled', () => {
     expect(r.toolName).toBe('');
   });
 
-  it('derives session-relative ms from emitted_at', () => {
-    const pb = mkCancelPb({ emittedAtSecs: 1_005, emittedAtNanos: 0 });
+  it('derives session-relative ms from Event.emitted_at', () => {
+    const ev = mkCancelEvent({ emittedAtSecs: 1_005, emittedAtNanos: 0 });
+    const payload = ev.payload;
+    if (payload.case !== 'invocationCancelled') throw new Error('bad fixture');
     // Session started at 1000s → 1_000_000ms
-    applyInvocationCancelled(pb, store, 1_000_000, 'sess-c');
+    applyInvocationCancelled(payload.value, ev, store, 1_000_000, 'sess-c');
     const r = store.invocationCancels.list()[0];
     expect(r.recordedAtMs).toBe(5_000);
     expect(r.recordedAtAbsoluteMs).toBe(1_005_000);
   });
 
   it('auto-registers the cancelled agent row so the Gantt has a lane', () => {
-    const pb = mkCancelPb({
+    const ev = mkCancelEvent({
       agentName: 'presentation-orchestrated-abc:stale_agent',
     });
-    applyInvocationCancelled(pb, store, 0, 'sess-c');
+    const payload = ev.payload;
+    if (payload.case !== 'invocationCancelled') throw new Error('bad fixture');
+    applyInvocationCancelled(payload.value, ev, store, 0, 'sess-c');
     const agent = store.agents.get(
       'presentation-orchestrated-abc:stale_agent',
     );
@@ -100,13 +119,15 @@ describe('applyInvocationCancelled', () => {
   });
 
   it('synthesizes a cancel marker span on the cancelled agent lane', () => {
-    const pb = mkCancelPb({
+    const ev = mkCancelEvent({
       emittedAtSecs: 1_002,
       emittedAtNanos: 0,
       reason: 'drift',
       driftKind: 'off_topic',
     });
-    applyInvocationCancelled(pb, store, 1_000_000, 'sess-c');
+    const payload = ev.payload;
+    if (payload.case !== 'invocationCancelled') throw new Error('bad fixture');
+    applyInvocationCancelled(payload.value, ev, store, 1_000_000, 'sess-c');
     const spans = store.spans.queryAgent(
       'presentation-orchestrated-abc:researcher_agent',
       0,
@@ -131,15 +152,19 @@ describe('applyInvocationCancelled', () => {
   });
 
   it('does not produce a cancel span when agent_name is empty', () => {
-    const pb = mkCancelPb({ agentName: '' });
-    applyInvocationCancelled(pb, store, 0, 'sess-c');
+    const ev = mkCancelEvent({ agentName: '' });
+    const payload = ev.payload;
+    if (payload.case !== 'invocationCancelled') throw new Error('bad fixture');
+    applyInvocationCancelled(payload.value, ev, store, 0, 'sess-c');
     const count = Array.from(store.spans.all()).length;
     expect(count).toBe(0);
   });
 
   it('tool_name rides through when set', () => {
-    const pb = mkCancelPb({ toolName: 'search_web' });
-    applyInvocationCancelled(pb, store, 0, 'sess-c');
+    const ev = mkCancelEvent({ toolName: 'search_web' });
+    const payload = ev.payload;
+    if (payload.case !== 'invocationCancelled') throw new Error('bad fixture');
+    applyInvocationCancelled(payload.value, ev, store, 0, 'sess-c');
     const r = store.invocationCancels.list()[0];
     expect(r.toolName).toBe('search_web');
     const spans = store.spans.queryAgent(
@@ -154,8 +179,10 @@ describe('applyInvocationCancelled', () => {
   });
 
   it('produces an InterventionRow with source=cancel via the deriver', () => {
-    const pb = mkCancelPb({ emittedAtSecs: 1_010 });
-    applyInvocationCancelled(pb, store, 1_000_000, 'sess-c');
+    const ev = mkCancelEvent({ emittedAtSecs: 1_010 });
+    const payload = ev.payload;
+    if (payload.case !== 'invocationCancelled') throw new Error('bad fixture');
+    applyInvocationCancelled(payload.value, ev, store, 1_000_000, 'sess-c');
     const rows = deriveInterventionsFromStore(store, []);
     expect(rows).toHaveLength(1);
     const row = rows[0];
@@ -174,8 +201,10 @@ describe('applyInvocationCancelled', () => {
   });
 
   it('derives a default body when detail is empty', () => {
-    const pb = mkCancelPb({ detail: '' });
-    applyInvocationCancelled(pb, store, 0, 'sess-c');
+    const ev = mkCancelEvent({ detail: '' });
+    const payload = ev.payload;
+    if (payload.case !== 'invocationCancelled') throw new Error('bad fixture');
+    applyInvocationCancelled(payload.value, ev, store, 0, 'sess-c');
     const [row] = deriveInterventionsFromStore(store, []);
     expect(row.bodyOrReason).toBe('cancelled (drift → off_topic)');
   });
@@ -192,8 +221,10 @@ describe('applyInvocationCancelled', () => {
       annotationId: '',
       driftId: 'drift-uuid-1',
     });
-    const pb = mkCancelPb({ emittedAtSecs: 1_010 });
-    applyInvocationCancelled(pb, store, 1_000_000, 'sess-c');
+    const ev = mkCancelEvent({ emittedAtSecs: 1_010 });
+    const payload = ev.payload;
+    if (payload.case !== 'invocationCancelled') throw new Error('bad fixture');
+    applyInvocationCancelled(payload.value, ev, store, 1_000_000, 'sess-c');
     const rows = deriveInterventionsFromStore(store, []);
     // Both the drift row AND the cancel row appear — the cancel is
     // deliberately NOT merged into the drift (they represent different
@@ -205,5 +236,36 @@ describe('applyInvocationCancelled', () => {
     // Backlink is preserved on the cancel row for hover / click-through
     // to the drift detail drawer.
     expect(cancelRow.driftId).toBe('drift-uuid-1');
+  });
+});
+
+describe('applyGoldfiveEvent invocationCancelled dispatch', () => {
+  let store: SessionStore;
+
+  beforeEach(() => {
+    store = new SessionStore();
+  });
+
+  it('routes invocationCancelled payloads to the cancel pipeline', () => {
+    // Migration regression: post-#262, the cancel arrives as a
+    // ``goldfive.v1.Event`` with ``payload.case === 'invocationCancelled'``
+    // — NOT on a dedicated ``SessionUpdate.invocation_cancelled`` slot.
+    // applyGoldfiveEvent must fan the payload into applyInvocationCancelled
+    // so the store gets the same record + synthesized span as the
+    // pre-migration dedicated dispatch produced.
+    const ev = mkCancelEvent({ emittedAtSecs: 1_010 });
+    applyGoldfiveEvent(ev, store, 1_000_000, 'sess-c');
+    const list = store.invocationCancels.list();
+    expect(list).toHaveLength(1);
+    expect(list[0].invocationId).toBe('inv-42');
+    expect(list[0].recordedAtMs).toBe(10_000);
+    // Cancel marker span synthesized on the agent row.
+    const spans = store.spans.queryAgent(
+      'presentation-orchestrated-abc:researcher_agent',
+      0,
+      Number.POSITIVE_INFINITY,
+    );
+    expect(spans).toHaveLength(1);
+    expect(spans[0].name).toBe('cancelled: drift');
   });
 });

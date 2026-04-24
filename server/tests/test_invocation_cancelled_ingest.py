@@ -1,33 +1,50 @@
-"""Tests for the ``TelemetryUp.invocation_cancelled`` ingest path
-(goldfive#251 Stream C / harmonograf PR).
+"""Tests for the goldfive-event ``invocation_cancelled`` ingest path
+post goldfive#262 (harmonograf Wave 2 / A8).
 
-Harmonograf's ingest pipeline dispatches the new oneof variant to
-``_handle_invocation_cancelled`` which (a) stashes a replay record on
-the per-session ring and (b) publishes a ``DELTA_INVOCATION_CANCELLED``
-bus delta so live WatchSession subscribers see the marker.
+History
+-------
+Originally (PR #187) the cancel rode on a dedicated
+``TelemetryUp.invocation_cancelled`` oneof slot carrying a placeholder
+``harmonograf.v1.InvocationCancelled`` message, because goldfive was
+still shipping the event as a dict envelope. goldfive#262 promoted the
+event to a typed ``goldfive.v1.InvocationCancelled`` payload variant on
+the standard ``Event`` envelope; this PR removed the harmonograf
+placeholder and the dedicated TelemetryUp slot.
 
-Unlike ``goldfive_event`` the cancel is not persisted in the
-``goldfive_events`` table — the event originates as a dict on the
-goldfive side and the ingest path for that table is strictly
-proto-serialized. Reconnect replay rides on the in-memory ring.
+Coverage now
+------------
+* The ingest dispatcher routes ``Event.invocation_cancelled`` through
+  :meth:`IngestPipeline._handle_goldfive_event` → ``_on_invocation_cancelled``
+  → ``SessionBus.publish_invocation_cancelled``. Live WatchSession
+  subscribers see ``DELTA_INVOCATION_CANCELLED`` with the same payload
+  shape as before.
+* The event is persisted in the ``goldfive_events`` table like every
+  other goldfive Event variant — reconnect replay reads it back from
+  storage instead of from the in-memory ring (which was removed).
+* Optional fields (drift_id, tool_name, …) propagate verbatim;
+  envelope metadata (run_id, sequence, emitted_at) reads off the
+  parent ``Event``, not the payload.
 """
 
 from __future__ import annotations
 
 import pytest
 import pytest_asyncio
+from google.protobuf import timestamp_pb2
 
 from harmonograf_server.bus import (
     DELTA_INVOCATION_CANCELLED,
     SessionBus,
 )
 from harmonograf_server.ingest import IngestPipeline, StreamContext
-from harmonograf_server.pb import telemetry_pb2
+from harmonograf_server.pb import telemetry_pb2  # noqa: F401 — grafts goldfive.v1
 from harmonograf_server.storage import (
     Session,
     SessionStatus,
     make_store,
 )
+
+from goldfive.v1 import events_pb2 as goldfive_events_pb2  # noqa: E402
 
 
 @pytest_asyncio.fixture
@@ -69,7 +86,7 @@ async def _ensure_session(store, session_id: str = "sess_c") -> None:
     )
 
 
-def _make_cancel(
+def _make_cancel_event(
     *,
     run_id: str = "run-1",
     sequence: int = 5,
@@ -82,32 +99,40 @@ def _make_cancel(
     detail: str = "assistant veered off task",
     tool_name: str = "",
     invocation_id: str = "inv-42",
-) -> telemetry_pb2.InvocationCancelled:
-    return telemetry_pb2.InvocationCancelled(
+    emitted_at: timestamp_pb2.Timestamp | None = None,
+) -> goldfive_events_pb2.Event:
+    """Build a goldfive Event with the typed
+    ``invocation_cancelled`` payload — matches the wire shape produced
+    by goldfive's ``invocation_cancelled_event`` factory."""
+    evt = goldfive_events_pb2.Event(
         run_id=run_id,
         sequence=sequence,
         session_id=session_id,
-        invocation_id=invocation_id,
-        agent_name=agent_name,
-        reason=reason,
-        severity=severity,
-        drift_id=drift_id,
-        drift_kind=drift_kind,
-        detail=detail,
-        tool_name=tool_name,
     )
+    if emitted_at is not None:
+        evt.emitted_at.CopyFrom(emitted_at)
+    evt.invocation_cancelled.invocation_id = invocation_id
+    evt.invocation_cancelled.agent_name = agent_name
+    evt.invocation_cancelled.reason = reason
+    evt.invocation_cancelled.severity = severity
+    evt.invocation_cancelled.drift_id = drift_id
+    evt.invocation_cancelled.drift_kind = drift_kind
+    evt.invocation_cancelled.detail = detail
+    evt.invocation_cancelled.tool_name = tool_name
+    return evt
 
 
-def _wrap(msg: telemetry_pb2.InvocationCancelled) -> telemetry_pb2.TelemetryUp:
-    return telemetry_pb2.TelemetryUp(invocation_cancelled=msg)
+def _wrap(event: goldfive_events_pb2.Event):
+    return telemetry_pb2.TelemetryUp(goldfive_event=event)
 
 
 @pytest.mark.asyncio
-async def test_invocation_cancelled_publishes_delta(pipeline):
+async def test_invocation_cancelled_publishes_delta(pipeline, store):
     pipe, bus, _ = pipeline
+    await _ensure_session(store)
     sub = await bus.subscribe("sess_c")
-    msg = _make_cancel()
-    await pipe.handle_message(_stream_ctx(), _wrap(msg))
+    evt = _make_cancel_event()
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
     delta = sub.queue.get_nowait()
     assert delta.kind == DELTA_INVOCATION_CANCELLED
     p = delta.payload
@@ -125,61 +150,86 @@ async def test_invocation_cancelled_publishes_delta(pipeline):
 
 
 @pytest.mark.asyncio
-async def test_invocation_cancelled_stashed_on_replay_ring(pipeline):
+async def test_invocation_cancelled_persisted_in_goldfive_events(
+    pipeline, store
+):
+    """The cancel lands in the same ``goldfive_events`` table as every
+    other typed goldfive event. The dedicated in-memory ring that #187
+    used (because the dict-sourced shape couldn't be persisted as
+    proto bytes) is gone; reconnect replay reads from storage now."""
     pipe, _, _ = pipeline
-    msg1 = _make_cancel(invocation_id="inv-A", sequence=1)
-    msg2 = _make_cancel(
+    await _ensure_session(store)
+    e1 = _make_cancel_event(invocation_id="inv-A", sequence=1)
+    e2 = _make_cancel_event(
         invocation_id="inv-B",
         sequence=2,
         reason="user_steer",
         drift_kind="user_steer",
         detail="user asked to stop",
     )
-    await pipe.handle_message(_stream_ctx(), _wrap(msg1))
-    await pipe.handle_message(_stream_ctx(), _wrap(msg2))
-    records = pipe.invocation_cancels_for_session("sess_c")
+    await pipe.handle_message(_stream_ctx(), _wrap(e1))
+    await pipe.handle_message(_stream_ctx(), _wrap(e2))
+    records = await store.list_goldfive_events(
+        "sess_c", kind="invocation_cancelled"
+    )
     assert len(records) == 2
-    # Ordered oldest-first.
-    assert records[0]["invocation_id"] == "inv-A"
-    assert records[1]["invocation_id"] == "inv-B"
-    assert records[1]["reason"] == "user_steer"
-    assert records[1]["drift_kind"] == "user_steer"
+    parsed = [
+        goldfive_events_pb2.Event.FromString(r.payload_bytes) for r in records
+    ]
+    invocation_ids = sorted(p.invocation_cancelled.invocation_id for p in parsed)
+    assert invocation_ids == ["inv-A", "inv-B"]
+    # Reasons round-trip — confirms the persisted bytes carry the typed
+    # payload, not just envelope metadata.
+    reasons = {p.invocation_cancelled.reason for p in parsed}
+    assert reasons == {"drift", "user_steer"}
 
 
 @pytest.mark.asyncio
-async def test_invocation_cancelled_ring_bounded(pipeline):
-    """The ring tops out at the configured max — oldest dropped."""
+async def test_invocation_cancelled_ring_attribute_removed(pipeline):
+    """Migration regression: the per-session in-memory ring + helper
+    method were removed alongside the dict-conversion path. Storage is
+    now the single source of truth for replay."""
     pipe, _, _ = pipeline
-    # Tighten the ring for the test so we don't emit 600 events.
-    pipe._invocation_cancel_ring_max = 3
-    for i in range(5):
-        await pipe.handle_message(
-            _stream_ctx(), _wrap(_make_cancel(invocation_id=f"inv-{i}", sequence=i))
-        )
-    records = pipe.invocation_cancels_for_session("sess_c")
-    assert [r["invocation_id"] for r in records] == ["inv-2", "inv-3", "inv-4"]
+    assert not hasattr(pipe, "_invocation_cancels_by_session")
+    assert not hasattr(pipe, "invocation_cancels_for_session")
 
 
 @pytest.mark.asyncio
-async def test_invocation_cancelled_tool_name_field_propagates(pipeline):
+async def test_invocation_cancelled_tool_name_field_propagates(pipeline, store):
     pipe, bus, _ = pipeline
+    await _ensure_session(store)
     sub = await bus.subscribe("sess_c")
-    msg = _make_cancel(tool_name="search_web")
-    await pipe.handle_message(_stream_ctx(), _wrap(msg))
+    evt = _make_cancel_event(tool_name="search_web")
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
     delta = sub.queue.get_nowait()
     assert delta.payload["tool_name"] == "search_web"
 
 
 @pytest.mark.asyncio
-async def test_invocation_cancelled_empty_emitted_at_uses_recorded_at(pipeline):
+async def test_invocation_cancelled_empty_emitted_at_uses_recorded_at(
+    pipeline, store
+):
     """An envelope with emitted_at unset still has a usable timestamp —
     the bus carries both fields and the frontend.py translator picks
     the fallback."""
     pipe, bus, _ = pipeline
+    await _ensure_session(store)
     sub = await bus.subscribe("sess_c")
-    msg = _make_cancel()  # emitted_at not populated
-    assert not msg.HasField("emitted_at")
-    await pipe.handle_message(_stream_ctx(), _wrap(msg))
+    evt = _make_cancel_event()  # emitted_at not populated
+    assert not evt.HasField("emitted_at")
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
     delta = sub.queue.get_nowait()
     assert delta.payload["emitted_at"] is None
     assert delta.payload["recorded_at"] == 1_000_000.0
+
+
+@pytest.mark.asyncio
+async def test_invocation_cancelled_emitted_at_propagates(pipeline, store):
+    pipe, bus, _ = pipeline
+    await _ensure_session(store)
+    sub = await bus.subscribe("sess_c")
+    ts = timestamp_pb2.Timestamp(seconds=1_700_000_000, nanos=123_000_000)
+    evt = _make_cancel_event(emitted_at=ts)
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
+    delta = sub.queue.get_nowait()
+    assert delta.payload["emitted_at"] == pytest.approx(1_700_000_000.123)

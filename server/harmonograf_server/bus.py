@@ -55,8 +55,9 @@ DELTA_DELEGATION_OBSERVED = "delegation_observed"
 # in the DB (orphan-span cleanup is a belt-and-suspenders layer on top).
 DELTA_SESSION_ENDED = "session_ended"
 # Operator-observability: goldfive cooperatively cancelled one agent
-# invocation (goldfive#251 Stream C / #259). Carries the dict-sourced
-# harmonograf proto variant verbatim; the frontend renders a distinct
+# invocation (goldfive#251 Stream C / #259, promoted to a typed
+# ``goldfive.v1.InvocationCancelled`` Event payload in goldfive#262).
+# Carries the cancel record verbatim; the frontend renders a distinct
 # cancel marker on the Trajectory / Gantt / Graph views. Plays the
 # same "intervention timeline marker" role as DELTA_DRIFT but with a
 # stop-glyph rather than a drift chevron.
@@ -404,12 +405,14 @@ class SessionBus:
     ) -> None:
         """Publish an ``invocation_cancelled`` record onto the session bus.
 
-        Fields mirror the wire ``InvocationCancelled`` message (see
-        ``telemetry.proto``). ``recorded_at`` is the ingest-side wall
-        clock; ``emitted_at`` is the goldfive-side wall clock from the
-        envelope — kept separately so the frontend can use either (the
-        frontend.py translator prefers ``emitted_at`` and falls back to
-        ``recorded_at``, matching the DELTA_DRIFT pattern).
+        Fields mirror the wire ``goldfive.v1.InvocationCancelled``
+        payload + the ``goldfive.v1.Event`` envelope it rides on (see
+        goldfive ``events.proto``). ``recorded_at`` is the ingest-side
+        wall clock; ``emitted_at`` is the goldfive-side wall clock from
+        the parent Event envelope — kept separately so the frontend can
+        use either (the frontend.py translator prefers ``emitted_at``
+        and falls back to ``recorded_at``, matching the DELTA_DRIFT
+        pattern).
         """
         self.publish(
             Delta(
