@@ -27,6 +27,10 @@ const TASK_PLAN_VIEW_KEY = 'harmonograf.taskPlanView';
 const GRAPH_VIEWPORT_KEY = 'harmonograf.graphViewport';
 const CONTEXT_OVERLAY_VISIBLE_KEY = 'harmonograf.contextOverlayVisible';
 const INTERVENTION_BANDS_VISIBLE_KEY = 'harmonograf.interventionBandsVisible';
+// harmonograf: TrajectoryView legacy stacked-layout toggle. Default false
+// (new compact layout); persisted so a user who expands it doesn't lose the
+// state on reload.
+const TRAJECTORY_LEGACY_EXPANDED_KEY = 'harmonograf.trajectoryLegacyExpanded';
 
 function readGraphViewport(): GraphViewport | null {
   try {
@@ -153,6 +157,25 @@ function writeInterventionBandsVisible(v: boolean): void {
   }
 }
 
+function readTrajectoryLegacyExpanded(): boolean {
+  try {
+    const v = localStorage.getItem(TRAJECTORY_LEGACY_EXPANDED_KEY);
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+function writeTrajectoryLegacyExpanded(v: boolean): void {
+  try {
+    localStorage.setItem(TRAJECTORY_LEGACY_EXPANDED_KEY, v ? 'true' : 'false');
+  } catch {
+    /* ignore */
+  }
+}
+
 export type DrawerTabId =
   | 'summary'
   | 'task'
@@ -241,6 +264,13 @@ interface UiState {
   // on, persisted to localStorage.
   interventionBandsVisible: boolean;
   toggleInterventionBandsVisible: () => void;
+
+  // TrajectoryView legacy-layout escape hatch. `false` (default) renders the
+  // new compact layout (unified ribbon + floating drawer + full-width DAG).
+  // `true` additionally renders the old stacked REVISIONS / REV N / INTERVENTIONS
+  // sections underneath, for users who want the pre-restructure view back.
+  trajectoryLegacyExpanded: boolean;
+  toggleTrajectoryLegacyExpanded: () => void;
 
   // Sequence diagram (GraphView) zoom + pan state. `null` means "no explicit
   // viewport saved yet" — the view will fit-to-content on mount. Persisted to
@@ -405,6 +435,14 @@ export const useUiStore = create<UiState>((set) => ({
       writeInterventionBandsVisible(next);
       s.activeRenderer?.setInterventionBandsVisible(next);
       return { interventionBandsVisible: next };
+    }),
+
+  trajectoryLegacyExpanded: readTrajectoryLegacyExpanded(),
+  toggleTrajectoryLegacyExpanded: () =>
+    set((s) => {
+      const next = !s.trajectoryLegacyExpanded;
+      writeTrajectoryLegacyExpanded(next);
+      return { trajectoryLegacyExpanded: next };
     }),
   setAgentsPaused: (paused, ts) =>
     set((s) => {

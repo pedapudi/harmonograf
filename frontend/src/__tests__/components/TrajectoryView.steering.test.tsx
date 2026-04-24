@@ -43,6 +43,10 @@ vi.mock('../../rpc/hooks', () => ({
 const uiStoreState = {
   currentSessionId: mockSessionId,
   selectSpan: vi.fn(),
+  trajectoryLegacyExpanded: false,
+  toggleTrajectoryLegacyExpanded: (): void => {
+    uiStoreState.trajectoryLegacyExpanded = !uiStoreState.trajectoryLegacyExpanded;
+  },
 };
 vi.mock('../../state/uiStore', () => ({
   useUiStore: <T,>(selector: (s: typeof uiStoreState) => T) =>
@@ -163,6 +167,7 @@ function synthUserGoalSpan(goal: string, atMs: number): Span {
 
 beforeEach(() => {
   mockStore = new SessionStore();
+  uiStoreState.trajectoryLegacyExpanded = false;
 });
 afterEach(() => {
   vi.clearAllMocks();
@@ -246,7 +251,13 @@ describe('<TrajectoryView /> steering arrow + user gutter + detail panel', () =>
     expect(screen.getByTestId('trajectory-user-edge')).toBeInTheDocument();
   });
 
-  it('intervention detail panel shows Trigger + Target when a drift is selected', () => {
+  it('legacy intervention detail panel shows Trigger + Target when a drift is selected', () => {
+    // The drift-marker detail pane lives on the legacy stacked layout
+    // (escape hatch). The restructured default layout routes drift + task
+    // + steering clicks through the floating drawer — a separate test in
+    // evolution.test.tsx covers that path. Here we verify the legacy
+    // drift-detail pane still renders when the user opts in.
+    uiStoreState.trajectoryLegacyExpanded = true;
     const rev0 = mkPlan('p1', [mkTask('t1', 'RUNNING', 'agent-a')]);
     mockStore.tasks.upsertPlan(rev0);
     mockStore.drifts.append({
@@ -267,16 +278,14 @@ describe('<TrajectoryView /> steering arrow + user gutter + detail panel', () =>
     fireEvent.click(marker);
 
     expect(screen.getByTestId('detail-drift')).toBeInTheDocument();
-    // Trigger section surfaces the drift detail.
     const trigger = screen.getByTestId('detail-drift-trigger');
     expect(trigger).toHaveTextContent('repeated tool calls');
-    // Target section surfaces agent-a.
     const target = screen.getByTestId('detail-drift-target');
     expect(target).toHaveTextContent('agent-a');
   });
 
-  it('intervention detail panel composes Steering from a matching PlanRevised', () => {
-    // rev 0 + drift + rev 1 with triggerEventId = drift.driftId.
+  it('legacy intervention detail panel composes Steering from a matching PlanRevised', () => {
+    uiStoreState.trajectoryLegacyExpanded = true;
     const rev0 = mkPlan('p1', [mkTask('t1', 'RUNNING', 'agent-a')]);
     mockStore.tasks.upsertPlan(rev0);
     mockStore.drifts.append({
@@ -310,7 +319,6 @@ describe('<TrajectoryView /> steering arrow + user gutter + detail panel', () =>
     const steering = screen.getByTestId('detail-drift-steering');
     expect(steering).toHaveTextContent('add verification');
     const target = screen.getByTestId('detail-drift-target');
-    // Refine's target_agent_id wins over drift's current_agent_id.
     expect(target).toHaveTextContent('agent-b');
   });
 });
