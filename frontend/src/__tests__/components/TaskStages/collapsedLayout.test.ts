@@ -22,6 +22,7 @@ function makeTask(id: string, title?: string): Task {
     predictedStartMs: 0,
     predictedDurationMs: 0,
     boundSpanId: '',
+    supersedes: '',
   };
 }
 

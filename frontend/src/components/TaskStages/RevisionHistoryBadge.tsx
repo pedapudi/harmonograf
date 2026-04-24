@@ -6,22 +6,7 @@ import {
   type ReactElement,
 } from 'react';
 import type { Task } from '../../gantt/types';
-// TODO(INT): LAY is landing the real `./collapsedLayout` module on a parallel
-// branch. Until it merges into this worktree we declare a minimal local shape
-// compatible with the one LAY is shipping. At integration time INT replaces
-// this block with `import type { TaskRevisionChain } from './collapsedLayout';`
-// and deletes the local interface.
-export interface TaskRevisionChain {
-  /** The representative task for the equivalence class — the one the DAG
-   *  actually renders as a node. */
-  canonical: Task;
-  /** All tasks in the equivalence class, ordered oldest → newest. The
-   *  last member MUST equal `canonical`. */
-  members: Task[];
-  /** Revision indices at which each `members[i]` was introduced. Same length
-   *  as `members`. */
-  revisions: number[];
-}
+import type { TaskRevisionChain } from './collapsedLayout';
 import './RevisionHistoryBadge.css';
 
 export interface RevisionHistoryBadgeProps {

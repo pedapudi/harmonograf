@@ -1,9 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import {
-  RevisionHistoryBadge,
-  type TaskRevisionChain,
-} from '../../../components/TaskStages/RevisionHistoryBadge';
+import { RevisionHistoryBadge } from '../../../components/TaskStages/RevisionHistoryBadge';
+import type { TaskRevisionChain } from '../../../components/TaskStages/collapsedLayout';
 import type { Task, TaskStatus } from '../../../gantt/types';
 
 vi.mock('../../../components/TaskStages/RevisionHistoryBadge.css', () => ({}));
@@ -18,6 +16,7 @@ function mkTask(id: string, title: string, status: TaskStatus = 'PENDING'): Task
     predictedStartMs: 0,
     predictedDurationMs: 0,
     boundSpanId: '',
+    supersedes: '',
   };
 }
 
