@@ -27,6 +27,7 @@ import type { Agent, ContextWindowSample, Span, SpanKind, Task, TaskStatus } fro
 import { hasThinking } from '../lib/thinking';
 import {
   goldfiveCallFill,
+  goldfiveCallGlyph,
   isGoldfiveSpan,
   resolveGoldfiveSpanInfo,
   type GoldfiveSpanInfo,
@@ -1056,7 +1057,14 @@ export class GanttRenderer {
     for (const b of buckets.values()) {
       for (const l of b.labels) {
         const { s, x, y: ly, w: lw, h: lh, gf } = l;
-        const icon = KIND_ICON[s.kind];
+        // Goldfive lane spans get a category-specific glyph in place of
+        // the bare CUSTOM "•" so refine_steer / judge_* / plan_* /
+        // reflective_check are distinguishable at a glance even when
+        // they share the same SpanKind. See Item 6 of the UX cleanup
+        // batch and goldfiveCallGlyph in lib/goldfiveSpan.ts.
+        const baseIcon = KIND_ICON[s.kind];
+        const gfGlyph = gf ? goldfiveCallGlyph(gf.category) : null;
+        const icon = gfGlyph ?? baseIcon;
         if (lw > 40) {
           const primary = gf ? gf.callName : s.name;
           const label = icon ? `${icon} ${primary}` : primary;

@@ -11,6 +11,7 @@ import type { AttributeValue, Span } from '../../gantt/types';
 import {
   bareGoldfiveAgentName,
   goldfiveCallFill,
+  goldfiveCallGlyph,
   isGoldfiveSpan,
   resolveGoldfiveSpanInfo,
   truncatePreview,
@@ -386,5 +387,38 @@ describe('truncatePreview', () => {
 
   it('returns empty string for empty / undefined input', () => {
     expect(truncatePreview('', 10)).toBe('');
+  });
+});
+
+describe('goldfiveCallGlyph (Item 6 of UX cleanup batch)', () => {
+  // refine_steer used to render with the bare CUSTOM "•" glyph on the
+  // goldfive lane, indistinguishable from other goldfive spans. Each
+  // category now has its own glyph so operators triage at a glance.
+  it('returns distinct glyphs per category', () => {
+    const refine = goldfiveCallGlyph('refine');
+    const judge = goldfiveCallGlyph('judge');
+    const plan = goldfiveCallGlyph('plan');
+    const reflective = goldfiveCallGlyph('reflective');
+    expect(refine).toBeTruthy();
+    expect(judge).toBeTruthy();
+    expect(plan).toBeTruthy();
+    expect(reflective).toBeTruthy();
+    // All four are pairwise distinct.
+    const set = new Set([refine, judge, plan, reflective]);
+    expect(set.size).toBe(4);
+  });
+
+  it('returns null for the unknown category', () => {
+    // ``unknown`` is the legacy / pre-merge fallback — the renderer
+    // should keep using the SpanKind icon (or no icon) rather than
+    // overlaying a misleading glyph.
+    expect(goldfiveCallGlyph('unknown')).toBeNull();
+  });
+
+  it('returns the refine glyph for the refine category', () => {
+    // The renderer relies on this exact glyph being present (truthy and
+    // string) so refine_steer spans stand out on the lane. Any change
+    // here should be intentional and coordinated with the icon palette.
+    expect(typeof goldfiveCallGlyph('refine')).toBe('string');
   });
 });

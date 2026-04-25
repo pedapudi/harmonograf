@@ -66,16 +66,28 @@ export function panBy(vp: Viewport, dx: number, dy: number): Viewport {
 // Fit a content-space rectangle into a container, leaving `padding` CSS px of
 // breathing room around it, and clamp the resulting scale into the allowed
 // range. The content is centered inside the container.
+//
+// ``maxScale`` overrides the default upper clamp so callers (e.g. the
+// "fit selection" affordance) can keep the zoom from blowing up on a
+// tiny selection, and the initial-fit path can cap the lower bound at
+// 1.0 so the overview opens at 100% (the previous behaviour fit big DAGs
+// at 37% which left the canvas mostly empty — see Item 2 of the UX
+// cleanup batch). Pass ``minScale`` to clamp upward (≥ minScale) so a
+// large content rect doesn't render at 0.3× and look like the panel's
+// broken.
 export function fitRect(
   content: Rect,
   container: Size,
   padding = 24,
+  opts: { minScale?: number; maxScale?: number } = {},
 ): Viewport {
   const availW = Math.max(1, container.w - padding * 2);
   const availH = Math.max(1, container.h - padding * 2);
   const bw = Math.max(1, content.w);
   const bh = Math.max(1, content.h);
-  const scale = clampScale(Math.min(availW / bw, availH / bh));
+  let scale = clampScale(Math.min(availW / bw, availH / bh));
+  if (opts.maxScale !== undefined) scale = Math.min(scale, opts.maxScale);
+  if (opts.minScale !== undefined) scale = Math.max(scale, opts.minScale);
   const tx = padding + (availW - bw * scale) / 2 - content.x * scale;
   const ty = padding + (availH - bh * scale) / 2 - content.y * scale;
   return { scale, tx, ty };

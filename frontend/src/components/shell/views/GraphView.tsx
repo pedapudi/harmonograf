@@ -811,7 +811,16 @@ export function GraphView() {
     if (containerSize.w <= 0 || containerSize.h <= 0) return;
     const cs = contentSizeRef.current;
     if (cs.w <= 0 || cs.h <= 0) return;
-    commitViewport(fitRect({ x: 0, y: 0, w: cs.w, h: cs.h }, containerSize));
+    // Initial-fit: clamp scale floor at 1.0 so a large DAG doesn't open at
+    // 0.37× (which used to leave most of the canvas blank — Item 2 of the
+    // UX cleanup batch). User-driven fits via the toolbar still clamp to
+    // 1.0 too — the operator can pan from there or hit zoom-out
+    // explicitly to see the whole DAG. See graphViewport.fitRect.
+    commitViewport(
+      fitRect({ x: 0, y: 0, w: cs.w, h: cs.h }, containerSize, 24, {
+        minScale: 1,
+      }),
+    );
   }, [commitViewport, containerSize]);
 
   const fitSelection = useCallback(() => {
