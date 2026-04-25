@@ -1342,3 +1342,98 @@ async def test_delegation_observed_stored_verbatim(pipeline, store):
     assert delta.kind == DELTA_DELEGATION_OBSERVED
     assert delta.payload["from_agent"] == "client-abc:coordinator_agent"
     assert delta.payload["to_agent"] == "client-abc:research_agent"
+
+
+# ---- run_id-gated dispatch invariant (audit trail consistency) ----------
+#
+# An event without a ``run_id`` cannot be persisted to the audit log
+# (``goldfive_events`` is keyed on (session_id, run_id, sequence)).
+# Pre-fix, the ingest pipeline gated ONLY the audit insert; the
+# per-kind dispatch chain (which writes ``task_plans``, ``tasks``,
+# annotations, …) ran unconditionally. That left silent inconsistency:
+# 3 ``task_plans`` rows for a single ``plan_submitted`` row in
+# ``goldfive_events`` (the symptom that motivated this fix).
+#
+# Invariant: every row in a derived table has a corresponding row in
+# ``goldfive_events``. Achieved by gating the WHOLE dispatch chain on
+# ``kind is not None and run_id``, not just the audit insert.
+
+
+@pytest.mark.asyncio
+async def test_plan_with_empty_run_id_skips_both_writes(pipeline, store):
+    """A plan event with empty ``run_id`` writes neither audit nor derived rows."""
+
+    pipe, _bus, _ = pipeline
+    await _ensure_session(store)
+
+    evt = _make_event(run_id="")  # explicitly empty
+    evt.plan_submitted.plan.CopyFrom(_plan_pb(plan_id="p-empty", run_id=""))
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
+
+    # Audit table: empty.
+    assert await store.list_goldfive_events("sess_gf") == []
+    # Derived ``task_plans``: nothing leaked through.
+    assert await store.list_task_plans_for_session("sess_gf") == []
+
+
+@pytest.mark.asyncio
+async def test_plan_with_non_empty_run_id_writes_both(pipeline, store):
+    """Sanity: the gate doesn't accidentally drop legitimate events."""
+
+    pipe, _bus, _ = pipeline
+    await _ensure_session(store)
+
+    evt = _make_event(run_id="run-1")
+    evt.plan_submitted.plan.CopyFrom(_plan_pb(plan_id="p-good", run_id="run-1"))
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
+
+    audit = await store.list_goldfive_events("sess_gf", kind="plan_submitted")
+    assert len(audit) == 1
+    plans = await store.list_task_plans_for_session("sess_gf")
+    assert [p.id for p in plans] == ["p-good"]
+
+
+@pytest.mark.asyncio
+async def test_drift_detected_with_empty_run_id_skips_both_writes(pipeline, store):
+    """Other dispatch handlers (drift, etc.) honor the same gate."""
+
+    pipe, bus, _ = pipeline
+    await _ensure_session(store)
+    sub = await bus.subscribe("sess_gf")
+
+    evt = _make_event(run_id="")
+    evt.drift_detected.detail = "skipped"
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
+
+    assert await store.list_goldfive_events("sess_gf") == []
+    # Bus fan-out is part of the dispatch chain; gating drops it too.
+    assert sub.queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_audit_invariant_no_orphan_task_plans(pipeline, store):
+    """Every row in ``task_plans`` has a matching ``goldfive_events`` row.
+
+    Mixes valid and gated events to exercise the invariant under load —
+    the symptom that motivated the fix was 3 ``task_plans`` for 1
+    audit row in a real session.
+    """
+
+    pipe, _bus, _ = pipeline
+    await _ensure_session(store)
+
+    # Three plan_submitted events; only the second carries a run_id.
+    for sequence, (run_id, plan_id) in enumerate(
+        [("", "p-leak-1"), ("run-keep", "p-keep"), ("", "p-leak-2")]
+    ):
+        evt = _make_event(event_id=f"e-{sequence}", sequence=sequence, run_id=run_id)
+        evt.plan_submitted.plan.CopyFrom(
+            _plan_pb(plan_id=plan_id, run_id=run_id)
+        )
+        await pipe.handle_message(_stream_ctx(), _wrap(evt))
+
+    audit = await store.list_goldfive_events("sess_gf", kind="plan_submitted")
+    plans = await store.list_task_plans_for_session("sess_gf")
+    assert {r.run_id for r in audit} == {"run-keep"}
+    assert [p.id for p in plans] == ["p-keep"]
+    assert len(plans) == len(audit) == 1
