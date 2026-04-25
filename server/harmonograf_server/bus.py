@@ -79,6 +79,14 @@ DELTA_REFINE_FAILED = "refine_failed"
 # before surfacing as an intervention row — the wire fans out every
 # transition; the deriver downstream picks the user-meaningful subset.
 DELTA_TASK_TRANSITIONED = "task_transitioned"
+# Operator-observability: ADK observed a user-authored message
+# (harmonograf user-message UX gap). Carries the verbatim text,
+# author hint, and mid-turn flag so the frontend can render the
+# operator's words on the Gantt user lane / Trajectory intervention
+# list / Graph origin lifeline. Plays the same "intervention timeline
+# marker" role as DELTA_DRIFT but is the raw user input — not
+# goldfive's interpretation of it.
+DELTA_USER_MESSAGE = "user_message"
 
 
 @dataclass
@@ -536,6 +544,45 @@ class SessionBus:
                     "detail": detail,
                     "current_task_id": current_task_id,
                     "current_agent_id": current_agent_id,
+                    "recorded_at": recorded_at,
+                },
+            )
+        )
+
+    def publish_user_message(
+        self,
+        session_id: str,
+        *,
+        run_id: str = "",
+        sequence: int = 0,
+        emitted_at: float | None = None,
+        content: str = "",
+        author: str = "user",
+        mid_turn: bool = False,
+        invocation_id: str = "",
+        recorded_at: float | None = None,
+    ) -> None:
+        """Publish a ``user_message`` record onto the session bus.
+
+        Fields mirror the wire ``UserMessageReceived`` message
+        (telemetry.proto). ``recorded_at`` is the ingest-side wall
+        clock; ``emitted_at`` is the client-side wall clock the
+        plugin stamped at ``on_user_message_callback`` time. Frontend
+        prefers ``emitted_at`` and falls back to ``recorded_at``
+        (matches the DELTA_REFINE_ATTEMPTED pattern).
+        """
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_USER_MESSAGE,
+                {
+                    "run_id": run_id,
+                    "sequence": int(sequence or 0),
+                    "emitted_at": emitted_at,
+                    "content": content,
+                    "author": author,
+                    "mid_turn": bool(mid_turn),
+                    "invocation_id": invocation_id,
                     "recorded_at": recorded_at,
                 },
             )

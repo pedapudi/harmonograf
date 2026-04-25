@@ -135,6 +135,11 @@ message SessionUpdate {
     // into the existing ``goldfive_event`` envelope.
     RefineAttempted refine_attempted = 21;
     RefineFailed refine_failed = 22;
+    // User-authored message observed via ADK's ``on_user_message_callback``
+    // (harmonograf user-message UX gap). Replayed during the initial
+    // burst from the per-session ring (same in-memory pattern as
+    // RefineAttempted) and streamed live as ingest fans deltas out.
+    UserMessageReceived user_message = 23;
   }
 }
 

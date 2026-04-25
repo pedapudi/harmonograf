@@ -37,6 +37,7 @@ import type {
   RefineFailureRecord,
   SessionStore,
   TaskTransitionRecord,
+  UserMessageRecord,
 } from '../gantt/index';
 import type { TaskPlan } from '../gantt/types';
 
@@ -215,6 +216,15 @@ export interface DeriveInput {
   // row. Optional so callers without a SessionStore stay backward-
   // compatible.
   transitions?: readonly TaskTransitionRecord[];
+  // harmonograf user-message UX gap: verbatim user-authored messages
+  // observed via ADK's ``on_user_message_callback``. Distinct from
+  // ``annotations`` (frontend-authored side-channel notes) and from
+  // ``drifts`` of kind=user_steer (goldfive's interpretation of the
+  // operator signal). Surfaced as ``source: 'user'`` rows so they
+  // sit alongside annotation steers in the unified intervention
+  // list. Optional so callers without a SessionStore stay backward-
+  // compatible.
+  userMessages?: readonly UserMessageRecord[];
   // Opt-in Tier-2 legacy time-window fallback for plan-revision
   // attribution (pre-#99 behaviour). Default 0 / undefined disables.
   // Provided by the caller (app runtime context) — never read from
@@ -505,6 +515,35 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
   // The intervention row carries the source attribution as a separate
   // field (``transitionSource``) so the renderer / detail panel can
   // surface the "why" alongside the "what" without re-parsing kind.
+  // User messages — verbatim operator turns observed via ADK's
+  // ``on_user_message_callback`` (harmonograf user-message UX gap).
+  // Source-tagged ``user`` so they sit alongside annotation steers in
+  // the unified intervention list. Distinct from a drift(user_steer)
+  // row: this carries the RAW input, before goldfive's drift
+  // interpretation. Both rows can coexist for the same turn — the
+  // user_message row says WHAT the operator typed; the
+  // drift(user_steer) row says how goldfive responded.
+  for (const um of input.userMessages ?? []) {
+    rows.push({
+      key: `usermsg:${um.seq}`,
+      atMs: um.recordedAtMs,
+      source: 'user',
+      kind: um.midTurn ? 'USER_MESSAGE_INTERJECTION' : 'USER_MESSAGE',
+      bodyOrReason: um.content,
+      author: um.author || 'user',
+      outcome: '',
+      planRevisionIndex: 0,
+      severity: '',
+      annotationId: '',
+      driftKind: '',
+      triggerEventId: '',
+      targetAgentId: '',
+      driftId: '',
+      attemptId: '',
+      failureKind: '',
+    });
+  }
+
   for (const tr of input.transitions ?? []) {
     const to = (tr.toStatus || '').toUpperCase();
     const src = (tr.source || '').toLowerCase();
@@ -818,6 +857,7 @@ export function deriveInterventionsFromStore(
     refineAttempts: store.refineAttempts.list(),
     refineFailures: store.refineFailures.list(),
     transitions: store.taskTransitions.list(),
+    userMessages: store.userMessages.list(),
     legacyPlanAttributionWindowMs: opts.legacyPlanAttributionWindowMs,
   });
 }

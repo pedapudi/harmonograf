@@ -61,6 +61,12 @@ class EnvelopeKind(enum.Enum):
     # envelope kinds collapse the same way INVOCATION_CANCELLED did.
     REFINE_ATTEMPTED = "refine_attempted"
     REFINE_FAILED = "refine_failed"
+    # User-authored message observed via ADK's
+    # ``on_user_message_callback`` (harmonograf user-message UX gap).
+    # Carries a ``harmonograf.v1.UserMessageReceived`` proto. Same
+    # transport + Hello-routing semantics as the refine envelopes —
+    # session_id is read off the proto's top-level field.
+    USER_MESSAGE = "user_message"
 
 
 @dataclasses.dataclass

@@ -46,6 +46,7 @@ from harmonograf_server.bus import (
     DELTA_TASK_REPORT,
     DELTA_TASK_STATUS,
     DELTA_TASK_TRANSITIONED,
+    DELTA_USER_MESSAGE,
     DELTA_CONTEXT_WINDOW_SAMPLE,
     Delta,
     SessionBus,
@@ -462,6 +463,39 @@ class FrontendServicerMixin:
                     if ts is not None:
                         fmsg.emitted_at.CopyFrom(ts)
                 yield frontend_pb2.SessionUpdate(refine_failed=fmsg)
+
+            # 4b.4. User messages (harmonograf user-message UX gap).
+            # Same ring rationale as the refine attempts above:
+            # in-memory, not persisted in ``goldfive_events``, but the
+            # operator UI relies on the verbatim user text surviving
+            # a reconnect — otherwise refreshing during a session
+            # erases the operator's words from every view. Replayed
+            # in arrival order.
+            try:
+                user_msgs = self._ingest.user_messages_for_session(
+                    session_id
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("user_messages_for_session failed: %s", exc)
+                user_msgs = []
+            for um in user_msgs:
+                umsg = telemetry_pb2.UserMessageReceived(
+                    run_id=um.get("run_id", "") or "",
+                    sequence=int(um.get("sequence", 0) or 0),
+                    session_id=session_id,
+                    content=um.get("content", "") or "",
+                    author=um.get("author", "user") or "user",
+                    mid_turn=bool(um.get("mid_turn", False)),
+                    invocation_id=um.get("invocation_id", "") or "",
+                )
+                ts_val = um.get("emitted_at")
+                if not isinstance(ts_val, (int, float)):
+                    ts_val = um.get("recorded_at")
+                if isinstance(ts_val, (int, float)):
+                    ts = float_to_ts(float(ts_val))
+                    if ts is not None:
+                        umsg.emitted_at.CopyFrom(ts)
+                yield frontend_pb2.SessionUpdate(user_message=umsg)
 
             # 4c. Context window samples — replay the most recent per-agent
             # series so the Gantt context-window lane renders immediately
@@ -1459,6 +1493,25 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
             if ts is not None:
                 fmsg.emitted_at.CopyFrom(ts)
         return frontend_pb2.SessionUpdate(refine_failed=fmsg)
+    if delta.kind == DELTA_USER_MESSAGE:
+        p = delta.payload
+        umsg = telemetry_pb2.UserMessageReceived(
+            run_id=p.get("run_id", "") or "",
+            sequence=int(p.get("sequence", 0) or 0),
+            session_id=delta.session_id,
+            content=p.get("content", "") or "",
+            author=p.get("author", "user") or "user",
+            mid_turn=bool(p.get("mid_turn", False)),
+            invocation_id=p.get("invocation_id", "") or "",
+        )
+        ts_val = p.get("emitted_at")
+        if not isinstance(ts_val, (int, float)):
+            ts_val = p.get("recorded_at")
+        if isinstance(ts_val, (int, float)):
+            ts = float_to_ts(float(ts_val))
+            if ts is not None:
+                umsg.emitted_at.CopyFrom(ts)
+        return frontend_pb2.SessionUpdate(user_message=umsg)
     if delta.kind == DELTA_TASK_TRANSITIONED:
         p = delta.payload
         # Wrap as a ``goldfive.v1.Event`` with the ``task_transitioned``

@@ -184,6 +184,14 @@ message TelemetryUp {
     // migration in #190).
     RefineAttempted refine_attempted = 13;
     RefineFailed refine_failed = 14;
+    // User-authored message observed via ADK ``on_user_message_callback``
+    // (harmonograf user-message UX gap). The plugin emits one of these
+    // per user turn so harmonograf surfaces what the operator typed —
+    // previously the body was invisible across every view (Sessions,
+    // Gantt, Trajectory, Graph). Same forward-compat dict-or-proto
+    // pattern as ``invocation_cancelled`` pre-#190; today we go straight
+    // to a typed proto since the plugin synthesizes the message.
+    UserMessageReceived user_message = 15;
   }
 }
 
@@ -271,6 +279,47 @@ message RefineFailed {
   string detail = 11;
   string current_task_id = 12;
   string current_agent_id = 13;
+}
+
+// ---------------------------------------------------------------------------
+// Operator-observability: user-authored messages
+// ---------------------------------------------------------------------------
+
+// A user-authored message observed via ADK's ``on_user_message_callback``.
+// Carries the verbatim text + author hint so harmonograf can surface
+// operator steers ("forget X. tell me about Y.") in every view (Gantt
+// user lane, Trajectory intervention list, Graph origin lifeline).
+//
+// Distinct from ``annotation`` (which represents a side-channel
+// frontend-authored note) and from ``DriftDetected(kind=user_steer)``
+// (which represents goldfive's *interpretation* of the user signal).
+// This event carries the raw user text, before any orchestration layer
+// transforms it.
+//
+// ``mid_turn`` flags messages that arrived during an in-flight ADK
+// invocation (as opposed to a fresh top-level turn). The frontend uses
+// it to render a distinct "interjection" glyph on the user lane.
+message UserMessageReceived {
+  // Envelope metadata — same shape as ``RefineAttempted`` / ``RefineFailed``.
+  string run_id = 1;
+  uint64 sequence = 2;
+  string session_id = 3;
+  google.protobuf.Timestamp emitted_at = 4;
+
+  // Verbatim user message text. May be multi-line; the server stores it
+  // as-is without truncation. Tooltip / list rendering on the frontend
+  // is responsible for clipping if the message is huge.
+  string content = 5;
+  // Author label, free-form. Defaults to "user" when ADK doesn't supply
+  // one; the plugin reads ``invocation_context.user_id`` when available.
+  string author = 6;
+  // True when the message arrived during an in-flight invocation. The
+  // plugin sets this when ``invocation_id`` is non-empty at the moment
+  // ``on_user_message_callback`` fires.
+  bool mid_turn = 7;
+  // Bare ADK invocation id at the moment the message arrived, when
+  // ``mid_turn`` is true. Empty for fresh top-level turns.
+  string invocation_id = 8;
 }
 
 // ---------------------------------------------------------------------------

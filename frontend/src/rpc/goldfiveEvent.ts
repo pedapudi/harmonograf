@@ -38,6 +38,7 @@ import type {
 import type {
   RefineAttempted as RefineAttemptedPb,
   RefineFailed as RefineFailedPb,
+  UserMessageReceived as UserMessageReceivedPb,
 } from '../pb/harmonograf/v1/telemetry_pb.js';
 import { useApprovalsStore } from '../state/approvalsStore';
 import {
@@ -961,6 +962,99 @@ export function applyRefineFailed(
     event.detail || '',
     recordedMs,
     goldfiveId,
+  );
+}
+
+// Synthesize a USER_MESSAGE span on the user actor row carrying the
+// verbatim operator text. The span name is the message body (clipped
+// to 120 chars for tooltip readability); the full text rides on
+// ``user.content`` for the detail panel. Distinct from
+// :func:`synthesizeUserGoalSpan` (which renders the RunStarted goal
+// summary): that's goldfive's distillation; this is the raw input.
+function synthesizeUserMessageSpan(
+  store: SessionStore,
+  sessionId: string | null,
+  recordedAtMs: number,
+  content: string,
+  author: string,
+  midTurn: boolean,
+  invocationId: string,
+): void {
+  if (!content) return;
+  const id = `user-msg-${recordedAtMs}-${author || 'user'}`;
+  const headline = content.length > 120 ? content.slice(0, 117) + '…' : content;
+  const span: Span = {
+    id,
+    sessionId: sessionId ?? '',
+    agentId: USER_ACTOR_ID,
+    parentSpanId: null,
+    kind: 'USER_MESSAGE',
+    status: 'COMPLETED',
+    name: headline,
+    startMs: recordedAtMs,
+    endMs: recordedAtMs,
+    links: [],
+    attributes: {
+      'user.content': { kind: 'string', value: content },
+      'user.author': { kind: 'string', value: author || 'user' },
+      'user.mid_turn': { kind: 'bool', value: midTurn },
+      'user.invocation_id': {
+        kind: 'string',
+        value: invocationId || '',
+      },
+      'harmonograf.synthetic_span': { kind: 'bool', value: true },
+      // Renderer flag: pick the user-message glyph variant on the
+      // user lane instead of the generic span style.
+      'harmonograf.user_message_marker': { kind: 'bool', value: true },
+    },
+    payloadRefs: [],
+    error: null,
+    lane: -1,
+    replaced: false,
+  };
+  store.spans.append(span);
+}
+
+// Operator-observability: a ``UserMessageReceived`` envelope landed
+// on the WatchSession stream (harmonograf user-message UX gap).
+// Append to the per-session :class:`UserMessageRegistry` so the
+// deriver in ``lib/interventions.ts`` can surface the operator's
+// words as a first-class intervention row, AND synthesize a
+// USER_MESSAGE span on the user actor row so Gantt + Graph render
+// the marker without crawling the registry directly.
+export function applyUserMessage(
+  event: UserMessageReceivedPb,
+  store: SessionStore,
+  sessionStartMs: number,
+  sessionId: string | null = null,
+): void {
+  const recordedAbsMs = tsToMsAbs(event.emittedAt);
+  const abs = recordedAbsMs || Date.now();
+  const recordedMs = abs - sessionStartMs;
+  const content = event.content || '';
+  const author = event.author || 'user';
+  const midTurn = Boolean(event.midTurn);
+  const invocationId = event.invocationId || '';
+  store.userMessages.append({
+    runId: event.runId || '',
+    content,
+    author,
+    midTurn,
+    invocationId,
+    recordedAtMs: recordedMs,
+    recordedAtAbsoluteMs: abs,
+  });
+  // Ensure the user actor row exists so the Gantt lane renders
+  // even on a fresh stream that hasn't fired runStarted yet.
+  ensureSyntheticActor(store, USER_ACTOR_ID);
+  synthesizeUserMessageSpan(
+    store,
+    sessionId,
+    recordedMs,
+    content,
+    author,
+    midTurn,
+    invocationId,
   );
 }
 
