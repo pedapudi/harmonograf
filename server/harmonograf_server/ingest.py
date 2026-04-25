@@ -845,40 +845,54 @@ class IngestPipeline:
             sequence,
             kind,
         )
-        # Persist the event envelope verbatim before dispatch. Writes
-        # are idempotent on (session_id, run_id, sequence); a reconnect
-        # replay or duplicate delivery is safe. The bus fan-out below
-        # still runs so live subscribers see the event immediately —
-        # persistence is additive. See harmonograf#113.
-        if kind is not None and run_id:
-            try:
-                raw_bytes = event.SerializeToString()
-            except Exception as exc:  # noqa: BLE001 — proto edge cases
-                logger.debug(
-                    "goldfive event serialize failed session_id=%s kind=%s: %s",
-                    target_ctx.session_id,
-                    kind,
-                    exc,
+        # Persist the event envelope verbatim before dispatch and gate
+        # the per-kind dispatch on the same condition. Writes are
+        # idempotent on (session_id, run_id, sequence); a reconnect
+        # replay or duplicate delivery is safe.
+        #
+        # harmonograf#: keep the audit log invariant — every row in a
+        # derived table (``task_plans``, ``tasks``, ``annotations``…)
+        # has a corresponding row in ``goldfive_events``. Gating ONLY
+        # the audit insert (and not the dispatch chain) lets plan /
+        # task events with empty ``run_id`` skip the audit row but
+        # still mutate ``task_plans`` and friends, leaving silent
+        # inconsistency (3 task_plans rows for 1 plan_submitted in
+        # ``goldfive_events`` was the symptom). An event without a
+        # ``run_id`` has no provenance — drop both the persist AND the
+        # dispatch so the DB stays consistent. Bus fan-out (live
+        # subscribers) lives inside the dispatch chain and is dropped
+        # too: there is no live state worth publishing for an event we
+        # cannot trace back to a run.
+        if kind is None or not run_id:
+            return
+        try:
+            raw_bytes = event.SerializeToString()
+        except Exception as exc:  # noqa: BLE001 — proto edge cases
+            logger.debug(
+                "goldfive event serialize failed session_id=%s kind=%s: %s",
+                target_ctx.session_id,
+                kind,
+                exc,
+            )
+            raw_bytes = b""
+        try:
+            await self._store.append_goldfive_event(
+                GoldfiveEventRecord(
+                    session_id=target_ctx.session_id,
+                    run_id=run_id,
+                    sequence=int(sequence),
+                    kind=kind,
+                    recorded_at=self._now(),
+                    payload_bytes=raw_bytes,
                 )
-                raw_bytes = b""
-            try:
-                await self._store.append_goldfive_event(
-                    GoldfiveEventRecord(
-                        session_id=target_ctx.session_id,
-                        run_id=run_id,
-                        sequence=int(sequence),
-                        kind=kind,
-                        recorded_at=self._now(),
-                        payload_bytes=raw_bytes,
-                    )
-                )
-            except Exception as exc:  # noqa: BLE001 — defensive: ingest must not raise
-                logger.debug(
-                    "goldfive event persist failed session_id=%s kind=%s: %s",
-                    target_ctx.session_id,
-                    kind,
-                    exc,
-                )
+            )
+        except Exception as exc:  # noqa: BLE001 — defensive: ingest must not raise
+            logger.debug(
+                "goldfive event persist failed session_id=%s kind=%s: %s",
+                target_ctx.session_id,
+                kind,
+                exc,
+            )
         if kind == "run_started":
             await self._on_run_started(target_ctx, event.run_started, run_id)
         elif kind == "goal_derived":
@@ -1079,6 +1093,12 @@ class IngestPipeline:
             created_at=created_at,
             planner_agent_id=ctx.agent_id,
         )
+        # goldfive#: prefer the envelope-level ``run_id`` when the inline
+        # ``Plan.run_id`` is empty. The two are normally identical, but
+        # older clients populated only the envelope; this keeps the
+        # round-trip preserving the run pin in either case.
+        if not stored.run_id and run_id:
+            stored.run_id = run_id
         # Task ``assignee_agent_id`` fields arrive already-compound from the
         # client-side sink (harmonograf#125). The bare→compound resolve loop
         # that used to live here is no longer needed — wire is authoritative.

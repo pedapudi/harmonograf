@@ -42,6 +42,43 @@ from harmonograf_server.storage.base import (
     ContextWindowSample,
     GoldfiveEventRecord,
 )
+from goldfive.types import SupersessionKind
+
+
+# goldfive#237 / goldfive#251: tasks.supersedes_kind storage encoding.
+# Persist as the same integer the proto enum uses (0 UNSPECIFIED /
+# 1 REPLACE / 2 CORRECT) so the column round-trips through the
+# converter without losing fidelity. The Python ``SupersessionKind``
+# is a ``StrEnum`` (string-valued); this mapping is what makes the
+# storage int authoritative.
+_SUPERSESSION_KIND_TO_INT: dict[Any, int] = {
+    SupersessionKind.UNSPECIFIED: 0,
+    SupersessionKind.REPLACE: 1,
+    SupersessionKind.CORRECT: 2,
+}
+_INT_TO_SUPERSESSION_KIND: dict[int, SupersessionKind] = {
+    0: SupersessionKind.UNSPECIFIED,
+    1: SupersessionKind.REPLACE,
+    2: SupersessionKind.CORRECT,
+}
+
+
+def _supersession_kind_to_int(value: Any) -> int:
+    """Map a Python ``SupersessionKind`` (or ``None``) to a storage int."""
+
+    if value is None:
+        return 0
+    return int(_SUPERSESSION_KIND_TO_INT.get(value, 0))
+
+
+def _supersession_kind_from_int(value: Any) -> SupersessionKind:
+    """Inverse of :func:`_supersession_kind_to_int`. Defaults to UNSPECIFIED."""
+
+    try:
+        i = int(value or 0)
+    except (TypeError, ValueError):
+        return SupersessionKind.UNSPECIFIED
+    return _INT_TO_SUPERSESSION_KIND.get(i, SupersessionKind.UNSPECIFIED)
 
 
 SCHEMA = """
@@ -135,7 +172,11 @@ CREATE TABLE IF NOT EXISTS task_plans (
     -- harmonograf#99 / goldfive#199: strict dedup key joining plan
     -- revisions to their originating annotation or drift. Non-empty on
     -- every revision (empty only on the initial plan).
-    trigger_event_id TEXT NOT NULL DEFAULT ''
+    trigger_event_id TEXT NOT NULL DEFAULT '',
+    -- goldfive#: the run that produced this plan. Mirrors
+    -- ``goldfive.v1.Plan.run_id`` on the wire. Empty on legacy rows
+    -- that pre-date the column.
+    run_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_task_plans_session ON task_plans(session_id);
 
@@ -189,6 +230,13 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- provenance id or human tail. Empty for PENDING / RUNNING /
     -- COMPLETED / BLOCKED rows.
     cancel_reason TEXT NOT NULL DEFAULT '',
+    -- goldfive#237 / goldfive#251: explicit supersession link. Non-empty
+    -- string on revision tasks that replace or correct an earlier task;
+    -- empty on initial plans and on tasks that are NOT replacements.
+    -- ``supersedes_kind`` carries the ``goldfive.v1.SupersessionKind``
+    -- enum int (0 UNSPECIFIED / 1 REPLACE / 2 CORRECT).
+    supersedes TEXT NOT NULL DEFAULT '',
+    supersedes_kind INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (plan_id, id),
     FOREIGN KEY (plan_id) REFERENCES task_plans(id) ON DELETE CASCADE
 );
@@ -308,6 +356,16 @@ class SqliteStore(Store):
             await self._db.execute(
                 "ALTER TABLE task_plans ADD COLUMN trigger_event_id TEXT NOT NULL DEFAULT ''"
             )
+        # goldfive#: ``Plan.run_id`` round-trip column. Pre-existing
+        # rows keep the default empty string; the value populates from
+        # the wire ``goldfive.v1.Plan.run_id`` on the next plan_submitted
+        # / plan_revised. Without this column, the storage→pb round-trip
+        # silently dropped the run_id and downstream consumers (frontend
+        # plan-history, intervention aggregator) lost the run pin.
+        if "run_id" not in tp_cols:
+            await self._db.execute(
+                "ALTER TABLE task_plans ADD COLUMN run_id TEXT NOT NULL DEFAULT ''"
+            )
         # harmonograf#110 / goldfive#205: cancel_reason on tasks table.
         # Additive, NOT NULL with empty-string default so existing rows
         # remain valid under the new schema. Pre-#205 sessions keep
@@ -318,6 +376,22 @@ class SqliteStore(Store):
         if "cancel_reason" not in task_cols:
             await self._db.execute(
                 "ALTER TABLE tasks ADD COLUMN cancel_reason TEXT NOT NULL DEFAULT ''"
+            )
+        # goldfive#237 / goldfive#251: ``Task.supersedes`` /
+        # ``supersedes_kind`` round-trip columns. Initial plans and
+        # legacy rows keep the empty default; revision tasks that
+        # replace / correct an earlier task carry the link. The
+        # frontend's chain-collapse renderer requires these to be
+        # preserved across the storage round-trip — without them,
+        # ``GetSessionPlanHistory`` returns plans with NULL supersedes
+        # and the chain rendering breaks.
+        if "supersedes" not in task_cols:
+            await self._db.execute(
+                "ALTER TABLE tasks ADD COLUMN supersedes TEXT NOT NULL DEFAULT ''"
+            )
+        if "supersedes_kind" not in task_cols:
+            await self._db.execute(
+                "ALTER TABLE tasks ADD COLUMN supersedes_kind INTEGER NOT NULL DEFAULT 0"
             )
         await self._db.commit()
 
@@ -982,8 +1056,8 @@ class SqliteStore(Store):
                                             planner_agent_id, created_at, summary, edges,
                                             revision_reason, revision_kind,
                                             revision_severity, revision_index,
-                                            trigger_event_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                            trigger_event_id, run_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         session_id=excluded.session_id,
                         invocation_span_id=excluded.invocation_span_id,
@@ -995,7 +1069,8 @@ class SqliteStore(Store):
                         revision_kind=excluded.revision_kind,
                         revision_severity=excluded.revision_severity,
                         revision_index=excluded.revision_index,
-                        trigger_event_id=excluded.trigger_event_id
+                        trigger_event_id=excluded.trigger_event_id,
+                        run_id=excluded.run_id
                     """,
                     (
                         plan.id,
@@ -1015,6 +1090,7 @@ class SqliteStore(Store):
                         plan.revision_severity or "",
                         int(plan.revision_index or 0),
                         plan.trigger_event_id or "",
+                        getattr(plan, "run_id", "") or "",
                     ),
                 )
                 # Replace tasks for this plan (simplest correct semantics for
@@ -1023,13 +1099,22 @@ class SqliteStore(Store):
                     "DELETE FROM tasks WHERE plan_id = ?", (plan.id,)
                 )
                 for t in plan.tasks:
+                    # goldfive#237 / goldfive#251: stash the supersedes
+                    # link alongside the rest of the task row. The
+                    # ``supersedes_kind`` field is the goldfive Python
+                    # enum (StrEnum). Persist as the matching int (0
+                    # UNSPECIFIED / 1 REPLACE / 2 CORRECT) — same wire
+                    # mapping the proto uses, no proto import needed.
+                    sup_kind = getattr(t, "supersedes_kind", None)
+                    sup_kind_int = _supersession_kind_to_int(sup_kind)
                     await self.db.execute(
                         """
                         INSERT INTO tasks (plan_id, id, title, description,
                                            assignee_agent_id, status,
                                            predicted_start_ms, predicted_duration_ms,
-                                           bound_span_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                           bound_span_id,
+                                           supersedes, supersedes_kind)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             plan.id,
@@ -1041,6 +1126,8 @@ class SqliteStore(Store):
                             t.predicted_start_ms,
                             t.predicted_duration_ms,
                             t.bound_span_id or None,
+                            getattr(t, "supersedes", "") or "",
+                            int(sup_kind_int or 0),
                         ),
                     )
                 await self.db.commit()
@@ -1066,6 +1153,7 @@ class SqliteStore(Store):
             "SELECT * FROM tasks WHERE plan_id = ? ORDER BY rowid", (plan_id,)
         ) as cur:
             for r in await cur.fetchall():
+                row_keys = r.keys()
                 tasks.append(
                     Task(
                         id=r["id"],
@@ -1077,8 +1165,16 @@ class SqliteStore(Store):
                         predicted_duration_ms=r["predicted_duration_ms"] or 0,
                         bound_span_id=r["bound_span_id"],
                         cancel_reason=(
-                            r["cancel_reason"] if "cancel_reason" in r.keys() else ""
+                            r["cancel_reason"] if "cancel_reason" in row_keys else ""
                         ) or "",
+                        supersedes=(
+                            r["supersedes"] if "supersedes" in row_keys else ""
+                        ) or "",
+                        supersedes_kind=_supersession_kind_from_int(
+                            r["supersedes_kind"]
+                            if "supersedes_kind" in row_keys
+                            else 0
+                        ),
                     )
                 )
         return TaskPlan(
@@ -1095,6 +1191,7 @@ class SqliteStore(Store):
             revision_severity=(row["revision_severity"] if "revision_severity" in row.keys() else "") or "",
             revision_index=int(row["revision_index"]) if "revision_index" in row.keys() and row["revision_index"] is not None else 0,
             trigger_event_id=(row["trigger_event_id"] if "trigger_event_id" in row.keys() else "") or "",
+            run_id=(row["run_id"] if "run_id" in row.keys() else "") or "",
         )
 
     async def get_task_plan(self, plan_id: str) -> Optional[TaskPlan]:

@@ -373,6 +373,63 @@ def goldfive_pb_task_to_storage(pb: Any) -> Task:
         # envelope). Default to empty; the ingest pipeline stamps it on
         # the matching sqlite row when the cancel event arrives.
         cancel_reason="",
+        # goldfive#237 / goldfive#251: explicit supersession link. Both
+        # fields carry through verbatim from the wire; the storage layer
+        # uses the same goldfive Python dataclass that defines them, so
+        # the enum value lands on the dataclass directly. ``int(...)``
+        # is a defensive coerce — proto enums report as ``int`` but the
+        # accessor type can be the EnumTypeWrapper.
+        supersedes=getattr(pb, "supersedes", "") or "",
+        supersedes_kind=_supersession_kind_pb_to_storage(
+            int(getattr(pb, "supersedes_kind", 0) or 0)
+        ),
+    )
+
+
+def _supersession_kind_pb_to_storage(value: int) -> Any:
+    """Map a ``goldfive.v1.SupersessionKind`` enum int to the goldfive
+    Python dataclass enum (``goldfive.types.SupersessionKind``).
+
+    The storage ``Task`` dataclass is goldfive's own dataclass, so the
+    field is typed as the Python enum, not the proto int. Unknown /
+    UNSPECIFIED values map to ``UNSPECIFIED``.
+    """
+
+    from goldfive.types import SupersessionKind
+
+    pb_unspec = getattr(
+        goldfive_types_pb2, "SUPERSESSION_KIND_UNSPECIFIED", 0
+    )
+    pb_replace = getattr(
+        goldfive_types_pb2, "SUPERSESSION_KIND_REPLACE", 1
+    )
+    pb_correct = getattr(
+        goldfive_types_pb2, "SUPERSESSION_KIND_CORRECT", 2
+    )
+    if value == pb_replace:
+        return SupersessionKind.REPLACE
+    if value == pb_correct:
+        return SupersessionKind.CORRECT
+    if value == pb_unspec:
+        return SupersessionKind.UNSPECIFIED
+    return SupersessionKind.UNSPECIFIED
+
+
+def _supersession_kind_storage_to_pb(value: Any) -> int:
+    """Inverse of :func:`_supersession_kind_pb_to_storage`."""
+
+    from goldfive.types import SupersessionKind
+
+    if value == SupersessionKind.REPLACE:
+        return getattr(
+            goldfive_types_pb2, "SUPERSESSION_KIND_REPLACE", 1
+        )
+    if value == SupersessionKind.CORRECT:
+        return getattr(
+            goldfive_types_pb2, "SUPERSESSION_KIND_CORRECT", 2
+        )
+    return getattr(
+        goldfive_types_pb2, "SUPERSESSION_KIND_UNSPECIFIED", 0
     )
 
 
@@ -421,6 +478,11 @@ def goldfive_pb_plan_to_storage(
         # goldfive steerer's _apply_revision). Non-empty for every
         # revision; empty on the initial plan submission.
         trigger_event_id=getattr(pb, "revision_trigger_event_id", "") or "",
+        # goldfive#: ``Plan.run_id`` round-trip. The wire carries the
+        # producing run; harmonograf preserves it in storage so the
+        # storage→pb inverse can reconstitute the original Plan
+        # without a side channel.
+        run_id=getattr(pb, "run_id", "") or "",
     )
 
 
@@ -494,6 +556,18 @@ def storage_task_to_goldfive_pb(task: Task) -> Any:
     )
     if task.bound_span_id:
         pb.bound_span_id = task.bound_span_id
+    # goldfive#237 / goldfive#251: round-trip the supersedes link.
+    # Skip the assignment when both fields default — proto3 won't
+    # serialize empty defaults anyway, but explicit guarding keeps the
+    # round-trip byte-for-byte stable for legacy plans.
+    supersedes = getattr(task, "supersedes", "") or ""
+    if supersedes:
+        pb.supersedes = supersedes
+    supersedes_kind = getattr(task, "supersedes_kind", None)
+    if supersedes_kind is not None:
+        kind_pb = _supersession_kind_storage_to_pb(supersedes_kind)
+        if kind_pb:
+            pb.supersedes_kind = kind_pb
     return pb
 
 
@@ -507,6 +581,12 @@ def storage_plan_to_goldfive_pb(plan: TaskPlan) -> Any:
 
     pb = goldfive_types_pb2.Plan(
         id=plan.id,
+        # goldfive#: ``Plan.run_id`` round-trip. The storage layer
+        # retains the producing run id; preserve it on the pb side
+        # so downstream consumers (snapshot replay, frontend
+        # GetSessionPlanHistory) get the same value the wire
+        # originally carried.
+        run_id=getattr(plan, "run_id", "") or "",
         summary=plan.summary,
         revision_reason=plan.revision_reason,
         revision_kind=_drift_kind_string_to_pb(plan.revision_kind),

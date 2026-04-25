@@ -203,6 +203,12 @@ class TaskPlan:
     # annotation_id, autonomous = DriftEvent.id). Empty on the initial
     # plan.
     trigger_event_id: str = ""
+    # goldfive#: the run that produced this plan. Mirrors
+    # ``goldfive.v1.Plan.run_id`` so the storage→pb round-trip preserves
+    # the run pin (otherwise the converter silently dropped the run_id
+    # and frontend plan-history could not be tied back to its run).
+    # Empty on legacy plans that pre-date the column.
+    run_id: str = ""
 
 
 # Sibling of TaskPlan — `task_plans` upserts on `id` alone, so every
