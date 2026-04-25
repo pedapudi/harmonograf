@@ -426,6 +426,26 @@ class Client:
         self._events.push(env)
         self._transport.notify()
 
+    def emit_user_message(self, msg: Any) -> None:
+        """Ship a ``UserMessageReceived`` record to the server.
+
+        ``msg`` is a ``harmonograf.v1.UserMessageReceived`` proto built
+        by :class:`HarmonografTelemetryPlugin.on_user_message_callback`
+        from an ADK ``types.Content`` user message. Same buffer +
+        transport flow as :meth:`emit_goldfive_event`; routed on the
+        ``TelemetryUp.user_message`` wire slot. Lazy-Hello reads the
+        proto's top-level ``session_id`` so a user message emitted
+        before any span on a fresh stream still carries the right
+        session id onto the Hello.
+        """
+        env = SpanEnvelope(
+            kind=EnvelopeKind.USER_MESSAGE,
+            span_id="",
+            payload=msg,
+        )
+        self._events.push(env)
+        self._transport.notify()
+
     def shutdown(self, flush_timeout: float = 5.0) -> None:
         if self._shutdown_called:
             return

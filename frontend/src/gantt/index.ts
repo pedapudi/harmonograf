@@ -1043,6 +1043,100 @@ export class RefineFailureRegistry {
   }
 }
 
+// A captured user-authored message observed via ADK's
+// ``on_user_message_callback`` (harmonograf user-message UX gap).
+// Lives alongside DriftRegistry and plays the same "append on
+// ingest, rebase on session start, render as a timeline marker"
+// role. The verbatim text is stored so Gantt + Trajectory + Graph
+// can surface the operator's words.
+//
+// Distinct from a DriftRecord(kind=user_steer): this record carries
+// the RAW user text, before any orchestration layer transforms it
+// into a drift signal. A given user turn may produce both a
+// UserMessageRecord (raw input) and a DriftRecord (goldfive's
+// interpretation); the two coexist on the timeline.
+export interface UserMessageRecord {
+  seq: number;            // monotonic per session, assigned on arrival
+  runId: string;
+  content: string;        // verbatim user text (multi-line allowed)
+  author: string;         // free-form author label, defaults to "user"
+  // True when the message arrived during an in-flight invocation
+  // (the plugin set ``mid_turn`` on the wire). Renderer uses this to
+  // pick a distinct "interjection" glyph variant.
+  midTurn: boolean;
+  invocationId: string;   // ADK invocation id when mid_turn, else ''
+  recordedAtMs: number;
+  recordedAtAbsoluteMs: number;
+}
+
+// Registry of per-session user-message records. Same append-on-ingest
+// + rebase-on-session-start pattern as InvocationCancelRegistry. Dedup
+// is keyed on (sequence, runId, content[:128]) — the wire's sequence
+// is monotonic per plugin instance but resets on plugin restart, and
+// reconnect replay can re-deliver the same row through both the
+// in-memory ring burst and the live tail.
+export class UserMessageRegistry {
+  private messages: UserMessageRecord[] = [];
+  private listeners = new Set<() => void>();
+  private nextSeq = 0;
+  private seen = new Set<string>();
+
+  list(): readonly UserMessageRecord[] {
+    return this.messages;
+  }
+
+  append(
+    m: Omit<UserMessageRecord, 'seq' | 'recordedAtAbsoluteMs'> &
+      Partial<Pick<UserMessageRecord, 'recordedAtAbsoluteMs'>>,
+  ): void {
+    // Strong key when the wire sequence is set; otherwise fall back
+    // to a content+timestamp tuple so a plugin-restart sequence reset
+    // doesn't collapse two different turns onto the same key.
+    const head = (m.content || '').slice(0, 128);
+    const key = `seq:${m.runId}|${head}|${m.recordedAtMs}`;
+    if (this.seen.has(key)) return;
+    this.seen.add(key);
+    const recordedAtAbsoluteMs = m.recordedAtAbsoluteMs ?? m.recordedAtMs;
+    this.messages.push({
+      ...m,
+      recordedAtAbsoluteMs,
+      seq: this.nextSeq++,
+    });
+    this.emit();
+  }
+
+  rebase(sessionStartMs: number): void {
+    if (this.messages.length === 0) return;
+    let changed = false;
+    for (const m of this.messages) {
+      if (!m.recordedAtAbsoluteMs) continue;
+      const next = m.recordedAtAbsoluteMs - sessionStartMs;
+      if (m.recordedAtMs !== next) {
+        m.recordedAtMs = next;
+        changed = true;
+      }
+    }
+    if (changed) this.emit();
+  }
+
+  clear(): void {
+    if (this.messages.length === 0) return;
+    this.messages = [];
+    this.nextSeq = 0;
+    this.seen.clear();
+    this.emit();
+  }
+
+  subscribe(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  private emit(): void {
+    for (const fn of this.listeners) fn();
+  }
+}
+
 // Registry of per-session invocation-cancel records. Lives alongside
 // DriftRegistry and plays the same "append on ingest, rebase on session
 // start, render as a timeline marker" role.
@@ -1237,6 +1331,11 @@ export class SessionStore {
   // the high-volume stream down to user-meaningful rows (terminal
   // statuses + meaningful source) before surfacing as interventions.
   readonly taskTransitions = new TaskTransitionRegistry();
+  // harmonograf user-message UX gap: ADK ``on_user_message_callback``
+  // surfaces operator turns as UserMessageReceived envelopes; the
+  // registry is the single source of truth for the Gantt user lane,
+  // the Trajectory intervention list, and the Graph origin lifeline.
+  readonly userMessages = new UserMessageRegistry();
   readonly delegations = new DelegationRegistry();
   readonly contextSeries = new ContextSeriesRegistry();
   // Accumulator for every revision of every plan observed in this
@@ -1388,6 +1487,7 @@ export class SessionStore {
     this.refineAttempts.rebase(sessionStartMs);
     this.refineFailures.rebase(sessionStartMs);
     this.taskTransitions.rebase(sessionStartMs);
+    this.userMessages.rebase(sessionStartMs);
     this.delegations.rebase(sessionStartMs);
   }
 
@@ -1452,6 +1552,8 @@ export class SessionStore {
     this.invocationCancels.clear();
     this.refineAttempts.clear();
     this.refineFailures.clear();
+    this.taskTransitions.clear();
+    this.userMessages.clear();
     this.delegations.clear();
     this.contextSeries.clear();
     this.planHistory.clear();

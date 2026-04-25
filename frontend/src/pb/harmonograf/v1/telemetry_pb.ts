@@ -30,7 +30,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file harmonograf/v1/telemetry.proto.
  */
 export const file_harmonograf_v1_telemetry: GenFile = /*@__PURE__*/
-  fileDesc("Ch5oYXJtb25vZ3JhZi92MS90ZWxlbWV0cnkucHJvdG8SDmhhcm1vbm9ncmFmLnYxIssCCgVIZWxsbxIQCghhZ2VudF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEgwKBG5hbWUYAyABKAkSLAoJZnJhbWV3b3JrGAQgASgOMhkuaGFybW9ub2dyYWYudjEuRnJhbWV3b3JrEhkKEWZyYW1ld29ya192ZXJzaW9uGAUgASgJEjAKDGNhcGFiaWxpdGllcxgGIAMoDjIaLmhhcm1vbm9ncmFmLnYxLkNhcGFiaWxpdHkSNQoIbWV0YWRhdGEYByADKAsyIy5oYXJtb25vZ3JhZi52MS5IZWxsby5NZXRhZGF0YUVudHJ5EhQKDHJlc3VtZV90b2tlbhgIIAEoCRIVCg1zZXNzaW9uX3RpdGxlGAkgASgJGi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASIvCglTcGFuU3RhcnQSIgoEc3BhbhgBIAEoCzIULmhhcm1vbm9ncmFmLnYxLlNwYW4ijgIKClNwYW5VcGRhdGUSDwoHc3Bhbl9pZBgBIAEoCRI+CgphdHRyaWJ1dGVzGAIgAygLMiouaGFybW9ub2dyYWYudjEuU3BhblVwZGF0ZS5BdHRyaWJ1dGVzRW50cnkSKgoGc3RhdHVzGAMgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIwCgxwYXlsb2FkX3JlZnMYBCADKAsyGi5oYXJtb25vZ3JhZi52MS5QYXlsb2FkUmVmGlEKD0F0dHJpYnV0ZXNFbnRyeRILCgNrZXkYASABKAkSLQoFdmFsdWUYAiABKAsyHi5oYXJtb25vZ3JhZi52MS5BdHRyaWJ1dGVWYWx1ZToCOAEi4AIKB1NwYW5FbmQSDwoHc3Bhbl9pZBgBIAEoCRIsCghlbmRfdGltZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKgoGc3RhdHVzGAMgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIoCgVlcnJvchgEIAEoCzIZLmhhcm1vbm9ncmFmLnYxLkVycm9ySW5mbxI7CgphdHRyaWJ1dGVzGAUgAygLMicuaGFybW9ub2dyYWYudjEuU3BhbkVuZC5BdHRyaWJ1dGVzRW50cnkSMAoMcGF5bG9hZF9yZWZzGAYgAygLMhouaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlZhpRCg9BdHRyaWJ1dGVzRW50cnkSCwoDa2V5GAEgASgJEi0KBXZhbHVlGAIgASgLMh4uaGFybW9ub2dyYWYudjEuQXR0cmlidXRlVmFsdWU6AjgBIm8KDVBheWxvYWRVcGxvYWQSDgoGZGlnZXN0GAEgASgJEhIKCnRvdGFsX3NpemUYAiABKAMSDAoEbWltZRgDIAEoCRINCgVjaHVuaxgEIAEoDBIMCgRsYXN0GAUgASgIEg8KB2V2aWN0ZWQYBiABKAgi1QIKCUhlYXJ0YmVhdBIXCg9idWZmZXJlZF9ldmVudHMYASABKAMSFgoOZHJvcHBlZF9ldmVudHMYAiABKAMSHgoWZHJvcHBlZF9zcGFuc19jcml0aWNhbBgDIAEoAxIeChZidWZmZXJlZF9wYXlsb2FkX2J5dGVzGAQgASgDEhgKEHBheWxvYWRzX2V2aWN0ZWQYBSABKAMSFAoMY3B1X3NlbGZfcGN0GAYgASgBEi8KC2NsaWVudF90aW1lGAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIYChBwcm9ncmVzc19jb3VudGVyGAggASgDEhgKEGN1cnJlbnRfYWN0aXZpdHkYCSABKAkSHQoVY29udGV4dF93aW5kb3dfdG9rZW5zGAogASgDEiMKG2NvbnRleHRfd2luZG93X2xpbWl0X3Rva2VucxgLIAEoAyIZCgdHb29kYnllEg4KBnJlYXNvbhgBIAEoCSK/BAoLVGVsZW1ldHJ5VXASJgoFaGVsbG8YASABKAsyFS5oYXJtb25vZ3JhZi52MS5IZWxsb0gAEi8KCnNwYW5fc3RhcnQYAiABKAsyGS5oYXJtb25vZ3JhZi52MS5TcGFuU3RhcnRIABIxCgtzcGFuX3VwZGF0ZRgDIAEoCzIaLmhhcm1vbm9ncmFmLnYxLlNwYW5VcGRhdGVIABIrCghzcGFuX2VuZBgEIAEoCzIXLmhhcm1vbm9ncmFmLnYxLlNwYW5FbmRIABIwCgdwYXlsb2FkGAUgASgLMh0uaGFybW9ub2dyYWYudjEuUGF5bG9hZFVwbG9hZEgAEi4KCWhlYXJ0YmVhdBgGIAEoCzIZLmhhcm1vbm9ncmFmLnYxLkhlYXJ0YmVhdEgAEi4KC2NvbnRyb2xfYWNrGAcgASgLMhcuZ29sZGZpdmUudjEuQ29udHJvbEFja0gAEioKB2dvb2RieWUYCCABKAsyFy5oYXJtb25vZ3JhZi52MS5Hb29kYnllSAASLAoOZ29sZGZpdmVfZXZlbnQYCyABKAsyEi5nb2xkZml2ZS52MS5FdmVudEgAEjsKEHJlZmluZV9hdHRlbXB0ZWQYDSABKAsyHy5oYXJtb25vZ3JhZi52MS5SZWZpbmVBdHRlbXB0ZWRIABI1Cg1yZWZpbmVfZmFpbGVkGA4gASgLMhwuaGFybW9ub2dyYWYudjEuUmVmaW5lRmFpbGVkSABCBQoDbXNnSgQICRAKSgQIChALSgQIDBANIoACCg9SZWZpbmVBdHRlbXB0ZWQSDgoGcnVuX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgEEhIKCnNlc3Npb25faWQYAyABKAkSLgoKZW1pdHRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKYXR0ZW1wdF9pZBgFIAEoCRIQCghkcmlmdF9pZBgGIAEoCRIUCgx0cmlnZ2VyX2tpbmQYByABKAkSGAoQdHJpZ2dlcl9zZXZlcml0eRgIIAEoCRIXCg9jdXJyZW50X3Rhc2tfaWQYCSABKAkSGAoQY3VycmVudF9hZ2VudF9pZBgKIAEoCSKzAgoMUmVmaW5lRmFpbGVkEg4KBnJ1bl9pZBgBIAEoCRIQCghzZXF1ZW5jZRgCIAEoBBISCgpzZXNzaW9uX2lkGAMgASgJEi4KCmVtaXR0ZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmF0dGVtcHRfaWQYBSABKAkSEAoIZHJpZnRfaWQYBiABKAkSFAoMdHJpZ2dlcl9raW5kGAcgASgJEhgKEHRyaWdnZXJfc2V2ZXJpdHkYCCABKAkSFAoMZmFpbHVyZV9raW5kGAkgASgJEg4KBnJlYXNvbhgKIAEoCRIOCgZkZXRhaWwYCyABKAkSFwoPY3VycmVudF90YXNrX2lkGAwgASgJEhgKEGN1cnJlbnRfYWdlbnRfaWQYDSABKAkigAIKB1dlbGNvbWUSEAoIYWNjZXB0ZWQYASABKAgSGwoTYXNzaWduZWRfc2Vzc2lvbl9pZBgCIAEoCRIaChJhc3NpZ25lZF9zdHJlYW1faWQYAyABKAkSLwoLc2VydmVyX3RpbWUYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjEKBWZsYWdzGAUgAygLMiIuaGFybW9ub2dyYWYudjEuV2VsY29tZS5GbGFnc0VudHJ5EhgKEHJlamVjdGlvbl9yZWFzb24YBiABKAkaLAoKRmxhZ3NFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIiAKDlBheWxvYWRSZXF1ZXN0Eg4KBmRpZ2VzdBgBIAEoCSKHAQoLRmxvd0NvbnRyb2wSMgoGYWN0aW9uGAEgASgOMiIuaGFybW9ub2dyYWYudjEuRmxvd0NvbnRyb2wuQWN0aW9uIkQKBkFjdGlvbhIWChJBQ1RJT05fVU5TUEVDSUZJRUQQABIPCgtBQ1RJT05fU0xPVxABEhEKDUFDVElPTl9SRVNVTUUQAiIfCg1TZXJ2ZXJHb29kYnllEg4KBnJlYXNvbhgBIAEoCSLrAQoNVGVsZW1ldHJ5RG93bhIqCgd3ZWxjb21lGAEgASgLMhcuaGFybW9ub2dyYWYudjEuV2VsY29tZUgAEjkKD3BheWxvYWRfcmVxdWVzdBgCIAEoCzIeLmhhcm1vbm9ncmFmLnYxLlBheWxvYWRSZXF1ZXN0SAASMwoMZmxvd19jb250cm9sGAMgASgLMhsuaGFybW9ub2dyYWYudjEuRmxvd0NvbnRyb2xIABI3Cg5zZXJ2ZXJfZ29vZGJ5ZRgEIAEoCzIdLmhhcm1vbm9ncmFmLnYxLlNlcnZlckdvb2RieWVIAEIFCgNtc2dCQlpAZ2l0aHViLmNvbS9wZWRhcHVkaS9oYXJtb25vZ3JhZi9nZW4vaGFybW9ub2dyYWYvdjE7aGFybW9ub2dyYWZ2MWIGcHJvdG8z", [file_google_protobuf_timestamp, file_harmonograf_v1_types, file_goldfive_v1_control, file_goldfive_v1_events]);
+  fileDesc("Ch5oYXJtb25vZ3JhZi92MS90ZWxlbWV0cnkucHJvdG8SDmhhcm1vbm9ncmFmLnYxIssCCgVIZWxsbxIQCghhZ2VudF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEgwKBG5hbWUYAyABKAkSLAoJZnJhbWV3b3JrGAQgASgOMhkuaGFybW9ub2dyYWYudjEuRnJhbWV3b3JrEhkKEWZyYW1ld29ya192ZXJzaW9uGAUgASgJEjAKDGNhcGFiaWxpdGllcxgGIAMoDjIaLmhhcm1vbm9ncmFmLnYxLkNhcGFiaWxpdHkSNQoIbWV0YWRhdGEYByADKAsyIy5oYXJtb25vZ3JhZi52MS5IZWxsby5NZXRhZGF0YUVudHJ5EhQKDHJlc3VtZV90b2tlbhgIIAEoCRIVCg1zZXNzaW9uX3RpdGxlGAkgASgJGi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASIvCglTcGFuU3RhcnQSIgoEc3BhbhgBIAEoCzIULmhhcm1vbm9ncmFmLnYxLlNwYW4ijgIKClNwYW5VcGRhdGUSDwoHc3Bhbl9pZBgBIAEoCRI+CgphdHRyaWJ1dGVzGAIgAygLMiouaGFybW9ub2dyYWYudjEuU3BhblVwZGF0ZS5BdHRyaWJ1dGVzRW50cnkSKgoGc3RhdHVzGAMgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIwCgxwYXlsb2FkX3JlZnMYBCADKAsyGi5oYXJtb25vZ3JhZi52MS5QYXlsb2FkUmVmGlEKD0F0dHJpYnV0ZXNFbnRyeRILCgNrZXkYASABKAkSLQoFdmFsdWUYAiABKAsyHi5oYXJtb25vZ3JhZi52MS5BdHRyaWJ1dGVWYWx1ZToCOAEi4AIKB1NwYW5FbmQSDwoHc3Bhbl9pZBgBIAEoCRIsCghlbmRfdGltZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKgoGc3RhdHVzGAMgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIoCgVlcnJvchgEIAEoCzIZLmhhcm1vbm9ncmFmLnYxLkVycm9ySW5mbxI7CgphdHRyaWJ1dGVzGAUgAygLMicuaGFybW9ub2dyYWYudjEuU3BhbkVuZC5BdHRyaWJ1dGVzRW50cnkSMAoMcGF5bG9hZF9yZWZzGAYgAygLMhouaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlZhpRCg9BdHRyaWJ1dGVzRW50cnkSCwoDa2V5GAEgASgJEi0KBXZhbHVlGAIgASgLMh4uaGFybW9ub2dyYWYudjEuQXR0cmlidXRlVmFsdWU6AjgBIm8KDVBheWxvYWRVcGxvYWQSDgoGZGlnZXN0GAEgASgJEhIKCnRvdGFsX3NpemUYAiABKAMSDAoEbWltZRgDIAEoCRINCgVjaHVuaxgEIAEoDBIMCgRsYXN0GAUgASgIEg8KB2V2aWN0ZWQYBiABKAgi1QIKCUhlYXJ0YmVhdBIXCg9idWZmZXJlZF9ldmVudHMYASABKAMSFgoOZHJvcHBlZF9ldmVudHMYAiABKAMSHgoWZHJvcHBlZF9zcGFuc19jcml0aWNhbBgDIAEoAxIeChZidWZmZXJlZF9wYXlsb2FkX2J5dGVzGAQgASgDEhgKEHBheWxvYWRzX2V2aWN0ZWQYBSABKAMSFAoMY3B1X3NlbGZfcGN0GAYgASgBEi8KC2NsaWVudF90aW1lGAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIYChBwcm9ncmVzc19jb3VudGVyGAggASgDEhgKEGN1cnJlbnRfYWN0aXZpdHkYCSABKAkSHQoVY29udGV4dF93aW5kb3dfdG9rZW5zGAogASgDEiMKG2NvbnRleHRfd2luZG93X2xpbWl0X3Rva2VucxgLIAEoAyIZCgdHb29kYnllEg4KBnJlYXNvbhgBIAEoCSL8BAoLVGVsZW1ldHJ5VXASJgoFaGVsbG8YASABKAsyFS5oYXJtb25vZ3JhZi52MS5IZWxsb0gAEi8KCnNwYW5fc3RhcnQYAiABKAsyGS5oYXJtb25vZ3JhZi52MS5TcGFuU3RhcnRIABIxCgtzcGFuX3VwZGF0ZRgDIAEoCzIaLmhhcm1vbm9ncmFmLnYxLlNwYW5VcGRhdGVIABIrCghzcGFuX2VuZBgEIAEoCzIXLmhhcm1vbm9ncmFmLnYxLlNwYW5FbmRIABIwCgdwYXlsb2FkGAUgASgLMh0uaGFybW9ub2dyYWYudjEuUGF5bG9hZFVwbG9hZEgAEi4KCWhlYXJ0YmVhdBgGIAEoCzIZLmhhcm1vbm9ncmFmLnYxLkhlYXJ0YmVhdEgAEi4KC2NvbnRyb2xfYWNrGAcgASgLMhcuZ29sZGZpdmUudjEuQ29udHJvbEFja0gAEioKB2dvb2RieWUYCCABKAsyFy5oYXJtb25vZ3JhZi52MS5Hb29kYnllSAASLAoOZ29sZGZpdmVfZXZlbnQYCyABKAsyEi5nb2xkZml2ZS52MS5FdmVudEgAEjsKEHJlZmluZV9hdHRlbXB0ZWQYDSABKAsyHy5oYXJtb25vZ3JhZi52MS5SZWZpbmVBdHRlbXB0ZWRIABI1Cg1yZWZpbmVfZmFpbGVkGA4gASgLMhwuaGFybW9ub2dyYWYudjEuUmVmaW5lRmFpbGVkSAASOwoMdXNlcl9tZXNzYWdlGA8gASgLMiMuaGFybW9ub2dyYWYudjEuVXNlck1lc3NhZ2VSZWNlaXZlZEgAQgUKA21zZ0oECAkQCkoECAoQC0oECAwQDSKAAgoPUmVmaW5lQXR0ZW1wdGVkEg4KBnJ1bl9pZBgBIAEoCRIQCghzZXF1ZW5jZRgCIAEoBBISCgpzZXNzaW9uX2lkGAMgASgJEi4KCmVtaXR0ZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmF0dGVtcHRfaWQYBSABKAkSEAoIZHJpZnRfaWQYBiABKAkSFAoMdHJpZ2dlcl9raW5kGAcgASgJEhgKEHRyaWdnZXJfc2V2ZXJpdHkYCCABKAkSFwoPY3VycmVudF90YXNrX2lkGAkgASgJEhgKEGN1cnJlbnRfYWdlbnRfaWQYCiABKAkiswIKDFJlZmluZUZhaWxlZBIOCgZydW5faWQYASABKAkSEAoIc2VxdWVuY2UYAiABKAQSEgoKc2Vzc2lvbl9pZBgDIAEoCRIuCgplbWl0dGVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgphdHRlbXB0X2lkGAUgASgJEhAKCGRyaWZ0X2lkGAYgASgJEhQKDHRyaWdnZXJfa2luZBgHIAEoCRIYChB0cmlnZ2VyX3NldmVyaXR5GAggASgJEhQKDGZhaWx1cmVfa2luZBgJIAEoCRIOCgZyZWFzb24YCiABKAkSDgoGZGV0YWlsGAsgASgJEhcKD2N1cnJlbnRfdGFza19pZBgMIAEoCRIYChBjdXJyZW50X2FnZW50X2lkGA0gASgJIsUBChNVc2VyTWVzc2FnZVJlY2VpdmVkEg4KBnJ1bl9pZBgBIAEoCRIQCghzZXF1ZW5jZRgCIAEoBBISCgpzZXNzaW9uX2lkGAMgASgJEi4KCmVtaXR0ZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg8KB2NvbnRlbnQYBSABKAkSDgoGYXV0aG9yGAYgASgJEhAKCG1pZF90dXJuGAcgASgIEhUKDWludm9jYXRpb25faWQYCCABKAkigAIKB1dlbGNvbWUSEAoIYWNjZXB0ZWQYASABKAgSGwoTYXNzaWduZWRfc2Vzc2lvbl9pZBgCIAEoCRIaChJhc3NpZ25lZF9zdHJlYW1faWQYAyABKAkSLwoLc2VydmVyX3RpbWUYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjEKBWZsYWdzGAUgAygLMiIuaGFybW9ub2dyYWYudjEuV2VsY29tZS5GbGFnc0VudHJ5EhgKEHJlamVjdGlvbl9yZWFzb24YBiABKAkaLAoKRmxhZ3NFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIiAKDlBheWxvYWRSZXF1ZXN0Eg4KBmRpZ2VzdBgBIAEoCSKHAQoLRmxvd0NvbnRyb2wSMgoGYWN0aW9uGAEgASgOMiIuaGFybW9ub2dyYWYudjEuRmxvd0NvbnRyb2wuQWN0aW9uIkQKBkFjdGlvbhIWChJBQ1RJT05fVU5TUEVDSUZJRUQQABIPCgtBQ1RJT05fU0xPVxABEhEKDUFDVElPTl9SRVNVTUUQAiIfCg1TZXJ2ZXJHb29kYnllEg4KBnJlYXNvbhgBIAEoCSLrAQoNVGVsZW1ldHJ5RG93bhIqCgd3ZWxjb21lGAEgASgLMhcuaGFybW9ub2dyYWYudjEuV2VsY29tZUgAEjkKD3BheWxvYWRfcmVxdWVzdBgCIAEoCzIeLmhhcm1vbm9ncmFmLnYxLlBheWxvYWRSZXF1ZXN0SAASMwoMZmxvd19jb250cm9sGAMgASgLMhsuaGFybW9ub2dyYWYudjEuRmxvd0NvbnRyb2xIABI3Cg5zZXJ2ZXJfZ29vZGJ5ZRgEIAEoCzIdLmhhcm1vbm9ncmFmLnYxLlNlcnZlckdvb2RieWVIAEIFCgNtc2dCQlpAZ2l0aHViLmNvbS9wZWRhcHVkaS9oYXJtb25vZ3JhZi9nZW4vaGFybW9ub2dyYWYvdjE7aGFybW9ub2dyYWZ2MWIGcHJvdG8z", [file_google_protobuf_timestamp, file_harmonograf_v1_types, file_goldfive_v1_control, file_goldfive_v1_events]);
 
 /**
  * First message on every StreamTelemetry. The server replies with Welcome.
@@ -470,6 +470,20 @@ export type TelemetryUp = Message<"harmonograf.v1.TelemetryUp"> & {
      */
     value: RefineFailed;
     case: "refineFailed";
+  } | {
+    /**
+     * User-authored message observed via ADK ``on_user_message_callback``
+     * (harmonograf user-message UX gap). The plugin emits one of these
+     * per user turn so harmonograf surfaces what the operator typed —
+     * previously the body was invisible across every view (Sessions,
+     * Gantt, Trajectory, Graph). Same forward-compat dict-or-proto
+     * pattern as ``invocation_cancelled`` pre-#190; today we go straight
+     * to a typed proto since the plugin synthesizes the message.
+     *
+     * @generated from field: harmonograf.v1.UserMessageReceived user_message = 15;
+     */
+    value: UserMessageReceived;
+    case: "userMessage";
   } | { case: undefined; value?: undefined };
 };
 
@@ -686,6 +700,89 @@ export const RefineFailedSchema: GenMessage<RefineFailed> = /*@__PURE__*/
   messageDesc(file_harmonograf_v1_telemetry, 9);
 
 /**
+ * A user-authored message observed via ADK's ``on_user_message_callback``.
+ * Carries the verbatim text + author hint so harmonograf can surface
+ * operator steers ("forget X. tell me about Y.") in every view (Gantt
+ * user lane, Trajectory intervention list, Graph origin lifeline).
+ *
+ * Distinct from ``annotation`` (which represents a side-channel
+ * frontend-authored note) and from ``DriftDetected(kind=user_steer)``
+ * (which represents goldfive's *interpretation* of the user signal).
+ * This event carries the raw user text, before any orchestration layer
+ * transforms it.
+ *
+ * ``mid_turn`` flags messages that arrived during an in-flight ADK
+ * invocation (as opposed to a fresh top-level turn). The frontend uses
+ * it to render a distinct "interjection" glyph on the user lane.
+ *
+ * @generated from message harmonograf.v1.UserMessageReceived
+ */
+export type UserMessageReceived = Message<"harmonograf.v1.UserMessageReceived"> & {
+  /**
+   * Envelope metadata — same shape as ``RefineAttempted`` / ``RefineFailed``.
+   *
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+
+  /**
+   * @generated from field: uint64 sequence = 2;
+   */
+  sequence: bigint;
+
+  /**
+   * @generated from field: string session_id = 3;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp emitted_at = 4;
+   */
+  emittedAt?: Timestamp;
+
+  /**
+   * Verbatim user message text. May be multi-line; the server stores it
+   * as-is without truncation. Tooltip / list rendering on the frontend
+   * is responsible for clipping if the message is huge.
+   *
+   * @generated from field: string content = 5;
+   */
+  content: string;
+
+  /**
+   * Author label, free-form. Defaults to "user" when ADK doesn't supply
+   * one; the plugin reads ``invocation_context.user_id`` when available.
+   *
+   * @generated from field: string author = 6;
+   */
+  author: string;
+
+  /**
+   * True when the message arrived during an in-flight invocation. The
+   * plugin sets this when ``invocation_id`` is non-empty at the moment
+   * ``on_user_message_callback`` fires.
+   *
+   * @generated from field: bool mid_turn = 7;
+   */
+  midTurn: boolean;
+
+  /**
+   * Bare ADK invocation id at the moment the message arrived, when
+   * ``mid_turn`` is true. Empty for fresh top-level turns.
+   *
+   * @generated from field: string invocation_id = 8;
+   */
+  invocationId: string;
+};
+
+/**
+ * Describes the message harmonograf.v1.UserMessageReceived.
+ * Use `create(UserMessageReceivedSchema)` to create a new message.
+ */
+export const UserMessageReceivedSchema: GenMessage<UserMessageReceived> = /*@__PURE__*/
+  messageDesc(file_harmonograf_v1_telemetry, 10);
+
+/**
  * Sent in response to Hello. Carries the assigned session_id (which may
  * equal what the client requested, or a freshly generated id) and a
  * stream_id that uniquely identifies this telemetry stream within the
@@ -736,7 +833,7 @@ export type Welcome = Message<"harmonograf.v1.Welcome"> & {
  * Use `create(WelcomeSchema)` to create a new message.
  */
 export const WelcomeSchema: GenMessage<Welcome> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_telemetry, 10);
+  messageDesc(file_harmonograf_v1_telemetry, 11);
 
 /**
  * Server asks the client to re-upload a payload by digest, typically
@@ -756,7 +853,7 @@ export type PayloadRequest = Message<"harmonograf.v1.PayloadRequest"> & {
  * Use `create(PayloadRequestSchema)` to create a new message.
  */
 export const PayloadRequestSchema: GenMessage<PayloadRequest> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_telemetry, 11);
+  messageDesc(file_harmonograf_v1_telemetry, 12);
 
 /**
  * Soft hint that the client should slow down or may resume. v0 ingest does
@@ -777,7 +874,7 @@ export type FlowControl = Message<"harmonograf.v1.FlowControl"> & {
  * Use `create(FlowControlSchema)` to create a new message.
  */
 export const FlowControlSchema: GenMessage<FlowControl> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_telemetry, 12);
+  messageDesc(file_harmonograf_v1_telemetry, 13);
 
 /**
  * @generated from enum harmonograf.v1.FlowControl.Action
@@ -803,7 +900,7 @@ export enum FlowControl_Action {
  * Describes the enum harmonograf.v1.FlowControl.Action.
  */
 export const FlowControl_ActionSchema: GenEnum<FlowControl_Action> = /*@__PURE__*/
-  enumDesc(file_harmonograf_v1_telemetry, 12, 0);
+  enumDesc(file_harmonograf_v1_telemetry, 13, 0);
 
 /**
  * @generated from message harmonograf.v1.ServerGoodbye
@@ -820,7 +917,7 @@ export type ServerGoodbye = Message<"harmonograf.v1.ServerGoodbye"> & {
  * Use `create(ServerGoodbyeSchema)` to create a new message.
  */
 export const ServerGoodbyeSchema: GenMessage<ServerGoodbye> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_telemetry, 13);
+  messageDesc(file_harmonograf_v1_telemetry, 14);
 
 /**
  * TelemetryDown is the downstream oneof.
@@ -863,5 +960,5 @@ export type TelemetryDown = Message<"harmonograf.v1.TelemetryDown"> & {
  * Use `create(TelemetryDownSchema)` to create a new message.
  */
 export const TelemetryDownSchema: GenMessage<TelemetryDown> = /*@__PURE__*/
-  messageDesc(file_harmonograf_v1_telemetry, 14);
+  messageDesc(file_harmonograf_v1_telemetry, 15);
 

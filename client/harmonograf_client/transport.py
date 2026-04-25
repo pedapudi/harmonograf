@@ -786,6 +786,8 @@ class Transport:
             return telemetry_pb2.TelemetryUp(refine_attempted=payload)
         if env.kind is EnvelopeKind.REFINE_FAILED:
             return telemetry_pb2.TelemetryUp(refine_failed=payload)
+        if env.kind is EnvelopeKind.USER_MESSAGE:
+            return telemetry_pb2.TelemetryUp(user_message=payload)
         return None
 
     def _build_hello(
@@ -1143,8 +1145,9 @@ def _session_id_of_envelope(env: SpanEnvelope) -> str:
     if (
         env.kind is EnvelopeKind.REFINE_ATTEMPTED
         or env.kind is EnvelopeKind.REFINE_FAILED
+        or env.kind is EnvelopeKind.USER_MESSAGE
     ):
-        # Refine dict-sourced envelopes carry session_id at the top
+        # Refine + user-message envelopes carry session_id at the top
         # level of the proto (mirrors the pre-#190 InvocationCancelled
         # path goldfive ships pre-proto-promotion events on).
         return getattr(payload, "session_id", "") or ""

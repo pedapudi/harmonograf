@@ -198,6 +198,41 @@ REASONING_INLINE_MAX_BYTES: int = 2048
 REASONING_TRAIL_INLINE_MAX_BYTES: int = 16 * 1024
 
 
+def _extract_user_message_text(user_message: Any) -> str:
+    """Extract verbatim text from an ADK ``types.Content`` user message.
+
+    ``Content.parts`` is a sequence of ``Part`` objects; for plain text
+    turns each Part has a ``text`` field. Multi-part user messages
+    (e.g. inline images) are concatenated text-only with newlines so
+    the harmonograf marker carries the operator's words even when the
+    message also has non-text parts. Returns an empty string when the
+    message has no extractable text — the plugin then declines to
+    emit (no point surfacing an empty marker).
+
+    Defensive against malformed shapes: ADK's types.Content may also
+    arrive as a plain dict via some test shims, so we fall back to
+    ``str(user_message)`` only if both attribute paths fail. Never
+    raises — telemetry must not surface internal bookkeeping errors
+    into the orchestration control path.
+    """
+    try:
+        parts = getattr(user_message, "parts", None)
+        if parts is None and isinstance(user_message, dict):
+            parts = user_message.get("parts")
+        if parts is None:
+            return ""
+        out: list[str] = []
+        for p in parts:
+            text = getattr(p, "text", None)
+            if text is None and isinstance(p, dict):
+                text = p.get("text")
+            if text:
+                out.append(str(text))
+        return "\n".join(out)
+    except Exception:  # noqa: BLE001 — defensive: telemetry must not raise
+        return ""
+
+
 def _format_reasoning_trail(chunks: list[str]) -> str:
     """Concatenate per-LLM-call reasoning fragments with clear separators.
 
@@ -531,6 +566,15 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         # ``on_run_end`` so long-lived plugin instances don't retain
         # references to dead ADK sessions.
         self._live_sessions: dict[str, Any] = {}
+
+        # Monotonic sequence counter for user-message envelopes
+        # (harmonograf user-message UX gap). Bumped on every
+        # ``on_user_message_callback`` so the server can deduplicate
+        # replays during initial-burst recovery (mirrors the
+        # ``RefineAttempted.sequence`` contract). Process-local;
+        # collisions across plugin instances are tolerated because the
+        # server's ring also keys on ``(content, recorded_at)``.
+        self._user_message_seq: int = 0
 
     @property
     def client(self) -> Client:
@@ -1292,6 +1336,79 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         except Exception:  # noqa: BLE001 — defensive
             return False
         return False
+
+    async def on_user_message_callback(
+        self, *, invocation_context: Any, user_message: Any
+    ) -> None:
+        """Forward a user-authored message to harmonograf.
+
+        ADK fires this callback once per user turn just before
+        ``before_run_callback``. Previously harmonograf had no record
+        of what the operator typed — Sessions, Gantt, Trajectory, and
+        Graph all rendered as if the agent had hallucinated its own
+        prompt. This callback closes the loop: extract the verbatim
+        text, build a ``UserMessageReceived`` proto, and ship it on
+        the ``TelemetryUp.user_message`` wire slot.
+
+        Returns ``None`` (does NOT replace the user message). The
+        plugin is observability-only: it never modifies orchestration
+        inputs.
+
+        Idempotent: the duplicate-install guard short-circuits on
+        secondary plugin instances. Empty / non-text messages are
+        silently dropped — no point surfacing an empty marker.
+        """
+        if self._maybe_disable_as_duplicate(invocation_context):
+            return
+        text = _extract_user_message_text(user_message)
+        if not text:
+            return
+        # Author hint: ADK's ``invocation_context.user_id`` is the
+        # operator-side identifier; default to "user" when absent so
+        # the frontend always has a non-empty author label.
+        author = str(_safe_attr(invocation_context, "user_id", "") or "user")
+        # Mid-turn detection: when the message lands during an
+        # in-flight invocation (sub-Runner / streaming), the
+        # ``invocation_id`` is non-empty AND already in
+        # ``_invocation_spans``. Fresh top-level turns fire
+        # ``on_user_message_callback`` BEFORE the span is opened, so
+        # the spans dict is empty at this point — that's the
+        # discriminator.
+        inv_id = str(_safe_attr(invocation_context, "invocation_id", "") or "")
+        mid_turn = bool(inv_id) and inv_id in self._invocation_spans
+        # Build the proto. Tolerate missing symbol on the generated
+        # stubs (pre-bump environments) the same way the refine path
+        # does — drop on the floor with a DEBUG log rather than
+        # raising.
+        telemetry_pb2 = self._client._telemetry_pb2  # type: ignore[attr-defined]
+        ctor = getattr(telemetry_pb2, "UserMessageReceived", None)
+        if ctor is None:
+            log.debug(
+                "telemetry_pb2 missing UserMessageReceived; "
+                "skip emit (proto stubs need regeneration)"
+            )
+            return
+        self._user_message_seq += 1
+        sid = self._stamp_session_id(invocation_context)
+        msg = ctor(
+            run_id="",
+            sequence=self._user_message_seq,
+            session_id=sid,
+            content=text,
+            author=author,
+            mid_turn=mid_turn,
+            invocation_id=inv_id if mid_turn else "",
+        )
+        # Stamp emitted_at to wall-clock now so the server's
+        # initial-burst replay can order the markers chronologically
+        # without leaning on receive-time. ``Timestamp.GetCurrentTime``
+        # is the standard idiom; fall back to leaving the field unset
+        # on any error so the server stamps it on receipt.
+        try:
+            msg.emitted_at.GetCurrentTime()
+        except Exception:  # noqa: BLE001 — defensive: telemetry must not raise
+            pass
+        self._client.emit_user_message(msg)
 
     async def before_run_callback(self, *, invocation_context: Any) -> None:
         if self._maybe_disable_as_duplicate(invocation_context):

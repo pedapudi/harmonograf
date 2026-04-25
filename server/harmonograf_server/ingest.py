@@ -250,6 +250,17 @@ class IngestPipeline:
         self._refine_failures_by_session: dict[str, list[dict[str, Any]]] = {}
         self._refine_ring_max = 500
 
+        # Per-session ring of recent UserMessageReceived events
+        # (harmonograf user-message UX gap). Same reconnect-replay
+        # role as the refine rings above. Lighter approach than a
+        # dedicated ``user_messages`` table: in-memory ring is
+        # sufficient for the operator-observability use case (replay
+        # what happened in the last few hundred turns), avoids a
+        # storage migration, and matches the storage class of every
+        # other operator-only marker (drifts, refines, cancels).
+        self._user_messages_by_session: dict[str, list[dict[str, Any]]] = {}
+        self._user_message_ring_max = 500
+
     # ---- public API ---------------------------------------------------
 
     @property
@@ -349,6 +360,8 @@ class IngestPipeline:
             await self._handle_refine_attempted(ctx, msg.refine_attempted)
         elif kind == "refine_failed":
             await self._handle_refine_failed(ctx, msg.refine_failed)
+        elif kind == "user_message":
+            await self._handle_user_message(ctx, msg.user_message)
         elif kind == "goodbye":
             await self._handle_goodbye(ctx, msg.goodbye)
         elif kind == "hello":
@@ -1492,6 +1505,60 @@ class IngestPipeline:
     ) -> list[dict[str, Any]]:
         """Return the in-memory refine-failed ring (oldest first)."""
         return list(self._refine_failures_by_session.get(session_id, []))
+
+    async def _handle_user_message(
+        self, ctx: StreamContext, msg: Any
+    ) -> None:
+        """Ingest a ``UserMessageReceived`` envelope.
+
+        Stash on the per-session ring (so reconnect replay during
+        WatchSession initial burst keeps the user marker visible)
+        and publish a DELTA_USER_MESSAGE on the bus so live
+        subscribers render the marker immediately.
+
+        Lighter than persisting in a dedicated ``user_messages``
+        table: same in-memory ring class as RefineAttempted /
+        RefineFailed, no storage migration.
+        """
+        emitted_at_val: float | None = None
+        if msg.HasField("emitted_at"):
+            emitted_at_val = ts_to_float(msg.emitted_at)
+        record: dict[str, Any] = {
+            "run_id": msg.run_id or "",
+            "sequence": int(msg.sequence or 0),
+            "emitted_at": emitted_at_val,
+            "content": msg.content or "",
+            "author": msg.author or "user",
+            "mid_turn": bool(msg.mid_turn),
+            "invocation_id": msg.invocation_id or "",
+            "recorded_at": self._now(),
+        }
+        ring = self._user_messages_by_session.setdefault(ctx.session_id, [])
+        ring.append(record)
+        if len(ring) > self._user_message_ring_max:
+            del ring[: len(ring) - self._user_message_ring_max]
+        self._bus.publish_user_message(
+            ctx.session_id,
+            run_id=record["run_id"],
+            sequence=record["sequence"],
+            emitted_at=record["emitted_at"],
+            content=record["content"],
+            author=record["author"],
+            mid_turn=record["mid_turn"],
+            invocation_id=record["invocation_id"],
+            recorded_at=record["recorded_at"],
+        )
+
+    def user_messages_for_session(
+        self, session_id: str
+    ) -> list[dict[str, Any]]:
+        """Return the in-memory user-message ring (oldest first).
+
+        Replayed during WatchSession initial burst so reconnects keep
+        every operator turn visible on the Gantt user lane and the
+        Trajectory intervention list.
+        """
+        return list(self._user_messages_by_session.get(session_id, []))
 
     async def _on_run_completed(
         self, ctx: StreamContext, payload: Any, run_id: str

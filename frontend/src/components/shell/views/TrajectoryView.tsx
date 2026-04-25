@@ -127,7 +127,10 @@ interface TrajectoryViewModel {
   allDelegations: DelegationRecord[];
 }
 
-function buildViewModel(store: SessionStore | null): TrajectoryViewModel {
+function buildViewModel(
+  store: SessionStore | null,
+  selectedPlanId: string | null = null,
+): TrajectoryViewModel {
   const empty: TrajectoryViewModel = {
     planId: null,
     revs: [],
@@ -138,26 +141,37 @@ function buildViewModel(store: SessionStore | null): TrajectoryViewModel {
   if (!store) return empty;
   const plans = store.tasks.listPlans();
   if (plans.length === 0) return empty;
-  // Goldfive planners often mint a fresh plan_id on each refine, so we
-  // cannot assume the session's plans share an id. The trajectory is the
-  // time-ordered sequence of every plan this session has seen, plus all
-  // snapshots of each plan_id (for planners that do keep the id stable).
-  // Merge both into a single list sorted by createdAtMs, de-duped by
-  // object identity.
+  // Plan picker (multi-plan sessions): when a plan id is selected,
+  // build the view model from THAT plan's revs only. Single-plan
+  // sessions (the common case) pass null; the legacy behaviour
+  // walks every plan in the session.
   const seen = new Set<TaskPlan>();
   const combined: TaskPlan[] = [];
-  for (const live of plans) {
-    for (const snap of store.tasks.allRevsForPlan(live.id)) {
+  if (selectedPlanId) {
+    // Selected mode: one plan, its full snapshot history.
+    for (const snap of store.tasks.allRevsForPlan(selectedPlanId)) {
       if (seen.has(snap)) continue;
       seen.add(snap);
       combined.push(snap);
     }
+  } else {
+    // Legacy mode: every plan and every snapshot, time-merged.
+    // Goldfive planners often mint a fresh plan_id on each refine,
+    // so we cannot assume the session's plans share an id. The
+    // trajectory is the time-ordered sequence of every plan this
+    // session has seen, plus all snapshots of each plan_id.
+    for (const live of plans) {
+      for (const snap of store.tasks.allRevsForPlan(live.id)) {
+        if (seen.has(snap)) continue;
+        seen.add(snap);
+        combined.push(snap);
+      }
+    }
   }
   combined.sort((a, b) => a.createdAtMs - b.createdAtMs);
-  // Primary plan id is the one that produced the first rev — used only
-  // for labeling / compare affordances; the trajectory view itself treats
-  // every rev uniformly regardless of its plan_id.
-  const primaryId = combined[0]?.id ?? plans[0].id;
+  // Primary plan id is the selected plan when picked, else the one
+  // that produced the first rev.
+  const primaryId = selectedPlanId ?? combined[0]?.id ?? plans[0].id;
   // Drop UNSPECIFIED-kind drifts up-front. Goldfive emits tens of thousands
   // of these from a misbehaving status-query path; rendering them in the
   // ribbon buries the DAG under a wall of dots and freezes the browser.
@@ -372,6 +386,11 @@ export function TrajectoryView() {
     const un6 = store.invocationCancels.subscribe(() =>
       setTick((n) => n + 1),
     );
+    // User messages (harmonograf user-message UX gap) — operator
+    // turns observed via ADK's ``on_user_message_callback``. New
+    // messages must trigger a re-derive so the intervention list
+    // updates in real time.
+    const un7 = store.userMessages.subscribe(() => setTick((n) => n + 1));
     return () => {
       un1();
       un2();
@@ -379,13 +398,47 @@ export function TrajectoryView() {
       un4();
       un5();
       un6();
+      un7();
     };
   }, [store]);
+
+  // Plan picker (multi-plan sessions): which plan id is currently
+  // pinned by the operator, if any. Null falls back to "latest by
+  // createdAt" — for single-plan sessions this collapses to the only
+  // plan. Persisted via useUiStore so a refresh keeps the choice.
+  const persistedPlanId = useUiStore(
+    (s) =>
+      (s as { trajectorySelectedPlanId?: string | null })
+        .trajectorySelectedPlanId ?? null,
+  );
+  const setPersistedPlanId = useUiStore(
+    (s) =>
+      (s as { setTrajectorySelectedPlanId?: (id: string | null) => void })
+        .setTrajectorySelectedPlanId ?? (() => {}),
+  );
+
+  // List of plans in this session (latest-first). Same registry the
+  // view model walks; cached as a stable reference per tick.
+  const planList = store ? [...store.tasks.listPlans()] : [];
+  // Sort latest-first by createdAtMs so the default selection (null)
+  // resolves to the most recently created plan; the picker also
+  // renders newest-first so the operator sees current work first.
+  planList.sort((a, b) => b.createdAtMs - a.createdAtMs);
+  const isMultiPlan = planList.length > 1;
+  // Resolve the effective selected plan id: persisted choice if it
+  // still exists in this session, else the latest plan, else null.
+  const effectivePlanId =
+    persistedPlanId && planList.some((p) => p.id === persistedPlanId)
+      ? persistedPlanId
+      : planList[0]?.id ?? null;
 
   // No memoization: buildViewModel is a small O(revs + drifts) walk and the
   // store is a stable object reference, so tick-driven re-renders need to
   // recompute to pick up the latest registry contents.
-  const vm = buildViewModel(store);
+  // Multi-plan sessions filter to the selected plan; single-plan
+  // sessions pass null and get the legacy "every plan, time-merged"
+  // walk so existing behaviour is unchanged.
+  const vm = buildViewModel(store, isMultiPlan ? effectivePlanId : null);
 
   // Unified intervention history, derived from the same session store the
   // ribbon walks above. One source of truth for the strip in the planning
@@ -613,6 +666,22 @@ export function TrajectoryView() {
         )}
         {sessionId && vm.revs.length > 0 && (
           <>
+            {isMultiPlan && (
+              <PlanPickerChipBar
+                plans={planList}
+                selectedPlanId={effectivePlanId}
+                onSelect={(id) => {
+                  setPersistedPlanId(id);
+                  // Clear pinned revision when switching plans —
+                  // revision indices don't translate across plans.
+                  setPinnedRevision(null);
+                  setPinnedRevIdx(null);
+                  setCompareRevIdx(null);
+                  setSelection(null);
+                  setSteeringSelection(null);
+                }}
+              />
+            )}
             <TrajectoryTimelineRibbon
               revisions={planHistoryRecords}
               interventions={interventions}
@@ -2307,5 +2376,68 @@ function InterventionEntries({ rows, onJumpToRevision }: InterventionEntriesProp
         })}
       </ol>
     </section>
+  );
+}
+
+// ── Plan picker chip bar (multi-plan sessions) ────────────────────────────
+//
+// Single-plan sessions (the common case) do not render this — the parent
+// gates rendering on ``isMultiPlan``. Three or more plans is unusual but
+// possible: today's E2E surfaced a session with three plans, prompted by
+// a plan-emission bug but a real eventuality regardless.
+//
+// UX choice: minimal chip-bar over a dropdown. Justification:
+//   * The picker shows the operator the FULL set of plans at a glance —
+//     useful for spotting cascading refines vs separate planning rounds.
+//   * Click is one-tap; a dropdown adds an open-and-find sub-step.
+//   * Keeps the visual weight low next to the rev scrubber (which is the
+//     dominant control on this view).
+//   * If a session ever has many plans (>5) we can revisit; today the
+//     wrapping handles the layout.
+
+interface PlanPickerChipBarProps {
+  plans: TaskPlan[]; // newest-first
+  selectedPlanId: string | null;
+  onSelect: (planId: string) => void;
+}
+
+function PlanPickerChipBar({
+  plans,
+  selectedPlanId,
+  onSelect,
+}: PlanPickerChipBarProps): React.ReactElement {
+  return (
+    <div
+      className="hg-traj__plan-picker"
+      role="tablist"
+      aria-label="Plan picker"
+      data-testid="trajectory-plan-picker"
+    >
+      <span className="hg-traj__plan-picker-label">Plan:</span>
+      {plans.map((plan) => {
+        const isActive = plan.id === selectedPlanId;
+        const summary = plan.summary || plan.id;
+        const headline = summary.length > 60 ? summary.slice(0, 57) + '…' : summary;
+        const idTail = plan.id.length > 12 ? plan.id.slice(-12) : plan.id;
+        return (
+          <button
+            key={plan.id}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            className={
+              'hg-traj__plan-chip' +
+              (isActive ? ' hg-traj__plan-chip--active' : '')
+            }
+            onClick={() => onSelect(plan.id)}
+            title={`Plan ${plan.id}\n${plan.summary || ''}`}
+            data-testid={`plan-chip-${plan.id}`}
+          >
+            <span className="hg-traj__plan-chip-id">…{idTail}</span>
+            <span className="hg-traj__plan-chip-summary">{headline}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }

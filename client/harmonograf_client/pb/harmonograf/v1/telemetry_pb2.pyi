@@ -139,7 +139,7 @@ class Goodbye(_message.Message):
     def __init__(self, reason: _Optional[str] = ...) -> None: ...
 
 class TelemetryUp(_message.Message):
-    __slots__ = ("hello", "span_start", "span_update", "span_end", "payload", "heartbeat", "control_ack", "goodbye", "goldfive_event", "refine_attempted", "refine_failed")
+    __slots__ = ("hello", "span_start", "span_update", "span_end", "payload", "heartbeat", "control_ack", "goodbye", "goldfive_event", "refine_attempted", "refine_failed", "user_message")
     HELLO_FIELD_NUMBER: _ClassVar[int]
     SPAN_START_FIELD_NUMBER: _ClassVar[int]
     SPAN_UPDATE_FIELD_NUMBER: _ClassVar[int]
@@ -151,6 +151,7 @@ class TelemetryUp(_message.Message):
     GOLDFIVE_EVENT_FIELD_NUMBER: _ClassVar[int]
     REFINE_ATTEMPTED_FIELD_NUMBER: _ClassVar[int]
     REFINE_FAILED_FIELD_NUMBER: _ClassVar[int]
+    USER_MESSAGE_FIELD_NUMBER: _ClassVar[int]
     hello: Hello
     span_start: SpanStart
     span_update: SpanUpdate
@@ -162,7 +163,8 @@ class TelemetryUp(_message.Message):
     goldfive_event: _events_pb2.Event
     refine_attempted: RefineAttempted
     refine_failed: RefineFailed
-    def __init__(self, hello: _Optional[_Union[Hello, _Mapping]] = ..., span_start: _Optional[_Union[SpanStart, _Mapping]] = ..., span_update: _Optional[_Union[SpanUpdate, _Mapping]] = ..., span_end: _Optional[_Union[SpanEnd, _Mapping]] = ..., payload: _Optional[_Union[PayloadUpload, _Mapping]] = ..., heartbeat: _Optional[_Union[Heartbeat, _Mapping]] = ..., control_ack: _Optional[_Union[_control_pb2.ControlAck, _Mapping]] = ..., goodbye: _Optional[_Union[Goodbye, _Mapping]] = ..., goldfive_event: _Optional[_Union[_events_pb2.Event, _Mapping]] = ..., refine_attempted: _Optional[_Union[RefineAttempted, _Mapping]] = ..., refine_failed: _Optional[_Union[RefineFailed, _Mapping]] = ...) -> None: ...
+    user_message: UserMessageReceived
+    def __init__(self, hello: _Optional[_Union[Hello, _Mapping]] = ..., span_start: _Optional[_Union[SpanStart, _Mapping]] = ..., span_update: _Optional[_Union[SpanUpdate, _Mapping]] = ..., span_end: _Optional[_Union[SpanEnd, _Mapping]] = ..., payload: _Optional[_Union[PayloadUpload, _Mapping]] = ..., heartbeat: _Optional[_Union[Heartbeat, _Mapping]] = ..., control_ack: _Optional[_Union[_control_pb2.ControlAck, _Mapping]] = ..., goodbye: _Optional[_Union[Goodbye, _Mapping]] = ..., goldfive_event: _Optional[_Union[_events_pb2.Event, _Mapping]] = ..., refine_attempted: _Optional[_Union[RefineAttempted, _Mapping]] = ..., refine_failed: _Optional[_Union[RefineFailed, _Mapping]] = ..., user_message: _Optional[_Union[UserMessageReceived, _Mapping]] = ...) -> None: ...
 
 class RefineAttempted(_message.Message):
     __slots__ = ("run_id", "sequence", "session_id", "emitted_at", "attempt_id", "drift_id", "trigger_kind", "trigger_severity", "current_task_id", "current_agent_id")
@@ -217,6 +219,26 @@ class RefineFailed(_message.Message):
     current_task_id: str
     current_agent_id: str
     def __init__(self, run_id: _Optional[str] = ..., sequence: _Optional[int] = ..., session_id: _Optional[str] = ..., emitted_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., attempt_id: _Optional[str] = ..., drift_id: _Optional[str] = ..., trigger_kind: _Optional[str] = ..., trigger_severity: _Optional[str] = ..., failure_kind: _Optional[str] = ..., reason: _Optional[str] = ..., detail: _Optional[str] = ..., current_task_id: _Optional[str] = ..., current_agent_id: _Optional[str] = ...) -> None: ...
+
+class UserMessageReceived(_message.Message):
+    __slots__ = ("run_id", "sequence", "session_id", "emitted_at", "content", "author", "mid_turn", "invocation_id")
+    RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    EMITTED_AT_FIELD_NUMBER: _ClassVar[int]
+    CONTENT_FIELD_NUMBER: _ClassVar[int]
+    AUTHOR_FIELD_NUMBER: _ClassVar[int]
+    MID_TURN_FIELD_NUMBER: _ClassVar[int]
+    INVOCATION_ID_FIELD_NUMBER: _ClassVar[int]
+    run_id: str
+    sequence: int
+    session_id: str
+    emitted_at: _timestamp_pb2.Timestamp
+    content: str
+    author: str
+    mid_turn: bool
+    invocation_id: str
+    def __init__(self, run_id: _Optional[str] = ..., sequence: _Optional[int] = ..., session_id: _Optional[str] = ..., emitted_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., content: _Optional[str] = ..., author: _Optional[str] = ..., mid_turn: bool = ..., invocation_id: _Optional[str] = ...) -> None: ...
 
 class Welcome(_message.Message):
     __slots__ = ("accepted", "assigned_session_id", "assigned_stream_id", "server_time", "flags", "rejection_reason")

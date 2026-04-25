@@ -247,6 +247,62 @@ a.hg-settings__value:hover {
   opacity: 0.55;
 }
 
+/* Plan picker chip bar (multi-plan sessions). Sits above the timeline
+ * ribbon; only renders when listPlans().length > 1. */
+.hg-traj__plan-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 8px 8px;
+  border-bottom: 1px solid var(--hg-border, rgba(255, 255, 255, 0.08));
+}
+
+.hg-traj__plan-picker-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  opacity: 0.65;
+  text-transform: uppercase;
+}
+
+.hg-traj__plan-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--hg-border, rgba(255, 255, 255, 0.12));
+  border-radius: 12px;
+  font-size: 11px;
+  cursor: pointer;
+  max-width: 360px;
+  transition: background 120ms, border-color 120ms;
+}
+
+.hg-traj__plan-chip:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.hg-traj__plan-chip--active {
+  background: rgba(91, 141, 239, 0.16);
+  border-color: rgba(91, 141, 239, 0.55);
+}
+
+.hg-traj__plan-chip-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  opacity: 0.6;
+  font-size: 10px;
+}
+
+.hg-traj__plan-chip-summary {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+}
+
 .hg-traj__rev-chips {
   display: flex;
   gap: 6px;

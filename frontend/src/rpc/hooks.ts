@@ -27,6 +27,7 @@ import {
   applyGoldfiveEvent,
   applyRefineAttempted,
   applyRefineFailed,
+  applyUserMessage,
 } from './goldfiveEvent';
 import { loadPlanHistory } from '../state/planHistoryLoader';
 
@@ -545,6 +546,20 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
             }
             case 'refineFailed': {
               applyRefineFailed(
+                kind.value,
+                store,
+                origin?.startMs ?? 0,
+                sessionId,
+              );
+              break;
+            }
+            case 'userMessage': {
+              // Operator-observability: ADK observed a user-authored
+              // message via ``on_user_message_callback`` (harmonograf
+              // user-message UX gap). Surface the verbatim text on
+              // the Gantt user lane, the Trajectory intervention
+              // list, and the Graph origin lifeline.
+              applyUserMessage(
                 kind.value,
                 store,
                 origin?.startMs ?? 0,

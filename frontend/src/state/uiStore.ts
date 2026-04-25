@@ -176,6 +176,33 @@ function writeTrajectoryLegacyExpanded(v: boolean): void {
   }
 }
 
+// harmonograf: TrajectoryView plan picker selection. Persisted across
+// reloads so the operator's choice survives a refresh. ``null`` ⇒
+// default to latest plan by created_at.
+const TRAJECTORY_SELECTED_PLAN_ID_KEY = 'harmonograf.trajectorySelectedPlanId';
+
+function readTrajectorySelectedPlanId(): string | null {
+  try {
+    const v = localStorage.getItem(TRAJECTORY_SELECTED_PLAN_ID_KEY);
+    if (v && v.length > 0) return v;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function writeTrajectorySelectedPlanId(planId: string | null): void {
+  try {
+    if (planId === null || planId.length === 0) {
+      localStorage.removeItem(TRAJECTORY_SELECTED_PLAN_ID_KEY);
+    } else {
+      localStorage.setItem(TRAJECTORY_SELECTED_PLAN_ID_KEY, planId);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 export type DrawerTabId =
   | 'summary'
   | 'task'
@@ -279,6 +306,14 @@ interface UiState {
   // same selection (read-only from its side). Single source of truth.
   selectedRevision: number | null;
   setSelectedRevision: (rev: number | null) => void;
+
+  // Plan selection on the Trajectory view's plan picker (multi-plan
+  // sessions). ``null`` means "default to the latest plan by
+  // created_at"; a concrete plan_id pins the Trajectory view to that
+  // plan. Persisted via localStorage so the operator's choice
+  // survives a reload.
+  trajectorySelectedPlanId: string | null;
+  setTrajectorySelectedPlanId: (planId: string | null) => void;
 
   // Sequence diagram (GraphView) zoom + pan state. `null` means "no explicit
   // viewport saved yet" — the view will fit-to-content on mount. Persisted to
@@ -457,6 +492,19 @@ export const useUiStore = create<UiState>((set) => ({
   // inspection mode, not a preference; reload → back to Latest.
   selectedRevision: null,
   setSelectedRevision: (rev) => set({ selectedRevision: rev }),
+
+  // Plan selection on the Trajectory view's plan picker (multi-plan
+  // sessions). `null` means "default — latest plan by created_at".
+  // Persisted via localStorage so refreshing keeps the picker on the
+  // operator's last selection within a single session id namespace.
+  // The session id key suffix prevents stale selections across
+  // unrelated sessions.
+  trajectorySelectedPlanId: readTrajectorySelectedPlanId(),
+  setTrajectorySelectedPlanId: (planId) =>
+    set(() => {
+      writeTrajectorySelectedPlanId(planId);
+      return { trajectorySelectedPlanId: planId };
+    }),
   setAgentsPaused: (paused, ts) =>
     set((s) => {
       // When pausing, freeze at the session-relative "now" from the renderer
