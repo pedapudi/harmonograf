@@ -102,6 +102,28 @@ def _make_drift_detected(sequence: int = 3) -> ge.Event:
     return evt
 
 
+def _make_task_transitioned(sequence: int = 4) -> ge.Event:
+    """Build a goldfive#267 / #251 R4 ``TaskTransitioned`` envelope.
+
+    Used to verify the sink's proto passthrough handles the new oneof
+    variant the same way it handles every other typed
+    ``goldfive.v1.Event`` payload — no special-casing on the sink side
+    because the variant rides the same buffer / transport pipeline.
+    """
+    evt = ge.Event()
+    evt.event_id = "e-transition"
+    evt.run_id = "run-1"
+    evt.sequence = sequence
+    evt.task_transitioned.task_id = "t-7"
+    evt.task_transitioned.from_status = "RUNNING"
+    evt.task_transitioned.to_status = "COMPLETED"
+    evt.task_transitioned.source = "llm_report"
+    evt.task_transitioned.revision_stamp = 0
+    evt.task_transitioned.agent_name = "researcher_agent"
+    evt.task_transitioned.invocation_id = "inv-7"
+    return evt
+
+
 class TestEmit:
     @pytest.mark.asyncio
     async def test_emit_run_started_pushes_envelope(
@@ -160,6 +182,10 @@ class TestEmit:
             (_make_plan_submitted, "plan_submitted"),
             (_make_task_started, "task_started"),
             (_make_drift_detected, "drift_detected"),
+            # goldfive#267 / #251 R4: TaskTransitioned rides the same
+            # proto-passthrough path; no sink-side translation needed
+            # (the new variant is forwarded as-is to the wire).
+            (_make_task_transitioned, "task_transitioned"),
         ],
     )
     async def test_emit_covers_each_payload_kind(
@@ -173,6 +199,32 @@ class TestEmit:
         envs = _drain(client)
         assert len(envs) == 1
         assert envs[0].payload.WhichOneof("payload") == expected_kind
+
+    @pytest.mark.asyncio
+    async def test_emit_task_transitioned_payload_round_trips(
+        self, sink: HarmonografSink, client: Client
+    ):
+        """The TaskTransitioned payload survives the sink with every
+        field intact — no canonicalization rewrite (the sink's
+        ``_canonicalize_agent_ids`` does not currently rewrite
+        ``TaskTransitioned.agent_name``; the field is bare and the
+        frontend tolerates either form). This test pins the current
+        passthrough contract so a future bare→compound rewrite is a
+        deliberate change, not an accident.
+        """
+        evt = _make_task_transitioned()
+        await sink.emit(evt)
+        envs = _drain(client)
+        assert len(envs) == 1
+        payload = envs[0].payload
+        assert payload.WhichOneof("payload") == "task_transitioned"
+        t = payload.task_transitioned
+        assert t.task_id == "t-7"
+        assert t.from_status == "RUNNING"
+        assert t.to_status == "COMPLETED"
+        assert t.source == "llm_report"
+        assert t.agent_name == "researcher_agent"
+        assert t.invocation_id == "inv-7"
 
 
 class TestClose:

@@ -45,6 +45,7 @@ from harmonograf_server.bus import (
     DELTA_TASK_PROGRESS,
     DELTA_TASK_REPORT,
     DELTA_TASK_STATUS,
+    DELTA_TASK_TRANSITIONED,
     DELTA_CONTEXT_WINDOW_SAMPLE,
     Delta,
     SessionBus,
@@ -1458,6 +1459,35 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
             if ts is not None:
                 fmsg.emitted_at.CopyFrom(ts)
         return frontend_pb2.SessionUpdate(refine_failed=fmsg)
+    if delta.kind == DELTA_TASK_TRANSITIONED:
+        p = delta.payload
+        # Wrap as a ``goldfive.v1.Event`` with the ``task_transitioned``
+        # payload oneof variant (goldfive#267 / #251 R4). Same envelope
+        # shape as DELTA_INVOCATION_CANCELLED / DELTA_DRIFT — frontend
+        # WatchSession dispatches on the goldfive-event payload case.
+        ev = goldfive_events_pb2.Event(
+            run_id=p.get("run_id", "") or "",
+            sequence=int(p.get("sequence", 0) or 0),
+            session_id=delta.session_id,
+        )
+        ev.task_transitioned.task_id = p.get("task_id", "") or ""
+        ev.task_transitioned.from_status = p.get("from_status", "") or ""
+        ev.task_transitioned.to_status = p.get("to_status", "") or ""
+        ev.task_transitioned.source = p.get("source", "") or ""
+        ev.task_transitioned.revision_stamp = int(p.get("revision_stamp", 0) or 0)
+        ev.task_transitioned.agent_name = p.get("agent_name", "") or ""
+        ev.task_transitioned.invocation_id = p.get("invocation_id", "") or ""
+        # Prefer the goldfive-side emitted_at; fall back to ingest-side
+        # recorded_at so the frontend always has a timestamp to render
+        # (mirrors the DELTA_DRIFT / DELTA_INVOCATION_CANCELLED pattern).
+        ts_val = p.get("emitted_at")
+        if not isinstance(ts_val, (int, float)):
+            ts_val = p.get("recorded_at")
+        if isinstance(ts_val, (int, float)):
+            ts = float_to_ts(float(ts_val))
+            if ts is not None:
+                ev.emitted_at.CopyFrom(ts)
+        return frontend_pb2.SessionUpdate(goldfive_event=ev)
     if delta.kind == DELTA_AGENT_INVOCATION_STARTED:
         p = delta.payload
         ev = goldfive_events_pb2.Event(run_id=p.get("run_id", ""))

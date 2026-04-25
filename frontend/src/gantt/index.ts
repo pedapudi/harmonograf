@@ -798,6 +798,115 @@ export interface RefineFailureRecord {
   recordedAtAbsoluteMs: number;
 }
 
+// A captured goldfive TaskTransitioned event (goldfive#267 / #251 R4).
+// Sink-only operator-observability marker — every plan-state transition
+// emits one with source attribution so operators can answer "who moved
+// this task and why". The frontend filters by ``source`` and
+// ``toStatus`` before surfacing as an intervention row (most
+// transitions are too granular for the user-facing list).
+//
+// Source vocabulary (goldfive#267 events.proto):
+//   * ``llm_report``        — LLM ``report_task_*`` tool call with explicit task_id
+//   * ``handler_default``   — same, but task_id resolved from adapter pin
+//   * ``supersedes_reroute`` — pin classifier rerouted to REPLACE successor
+//   * ``plan_revision``     — refine stamped status (FAILED / CANCELLED)
+//   * ``cancellation``      — cooperative cancel cascade
+//   * ``other``              — anything else (forward-compat catch-all)
+//
+// Readers MUST tolerate unknown source strings.
+export interface TaskTransitionRecord {
+  seq: number;              // monotonic per session, assigned on arrival
+  runId: string;
+  taskId: string;           // SUCCESSOR id after supersedes-reroute
+  fromStatus: string;       // bare uppercase ('PENDING'/'RUNNING'/...)
+  toStatus: string;
+  source: string;           // attribution string; unknown values pass through
+  revisionStamp: number;    // Plan.revision_index at transition time
+  agentName: string;        // canonicalized <client>:<bare> when present
+  invocationId: string;     // ADK invocation id, empty when not bound
+  recordedAtMs: number;
+  recordedAtAbsoluteMs: number;
+}
+
+// Registry of per-session task-transition records. Same append-on-ingest
+// + rebase-on-session-start pattern as InvocationCancelRegistry. Dedup
+// is keyed on (taskId, sequence) when sequence is non-zero, else
+// (taskId, fromStatus, toStatus, recordedAtAbsoluteMs) — goldfive emits
+// one TaskTransitioned per real transition, but reconnect replay can
+// re-deliver the same row through both the persisted-event burst and
+// the live tail.
+export class TaskTransitionRegistry {
+  private transitions: TaskTransitionRecord[] = [];
+  private listeners = new Set<() => void>();
+  private nextSeq = 0;
+  private seen = new Set<string>();
+
+  list(): readonly TaskTransitionRecord[] {
+    return this.transitions;
+  }
+
+  append(
+    t: Omit<TaskTransitionRecord, 'seq' | 'recordedAtAbsoluteMs'> & {
+      sequence?: number;
+    } & Partial<Pick<TaskTransitionRecord, 'recordedAtAbsoluteMs'>>,
+  ): void {
+    const recordedAtAbsoluteMs = t.recordedAtAbsoluteMs ?? t.recordedAtMs;
+    const seqKey = t.sequence ? `seq:${t.taskId}|${t.sequence}` : '';
+    const fbKey = `fb:${t.taskId}|${t.fromStatus}|${t.toStatus}|${
+      recordedAtAbsoluteMs || t.recordedAtMs
+    }`;
+    const key = seqKey || fbKey;
+    if (this.seen.has(key)) return;
+    this.seen.add(key);
+    const record: TaskTransitionRecord = {
+      runId: t.runId,
+      taskId: t.taskId,
+      fromStatus: t.fromStatus,
+      toStatus: t.toStatus,
+      source: t.source,
+      revisionStamp: t.revisionStamp,
+      agentName: t.agentName,
+      invocationId: t.invocationId,
+      recordedAtMs: t.recordedAtMs,
+      recordedAtAbsoluteMs,
+      seq: this.nextSeq++,
+    };
+    this.transitions.push(record);
+    this.emit();
+  }
+
+  rebase(sessionStartMs: number): void {
+    if (this.transitions.length === 0) return;
+    let changed = false;
+    for (const t of this.transitions) {
+      if (!t.recordedAtAbsoluteMs) continue;
+      const next = t.recordedAtAbsoluteMs - sessionStartMs;
+      if (t.recordedAtMs !== next) {
+        t.recordedAtMs = next;
+        changed = true;
+      }
+    }
+    if (changed) this.emit();
+  }
+
+  clear(): void {
+    if (this.transitions.length === 0) return;
+    this.transitions = [];
+    this.nextSeq = 0;
+    this.seen.clear();
+    this.emit();
+  }
+
+  subscribe(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  private emit(): void {
+    for (const fn of this.listeners) fn();
+  }
+}
+
 // Registry of per-session refine-attempt records (the start side).
 // Same append-on-ingest + rebase-on-session-start pattern as
 // DriftRegistry / InvocationCancelRegistry. Bounded only by session
@@ -1123,6 +1232,11 @@ export class SessionStore {
   // failure by ``attemptId`` in O(1) without filtering a tagged union.
   readonly refineAttempts = new RefineAttemptRegistry();
   readonly refineFailures = new RefineFailureRegistry();
+  // goldfive#267 / #251 R4: every plan-state transition emits a
+  // TaskTransitioned record with source attribution. Frontend filters
+  // the high-volume stream down to user-meaningful rows (terminal
+  // statuses + meaningful source) before surfacing as interventions.
+  readonly taskTransitions = new TaskTransitionRegistry();
   readonly delegations = new DelegationRegistry();
   readonly contextSeries = new ContextSeriesRegistry();
   // Accumulator for every revision of every plan observed in this
@@ -1273,6 +1387,7 @@ export class SessionStore {
     this.invocationCancels.rebase(sessionStartMs);
     this.refineAttempts.rebase(sessionStartMs);
     this.refineFailures.rebase(sessionStartMs);
+    this.taskTransitions.rebase(sessionStartMs);
     this.delegations.rebase(sessionStartMs);
   }
 

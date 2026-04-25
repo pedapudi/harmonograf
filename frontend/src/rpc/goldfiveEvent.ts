@@ -33,6 +33,7 @@ import {
 import type {
   Event as GoldfiveEvent,
   InvocationCancelled as InvocationCancelledPb,
+  TaskTransitioned as TaskTransitionedPb,
 } from '../pb/goldfive/v1/events_pb.js';
 import type {
   RefineAttempted as RefineAttemptedPb,
@@ -671,6 +672,18 @@ export function applyGoldfiveEvent(
       applyInvocationCancelled(payload.value, event, store, sessionStartMs, sessionId);
       return;
     }
+    case 'taskTransitioned': {
+      // Operator-observability marker (goldfive#267 / #251 R4). Every
+      // plan-state transition emits a TaskTransitioned record with
+      // source attribution; the deriver in ``lib/interventions.ts``
+      // filters down to the user-meaningful subset (terminal to_status
+      // + meaningful source) before surfacing as an intervention row.
+      // We do NOT synthesize a span on Gantt / Graph — these events are
+      // too fine-grained for those views; the intervention list is
+      // their only surface.
+      applyTaskTransitioned(payload.value, event, store, sessionStartMs);
+      return;
+    }
   }
 }
 
@@ -949,4 +962,49 @@ export function applyRefineFailed(
     recordedMs,
     goldfiveId,
   );
+}
+
+// Operator-observability: a ``TaskTransitioned`` payload landed on the
+// WatchSession stream as part of a ``goldfive.v1.Event`` envelope
+// (goldfive#267 / #251 R4). Append to the per-session
+// :class:`TaskTransitionRegistry` so the deriver in
+// ``lib/interventions.ts`` can pick the user-meaningful subset.
+//
+// We deliberately do NOT synthesize a span on any actor row. These
+// events are fine-grained (every plan-state transition emits one); the
+// intervention list is the only surface. Adding glyphs to Gantt /
+// Graph would be visual noise. If operators want them on Gantt later
+// that's a separate UX decision.
+//
+// We also do NOT mutate task status here — the existing TaskStarted /
+// TaskCompleted / TaskFailed / TaskCancelled handlers above are still
+// the authoritative path for the gantt task store. TaskTransitioned is
+// a *parallel* observability stream alongside those, not a replacement.
+export function applyTaskTransitioned(
+  payload: TaskTransitionedPb,
+  event: GoldfiveEvent,
+  store: SessionStore,
+  sessionStartMs: number,
+): void {
+  const recordedAbsMs = tsToMsAbs(event.emittedAt);
+  // When emitted_at is missing on a replay of legacy data, fall back to
+  // "now" so the record still has a usable timestamp to render.
+  const abs = recordedAbsMs || Date.now();
+  const recordedMs = abs - sessionStartMs;
+  store.taskTransitions.append({
+    runId: event.runId || '',
+    sequence: Number(event.sequence ?? 0n),
+    taskId: payload.taskId || '',
+    // ``from_status`` / ``to_status`` arrive as bare uppercase strings on
+    // the wire (per goldfive#267 events.proto comment). Coerce
+    // defensively in case a non-conforming emitter ships lowercase.
+    fromStatus: (payload.fromStatus || '').toUpperCase(),
+    toStatus: (payload.toStatus || '').toUpperCase(),
+    source: payload.source || '',
+    revisionStamp: payload.revisionStamp || 0,
+    agentName: payload.agentName || '',
+    invocationId: payload.invocationId || '',
+    recordedAtMs: recordedMs,
+    recordedAtAbsoluteMs: abs,
+  });
 }

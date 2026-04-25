@@ -36,6 +36,7 @@ import type {
   RefineAttemptRecord,
   RefineFailureRecord,
   SessionStore,
+  TaskTransitionRecord,
 } from '../gantt/index';
 import type { TaskPlan } from '../gantt/types';
 
@@ -56,7 +57,21 @@ import type { TaskPlan } from '../gantt/types';
 // from ``goldfive`` (which is reserved for autonomous orchestrator
 // kinds like cascade_cancel) so the UI can pick a refine-specific
 // glyph + palette swatch.
-export type InterventionSource = 'user' | 'drift' | 'goldfive' | 'cancel' | 'refine';
+// ``transition`` is the source tag for TaskTransitioned rows
+// (goldfive#267 / #251 R4). One row per filtered transition (terminal
+// to_status + meaningful source); see :func:`deriveInterventions` for
+// the filter ladder. Distinct from ``cancel`` (which fires on
+// invocation cancellation, not task status flip) and from ``goldfive``
+// (which is reserved for autonomous orchestrator kinds at the plan
+// revision level) so the UI can pick a transition-specific glyph and
+// palette swatch.
+export type InterventionSource =
+  | 'user'
+  | 'drift'
+  | 'goldfive'
+  | 'cancel'
+  | 'refine'
+  | 'transition';
 
 export interface InterventionRow {
   // Stable key for React lists — composed from source + (annotation id /
@@ -104,11 +119,52 @@ export interface InterventionRow {
   // failed-refine glyph variant (warning chevron) without re-deriving
   // the outcome from ``outcome``.
   failureKind: string;
+  // For ``transition`` rows: the bare uppercase ``to_status`` of the
+  // TaskTransitioned event (e.g. ``COMPLETED``, ``FAILED``,
+  // ``CANCELLED``). Absent on every other source. Surfaced on the row
+  // so the click-through detail panel and renderer can branch on the
+  // transition outcome without re-parsing ``outcome``. Optional (rather
+  // than required + ``''`` default) so existing test fixtures and any
+  // future synthetic-row builders don't have to know about the field.
+  transitionToStatus?: string;
+  // For ``transition`` rows: the source attribution string that goldfive
+  // stamped on the event (``llm_report`` / ``supersedes_reroute`` /
+  // ``plan_revision`` / ``cancellation`` / ``other``). Absent on every
+  // other source. Operators read it directly in the detail pane.
+  transitionSource?: string;
+  // For ``transition`` rows: the goldfive task id that transitioned
+  // (after supersedes-reroute this is the SUCCESSOR id). Absent on
+  // every other source.
+  transitionTaskId?: string;
 }
 
 // Drift kinds emitted by goldfive when the user pulled the trigger. Mirrors
 // _USER_DRIFT_KINDS on the server side.
 const USER_DRIFT_KINDS = new Set(['user_steer', 'user_cancel']);
+
+// TaskTransitioned filter ladder (goldfive#267).
+//
+// Only terminal ``to_status`` values surface as intervention rows.
+// RUNNING transitions are too granular for the operator-facing list —
+// the gantt + task panel already convey the running state. Statuses
+// the renderer doesn't recognize fall through to "skip" so unknown
+// future statuses don't crash the view.
+const TASK_TRANSITION_TERMINAL_STATUSES = new Set([
+  'COMPLETED',
+  'FAILED',
+  'CANCELLED',
+]);
+
+// Source-attribution values the operator cares about. Anything else
+// (``handler_default``, ``other``, future unknowns) is suppressed —
+// those are framework / adapter-driven transitions that flood the
+// wire without representing an operator-meaningful intervention.
+const TASK_TRANSITION_MEANINGFUL_SOURCES = new Set([
+  'llm_report',
+  'supersedes_reroute',
+  'plan_revision',
+  'cancellation',
+]);
 
 // Revision kinds minted by goldfive's own escalation ladder (not drift
 // kinds). Mirrors _GOLDFIVE_REVISION_KINDS on the server.
@@ -152,6 +208,13 @@ export interface DeriveInput {
   // the historical four sources.
   refineAttempts?: readonly RefineAttemptRecord[];
   refineFailures?: readonly RefineFailureRecord[];
+  // goldfive#267 / #251 R4: every plan-state transition. The deriver
+  // filters by ``to_status`` and ``source`` (see
+  // ``TASK_TRANSITION_TERMINAL_STATUSES`` and
+  // ``TASK_TRANSITION_MEANINGFUL_SOURCES``) before surfacing as a
+  // row. Optional so callers without a SessionStore stay backward-
+  // compatible.
+  transitions?: readonly TaskTransitionRecord[];
   // Opt-in Tier-2 legacy time-window fallback for plan-revision
   // attribution (pre-#99 behaviour). Default 0 / undefined disables.
   // Provided by the caller (app runtime context) — never read from
@@ -420,6 +483,70 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
     }
   }
 
+  // TaskTransitioned — goldfive#267 / #251 R4. Every plan-state
+  // transition emits one with source attribution; the deriver below
+  // filters to the user-meaningful subset.
+  //
+  //   * Skip when ``to_status`` is not terminal (RUNNING transitions
+  //     are too granular for the intervention list — Gantt + task
+  //     panel already surface the running state).
+  //   * Skip when ``source`` is ``handler_default`` /
+  //     ``executor_dispatch`` / ``other`` / unknown — these are the
+  //     framework / adapter-driven transitions that flood the wire
+  //     and don't represent an operator-meaningful intervention.
+  //   * Surface only ``llm_report`` / ``supersedes_reroute`` /
+  //     ``plan_revision`` / ``cancellation`` sources as rows.
+  //
+  // Severity ladder mirrors the cancel / refine pattern:
+  //   * COMPLETED     ⇒ info     (success outcome, informational)
+  //   * FAILED        ⇒ warning  (operator attention)
+  //   * CANCELLED     ⇒ warning  (operator attention)
+  //
+  // The intervention row carries the source attribution as a separate
+  // field (``transitionSource``) so the renderer / detail panel can
+  // surface the "why" alongside the "what" without re-parsing kind.
+  for (const tr of input.transitions ?? []) {
+    const to = (tr.toStatus || '').toUpperCase();
+    const src = (tr.source || '').toLowerCase();
+    if (!TASK_TRANSITION_TERMINAL_STATUSES.has(to)) continue;
+    if (!TASK_TRANSITION_MEANINGFUL_SOURCES.has(src)) continue;
+    let severity: string;
+    if (to === 'COMPLETED') severity = 'info';
+    else severity = 'warning'; // FAILED / CANCELLED
+    const taskLabel = tr.taskId || '?';
+    const kind = `TASK_${to}`;
+    const body = `Task ${taskLabel} ${to} via ${src}`;
+    rows.push({
+      key: `transition:${tr.seq}`,
+      atMs: tr.recordedAtMs,
+      source: 'transition',
+      kind,
+      bodyOrReason: body,
+      author: '',
+      // Carry the from→to + source as the outcome string so existing
+      // chrome that reads ``outcome`` (the compact list line, the
+      // outcome formatter) renders something meaningful without a
+      // schema bump. Detail panel reads the dedicated transition*
+      // fields directly.
+      outcome: `transition:${(tr.fromStatus || '?').toLowerCase()}->${to.toLowerCase()}`,
+      planRevisionIndex: tr.revisionStamp || 0,
+      severity,
+      annotationId: '',
+      driftKind: '',
+      // Transitions don't participate in the trigger_event_id strict-id
+      // merge groups (they're a parallel observability stream — see
+      // ``mergeByTriggerEventId``).
+      triggerEventId: '',
+      targetAgentId: tr.agentName || '',
+      driftId: '',
+      attemptId: '',
+      failureKind: '',
+      transitionToStatus: to,
+      transitionSource: src,
+      transitionTaskId: tr.taskId || '',
+    });
+  }
+
   rows.sort((a, b) => a.atMs - b.atMs);
 
   // Outcome attribution (pre-merge). Strict-id only by default; the
@@ -552,7 +679,12 @@ function mergeByTriggerEventId(rows: InterventionRow[]): InterventionRow[] {
     // them here keeps the merged row from collapsing into its source
     // drift / plan revision, which would discard the attempt-specific
     // failure_kind + bodyOrReason styling. See goldfive#264 / Option A.
-    if (row.source === 'refine') {
+    //
+    // Transition rows are similarly self-contained — they carry no
+    // ``triggerEventId`` (the merger short-circuits empty-string
+    // entries below anyway, but we route them through ``passthrough``
+    // explicitly so the intent is recorded near the refine guard).
+    if (row.source === 'refine' || row.source === 'transition') {
       passthrough.push(row);
       continue;
     }
@@ -685,6 +817,7 @@ export function deriveInterventionsFromStore(
     cancels: store.invocationCancels.list(),
     refineAttempts: store.refineAttempts.list(),
     refineFailures: store.refineFailures.list(),
+    transitions: store.taskTransitions.list(),
     legacyPlanAttributionWindowMs: opts.legacyPlanAttributionWindowMs,
   });
 }
@@ -700,46 +833,56 @@ export const SEVERITY_WEIGHT: Record<string, number> = {
 };
 
 export function markerRadiusFor(row: InterventionRow): number {
-  // drift / cancel / refine rows scale by severity so high-severity
-  // markers read as heavier on the strip (the most consequential
-  // markers). Annotation + plan-only rows render at the "info" weight
-  // (they don't carry a meaningful severity for the sizing axis).
+  // drift / cancel / refine / transition rows scale by severity so
+  // high-severity markers read as heavier on the strip (the most
+  // consequential markers). Annotation + plan-only rows render at the
+  // "info" weight (they don't carry a meaningful severity for the
+  // sizing axis).
   if (
     row.source !== 'drift' &&
     row.source !== 'cancel' &&
-    row.source !== 'refine'
+    row.source !== 'refine' &&
+    row.source !== 'transition'
   )
     return SEVERITY_WEIGHT.info;
   return SEVERITY_WEIGHT[row.severity] ?? SEVERITY_WEIGHT.info;
 }
 
 // Palette keyed by source — aligns with the palette note in issue #69:
-//   user-blue, drift-amber, goldfive-grey, cancel-red, refine-teal.
+//   user-blue, drift-amber, goldfive-grey, cancel-red, refine-teal,
+//   transition-violet.
 // Centralized so the planning and trajectory views render uniformly.
 // Cancel rows use a distinct red so the stop-glyph reads at a glance as
 // a terminal, operator-only marker (critical cancels intensify in the
 // renderer via the severity weight, not via the palette swatch). Refine
 // rows use a teal so they read as "orchestrator self-correction" without
-// pulling visual weight from cancels (red) or drifts (amber).
+// pulling visual weight from cancels (red) or drifts (amber). Transition
+// rows use a violet so terminal task-status events read as a distinct
+// "task moved" surface alongside the drift/refine lanes without
+// competing with cancel red.
 export const SOURCE_COLOR: Record<InterventionSource, string> = {
   user: '#5b8def',
   drift: '#f59e0b',
   goldfive: '#8d9199',
   cancel: '#e05e4a',
   refine: '#3a9b8a',
+  transition: '#9b6dd6',
 };
 
 // Glyph character keyed by source — so the compact list renders a
 // source-discriminating leading symbol even before the row's text kicks
 // in. Cancel is the stop / cancel symbol (U+2298 CIRCLED DIVISION SLASH),
 // mirroring the lane markers on the Gantt and Graph views. Refine uses
-// the cycle / refresh symbol (U+21BB CLOCKWISE OPEN CIRCLE ARROW). Other
-// sources default to a small middle dot so the column aligns across
-// rows.
+// the cycle / refresh symbol (U+21BB CLOCKWISE OPEN CIRCLE ARROW).
+// Transition uses the rightwards-arrow (U+2192 RIGHTWARDS ARROW) so the
+// "from→to" intent is legible at a glance without inspecting body
+// text. Other sources default to a small middle dot so the column
+// aligns across rows.
 export const SOURCE_GLYPH: Record<InterventionSource, string> = {
   user: '·',
   drift: '·',
   goldfive: '·',
   cancel: '⊘',
   refine: '↻',
+  transition: '→',
 };

@@ -24,7 +24,11 @@
 //   there is nothing to wire. Post-merge the ingest layer fills the span
 //   attributes and this resolver surfaces them.
 
-import type { DriftRecord, SessionStore } from '../gantt/index';
+import type {
+  DriftRecord,
+  SessionStore,
+  TaskTransitionRecord,
+} from '../gantt/index';
 import type { Span, TaskPlan, Task } from '../gantt/types';
 
 export interface InterventionDetail {
@@ -405,6 +409,52 @@ export function isJudgeSpan(span: Span | null | undefined): boolean {
   // matching so older sessions replayed from the server don't lose the
   // routing.
   return span.agentId === '__goldfive__' && span.name.startsWith('judge:');
+}
+
+// Resolve detail for a TaskTransitioned selection (goldfive#267 / #251 R4).
+// Reuses the same three-section shape as :func:`resolveDriftDetail` so the
+// existing :class:`InterventionDetailSections` view can render transitions
+// without a new component.
+//
+// Mapping:
+//   * trigger  — empty (TaskTransitioned has no observation snippet; the
+//                from→to status is rendered in the panel header instead).
+//   * steering — "{from_status} → {to_status} via {source}" plus the
+//                revision_stamp when non-zero (mirrors how plan-revision
+//                detail composes "input/output" lines).
+//   * target   — the agent the transition was attributed to (compound id
+//                when the sink rewrote it; bare otherwise).
+//
+// The detail panel reuses the drift-shape; no new component is added —
+// keeps the surface area minimal for a fine-grained marker that lives
+// only on the intervention list (no Gantt / Graph glyph).
+export function resolveTaskTransitionDetail(
+  transition: TaskTransitionRecord,
+): InterventionDetail {
+  const fromS = (transition.fromStatus || '').toUpperCase();
+  const toS = (transition.toStatus || '').toUpperCase();
+  const src = (transition.source || '').toLowerCase();
+  const steeringParts: string[] = [];
+  if (fromS && toS) {
+    steeringParts.push(`${fromS} → ${toS}`);
+  } else if (toS) {
+    steeringParts.push(toS);
+  }
+  if (src) {
+    steeringParts.push(`source: ${src}`);
+  }
+  if (transition.revisionStamp && transition.revisionStamp > 0) {
+    steeringParts.push(`plan rev: ${transition.revisionStamp}`);
+  }
+  if (transition.invocationId) {
+    steeringParts.push(`invocation: ${transition.invocationId}`);
+  }
+  return {
+    trigger: '',
+    steering: steeringParts.join('\n'),
+    targetAgentId: transition.agentName || '',
+    targetTaskId: transition.taskId || '',
+  };
 }
 
 // Resolve detail for a task cancellation (terminal status + cancelReason).

@@ -28,6 +28,7 @@ from harmonograf_server.bus import (
     DELTA_TASK_PLAN,
     DELTA_TASK_PROGRESS,
     DELTA_TASK_STATUS,
+    DELTA_TASK_TRANSITIONED,
     SessionBus,
 )
 from harmonograf_server.ingest import IngestPipeline, StreamContext
@@ -784,6 +785,87 @@ async def test_drift_detected_publishes_delta(pipeline):
     assert delta.payload["severity"] == "critical"
     assert delta.payload["detail"] == "backend flaky"
     assert delta.payload["current_task_id"] == "t1"
+
+
+# ---- task transitions (goldfive#267 / #251 R4) --------------------------
+
+
+@pytest.mark.asyncio
+async def test_task_transitioned_publishes_delta(pipeline):
+    """``TaskTransitioned`` payloads fan out as ``DELTA_TASK_TRANSITIONED``
+    onto the session bus with envelope-derived sequence + emitted_at and
+    payload-local task_id / from_status / to_status / source / etc.
+    """
+    pipe, bus, _ = pipeline
+    sub = await bus.subscribe("sess_gf")
+    evt = _make_event(sequence=42)
+    evt.task_transitioned.task_id = "t-7"
+    evt.task_transitioned.from_status = "RUNNING"
+    evt.task_transitioned.to_status = "COMPLETED"
+    evt.task_transitioned.source = "llm_report"
+    evt.task_transitioned.revision_stamp = 3
+    evt.task_transitioned.agent_name = "researcher_agent"
+    evt.task_transitioned.invocation_id = "inv-7"
+    evt.emitted_at.seconds = 1_000
+    evt.emitted_at.nanos = 500_000_000
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
+    delta = sub.queue.get_nowait()
+    assert delta.kind == DELTA_TASK_TRANSITIONED
+    assert delta.payload["task_id"] == "t-7"
+    assert delta.payload["from_status"] == "RUNNING"
+    assert delta.payload["to_status"] == "COMPLETED"
+    assert delta.payload["source"] == "llm_report"
+    assert delta.payload["revision_stamp"] == 3
+    assert delta.payload["agent_name"] == "researcher_agent"
+    assert delta.payload["invocation_id"] == "inv-7"
+    assert delta.payload["sequence"] == 42
+    assert delta.payload["emitted_at"] == pytest.approx(1_000.5, abs=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_task_transitioned_persists_in_goldfive_events(pipeline, store):
+    """The TaskTransitioned event lands in the ``goldfive_events`` table
+    via the generic persist path (no sibling table — see the
+    ``_on_task_transitioned`` docstring). On reconnect, the events
+    replay through the same persisted-event path as other Event
+    variants.
+    """
+    pipe, _, _ = pipeline
+    evt = _make_event(sequence=7)
+    evt.task_transitioned.task_id = "t-99"
+    evt.task_transitioned.from_status = "PENDING"
+    evt.task_transitioned.to_status = "RUNNING"
+    evt.task_transitioned.source = "llm_report"
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
+    # The persisted-event path is the generic ``append_goldfive_event``
+    # in ``_handle_goldfive_event`` — verify a row landed by reading
+    # it back through the store API.
+    rows = await store.list_goldfive_events("sess_gf")
+    kinds = [r.kind for r in rows]
+    assert "task_transitioned" in kinds
+
+
+@pytest.mark.asyncio
+async def test_task_transitioned_tolerates_missing_emitted_at(pipeline):
+    """When the envelope's ``emitted_at`` is unset, the delta carries
+    ``emitted_at = None`` and the frontend falls back to ``recorded_at``
+    (the ingest-side wall clock). Mirrors the
+    ``test_invocation_cancelled_*`` pattern.
+    """
+    pipe, bus, _ = pipeline
+    sub = await bus.subscribe("sess_gf")
+    evt = _make_event(sequence=5)
+    evt.task_transitioned.task_id = "t-x"
+    evt.task_transitioned.from_status = "RUNNING"
+    evt.task_transitioned.to_status = "FAILED"
+    evt.task_transitioned.source = "plan_revision"
+    # No emitted_at set on the envelope.
+    await pipe.handle_message(_stream_ctx(), _wrap(evt))
+    delta = sub.queue.get_nowait()
+    assert delta.kind == DELTA_TASK_TRANSITIONED
+    assert delta.payload["emitted_at"] is None
+    # recorded_at is stamped from the pipeline's now_fn.
+    assert delta.payload["recorded_at"] == 1_000_000.0
 
 
 # ---- dispatch sanity -----------------------------------------------------

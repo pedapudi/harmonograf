@@ -906,6 +906,10 @@ class IngestPipeline:
             self._on_invocation_cancelled(
                 target_ctx, event.invocation_cancelled, run_id, event
             )
+        elif kind == "task_transitioned":
+            self._on_task_transitioned(
+                target_ctx, event.task_transitioned, run_id, event
+            )
         else:
             logger.debug(
                 "ignoring unknown goldfive event payload kind=%s on session_id=%s",
@@ -1317,6 +1321,61 @@ class IngestPipeline:
             drift_kind=payload.drift_kind or "",
             detail=payload.detail or "",
             tool_name=payload.tool_name or "",
+            recorded_at=self._now(),
+        )
+
+    def _on_task_transitioned(
+        self,
+        ctx: StreamContext,
+        payload: Any,
+        run_id: str,
+        event: Any,
+    ) -> None:
+        """Ingest a ``TaskTransitioned`` payload (goldfive#267 / #251 R4).
+
+        Plays the same "operator observability marker" role as
+        :meth:`_on_drift_detected` and :meth:`_on_invocation_cancelled`:
+        publish a ``DELTA_TASK_TRANSITIONED`` on the bus so live
+        WatchSession subscribers can render the transition immediately.
+        Persistence happens upstream in :meth:`_handle_goldfive_event`
+        via ``Store.append_goldfive_event`` — every TaskTransitioned
+        rides the same ``goldfive_events`` table so reconnect replay
+        pulls it back through the persisted-event read path with no
+        sibling table.
+
+        We deliberately do NOT add a sibling ``task_transitions`` table:
+        the ``goldfive_events`` row is sufficient for the frontend's
+        intervention-list workload (the deriver scans live events; it
+        does not query historical transitions by task_id). When a
+        clearly distinct query workload emerges (e.g. "show me every
+        ``llm_report``-sourced transition for task X across runs"),
+        promoting to a sibling table is a follow-up.
+
+        Sequence + emitted_at come off the parent ``Event`` envelope;
+        only payload-local fields (task_id, from_status, to_status,
+        source, revision_stamp, agent_name, invocation_id) are read off
+        ``payload``. ``agent_name`` arrives already canonicalised to
+        ``<client>:<bare>`` from the client sink (NOT YET — the sink's
+        ``_canonicalize_agent_ids`` does not currently rewrite this
+        field; the frontend tolerates either form. See the rewrite
+        dispatch table in ``client/harmonograf_client/sink.py``).
+        """
+        emitted_at_val: float | None = None
+        if event is not None and event.HasField("emitted_at"):
+            emitted_at_val = ts_to_float(event.emitted_at)
+        sequence_val = int(getattr(event, "sequence", 0) or 0)
+        self._bus.publish_task_transitioned(
+            ctx.session_id,
+            run_id,
+            sequence=sequence_val,
+            emitted_at=emitted_at_val,
+            task_id=payload.task_id or "",
+            from_status=payload.from_status or "",
+            to_status=payload.to_status or "",
+            source=payload.source or "",
+            revision_stamp=int(getattr(payload, "revision_stamp", 0) or 0),
+            agent_name=payload.agent_name or "",
+            invocation_id=payload.invocation_id or "",
             recorded_at=self._now(),
         )
 
