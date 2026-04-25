@@ -71,6 +71,14 @@ DELTA_INVOCATION_CANCELLED = "invocation_cancelled"
 # attempted+terminal into a single intervention row per attempt.
 DELTA_REFINE_ATTEMPTED = "refine_attempted"
 DELTA_REFINE_FAILED = "refine_failed"
+# Operator-observability: goldfive emitted a TaskTransitioned record at a
+# plan-state transition boundary (goldfive#267 / #251 R4). Carries the
+# from/to status, source attribution (llm_report, supersedes_reroute,
+# plan_revision, handler_default, cancellation, other), revision_stamp,
+# agent_name, and invocation_id. Frontend filters by source/to_status
+# before surfacing as an intervention row — the wire fans out every
+# transition; the deriver downstream picks the user-meaningful subset.
+DELTA_TASK_TRANSITIONED = "task_transitioned"
 
 
 @dataclass
@@ -528,6 +536,55 @@ class SessionBus:
                     "detail": detail,
                     "current_task_id": current_task_id,
                     "current_agent_id": current_agent_id,
+                    "recorded_at": recorded_at,
+                },
+            )
+        )
+
+    def publish_task_transitioned(
+        self,
+        session_id: str,
+        run_id: str,
+        *,
+        sequence: int = 0,
+        emitted_at: float | None = None,
+        task_id: str = "",
+        from_status: str = "",
+        to_status: str = "",
+        source: str = "",
+        revision_stamp: int = 0,
+        agent_name: str = "",
+        invocation_id: str = "",
+        recorded_at: float | None = None,
+    ) -> None:
+        """Publish a ``task_transitioned`` record onto the session bus.
+
+        Fields mirror the wire ``goldfive.v1.TaskTransitioned`` message
+        (goldfive#267): from/to status as bare lowercase strings (e.g.
+        ``"PENDING"``/``"RUNNING"``), source attribution as a free-form
+        symbolic string the frontend MUST tolerate unknown values for,
+        revision_stamp as the ``Plan.revision_index`` in effect at the
+        transition boundary, plus the ADK agent_name + invocation_id when
+        resolvable. ``recorded_at`` is the ingest-side wall clock;
+        ``emitted_at`` is the goldfive-side wall clock from the envelope.
+        Mirrors the DELTA_DRIFT / DELTA_INVOCATION_CANCELLED publish
+        pattern for emitted_at fall-through.
+        """
+        self.publish(
+            Delta(
+                session_id,
+                DELTA_TASK_TRANSITIONED,
+                {
+                    "run_id": run_id,
+                    "sequence": int(sequence or 0),
+                    "emitted_at": emitted_at,
+                    "task_id": task_id,
+                    "from_status": from_status,
+                    "to_status": to_status,
+                    "source": source,
+                    "revision_stamp": int(revision_stamp or 0),
+                    "agent_name": agent_name,
+                    "invocation_id": invocation_id,
                     "recorded_at": recorded_at,
                 },
             )

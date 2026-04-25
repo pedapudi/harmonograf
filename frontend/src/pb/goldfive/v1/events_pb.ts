@@ -26,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file goldfive/v1/events.proto.
  */
 export const file_goldfive_v1_events: GenFile = /*@__PURE__*/
-  fileDesc("Chhnb2xkZml2ZS92MS9ldmVudHMucHJvdG8SC2dvbGRmaXZlLnYxIr0MCgVFdmVudBIQCghldmVudF9pZBgBIAEoCRIOCgZydW5faWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAQSLgoKZW1pdHRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKc2Vzc2lvbl9pZBgFIAEoCRIuCgtydW5fc3RhcnRlZBgKIAEoCzIXLmdvbGRmaXZlLnYxLlJ1blN0YXJ0ZWRIABIwCgxnb2FsX2Rlcml2ZWQYCyABKAsyGC5nb2xkZml2ZS52MS5Hb2FsRGVyaXZlZEgAEjQKDnBsYW5fc3VibWl0dGVkGAwgASgLMhouZ29sZGZpdmUudjEuUGxhblN1Ym1pdHRlZEgAEjAKDHBsYW5fcmV2aXNlZBgNIAEoCzIYLmdvbGRmaXZlLnYxLlBsYW5SZXZpc2VkSAASMAoMdGFza19zdGFydGVkGA4gASgLMhguZ29sZGZpdmUudjEuVGFza1N0YXJ0ZWRIABIyCg10YXNrX3Byb2dyZXNzGA8gASgLMhkuZ29sZGZpdmUudjEuVGFza1Byb2dyZXNzSAASNAoOdGFza19jb21wbGV0ZWQYECABKAsyGi5nb2xkZml2ZS52MS5UYXNrQ29tcGxldGVkSAASLgoLdGFza19mYWlsZWQYESABKAsyFy5nb2xkZml2ZS52MS5UYXNrRmFpbGVkSAASMAoMdGFza19ibG9ja2VkGBIgASgLMhguZ29sZGZpdmUudjEuVGFza0Jsb2NrZWRIABI0Cg50YXNrX2NhbmNlbGxlZBgTIAEoCzIaLmdvbGRmaXZlLnYxLlRhc2tDYW5jZWxsZWRIABI0Cg5kcmlmdF9kZXRlY3RlZBgUIAEoCzIaLmdvbGRmaXZlLnYxLkRyaWZ0RGV0ZWN0ZWRIABIyCg1ydW5fY29tcGxldGVkGBUgASgLMhkuZ29sZGZpdmUudjEuUnVuQ29tcGxldGVkSAASLgoLcnVuX2Fib3J0ZWQYFiABKAsyFy5nb2xkZml2ZS52MS5SdW5BYm9ydGVkSAASQAoUY29udmVyc2F0aW9uX3N0YXJ0ZWQYFyABKAsyIC5nb2xkZml2ZS52MS5Db252ZXJzYXRpb25TdGFydGVkSAASPAoSY29udmVyc2F0aW9uX2VuZGVkGBggASgLMh4uZ29sZGZpdmUudjEuQ29udmVyc2F0aW9uRW5kZWRIABI8ChJhcHByb3ZhbF9yZXF1ZXN0ZWQYGSABKAsyHi5nb2xkZml2ZS52MS5BcHByb3ZhbFJlcXVlc3RlZEgAEjgKEGFwcHJvdmFsX2dyYW50ZWQYGiABKAsyHC5nb2xkZml2ZS52MS5BcHByb3ZhbEdyYW50ZWRIABI6ChFhcHByb3ZhbF9yZWplY3RlZBgbIAEoCzIdLmdvbGRmaXZlLnYxLkFwcHJvdmFsUmVqZWN0ZWRIABJHChhhZ2VudF9pbnZvY2F0aW9uX3N0YXJ0ZWQYHCABKAsyIy5nb2xkZml2ZS52MS5BZ2VudEludm9jYXRpb25TdGFydGVkSAASSwoaYWdlbnRfaW52b2NhdGlvbl9jb21wbGV0ZWQYHSABKAsyJS5nb2xkZml2ZS52MS5BZ2VudEludm9jYXRpb25Db21wbGV0ZWRIABI+ChNkZWxlZ2F0aW9uX29ic2VydmVkGB4gASgLMh8uZ29sZGZpdmUudjEuRGVsZWdhdGlvbk9ic2VydmVkSAASRQoXcmVhc29uaW5nX2p1ZGdlX2ludm9rZWQYHyABKAsyIi5nb2xkZml2ZS52MS5SZWFzb25pbmdKdWRnZUludm9rZWRIABJEChdnb2xkZml2ZV9sbG1fY2FsbF9zdGFydBggIAEoCzIhLmdvbGRmaXZlLnYxLkdvbGRmaXZlTExNQ2FsbFN0YXJ0SAASQAoVZ29sZGZpdmVfbGxtX2NhbGxfZW5kGCEgASgLMh8uZ29sZGZpdmUudjEuR29sZGZpdmVMTE1DYWxsRW5kSAASQAoUaW52b2NhdGlvbl9jYW5jZWxsZWQYIiABKAsyIC5nb2xkZml2ZS52MS5JbnZvY2F0aW9uQ2FuY2VsbGVkSABCCQoHcGF5bG9hZCJiCgpSdW5TdGFydGVkEg4KBnJ1bl9pZBgBIAEoCRIUCgxnb2FsX3N1bW1hcnkYAiABKAkSLgoKc3RhcnRlZF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiLwoLR29hbERlcml2ZWQSIAoFZ29hbHMYASADKAsyES5nb2xkZml2ZS52MS5Hb2FsIjAKDVBsYW5TdWJtaXR0ZWQSHwoEcGxhbhgBIAEoCzIRLmdvbGRmaXZlLnYxLlBsYW4iuQEKEFBsYW5SZXZpc2lvbkRpZmYSFgoOYWRkZWRfdGFza19pZHMYASADKAkSGAoQcmVtb3ZlZF90YXNrX2lkcxgCIAMoCRIZChFtb2RpZmllZF90YXNrX2lkcxgDIAMoCRIqCgthZGRlZF9lZGdlcxgEIAMoCzIVLmdvbGRmaXZlLnYxLlRhc2tFZGdlEiwKDXJlbW92ZWRfZWRnZXMYBSADKAsyFS5nb2xkZml2ZS52MS5UYXNrRWRnZSLNAgoLUGxhblJldmlzZWQSHwoEcGxhbhgBIAEoCzIRLmdvbGRmaXZlLnYxLlBsYW4SKgoKZHJpZnRfa2luZBgCIAEoDjIWLmdvbGRmaXZlLnYxLkRyaWZ0S2luZBIsCghzZXZlcml0eRgDIAEoDjIaLmdvbGRmaXZlLnYxLkRyaWZ0U2V2ZXJpdHkSDgoGcmVhc29uGAQgASgJEhYKDnJldmlzaW9uX2luZGV4GAUgASgNEisKBGRpZmYYBiABKAsyHS5nb2xkZml2ZS52MS5QbGFuUmV2aXNpb25EaWZmEhgKEHRyaWdnZXJfZXZlbnRfaWQYByABKAkSHAoUcmVmaW5lX2lucHV0X3N1bW1hcnkYCCABKAkSHQoVcmVmaW5lX291dHB1dF9zdW1tYXJ5GAkgASgJEhcKD3RhcmdldF9hZ2VudF9pZBgKIAEoCSIuCgtUYXNrU3RhcnRlZBIPCgd0YXNrX2lkGAEgASgJEg4KBmRldGFpbBgCIAEoCSJBCgxUYXNrUHJvZ3Jlc3MSDwoHdGFza19pZBgBIAEoCRIQCghmcmFjdGlvbhgCIAEoAhIOCgZkZXRhaWwYAyABKAkioQEKDVRhc2tDb21wbGV0ZWQSDwoHdGFza19pZBgBIAEoCRIPCgdzdW1tYXJ5GAIgASgJEjwKCWFydGlmYWN0cxgDIAMoCzIpLmdvbGRmaXZlLnYxLlRhc2tDb21wbGV0ZWQuQXJ0aWZhY3RzRW50cnkaMAoOQXJ0aWZhY3RzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASJCCgpUYXNrRmFpbGVkEg8KB3Rhc2tfaWQYASABKAkSDgoGcmVhc29uGAIgASgJEhMKC3JlY292ZXJhYmxlGAMgASgIIj8KC1Rhc2tCbG9ja2VkEg8KB3Rhc2tfaWQYASABKAkSDwoHYmxvY2tlchgCIAEoCRIOCgZuZWVkZWQYAyABKAkiMAoNVGFza0NhbmNlbGxlZBIPCgd0YXNrX2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCSKXAgoNRHJpZnREZXRlY3RlZBIkCgRraW5kGAEgASgOMhYuZ29sZGZpdmUudjEuRHJpZnRLaW5kEiwKCHNldmVyaXR5GAIgASgOMhouZ29sZGZpdmUudjEuRHJpZnRTZXZlcml0eRIOCgZkZXRhaWwYAyABKAkSFwoPY3VycmVudF90YXNrX2lkGAQgASgJEhgKEGN1cnJlbnRfYWdlbnRfaWQYBSABKAkSFQoNYW5ub3RhdGlvbl9pZBgGIAEoCRIKCgJpZBgHIAEoCRIVCg10cmlnZ2VyX2lucHV0GAggASgJEhMKC2F1dGhvcmVkX2J5GAkgASgJEiAKGHN1cHByZXNzZWRfYnlfdXNlcl9zdGVlchgKIAEoCCInCgxSdW5Db21wbGV0ZWQSFwoPb3V0Y29tZV9zdW1tYXJ5GAEgASgJIhwKClJ1bkFib3J0ZWQSDgoGcmVhc29uGAEgASgJIl4KE0NvbnZlcnNhdGlvblN0YXJ0ZWQSFwoPY29udmVyc2F0aW9uX2lkGAEgASgJEi4KCnN0YXJ0ZWRfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIlAKEUNvbnZlcnNhdGlvbkVuZGVkEhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCRISCgp0dXJuX2NvdW50GAIgASgNEg4KBnJlYXNvbhgDIAEoCSLGAQoRQXBwcm92YWxSZXF1ZXN0ZWQSEQoJdGFyZ2V0X2lkGAEgASgJEgwKBGtpbmQYAiABKAkSDgoGcHJvbXB0GAMgASgJEg8KB3Rhc2tfaWQYBCABKAkSPgoIbWV0YWRhdGEYBSADKAsyLC5nb2xkZml2ZS52MS5BcHByb3ZhbFJlcXVlc3RlZC5NZXRhZGF0YUVudHJ5Gi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASI0Cg9BcHByb3ZhbEdyYW50ZWQSEQoJdGFyZ2V0X2lkGAEgASgJEg4KBmRldGFpbBgCIAEoCSI1ChBBcHByb3ZhbFJlamVjdGVkEhEKCXRhcmdldF9pZBgBIAEoCRIOCgZkZXRhaWwYAiABKAkiogEKFkFnZW50SW52b2NhdGlvblN0YXJ0ZWQSEgoKYWdlbnRfbmFtZRgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEhUKDWludm9jYXRpb25faWQYAyABKAkSHAoUcGFyZW50X2ludm9jYXRpb25faWQYBCABKAkSLgoKc3RhcnRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAimQEKGEFnZW50SW52b2NhdGlvbkNvbXBsZXRlZBISCgphZ2VudF9uYW1lGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkSFQoNaW52b2NhdGlvbl9pZBgDIAEoCRIPCgdzdW1tYXJ5GAQgASgJEjAKDGNvbXBsZXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAikwEKEkRlbGVnYXRpb25PYnNlcnZlZBISCgpmcm9tX2FnZW50GAEgASgJEhAKCHRvX2FnZW50GAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSFQoNaW52b2NhdGlvbl9pZBgEIAEoCRIvCgtvYnNlcnZlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAi1wEKFVJlYXNvbmluZ0p1ZGdlSW52b2tlZBIOCgZydW5faWQYASABKAkSDwoHdGFza19pZBgCIAEoCRIYChBzdWJqZWN0X2FnZW50X2lkGAMgASgJEg0KBW1vZGVsGAQgASgJEhIKCmVsYXBzZWRfbXMYBSABKAMSFwoPcmVhc29uaW5nX2lucHV0GAYgASgJEhQKDHJhd19yZXNwb25zZRgHIAEoCRIPCgdvbl90YXNrGAggASgIEhAKCHNldmVyaXR5GAkgASgJEg4KBnJlYXNvbhgKIAEoCSK0AQoUR29sZGZpdmVMTE1DYWxsU3RhcnQSDwoHc3Bhbl9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEg0KBW1vZGVsGAMgASgJEg8KB3Rhc2tfaWQYBCABKAkSFQoNc3RhcnRfdGltZV9ucxgFIAEoAxIVCg1pbnB1dF9wcmV2aWV3GAYgASgJEhcKD3RhcmdldF9hZ2VudF9pZBgHIAEoCRIWCg50YXJnZXRfdGFza19pZBgIIAEoCSLhAQoSR29sZGZpdmVMTE1DYWxsRW5kEg8KB3NwYW5faWQYASABKAkSDAoEbmFtZRgCIAEoCRITCgtlbmRfdGltZV9ucxgDIAEoAxIOCgZzdGF0dXMYBCABKAkSDQoFZXJyb3IYBSABKAkSFQoNaW5wdXRfcHJldmlldxgGIAEoCRIWCg5vdXRwdXRfcHJldmlldxgHIAEoCRIXCg90YXJnZXRfYWdlbnRfaWQYCCABKAkSFgoOdGFyZ2V0X3Rhc2tfaWQYCSABKAkSGAoQZGVjaXNpb25fc3VtbWFyeRgKIAEoCSKrAQoTSW52b2NhdGlvbkNhbmNlbGxlZBIVCg1pbnZvY2F0aW9uX2lkGAEgASgJEhIKCmFnZW50X25hbWUYAiABKAkSDgoGcmVhc29uGAMgASgJEhAKCHNldmVyaXR5GAQgASgJEhAKCGRyaWZ0X2lkGAUgASgJEhIKCmRyaWZ0X2tpbmQYBiABKAkSDgoGZGV0YWlsGAcgASgJEhEKCXRvb2xfbmFtZRgIIAEoCUI5WjdnaXRodWIuY29tL3BlZGFwdWRpL2dvbGRmaXZlL2dlbi9nb2xkZml2ZS92MTtnb2xkZml2ZXYxYgZwcm90bzM", [file_google_protobuf_timestamp, file_goldfive_v1_types]);
+  fileDesc("Chhnb2xkZml2ZS92MS9ldmVudHMucHJvdG8SC2dvbGRmaXZlLnYxIvkMCgVFdmVudBIQCghldmVudF9pZBgBIAEoCRIOCgZydW5faWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAQSLgoKZW1pdHRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKc2Vzc2lvbl9pZBgFIAEoCRIuCgtydW5fc3RhcnRlZBgKIAEoCzIXLmdvbGRmaXZlLnYxLlJ1blN0YXJ0ZWRIABIwCgxnb2FsX2Rlcml2ZWQYCyABKAsyGC5nb2xkZml2ZS52MS5Hb2FsRGVyaXZlZEgAEjQKDnBsYW5fc3VibWl0dGVkGAwgASgLMhouZ29sZGZpdmUudjEuUGxhblN1Ym1pdHRlZEgAEjAKDHBsYW5fcmV2aXNlZBgNIAEoCzIYLmdvbGRmaXZlLnYxLlBsYW5SZXZpc2VkSAASMAoMdGFza19zdGFydGVkGA4gASgLMhguZ29sZGZpdmUudjEuVGFza1N0YXJ0ZWRIABIyCg10YXNrX3Byb2dyZXNzGA8gASgLMhkuZ29sZGZpdmUudjEuVGFza1Byb2dyZXNzSAASNAoOdGFza19jb21wbGV0ZWQYECABKAsyGi5nb2xkZml2ZS52MS5UYXNrQ29tcGxldGVkSAASLgoLdGFza19mYWlsZWQYESABKAsyFy5nb2xkZml2ZS52MS5UYXNrRmFpbGVkSAASMAoMdGFza19ibG9ja2VkGBIgASgLMhguZ29sZGZpdmUudjEuVGFza0Jsb2NrZWRIABI0Cg50YXNrX2NhbmNlbGxlZBgTIAEoCzIaLmdvbGRmaXZlLnYxLlRhc2tDYW5jZWxsZWRIABI0Cg5kcmlmdF9kZXRlY3RlZBgUIAEoCzIaLmdvbGRmaXZlLnYxLkRyaWZ0RGV0ZWN0ZWRIABIyCg1ydW5fY29tcGxldGVkGBUgASgLMhkuZ29sZGZpdmUudjEuUnVuQ29tcGxldGVkSAASLgoLcnVuX2Fib3J0ZWQYFiABKAsyFy5nb2xkZml2ZS52MS5SdW5BYm9ydGVkSAASQAoUY29udmVyc2F0aW9uX3N0YXJ0ZWQYFyABKAsyIC5nb2xkZml2ZS52MS5Db252ZXJzYXRpb25TdGFydGVkSAASPAoSY29udmVyc2F0aW9uX2VuZGVkGBggASgLMh4uZ29sZGZpdmUudjEuQ29udmVyc2F0aW9uRW5kZWRIABI8ChJhcHByb3ZhbF9yZXF1ZXN0ZWQYGSABKAsyHi5nb2xkZml2ZS52MS5BcHByb3ZhbFJlcXVlc3RlZEgAEjgKEGFwcHJvdmFsX2dyYW50ZWQYGiABKAsyHC5nb2xkZml2ZS52MS5BcHByb3ZhbEdyYW50ZWRIABI6ChFhcHByb3ZhbF9yZWplY3RlZBgbIAEoCzIdLmdvbGRmaXZlLnYxLkFwcHJvdmFsUmVqZWN0ZWRIABJHChhhZ2VudF9pbnZvY2F0aW9uX3N0YXJ0ZWQYHCABKAsyIy5nb2xkZml2ZS52MS5BZ2VudEludm9jYXRpb25TdGFydGVkSAASSwoaYWdlbnRfaW52b2NhdGlvbl9jb21wbGV0ZWQYHSABKAsyJS5nb2xkZml2ZS52MS5BZ2VudEludm9jYXRpb25Db21wbGV0ZWRIABI+ChNkZWxlZ2F0aW9uX29ic2VydmVkGB4gASgLMh8uZ29sZGZpdmUudjEuRGVsZWdhdGlvbk9ic2VydmVkSAASRQoXcmVhc29uaW5nX2p1ZGdlX2ludm9rZWQYHyABKAsyIi5nb2xkZml2ZS52MS5SZWFzb25pbmdKdWRnZUludm9rZWRIABJEChdnb2xkZml2ZV9sbG1fY2FsbF9zdGFydBggIAEoCzIhLmdvbGRmaXZlLnYxLkdvbGRmaXZlTExNQ2FsbFN0YXJ0SAASQAoVZ29sZGZpdmVfbGxtX2NhbGxfZW5kGCEgASgLMh8uZ29sZGZpdmUudjEuR29sZGZpdmVMTE1DYWxsRW5kSAASQAoUaW52b2NhdGlvbl9jYW5jZWxsZWQYIiABKAsyIC5nb2xkZml2ZS52MS5JbnZvY2F0aW9uQ2FuY2VsbGVkSAASOgoRdGFza190cmFuc2l0aW9uZWQYIyABKAsyHS5nb2xkZml2ZS52MS5UYXNrVHJhbnNpdGlvbmVkSABCCQoHcGF5bG9hZCJiCgpSdW5TdGFydGVkEg4KBnJ1bl9pZBgBIAEoCRIUCgxnb2FsX3N1bW1hcnkYAiABKAkSLgoKc3RhcnRlZF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiLwoLR29hbERlcml2ZWQSIAoFZ29hbHMYASADKAsyES5nb2xkZml2ZS52MS5Hb2FsIjAKDVBsYW5TdWJtaXR0ZWQSHwoEcGxhbhgBIAEoCzIRLmdvbGRmaXZlLnYxLlBsYW4iuQEKEFBsYW5SZXZpc2lvbkRpZmYSFgoOYWRkZWRfdGFza19pZHMYASADKAkSGAoQcmVtb3ZlZF90YXNrX2lkcxgCIAMoCRIZChFtb2RpZmllZF90YXNrX2lkcxgDIAMoCRIqCgthZGRlZF9lZGdlcxgEIAMoCzIVLmdvbGRmaXZlLnYxLlRhc2tFZGdlEiwKDXJlbW92ZWRfZWRnZXMYBSADKAsyFS5nb2xkZml2ZS52MS5UYXNrRWRnZSLNAgoLUGxhblJldmlzZWQSHwoEcGxhbhgBIAEoCzIRLmdvbGRmaXZlLnYxLlBsYW4SKgoKZHJpZnRfa2luZBgCIAEoDjIWLmdvbGRmaXZlLnYxLkRyaWZ0S2luZBIsCghzZXZlcml0eRgDIAEoDjIaLmdvbGRmaXZlLnYxLkRyaWZ0U2V2ZXJpdHkSDgoGcmVhc29uGAQgASgJEhYKDnJldmlzaW9uX2luZGV4GAUgASgNEisKBGRpZmYYBiABKAsyHS5nb2xkZml2ZS52MS5QbGFuUmV2aXNpb25EaWZmEhgKEHRyaWdnZXJfZXZlbnRfaWQYByABKAkSHAoUcmVmaW5lX2lucHV0X3N1bW1hcnkYCCABKAkSHQoVcmVmaW5lX291dHB1dF9zdW1tYXJ5GAkgASgJEhcKD3RhcmdldF9hZ2VudF9pZBgKIAEoCSIuCgtUYXNrU3RhcnRlZBIPCgd0YXNrX2lkGAEgASgJEg4KBmRldGFpbBgCIAEoCSJBCgxUYXNrUHJvZ3Jlc3MSDwoHdGFza19pZBgBIAEoCRIQCghmcmFjdGlvbhgCIAEoAhIOCgZkZXRhaWwYAyABKAkioQEKDVRhc2tDb21wbGV0ZWQSDwoHdGFza19pZBgBIAEoCRIPCgdzdW1tYXJ5GAIgASgJEjwKCWFydGlmYWN0cxgDIAMoCzIpLmdvbGRmaXZlLnYxLlRhc2tDb21wbGV0ZWQuQXJ0aWZhY3RzRW50cnkaMAoOQXJ0aWZhY3RzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASJCCgpUYXNrRmFpbGVkEg8KB3Rhc2tfaWQYASABKAkSDgoGcmVhc29uGAIgASgJEhMKC3JlY292ZXJhYmxlGAMgASgIIj8KC1Rhc2tCbG9ja2VkEg8KB3Rhc2tfaWQYASABKAkSDwoHYmxvY2tlchgCIAEoCRIOCgZuZWVkZWQYAyABKAkiMAoNVGFza0NhbmNlbGxlZBIPCgd0YXNrX2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCSKXAgoNRHJpZnREZXRlY3RlZBIkCgRraW5kGAEgASgOMhYuZ29sZGZpdmUudjEuRHJpZnRLaW5kEiwKCHNldmVyaXR5GAIgASgOMhouZ29sZGZpdmUudjEuRHJpZnRTZXZlcml0eRIOCgZkZXRhaWwYAyABKAkSFwoPY3VycmVudF90YXNrX2lkGAQgASgJEhgKEGN1cnJlbnRfYWdlbnRfaWQYBSABKAkSFQoNYW5ub3RhdGlvbl9pZBgGIAEoCRIKCgJpZBgHIAEoCRIVCg10cmlnZ2VyX2lucHV0GAggASgJEhMKC2F1dGhvcmVkX2J5GAkgASgJEiAKGHN1cHByZXNzZWRfYnlfdXNlcl9zdGVlchgKIAEoCCInCgxSdW5Db21wbGV0ZWQSFwoPb3V0Y29tZV9zdW1tYXJ5GAEgASgJIhwKClJ1bkFib3J0ZWQSDgoGcmVhc29uGAEgASgJIl4KE0NvbnZlcnNhdGlvblN0YXJ0ZWQSFwoPY29udmVyc2F0aW9uX2lkGAEgASgJEi4KCnN0YXJ0ZWRfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIlAKEUNvbnZlcnNhdGlvbkVuZGVkEhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCRISCgp0dXJuX2NvdW50GAIgASgNEg4KBnJlYXNvbhgDIAEoCSLGAQoRQXBwcm92YWxSZXF1ZXN0ZWQSEQoJdGFyZ2V0X2lkGAEgASgJEgwKBGtpbmQYAiABKAkSDgoGcHJvbXB0GAMgASgJEg8KB3Rhc2tfaWQYBCABKAkSPgoIbWV0YWRhdGEYBSADKAsyLC5nb2xkZml2ZS52MS5BcHByb3ZhbFJlcXVlc3RlZC5NZXRhZGF0YUVudHJ5Gi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASI0Cg9BcHByb3ZhbEdyYW50ZWQSEQoJdGFyZ2V0X2lkGAEgASgJEg4KBmRldGFpbBgCIAEoCSI1ChBBcHByb3ZhbFJlamVjdGVkEhEKCXRhcmdldF9pZBgBIAEoCRIOCgZkZXRhaWwYAiABKAkiogEKFkFnZW50SW52b2NhdGlvblN0YXJ0ZWQSEgoKYWdlbnRfbmFtZRgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEhUKDWludm9jYXRpb25faWQYAyABKAkSHAoUcGFyZW50X2ludm9jYXRpb25faWQYBCABKAkSLgoKc3RhcnRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAimQEKGEFnZW50SW52b2NhdGlvbkNvbXBsZXRlZBISCgphZ2VudF9uYW1lGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkSFQoNaW52b2NhdGlvbl9pZBgDIAEoCRIPCgdzdW1tYXJ5GAQgASgJEjAKDGNvbXBsZXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAikwEKEkRlbGVnYXRpb25PYnNlcnZlZBISCgpmcm9tX2FnZW50GAEgASgJEhAKCHRvX2FnZW50GAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSFQoNaW52b2NhdGlvbl9pZBgEIAEoCRIvCgtvYnNlcnZlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAi1wEKFVJlYXNvbmluZ0p1ZGdlSW52b2tlZBIOCgZydW5faWQYASABKAkSDwoHdGFza19pZBgCIAEoCRIYChBzdWJqZWN0X2FnZW50X2lkGAMgASgJEg0KBW1vZGVsGAQgASgJEhIKCmVsYXBzZWRfbXMYBSABKAMSFwoPcmVhc29uaW5nX2lucHV0GAYgASgJEhQKDHJhd19yZXNwb25zZRgHIAEoCRIPCgdvbl90YXNrGAggASgIEhAKCHNldmVyaXR5GAkgASgJEg4KBnJlYXNvbhgKIAEoCSK0AQoUR29sZGZpdmVMTE1DYWxsU3RhcnQSDwoHc3Bhbl9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEg0KBW1vZGVsGAMgASgJEg8KB3Rhc2tfaWQYBCABKAkSFQoNc3RhcnRfdGltZV9ucxgFIAEoAxIVCg1pbnB1dF9wcmV2aWV3GAYgASgJEhcKD3RhcmdldF9hZ2VudF9pZBgHIAEoCRIWCg50YXJnZXRfdGFza19pZBgIIAEoCSLhAQoSR29sZGZpdmVMTE1DYWxsRW5kEg8KB3NwYW5faWQYASABKAkSDAoEbmFtZRgCIAEoCRITCgtlbmRfdGltZV9ucxgDIAEoAxIOCgZzdGF0dXMYBCABKAkSDQoFZXJyb3IYBSABKAkSFQoNaW5wdXRfcHJldmlldxgGIAEoCRIWCg5vdXRwdXRfcHJldmlldxgHIAEoCRIXCg90YXJnZXRfYWdlbnRfaWQYCCABKAkSFgoOdGFyZ2V0X3Rhc2tfaWQYCSABKAkSGAoQZGVjaXNpb25fc3VtbWFyeRgKIAEoCSKrAQoTSW52b2NhdGlvbkNhbmNlbGxlZBIVCg1pbnZvY2F0aW9uX2lkGAEgASgJEhIKCmFnZW50X25hbWUYAiABKAkSDgoGcmVhc29uGAMgASgJEhAKCHNldmVyaXR5GAQgASgJEhAKCGRyaWZ0X2lkGAUgASgJEhIKCmRyaWZ0X2tpbmQYBiABKAkSDgoGZGV0YWlsGAcgASgJEhEKCXRvb2xfbmFtZRgIIAEoCSKeAQoQVGFza1RyYW5zaXRpb25lZBIPCgd0YXNrX2lkGAEgASgJEhMKC2Zyb21fc3RhdHVzGAIgASgJEhEKCXRvX3N0YXR1cxgDIAEoCRIOCgZzb3VyY2UYBCABKAkSFgoOcmV2aXNpb25fc3RhbXAYBSABKAUSEgoKYWdlbnRfbmFtZRgGIAEoCRIVCg1pbnZvY2F0aW9uX2lkGAcgASgJQjlaN2dpdGh1Yi5jb20vcGVkYXB1ZGkvZ29sZGZpdmUvZ2VuL2dvbGRmaXZlL3YxO2dvbGRmaXZldjFiBnByb3RvMw", [file_google_protobuf_timestamp, file_goldfive_v1_types]);
 
 /**
  * Event is the uniform envelope wrapping every goldfive event. Sinks
@@ -233,6 +233,12 @@ export type Event = Message<"goldfive.v1.Event"> & {
      */
     value: InvocationCancelled;
     case: "invocationCancelled";
+  } | {
+    /**
+     * @generated from field: goldfive.v1.TaskTransitioned task_transitioned = 35;
+     */
+    value: TaskTransitioned;
+    case: "taskTransitioned";
   } | { case: undefined; value?: undefined };
 };
 
@@ -1527,4 +1533,123 @@ export type InvocationCancelled = Message<"goldfive.v1.InvocationCancelled"> & {
  */
 export const InvocationCancelledSchema: GenMessage<InvocationCancelled> = /*@__PURE__*/
   messageDesc(file_goldfive_v1_events, 26);
+
+/**
+ * Emitted on EVERY successful task status transition with source
+ * attribution so operators can answer "who moved this task and why".
+ * Sink-only — the LLM's ``report_task_*`` surface still returns
+ * ``{"acknowledged": True}``; this event is operator observability
+ * (audit trail + Gantt rendering).
+ *
+ * Pairs with the ``task_transition_refused`` dict event from the
+ * pin-versioning audit (#266): refused attempts emit the dict refusal
+ * payload and DO NOT emit ``TaskTransitioned`` (no transition
+ * happened). Successful transitions emit this typed proto envelope.
+ *
+ * ``source`` is a short symbolic vocabulary; readers MUST tolerate
+ * unknown values (forward-compat) and SHOULD render them as-is when
+ * surfacing to operators. Defined values:
+ *
+ *   * ``"llm_report"``        — driven by an LLM ``report_task_*``
+ *                                tool call with an explicit ``task_id``
+ *                                arg.
+ *   * ``"handler_default"``    — driven by an LLM ``report_task_*``
+ *                                tool call where ``task_id`` was
+ *                                resolved from the adapter-stamped
+ *                                pin (``goldfive.current_task_id``)
+ *                                rather than an explicit arg.
+ *   * ``"supersedes_reroute"`` — driven by an LLM report on a
+ *                                superseded task that the report-time
+ *                                pin classifier (#266) routed to the
+ *                                REPLACE-kind successor.
+ *   * ``"plan_revision"``      — refine changed the task's status (e.g.
+ *                                stamped FAILED on a looping task,
+ *                                CANCELLED on a supersede).
+ *   * ``"cancellation"``       — cooperative cancellation (#251 Stream
+ *                                C) transitioned a running task as a
+ *                                consequence (cascade-cancel from a
+ *                                CRITICAL drift).
+ *   * ``"other"``              — any transition that doesn't match a
+ *                                more specific source (e.g. framework
+ *                                auto-start, control-message rewinds).
+ *                                Operators can still surface the row;
+ *                                a follow-up may refine the vocabulary.
+ *
+ * @generated from message goldfive.v1.TaskTransitioned
+ */
+export type TaskTransitioned = Message<"goldfive.v1.TaskTransitioned"> & {
+  /**
+   * The task that transitioned. After supersedes-reroute this is the
+   * SUCCESSOR task id (the one whose status actually changed), not the
+   * pin the LLM quoted.
+   *
+   * @generated from field: string task_id = 1;
+   */
+  taskId: string;
+
+  /**
+   * ``TaskStatus`` enum value as the bare lowercase string (e.g.
+   * ``"PENDING"``, ``"RUNNING"``, ``"COMPLETED"``). Recorded as a
+   * string (not the enum) so consumers can render without a lookup
+   * and so unknown future statuses round-trip without proto-regen.
+   *
+   * @generated from field: string from_status = 2;
+   */
+  fromStatus: string;
+
+  /**
+   * @generated from field: string to_status = 3;
+   */
+  toStatus: string;
+
+  /**
+   * Source attribution — see the message comment for the defined
+   * vocabulary. Always non-empty on emitted events; readers MUST
+   * tolerate unknown strings.
+   *
+   * @generated from field: string source = 4;
+   */
+  source: string;
+
+  /**
+   * Plan revision in effect at transition time. Mirrors
+   * ``Plan.revision_index`` of ``session.plan`` at emit time so
+   * operators can correlate transitions with the revision that drove
+   * them (especially useful for supersedes-reroute and plan-revision
+   * sources). Recorded as ``int32`` rather than ``uint32`` for parity
+   * with the existing convention in this file (e.g. revision-driven
+   * counters elsewhere); negative values are not produced.
+   *
+   * @generated from field: int32 revision_stamp = 5;
+   */
+  revisionStamp: number;
+
+  /**
+   * Agent the transition was attributed to — usually
+   * ``Task.assignee_agent_id`` for the transitioning task. Empty when
+   * unbound (e.g. CANCELLED via cascade-from-upstream where the
+   * assignee field on the cascaded task was empty). Bare ADK name
+   * (harmonograf sink canonicalises to compound).
+   *
+   * @generated from field: string agent_name = 6;
+   */
+  agentName: string;
+
+  /**
+   * ADK ``invocation_id`` for the dispatch that drove this transition,
+   * when resolvable. Empty for transitions not tied to a specific
+   * in-flight invocation (e.g. plan-revision-driven CANCELLED) and on
+   * adapters that don't surface an invocation_id. Best-effort.
+   *
+   * @generated from field: string invocation_id = 7;
+   */
+  invocationId: string;
+};
+
+/**
+ * Describes the message goldfive.v1.TaskTransitioned.
+ * Use `create(TaskTransitionedSchema)` to create a new message.
+ */
+export const TaskTransitionedSchema: GenMessage<TaskTransitioned> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 27);
 
