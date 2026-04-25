@@ -477,6 +477,30 @@ export function TrajectoryView() {
   const currentRevisionIndex = currentRev?.revisionIndex ?? revIdx;
   const compareRevisionIndex =
     compareRev?.revisionIndex ?? compareRevIdx ?? null;
+  // Multi-plan awareness for the header (Item 4 of UX cleanup batch).
+  // Compute the distinct plan_ids spanned by ``vm.revs`` — when the
+  // session contains more than one we prefix the rev label with "Plan
+  // {N}" so operators can tell which plan the current revision belongs
+  // to. Plans are numbered by first appearance in the time-sorted rev
+  // list; this composes naturally with the H1 plan picker landing in a
+  // sibling PR (the picker selects a plan and the header reflects which
+  // plan is selected). Single-plan sessions retain the unchanged
+  // "rev N of M" label.
+  const distinctPlanIds: string[] = [];
+  const planIdSeen = new Set<string>();
+  for (const rev of vm.revs) {
+    if (!planIdSeen.has(rev.id)) {
+      planIdSeen.add(rev.id);
+      distinctPlanIds.push(rev.id);
+    }
+  }
+  const multiPlan = distinctPlanIds.length > 1;
+  const currentPlanIndex = currentRev
+    ? distinctPlanIds.indexOf(currentRev.id) + 1
+    : 0;
+  const planPrefix = multiPlan && currentPlanIndex > 0
+    ? `Plan ${currentPlanIndex} · `
+    : '';
   // Only produce diff marks when the user has explicitly pinned a compare
   // rev — otherwise every task would be flagged "added" against a null prev.
   const marks =
@@ -573,7 +597,7 @@ export function TrajectoryView() {
         <span className="hg-panel__hint">
           {vm.revs.length === 0
             ? 'no plan yet'
-            : `rev ${currentRevisionIndex} of ${highestRevisionIndex}${compareRev ? ` · comparing to rev ${compareRevisionIndex}` : ''}`}
+            : `${planPrefix}rev ${currentRevisionIndex} of ${highestRevisionIndex}${compareRev ? ` · comparing to rev ${compareRevisionIndex}` : ''}`}
         </span>
       </header>
       <div className="hg-panel__body hg-traj__body">

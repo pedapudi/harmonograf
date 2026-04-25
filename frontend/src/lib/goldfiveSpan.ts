@@ -199,3 +199,32 @@ export function truncatePreview(text: string, limit: number): string {
   if (text.length <= limit) return text;
   return text.slice(0, limit) + '…';
 }
+
+/**
+ * Per-category glyph used to disambiguate goldfive lane spans visually.
+ * The goldfive lane otherwise renders every category as a "CUSTOM"-kind
+ * span (• dot), so refine / judge / plan / reflective calls were
+ * indistinguishable beyond their fill colour. Distinct glyphs let
+ * operators triage at a glance: refine spans (↻ self-correction) read
+ * different from judge spans (⚖ verdict) read different from plan
+ * spans (📐 planning) read different from reflective spans (✱ progress
+ * check). See Item 6 of the UX cleanup batch.
+ *
+ * Returns null for ``unknown`` so the renderer keeps the default
+ * SpanKind icon (or no icon for plain CUSTOM spans).
+ */
+export function goldfiveCallGlyph(category: GoldfiveCallCategory): string | null {
+  switch (category) {
+    case 'refine':
+      return '↻';
+    case 'judge':
+      return '⚖';
+    case 'plan':
+      return '📐';
+    case 'reflective':
+      return '✱';
+    case 'unknown':
+    default:
+      return null;
+  }
+}

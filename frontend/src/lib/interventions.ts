@@ -136,6 +136,16 @@ export interface InterventionRow {
   // (after supersedes-reroute this is the SUCCESSOR id). Absent on
   // every other source.
   transitionTaskId?: string;
+  // Plan id this intervention is scoped to (Item 5 of UX cleanup batch /
+  // PR #184 follow-up). When a session contains multiple plans (different
+  // plan_ids), the per-plan ``InterventionsList`` filter scopes to this
+  // field so a row produced under one plan doesn't render under every
+  // other plan with the same revisionIndex. Empty when the deriver could
+  // not pin the intervention to a specific plan (e.g. a drift that fired
+  // before any plan landed) — the renderer falls back to attaching it to
+  // the earliest plan in that case so the row still renders exactly
+  // once.
+  targetPlanId?: string;
 }
 
 // Drift kinds emitted by goldfive when the user pulled the trigger. Mirrors
@@ -305,6 +315,8 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
       driftId: '',
       attemptId: '',
       failureKind: '',
+      // Plan-rev rows are intrinsically scoped to their own plan.
+      targetPlanId: plan.id,
     });
   }
 
@@ -593,6 +605,11 @@ function attributeOutcomes(
         const idx = matched.revisionIndex ?? 0;
         row.outcome = `plan_revised:r${idx}`;
         row.planRevisionIndex = idx;
+        // Carry the matched plan's id so the per-plan filter in
+        // GanttView doesn't fall through to "every plan with same
+        // revisionIndex" — fixes the duplicate-rendering bug under
+        // multi-plan sessions (Item 5 / PR #184 follow-up).
+        if (!row.targetPlanId) row.targetPlanId = matched.id;
         continue;
       }
     }
@@ -613,6 +630,7 @@ function attributeOutcomes(
         const idx = fallback.revisionIndex ?? 0;
         row.outcome = `plan_revised:r${idx}`;
         row.planRevisionIndex = idx;
+        if (!row.targetPlanId) row.targetPlanId = fallback.id;
         continue;
       }
     }
@@ -627,6 +645,28 @@ function attributeOutcomes(
       }
     }
     row.outcome = 'recorded';
+  }
+
+  // Final pass: ensure every row has a ``targetPlanId`` so the per-plan
+  // filter in GanttView can attach it exactly once. Rows that didn't
+  // match a plan revision via strict-id or legacy fallback still need a
+  // home; we attach them to the most recent plan whose ``createdAtMs``
+  // is at-or-before the row's ``atMs`` (i.e. the plan that was active
+  // when the intervention fired). No active plan ⇒ first plan in the
+  // session (the row was an early annotation / drift before any plan
+  // landed). No plans at all ⇒ leave empty; the GanttView filter has
+  // nothing to attach to anyway.
+  if (plans.length > 0) {
+    const sortedPlans = [...plans].sort((a, b) => a.createdAtMs - b.createdAtMs);
+    for (const row of rows) {
+      if (row.targetPlanId) continue;
+      let active: TaskPlan | null = null;
+      for (const p of sortedPlans) {
+        if (p.createdAtMs <= row.atMs) active = p;
+        else break;
+      }
+      row.targetPlanId = (active ?? sortedPlans[0]).id;
+    }
   }
 }
 

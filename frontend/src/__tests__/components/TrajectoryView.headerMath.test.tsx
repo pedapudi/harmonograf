@@ -151,14 +151,21 @@ describe('<TrajectoryView /> header "rev N of M" math', () => {
     // rev sequence non-contiguous when the trajectory merges both plans.
     // The header denominator must reflect the highest revisionIndex
     // observed, not `vm.revs.length - 1`.
+    //
+    // Multi-plan note (Item 4 of UX cleanup batch): two distinct plan
+    // ids (p1, p2) means the header now prefixes the rev label with
+    // "Plan {N} · " so operators can see which plan the current rev
+    // belongs to (the H1 plan picker lands the picker UI on top of this
+    // label). The numerator/denominator math is unchanged.
     mockStore.tasks.upsertPlan(mkPlan('p1', [mkTask('t1')], 0));
     mockStore.tasks.upsertPlan(
       mkPlan('p2', [mkTask('t1'), mkTask('t2')], 2, 'user steer', 'user_steer'),
     );
     render(<TrajectoryView />);
     // vm.revs.length === 2, but max revisionIndex === 2 → "rev 2 of 2",
-    // not the buggy "rev 1 of 1".
-    expect(headerHint()).toBe('rev 2 of 2');
+    // not the buggy "rev 1 of 1". Multi-plan prefix surfaces "Plan 2"
+    // because the latest rev belongs to the second distinct plan id.
+    expect(headerHint()).toBe('Plan 2 · rev 2 of 2');
   });
 
   it('switches between "no plan yet" and a "rev N of M" hint as plans land', () => {
@@ -173,5 +180,33 @@ describe('<TrajectoryView /> header "rev N of M" math', () => {
     expect(
       screen.getByRole('heading', { name: 'Trajectory' }),
     ).toBeInTheDocument();
+  });
+
+  it('omits the multi-plan prefix in the single-plan case (Item 4)', () => {
+    // One plan id across multiple revs → no "Plan N · " prefix; the
+    // header reads exactly "rev N of M" as before.
+    mockStore.tasks.upsertPlan(mkPlan('p1', [mkTask('t1')], 0));
+    mockStore.tasks.upsertPlan(
+      mkPlan('p1', [mkTask('t1'), mkTask('t2')], 1, 'next', 'goldfive'),
+    );
+    render(<TrajectoryView />);
+    expect(headerHint()).toBe('rev 1 of 1');
+    expect(headerHint()).not.toContain('Plan');
+  });
+
+  it('prefixes "Plan N · " when multiple plan ids are present (Item 4)', () => {
+    // Three distinct plan ids → header surfaces the index of the plan
+    // the current rev belongs to, so an operator viewing rev 2 can tell
+    // which plan they're scoped to ahead of the H1 plan picker landing.
+    mockStore.tasks.upsertPlan(mkPlan('p1', [mkTask('t1')], 0));
+    mockStore.tasks.upsertPlan(
+      mkPlan('p2', [mkTask('t1'), mkTask('t2')], 1, 'split', 'plan_divergence'),
+    );
+    mockStore.tasks.upsertPlan(
+      mkPlan('p3', [mkTask('t1'), mkTask('t2'), mkTask('t3')], 2, 'next', 'goldfive'),
+    );
+    render(<TrajectoryView />);
+    // Latest rev belongs to the third distinct plan id → "Plan 3".
+    expect(headerHint()).toBe('Plan 3 · rev 2 of 2');
   });
 });

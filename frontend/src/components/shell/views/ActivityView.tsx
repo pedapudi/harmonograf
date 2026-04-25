@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useUiStore } from '../../../state/uiStore';
 import { useSessionWatch } from '../../../rpc/hooks';
 import type { Span } from '../../../gantt/types';
+import { activityKindLabel } from './activityKind';
 
 const MAX_ROWS = 200;
 
@@ -62,7 +63,7 @@ export function ActivityView() {
                 onClick={() => selectSpan(span.id)}
               >
                 <span className="hg-activity__time">{fmtTime(span.startMs)}</span>
-                <span className="hg-activity__kind">{span.kind}</span>
+                <span className="hg-activity__kind">{activityKindLabel(span)}</span>
                 <span className="hg-activity__name">{span.name || '(unnamed)'}</span>
                 <span className="hg-activity__agent">{span.agentId}</span>
                 <span

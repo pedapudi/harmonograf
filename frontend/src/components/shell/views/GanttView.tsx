@@ -374,17 +374,24 @@ export function GanttView() {
                   onTaskClick={handleTaskClick}
                 />
                 <InterventionsList
-                  rows={interventions.filter(
-                    // Attach each intervention to the plan whose rev it
-                    // produced, or — if it never produced a revision —
-                    // the nearest preceding plan. Keeps every plan
-                    // uncluttered while still showing every
-                    // intervention exactly once.
-                    (row) =>
-                      row.planRevisionIndex > 0
-                        ? (plan.revisionIndex ?? 0) === row.planRevisionIndex
-                        : (plan.revisionIndex ?? 0) === 0,
-                  )}
+                  rows={interventions.filter((row) => {
+                    // Plan-scoped attachment (Item 5 of UX cleanup batch /
+                    // PR #184 follow-up). Multi-plan sessions used to
+                    // duplicate every "intervention with revisionIndex 0"
+                    // under each plan's section because the filter only
+                    // compared revisionIndex. The deriver now stamps a
+                    // ``targetPlanId`` on every row, so we scope by it
+                    // when present.
+                    if (row.targetPlanId) {
+                      return row.targetPlanId === plan.id;
+                    }
+                    // Backward-compat path: a row without targetPlanId
+                    // (legacy fixtures, hand-built rows in tests) falls
+                    // back to the previous revisionIndex-only behaviour.
+                    return row.planRevisionIndex > 0
+                      ? (plan.revisionIndex ?? 0) === row.planRevisionIndex
+                      : (plan.revisionIndex ?? 0) === 0;
+                  })}
                 />
               </div>
             ))}

@@ -552,3 +552,111 @@ describe('marker sizing / palette', () => {
     expect(SOURCE_COLOR.drift).not.toBe(SOURCE_COLOR.goldfive);
   });
 });
+
+describe('deriveInterventions — targetPlanId (Item 5 of UX cleanup batch)', () => {
+  it('stamps targetPlanId on plan-revision rows from the plan they originated on', () => {
+    const planA = mkPlan({
+      id: 'plan-A',
+      revisionIndex: 1,
+      revisionKind: 'off_topic',
+      revisionReason: 'off topic',
+      createdAtMs: 100,
+    });
+    const rows = deriveInterventions({
+      annotations: [],
+      drifts: [],
+      plans: [planA],
+    });
+    const planRow = rows.find((r) => r.source === 'drift' && r.kind === 'OFF_TOPIC');
+    expect(planRow?.targetPlanId).toBe('plan-A');
+  });
+
+  it('stamps targetPlanId on drift rows via strict trigger_event_id match', () => {
+    // Drift triggers a refine that produces plan-B's revision; the
+    // attributeOutcomes step should copy plan-B's id onto the drift row.
+    const planB = mkPlan({
+      id: 'plan-B',
+      revisionIndex: 2,
+      revisionKind: 'off_topic',
+      revisionReason: 'reroute',
+      createdAtMs: 300,
+      triggerEventId: 'drift-id-1',
+    });
+    const rows = deriveInterventions({
+      annotations: [],
+      drifts: [
+        mkDrift({
+          seq: 1,
+          kind: 'off_topic',
+          driftId: 'drift-id-1',
+          recordedAtMs: 250,
+        }),
+      ],
+      plans: [planB],
+    });
+    const driftRow = rows.find((r) => r.source === 'drift' && r.driftId === 'drift-id-1');
+    expect(driftRow?.targetPlanId).toBe('plan-B');
+    // The plan-rev row that merged in the strict-id pass also carries
+    // plan-B's id (or the merge survivor inherits from either side).
+    expect(driftRow?.planRevisionIndex).toBe(2);
+  });
+
+  it('falls back to the active plan at intervention time when no rev match', () => {
+    // Two distinct plans in the session, an early drift that didn't
+    // produce a revision. The deriver attaches the drift to plan-A
+    // (active when the drift fired), not plan-B.
+    const planA = mkPlan({ id: 'plan-A', createdAtMs: 0, revisionIndex: 0 });
+    const planB = mkPlan({ id: 'plan-B', createdAtMs: 500, revisionIndex: 0 });
+    const rows = deriveInterventions({
+      annotations: [],
+      drifts: [
+        mkDrift({
+          seq: 1,
+          kind: 'looping_reasoning',
+          driftId: 'drift-id-1',
+          recordedAtMs: 100,
+        }),
+      ],
+      plans: [planA, planB],
+    });
+    const driftRow = rows.find((r) => r.source === 'drift');
+    expect(driftRow?.targetPlanId).toBe('plan-A');
+  });
+
+  it('attaches drifts that fired after the latest plan to that plan', () => {
+    const planA = mkPlan({ id: 'plan-A', createdAtMs: 0, revisionIndex: 0 });
+    const planB = mkPlan({ id: 'plan-B', createdAtMs: 500, revisionIndex: 0 });
+    const rows = deriveInterventions({
+      annotations: [],
+      drifts: [
+        mkDrift({
+          seq: 1,
+          kind: 'looping_reasoning',
+          driftId: 'drift-id-1',
+          recordedAtMs: 800,
+        }),
+      ],
+      plans: [planA, planB],
+    });
+    const driftRow = rows.find((r) => r.source === 'drift');
+    expect(driftRow?.targetPlanId).toBe('plan-B');
+  });
+
+  it('attaches early drifts to the first plan when they fired before any plan', () => {
+    const planA = mkPlan({ id: 'plan-A', createdAtMs: 500, revisionIndex: 0 });
+    const rows = deriveInterventions({
+      annotations: [],
+      drifts: [
+        mkDrift({
+          seq: 1,
+          kind: 'looping_reasoning',
+          driftId: 'drift-id-1',
+          recordedAtMs: 100, // Before plan-A's createdAtMs.
+        }),
+      ],
+      plans: [planA],
+    });
+    const driftRow = rows.find((r) => r.source === 'drift');
+    expect(driftRow?.targetPlanId).toBe('plan-A');
+  });
+});

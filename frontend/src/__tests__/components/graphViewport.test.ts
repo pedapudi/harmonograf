@@ -107,6 +107,33 @@ describe('graphViewport — fitRect', () => {
     expect(vp.scale).toBe(0.25);
   });
 
+  it('clamps the fit-scale up to ``minScale`` when content is larger than the container', () => {
+    // Item 2 of UX cleanup batch: the GraphView's initial-fit was leaving
+    // the canvas at 0.37× when the DAG was wider than the viewport,
+    // which read as broken / mostly empty. The fitRect ``minScale``
+    // option clamps the floor so big DAGs open at 1.0× (centered) and
+    // operators can pan from there.
+    const vp = fitRect(
+      { x: 0, y: 0, w: 2000, h: 1000 },
+      { w: 800, h: 600 },
+      24,
+      { minScale: 1 },
+    );
+    expect(vp.scale).toBe(1);
+  });
+
+  it('does not change behaviour when ``minScale`` is below the natural fit', () => {
+    // Sanity: minScale only acts as a floor. Tiny content that fits
+    // comfortably should still hit MAX_SCALE clamping.
+    const vp = fitRect(
+      { x: 0, y: 0, w: 100, h: 50 },
+      { w: 800, h: 600 },
+      20,
+      { minScale: 1 },
+    );
+    expect(vp.scale).toBe(MAX_SCALE);
+  });
+
   it('handles a non-origin content rect', () => {
     const vp = fitRect({ x: 50, y: 100, w: 200, h: 100 }, { w: 400, h: 300 }, 10);
     // Content top-left should sit at (pad + extraX, pad + extraY).

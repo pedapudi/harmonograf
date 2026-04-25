@@ -30,7 +30,26 @@ export function NotesView() {
           </div>
         )}
         {sessionId && sorted.length === 0 && (
-          <div className="hg-panel__empty">No notes yet for this session.</div>
+          // Empty-state CTA. The "Add note" affordance lives on the span
+          // popover (Interaction/SpanPopover.tsx :: annotate) — this view
+          // doesn't own the add flow. The CTA below directs operators to
+          // it so the empty panel isn't a dead end. See Item 3 of the UX
+          // cleanup batch.
+          <div className="hg-panel__empty hg-notes__empty" data-testid="notes-empty-cta">
+            <div className="hg-notes__empty-glyph" aria-hidden="true">
+              {'✉'}
+            </div>
+            <div className="hg-notes__empty-title">
+              No notes for this session yet.
+            </div>
+            <div className="hg-notes__empty-hint">
+              Click any span on the Gantt or Graph view, then press
+              {' '}
+              <kbd>Add note</kbd>
+              {' '}
+              in the popover to attach a comment.
+            </div>
+          </div>
         )}
         {sorted.length > 0 && (
           <ul className="hg-notes__list" data-testid="notes-list">

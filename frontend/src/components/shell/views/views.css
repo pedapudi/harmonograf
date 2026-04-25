@@ -41,6 +41,42 @@
   text-align: center;
 }
 
+.hg-notes__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 24px;
+  opacity: 1;
+}
+
+.hg-notes__empty-glyph {
+  font-size: 36px;
+  opacity: 0.5;
+}
+
+.hg-notes__empty-title {
+  font-size: 14px;
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+.hg-notes__empty-hint {
+  font-size: 12px;
+  opacity: 0.6;
+  max-width: 320px;
+  line-height: 1.5;
+}
+
+.hg-notes__empty-hint kbd {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 1px 6px;
+  background: var(--md-sys-color-surface-container-highest, #31333c);
+  border: 1px solid var(--md-sys-color-outline-variant, #4a4a53);
+  border-radius: 4px;
+}
+
 .hg-activity__list,
 .hg-notes__list {
   list-style: none;
