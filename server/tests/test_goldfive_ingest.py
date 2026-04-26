@@ -108,9 +108,24 @@ async def _drain(sub, kinds: set[str] | None = None) -> list:
 
 def _make_event(**kwargs) -> ge.Event:
     evt = ge.Event()
-    evt.event_id = kwargs.get("event_id", "e1")
-    evt.run_id = kwargs.get("run_id", "run-1")
-    evt.sequence = kwargs.get("sequence", 0)
+    # goldfive#271 Phase 3 Addition B: every wire envelope carries a
+    # globally-unique ``event_id`` of the form
+    # ``{run_id}:{sequence}:{uuid4_short}``. Tests that don't pass an
+    # explicit ``event_id`` get one synthesised here so the storage
+    # layer's UNIQUE-on-event_id dedup doesn't collapse otherwise-
+    # distinct events. Tests that DO pass an explicit ``event_id`` (the
+    # idempotent-replay tests) use it verbatim — they want the dedup.
+    run_id = kwargs.get("run_id", "run-1")
+    sequence = kwargs.get("sequence", 0)
+    explicit_eid = kwargs.get("event_id")
+    if explicit_eid is None:
+        import uuid as _uuid
+
+        evt.event_id = f"{run_id}:{sequence}:{_uuid.uuid4().hex[:8]}"
+    else:
+        evt.event_id = explicit_eid
+    evt.run_id = run_id
+    evt.sequence = sequence
     return evt
 
 

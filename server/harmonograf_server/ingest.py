@@ -876,6 +876,13 @@ class IngestPipeline:
             )
             raw_bytes = b""
         try:
+            # goldfive#271 Phase 3 Addition B: thread the wire event_id
+            # through to the persisted row. Pre-#271 producers leave it
+            # empty; the storage layer's INSERT path synthesises a
+            # deterministic ``{session_id}:{run_id}:{sequence}`` fallback
+            # in that case so the column / UNIQUE INDEX remain populated
+            # without a per-row uuid mint here.
+            wire_event_id = str(getattr(event, "event_id", "") or "")
             await self._store.append_goldfive_event(
                 GoldfiveEventRecord(
                     session_id=target_ctx.session_id,
@@ -884,6 +891,7 @@ class IngestPipeline:
                     kind=kind,
                     recorded_at=self._now(),
                     payload_bytes=raw_bytes,
+                    event_id=wire_event_id,
                 )
             )
         except Exception as exc:  # noqa: BLE001 — defensive: ingest must not raise

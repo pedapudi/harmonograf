@@ -271,6 +271,16 @@ class GoldfiveEventRecord:
     sequence: int
     recorded_at: float
     payload_bytes: bytes = b""
+    # goldfive#271 Phase 3 Addition B: globally-unique event id of the
+    # form ``{run_id}:{sequence}:{uuid4_short}`` minted by goldfive's
+    # ``Session.next_event_id``. Empty for pre-#271 wire envelopes; the
+    # ingest path synthesises a deterministic
+    # ``{session_id}:{run_id}:{sequence}`` fallback when that's the case
+    # so the persisted column is always non-empty (matches the SQLite
+    # backfill behaviour). New goldfive producers always populate the
+    # field — the uuid suffix is what makes it survive harmonograf#61's
+    # outer-session-pin collapse without PK collision.
+    event_id: str = ""
 
 
 @dataclass
