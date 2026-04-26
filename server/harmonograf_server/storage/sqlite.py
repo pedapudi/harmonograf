@@ -285,12 +285,38 @@ CREATE TABLE IF NOT EXISTS goldfive_events (
     kind TEXT NOT NULL,
     recorded_at REAL NOT NULL,
     payload_bytes BLOB NOT NULL DEFAULT X'',
+    -- goldfive#271 Phase 3 Addition B: globally-unique event_id of the
+    -- form ``{run_id}:{sequence}:{uuid4_short}`` minted by goldfive's
+    -- Session.next_event_id. Pre-#271 producers leave the wire field
+    -- empty; the ingest path synthesises a deterministic
+    -- ``{session_id}:{run_id}:{sequence}`` fallback in that case so this
+    -- column is always non-empty. Outer-session pin (harmonograf#61)
+    -- collapses two turns onto the same outer session_id; per-turn
+    -- sequence resets at 0 and the composite PK
+    -- ``(session_id, run_id, sequence)`` collides on the seq-0 events
+    -- (silently dropped by INSERT OR IGNORE). The new event_id is
+    -- globally unique by construction (uuid4 suffix) so it is the
+    -- right dedup key for new ingests.
+    --
+    -- The composite PK is preserved for back-compat with pre-existing
+    -- data; new INSERTs dedup on the UNIQUE INDEX over event_id below.
+    -- A future migration may swap the composite for event_id once the
+    -- ecosystem has fully cut over.
+    event_id TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (session_id, run_id, sequence)
 );
 CREATE INDEX IF NOT EXISTS idx_goldfive_events_session_kind
     ON goldfive_events(session_id, kind);
 CREATE INDEX IF NOT EXISTS idx_goldfive_events_session_time
     ON goldfive_events(session_id, recorded_at);
+-- harmonograf#61 / goldfive#271 Phase 3 Addition B: UNIQUE on event_id
+-- so duplicate event_ids (producer mis-mints, replays carrying the same
+-- id) collapse cleanly without relying on the composite PK. NULLs are
+-- not allowed by the column (NOT NULL DEFAULT '') so the UNIQUE
+-- constraint is on real strings — but partial WHERE filters out the
+-- empty-string default left by pre-#271 rows so legacy data can coexist.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_goldfive_events_event_id
+    ON goldfive_events(event_id) WHERE event_id != '';
 """
 
 
@@ -393,6 +419,37 @@ class SqliteStore(Store):
             await self._db.execute(
                 "ALTER TABLE tasks ADD COLUMN supersedes_kind INTEGER NOT NULL DEFAULT 0"
             )
+        # goldfive#271 Phase 3 Addition B: event_id column on
+        # goldfive_events. Pre-existing dev DBs predate the column;
+        # ALTER TABLE adds it with empty default. The CREATE TABLE in
+        # SCHEMA also declares it for fresh DBs; we still need to ALTER
+        # for upgraded ones because SQLite doesn't re-execute CREATE
+        # TABLE IF NOT EXISTS to add columns. After the column lands,
+        # backfill empty-string rows with a deterministic synthetic id
+        # so the UNIQUE INDEX created by SCHEMA's idx_goldfive_events_event_id
+        # has a populated key for every row.
+        async with self._db.execute("PRAGMA table_info(goldfive_events)") as cur:
+            ge_cols = {row[1] for row in await cur.fetchall()}
+        if "event_id" not in ge_cols:
+            await self._db.execute(
+                "ALTER TABLE goldfive_events ADD COLUMN event_id TEXT NOT NULL DEFAULT ''"
+            )
+        # Backfill empty-string event_ids deterministically. The
+        # synthesised value is ``{session_id}:{run_id}:{sequence}`` —
+        # it's NOT globally-unique under outer-session collapse (that's
+        # the whole point of the new uuid-suffixed format) but it IS
+        # unique within pre-#271 data because the composite PK already
+        # guaranteed the triple is unique per row. Forward-only — when
+        # a fresh wire event arrives carrying its own event_id, the
+        # ingest path uses that value verbatim and does NOT overwrite
+        # this synthetic one. The UNIQUE INDEX is created with
+        # ``WHERE event_id != ''`` so empty rows (mid-migration race)
+        # don't break the constraint, but after backfill there are
+        # none.
+        await self._db.execute(
+            "UPDATE goldfive_events SET event_id = session_id || ':' || run_id || ':' || sequence "
+            "WHERE event_id = ''"
+        )
         await self._db.commit()
 
     async def close(self) -> None:
@@ -1445,11 +1502,23 @@ class SqliteStore(Store):
             # sequence) exactly once, but a reconnect / replay race
             # could re-deliver the same envelope. Idempotent-by-key
             # matches ``_handle_span_start`` 's dedup semantics.
+            #
+            # goldfive#271 Phase 3 Addition B: ALSO write event_id. When
+            # the wire envelope carries one (post-#271 producer), use it
+            # verbatim; otherwise synthesize the deterministic
+            # ``{session_id}:{run_id}:{sequence}`` fallback that matches
+            # what the SCHEMA backfill stamped on legacy rows. The
+            # column has a UNIQUE INDEX, so the two-key dedup is:
+            # composite PK (legacy contract) + event_id UNIQUE
+            # (Phase 3 contract). Both ride the same INSERT OR IGNORE.
+            event_id = record.event_id or (
+                f"{record.session_id}:{record.run_id}:{int(record.sequence)}"
+            )
             await self.db.execute(
                 """
                 INSERT OR IGNORE INTO goldfive_events
-                    (session_id, run_id, sequence, kind, recorded_at, payload_bytes)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (session_id, run_id, sequence, kind, recorded_at, payload_bytes, event_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.session_id,
@@ -1458,6 +1527,7 @@ class SqliteStore(Store):
                     record.kind,
                     record.recorded_at,
                     record.payload_bytes or b"",
+                    event_id,
                 ),
             )
             await self.db.commit()
@@ -1471,7 +1541,7 @@ class SqliteStore(Store):
     ) -> list[GoldfiveEventRecord]:
         async with self._lock:
             q = (
-                "SELECT session_id, run_id, sequence, kind, recorded_at, payload_bytes "
+                "SELECT session_id, run_id, sequence, kind, recorded_at, payload_bytes, event_id "
                 "FROM goldfive_events WHERE session_id = ?"
             )
             args: list[Any] = [session_id]
@@ -1492,6 +1562,7 @@ class SqliteStore(Store):
                 kind=r["kind"],
                 recorded_at=r["recorded_at"],
                 payload_bytes=bytes(r["payload_bytes"] or b""),
+                event_id=r["event_id"] if "event_id" in r.keys() else "",
             )
             for r in rows
         ]

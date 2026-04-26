@@ -54,8 +54,11 @@ class InMemoryStore(Store):
         # session_id -> list[GoldfiveEventRecord] (append-only, in wire order).
         # Keyed-by-tuple dedup is layered on top via ``_seen_gf_events``
         # to match sqlite's PRIMARY KEY semantics under reconnect replay.
+        # goldfive#271 Phase 3 Addition B: dedup key is a tagged tuple —
+        # ``("event_id", record.event_id)`` for post-#271 records,
+        # ``("composite", session_id, run_id, sequence)`` for legacy.
         self._gf_events: dict[str, list[GoldfiveEventRecord]] = {}
-        self._seen_gf_events: set[tuple[str, str, int]] = set()
+        self._seen_gf_events: set[tuple] = set()
 
     async def start(self) -> None:
         return None
@@ -506,11 +509,25 @@ class InMemoryStore(Store):
     async def append_goldfive_event(
         self, record: GoldfiveEventRecord
     ) -> None:
-        key = (record.session_id, record.run_id, int(record.sequence))
+        # Composite (session_id, run_id, sequence) remains the primary
+        # dedup key — that's the contract callers (and tests) have
+        # written against. goldfive#271 Phase 3 Addition B adds the
+        # event_id field as an additional UNIQUE constraint at the
+        # sqlite layer; for the in-memory store we dedup on the
+        # composite OR a non-empty event_id whichever has been seen,
+        # mirroring sqlite's combined PK + UNIQUE INDEX semantics.
+        composite: tuple = ("composite", record.session_id, record.run_id, int(record.sequence))
+        eid_key: tuple | None = (
+            ("event_id", record.event_id) if record.event_id else None
+        )
         async with self._lock:
-            if key in self._seen_gf_events:
+            if composite in self._seen_gf_events:
                 return
-            self._seen_gf_events.add(key)
+            if eid_key is not None and eid_key in self._seen_gf_events:
+                return
+            self._seen_gf_events.add(composite)
+            if eid_key is not None:
+                self._seen_gf_events.add(eid_key)
             self._gf_events.setdefault(record.session_id, []).append(
                 copy.deepcopy(record)
             )
