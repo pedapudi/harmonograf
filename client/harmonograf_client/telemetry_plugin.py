@@ -1367,9 +1367,41 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         surface in the interventions panel as if the operator typed
         them. The legitimate mid-turn HITL path stays on the parent's
         session id and continues to emit.
+
+        Goldfive re-entry contract (harmonograf#234, goldfive#325): when
+        running under a goldfive-wrapped agent tree, the inner ADK
+        Runner re-fires ``on_user_message_callback`` for goldfive's
+        re-feed of the operator's input (``OVERLAY_REPLAY``) and again
+        for goldfive-composed nudge / steer-restart bodies
+        (``NUDGE_REPLAY`` / ``STEER_REPLAY``). The outer adk-web Runner
+        already emitted the operator's user_message as a USER_TURN, so
+        every non-USER_TURN re-entry is a duplicate (or goldfive-authored
+        framing, not operator content) that we must NOT re-emit. Plain
+        ADK use is unaffected: the contextvar's default is USER_TURN
+        and the ``ImportError`` fallback keeps the plugin working when
+        goldfive is not installed.
         """
         if self._maybe_disable_as_duplicate(invocation_context):
             return
+        # Honor goldfive's re-entry contract (goldfive#325). Only
+        # USER_TURN represents new operator input; other kinds are
+        # framework replays whose content was already emitted by the
+        # outer runner, or is goldfive-composed (not operator-authored).
+        try:
+            from goldfive.adapters.adk_reentry import (  # type: ignore[import-not-found]
+                ReentryKind,
+                current_reentry_kind,
+            )
+        except ImportError:
+            pass  # plain ADK, no goldfive — proceed with current behaviour
+        else:
+            if current_reentry_kind.get() is not ReentryKind.USER_TURN:
+                log.debug(
+                    "telemetry_plugin: suppressing UserMessageReceived for "
+                    "goldfive re-entry kind=%s",
+                    current_reentry_kind.get().value,
+                )
+                return
         text = _extract_user_message_text(user_message)
         if not text:
             return
