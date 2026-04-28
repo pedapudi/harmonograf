@@ -211,47 +211,32 @@ async def test_user_drift_kind_is_attributed_to_user_source(store):
     assert records[0].drift_kind == "user_steer"
 
 
-# goldfive#271 follow-up: Runner._install_revision fabricates a
-# USER_STEER drift on every plan install so the install pipeline can
-# route uniformly through DefaultSteerer.apply_user_steer_with_plan.
-# The drift is plumbing, not an operator action; goldfive marks it
-# ``synthetic = True`` on the wire and the aggregator MUST filter it
-# out of the user-facing interventions list. v15 UI session
-# ``v15presmtx-1`` showed REFINE:USER_STEER + STEER WARNING cards on
-# the FIRST install at 0:30s with no operator action — this test pins
-# that exact regression.
-async def test_synthetic_user_steer_drift_is_filtered_from_intervention_list(store):
-    """Synthetic ``USER_STEER`` drifts (Runner._install_revision plumbing)
-    must NOT surface as ``Intervention`` records.
+# goldfive#271 Option A: ``Runner._install_revision`` no longer
+# fabricates a USER_STEER drift on every plan install. Turn-1 installs
+# emit ``PlanRevised`` only (no ``DriftDetected``); turn N+1 installs
+# emit ``NEW_WORK_DISCOVERED``. So the synthetic-filter fallbacks the
+# v15 / v17 regressions needed are gone — the upstream stops producing
+# the phantom rows in the first place. The tests below pin Option A's
+# wire shape: a real operator STEER drift surfaces; an Option-A
+# turn-1 install (no drift, just a PlanRevised) surfaces as a
+# bare-plan card whose absence of upstream intervention is honest
+# (the framework chose this plan; no operator pushed it).
+async def test_real_operator_steer_drift_surfaces_in_intervention_list(store):
+    """A genuine operator STEER drift (with annotation_id) surfaces
+    as a USER STEER intervention — Option A doesn't change the
+    real-steer path."""
 
-    A real operator STEER drift (``synthetic = False``) on the same
-    session MUST surface unchanged so this filter doesn't silently hide
-    genuine interventions.
-    """
-
-    sid = "sess_synthetic_steer"
+    sid = "sess_real_steer"
     await _seed_session(store, sid)
     drifts = _StubDrifts(
         {
             sid: [
-                # Synthetic install drift — MUST be filtered.
-                {
-                    "run_id": "r1",
-                    "kind": "user_steer",
-                    "severity": "warning",
-                    "detail": "fresh user turn",
-                    "recorded_at": 100.0,
-                    "synthetic": True,
-                    "id": "drift_install_a",
-                },
-                # Real operator STEER — MUST surface.
                 {
                     "run_id": "r1",
                     "kind": "user_steer",
                     "severity": "warning",
                     "detail": "operator-Alice: refocus",
                     "recorded_at": 250.0,
-                    "synthetic": False,
                     "id": "drift_real_steer",
                     "annotation_id": "ann_real_x",
                 },
@@ -259,141 +244,14 @@ async def test_synthetic_user_steer_drift_is_filtered_from_intervention_list(sto
         }
     )
     records = await list_interventions(sid, store=store, drifts_provider=drifts)
-    # Only the real operator STEER drift surfaces.
     assert len(records) == 1, (
-        "expected synthetic install drift to be filtered out; got "
+        f"expected the operator STEER to surface; got "
         f"records={[(r.kind, r.body_or_reason) for r in records]!r}"
     )
     assert records[0].source == "user"
     assert records[0].kind == "STEER"
     assert records[0].body_or_reason == "operator-Alice: refocus"
     assert records[0].annotation_id == "ann_real_x"
-
-
-# goldfive#271 follow-up: v17 UI regression. PR #302 set
-# ``synthetic = True`` on ``Runner._install_revision``'s drift and
-# PR #219 made the aggregator filter synthetic drifts. But the
-# matching ``PlanRevised`` carries the synthetic drift's id as
-# ``trigger_event_id`` with no synthetic flag of its own (the proto
-# field doesn't exist on PlanRevised) — so once the drift was filtered,
-# the plan-revision row fell through the strict-id merge alone and
-# surfaced as a phantom ``STEER WARNING -> REV 1`` card at 0:22 on
-# every fresh user turn (v17 session
-# 845dcbe8-0861-452f-b7ba-e37703458785). This test pins the third leak
-# path: the plan-revision row whose ``trigger_event_id`` matches a
-# synthetic drift's id MUST be filtered too.
-async def test_synthetic_install_plan_revision_is_filtered_from_intervention_list(store):
-    """A ``PlanRevised`` whose ``trigger_event_id`` matches a synthetic
-    drift's id MUST NOT surface as an intervention.
-
-    A real operator STEER drift + matching plan revision on the same
-    session MUST surface unchanged so this filter does not silently
-    swallow genuine interventions.
-    """
-
-    sid = "sess_synthetic_plan"
-    await _seed_session(store, sid)
-
-    synthetic_drift_id = "drift_install_xyz"
-    real_drift_id = "drift_real_steer_xyz"
-
-    # The PlanRevised that goldfive's _install_revision pipeline would
-    # mint on the first user turn — trigger_event_id matches the
-    # synthetic USER_STEER drift below.
-    await store.put_task_plan(
-        TaskPlan(
-            id="plan_install_1",
-            session_id=sid,
-            created_at=100.0,
-            summary="install rev 1",
-            tasks=[],
-            edges=[],
-            revision_reason="Create a presentation about solar panels",
-            revision_kind="user_steer",
-            revision_severity="warning",
-            revision_index=1,
-            trigger_event_id=synthetic_drift_id,
-        )
-    )
-    # A genuine user STEER followed by a real revision (rev 2). MUST
-    # surface so the regression test pins both the filter-out AND the
-    # don't-overfilter requirements.
-    await store.put_annotation(
-        Annotation(
-            id="ann_real",
-            session_id=sid,
-            target=AnnotationTarget(agent_id="a", time_start=240.0),
-            author="alice",
-            created_at=240.0,
-            kind=AnnotationKind.STEERING,
-            body="operator-Alice: refocus on flares",
-        )
-    )
-    await store.put_task_plan(
-        TaskPlan(
-            id="plan_real_2",
-            session_id=sid,
-            created_at=260.0,
-            summary="real rev 2",
-            tasks=[],
-            edges=[],
-            revision_reason="Forget solar panels, tell me about solar flares",
-            revision_kind="user_steer",
-            revision_severity="warning",
-            revision_index=2,
-            # Real operator STEER drift carries the source annotation_id
-            # as trigger_event_id (per goldfive#199 / harmonograf#99
-            # rescope), which strict-id-merges onto the annotation row.
-            trigger_event_id="ann_real",
-        )
-    )
-    drifts = _StubDrifts(
-        {
-            sid: [
-                {
-                    "run_id": "r1",
-                    "kind": "user_steer",
-                    "severity": "warning",
-                    "detail": "Create a presentation about solar panels",
-                    "recorded_at": 100.0,
-                    "synthetic": True,
-                    "id": synthetic_drift_id,
-                },
-                {
-                    "run_id": "r1",
-                    "kind": "user_steer",
-                    "severity": "warning",
-                    "detail": "Forget solar panels, tell me about solar flares",
-                    "recorded_at": 250.0,
-                    "synthetic": False,
-                    "id": real_drift_id,
-                    "annotation_id": "ann_real",
-                },
-            ]
-        }
-    )
-
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
-
-    # The synthetic drift, the synthetic install plan-revision row, AND
-    # any phantom STEER card built from them MUST all be filtered. Only
-    # the real operator STEER (annotation row, with rev 2 outcome
-    # absorbed via strict-id merge) surfaces.
-    surfaced = [(r.source, r.kind, r.outcome, r.body_or_reason) for r in records]
-    assert len(records) == 1, (
-        "expected synthetic install plan-revision to be filtered out; got "
-        f"records={surfaced!r}"
-    )
-    assert records[0].source == "user"
-    assert records[0].kind == "STEER"
-    assert records[0].annotation_id == "ann_real"
-    # Belt-and-braces: no record should reference the synthetic drift's
-    # id as its trigger_event_id (would re-introduce the phantom).
-    for r in records:
-        assert r.trigger_event_id != synthetic_drift_id
-        assert r.plan_revision_index != 1, (
-            "rev 1 was the synthetic install revision and must not surface"
-        )
 
 
 async def test_ordering_across_sources_is_by_timestamp(store):

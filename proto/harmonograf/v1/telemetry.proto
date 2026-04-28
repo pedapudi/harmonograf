@@ -240,17 +240,13 @@ message RefineAttempted {
   // side; the harmonograf sink canonicalizes to ``<client>:<bare>``
   // (mirrors the rule applied to every other compound id).
   string current_agent_id = 10;
-  // True when the triggering ``DriftDetected`` was a goldfive plumbing
-  // synthesis (e.g. the ``USER_STEER`` drift
-  // ``Runner._install_revision`` fabricates on every plan install so
-  // the install pipeline can route uniformly through
-  // ``DefaultSteerer.apply_user_steer_with_plan``). Synthetic refine
-  // rows are filtered out of the user-facing interventions panel; the
-  // event itself remains in the audit timeline so debug views still
-  // surface it. Always ``false`` on refines triggered by genuine
-  // user-control drifts (carrying a ``raw`` ControlMessage) and on
-  // refines triggered by autonomous detector drifts.
-  bool synthetic = 11;
+  // Field 11 (``synthetic``) was retired with goldfive#271 Option A
+  // (the corresponding goldfive field is also reserved). Plan
+  // installs no longer fabricate synthetic USER_STEER drifts, so
+  // there is no plumbing-only refine row to filter. Reserved so old
+  // wire bytes deserialise; do NOT reuse the tag.
+  reserved 11;
+  reserved "synthetic";
 }
 
 // Operator-facing record that a refine attempt produced an unusable
