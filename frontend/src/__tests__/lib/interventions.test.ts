@@ -185,6 +185,96 @@ describe('deriveInterventions', () => {
     }
   });
 
+  // goldfive#271 follow-up: v17 UI regression. PR #302 set
+  // ``synthetic = true`` on Runner._install_revision's drift and PR
+  // #219 made the deriver filter synthetic drifts. But the matching
+  // PlanRevised carries the synthetic drift's id as triggerEventId
+  // with no synthetic flag of its own (the proto field doesn't exist
+  // on PlanRevised) — so once the drift was filtered, the
+  // plan-revision row fell through the strict-id merge alone and
+  // surfaced as a phantom ``STEER WARNING -> REV 1`` card at 0:22 on
+  // every fresh user turn (v17 session
+  // 845dcbe8-0861-452f-b7ba-e37703458785). This test pins the third
+  // leak path: a plan-revision row whose triggerEventId matches a
+  // synthetic drift's id MUST be filtered too.
+  it('filters synthetic install plan-revisions from the interventions panel', () => {
+    const rows = deriveInterventions({
+      annotations: [
+        // Real operator STEER drives revision 2.
+        mkAnnotation({
+          id: 'ann_real',
+          createdAtMs: 240,
+          author: 'alice',
+          body: 'operator-Alice: refocus on flares',
+        }),
+      ],
+      drifts: [
+        // Synthetic install drift — filtered by the existing PR #219
+        // loop. We're checking the plan-revision filter doesn't depend
+        // on the drift surviving.
+        mkDrift({
+          seq: 0,
+          kind: 'user_steer',
+          severity: 'warning',
+          recordedAtMs: 100,
+          driftId: 'drift_install_v17',
+          synthetic: true,
+        }),
+        // Real operator STEER — surfaces as the user row, with rev 2
+        // outcome merged via strict-id (annotation_id == triggerEventId).
+        mkDrift({
+          seq: 1,
+          kind: 'user_steer',
+          severity: 'warning',
+          recordedAtMs: 250,
+          driftId: 'drift_real_steer',
+          annotationId: 'ann_real',
+          synthetic: false,
+        }),
+      ],
+      plans: [
+        // The synthetic install plan revision — triggerEventId matches
+        // the synthetic drift. MUST be filtered (was leaking pre-fix).
+        mkPlan({
+          id: 'plan_install_1',
+          createdAtMs: 100,
+          revisionKind: 'user_steer',
+          revisionSeverity: 'warning',
+          revisionIndex: 1,
+          revisionReason: 'Create a presentation about solar panels',
+          triggerEventId: 'drift_install_v17',
+        }),
+        // The real STEER's plan revision (rev 2) — strict-id-merges
+        // onto the annotation row. MUST surface via the merged user
+        // row, NOT as a separate goldfive/user STEER card.
+        mkPlan({
+          id: 'plan_real_2',
+          createdAtMs: 260,
+          revisionKind: 'user_steer',
+          revisionSeverity: 'warning',
+          revisionIndex: 2,
+          revisionReason: 'Forget solar panels, tell me about solar flares',
+          triggerEventId: 'ann_real',
+        }),
+      ],
+    });
+
+    // Only the real operator STEER (annotation row, with rev 2 outcome
+    // absorbed) surfaces. No phantom rev 1 STEER card.
+    expect(rows).toHaveLength(1);
+    expect(rows[0].source).toBe('user');
+    expect(rows[0].kind).toBe('STEER');
+    expect(rows[0].annotationId).toBe('ann_real');
+    expect(rows[0].outcome).toBe('plan_revised:r2');
+    expect(rows[0].planRevisionIndex).toBe(2);
+    // Belt-and-braces: rev 1 (the synthetic install) MUST NOT appear
+    // anywhere in the surfaced rows.
+    for (const row of rows) {
+      expect(row.planRevisionIndex).not.toBe(1);
+      expect(row.triggerEventId).not.toBe('drift_install_v17');
+    }
+  });
+
   it('preserves annotation_id for deep-linking', () => {
     const rows = deriveInterventions({
       annotations: [mkAnnotation({ id: 'ann_steer_42' })],
