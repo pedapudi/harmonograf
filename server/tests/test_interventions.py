@@ -211,6 +211,65 @@ async def test_user_drift_kind_is_attributed_to_user_source(store):
     assert records[0].drift_kind == "user_steer"
 
 
+# goldfive#271 follow-up: Runner._install_revision fabricates a
+# USER_STEER drift on every plan install so the install pipeline can
+# route uniformly through DefaultSteerer.apply_user_steer_with_plan.
+# The drift is plumbing, not an operator action; goldfive marks it
+# ``synthetic = True`` on the wire and the aggregator MUST filter it
+# out of the user-facing interventions list. v15 UI session
+# ``v15presmtx-1`` showed REFINE:USER_STEER + STEER WARNING cards on
+# the FIRST install at 0:30s with no operator action — this test pins
+# that exact regression.
+async def test_synthetic_user_steer_drift_is_filtered_from_intervention_list(store):
+    """Synthetic ``USER_STEER`` drifts (Runner._install_revision plumbing)
+    must NOT surface as ``Intervention`` records.
+
+    A real operator STEER drift (``synthetic = False``) on the same
+    session MUST surface unchanged so this filter doesn't silently hide
+    genuine interventions.
+    """
+
+    sid = "sess_synthetic_steer"
+    await _seed_session(store, sid)
+    drifts = _StubDrifts(
+        {
+            sid: [
+                # Synthetic install drift — MUST be filtered.
+                {
+                    "run_id": "r1",
+                    "kind": "user_steer",
+                    "severity": "warning",
+                    "detail": "fresh user turn",
+                    "recorded_at": 100.0,
+                    "synthetic": True,
+                    "id": "drift_install_a",
+                },
+                # Real operator STEER — MUST surface.
+                {
+                    "run_id": "r1",
+                    "kind": "user_steer",
+                    "severity": "warning",
+                    "detail": "operator-Alice: refocus",
+                    "recorded_at": 250.0,
+                    "synthetic": False,
+                    "id": "drift_real_steer",
+                    "annotation_id": "ann_real_x",
+                },
+            ]
+        }
+    )
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    # Only the real operator STEER drift surfaces.
+    assert len(records) == 1, (
+        "expected synthetic install drift to be filtered out; got "
+        f"records={[(r.kind, r.body_or_reason) for r in records]!r}"
+    )
+    assert records[0].source == "user"
+    assert records[0].kind == "STEER"
+    assert records[0].body_or_reason == "operator-Alice: refocus"
+    assert records[0].annotation_id == "ann_real_x"
+
+
 async def test_ordering_across_sources_is_by_timestamp(store):
     """Rows interleave strictly by timestamp, regardless of source."""
 

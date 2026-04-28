@@ -649,6 +649,18 @@ export interface DriftRecord {
   // the orchestrator minted itself), or "" when the producing goldfive
   // build predates the field. Surfaced in the intervention detail pane.
   authoredBy?: string;
+  // True when the goldfive producer marked this DriftDetected as a
+  // plumbing-only synthesis (e.g. the USER_STEER drift
+  // ``Runner._install_revision`` fabricates on every plan install so the
+  // install pipeline can route uniformly through
+  // ``DefaultSteerer.apply_user_steer_with_plan``). Synthetic drifts are
+  // NOT operator-meaningful interventions and are filtered out of the
+  // user-facing interventions list — but they remain on the full event
+  // timeline (audit / debug views) and on the DriftRegistry itself so
+  // every consumer keeps a complete record. Optional + defaults to
+  // false so older goldfive builds that predate the field (and the
+  // pre-merge submodule pin used in tests) flow through unchanged.
+  synthetic?: boolean;
 }
 
 // Drift registry — in-memory list of DriftDetected events received during
@@ -776,6 +788,14 @@ export interface RefineAttemptRecord {
   agentId: string;          // canonicalized <client>:<bare> on the wire
   recordedAtMs: number;
   recordedAtAbsoluteMs: number;
+  // True when the triggering drift was a goldfive plumbing synthesis
+  // (e.g. ``Runner._install_revision`` minted the USER_STEER drift).
+  // The intervention deriver filters ``synthetic = true`` refine rows
+  // out of the user-facing interventions panel; they remain in the
+  // RefineAttemptRegistry / event timeline. Optional + defaults to
+  // false so older goldfive builds (and the pre-merge submodule pin
+  // used in tests) flow through unchanged.
+  synthetic?: boolean;
 }
 
 // A captured goldfive RefineFailed event (goldfive#264). Terminal

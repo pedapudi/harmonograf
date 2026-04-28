@@ -338,6 +338,15 @@ def _project_drifts(drifts: Iterable[dict[str, Any]]) -> list[InterventionRecord
         if not drift_kind:
             # DRIFT_KIND_UNSPECIFIED — ignore.
             continue
+        # goldfive#271 follow-up: skip plumbing-synthesized drifts. The
+        # ``USER_STEER`` drift ``Runner._install_revision`` fabricates on
+        # every plan install carries ``synthetic = True``; surfacing it
+        # on the interventions list produces a phantom STEER card on
+        # every fresh user turn (v15 UI ``v15presmtx-1`` evidence).
+        # Synthetic drifts remain in the in-memory drift ring + event
+        # timeline; only the aggregator filters them out.
+        if dr.get("synthetic"):
+            continue
         is_user = drift_kind in _USER_DRIFT_KINDS
         source = "user" if is_user else "drift"
         # Normalize the kind label. User drifts get a compact English

@@ -167,7 +167,7 @@ class TelemetryUp(_message.Message):
     def __init__(self, hello: _Optional[_Union[Hello, _Mapping]] = ..., span_start: _Optional[_Union[SpanStart, _Mapping]] = ..., span_update: _Optional[_Union[SpanUpdate, _Mapping]] = ..., span_end: _Optional[_Union[SpanEnd, _Mapping]] = ..., payload: _Optional[_Union[PayloadUpload, _Mapping]] = ..., heartbeat: _Optional[_Union[Heartbeat, _Mapping]] = ..., control_ack: _Optional[_Union[_control_pb2.ControlAck, _Mapping]] = ..., goodbye: _Optional[_Union[Goodbye, _Mapping]] = ..., goldfive_event: _Optional[_Union[_events_pb2.Event, _Mapping]] = ..., refine_attempted: _Optional[_Union[RefineAttempted, _Mapping]] = ..., refine_failed: _Optional[_Union[RefineFailed, _Mapping]] = ..., user_message: _Optional[_Union[UserMessageReceived, _Mapping]] = ...) -> None: ...
 
 class RefineAttempted(_message.Message):
-    __slots__ = ("run_id", "sequence", "session_id", "emitted_at", "attempt_id", "drift_id", "trigger_kind", "trigger_severity", "current_task_id", "current_agent_id")
+    __slots__ = ("run_id", "sequence", "session_id", "emitted_at", "attempt_id", "drift_id", "trigger_kind", "trigger_severity", "current_task_id", "current_agent_id", "synthetic")
     RUN_ID_FIELD_NUMBER: _ClassVar[int]
     SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -178,6 +178,7 @@ class RefineAttempted(_message.Message):
     TRIGGER_SEVERITY_FIELD_NUMBER: _ClassVar[int]
     CURRENT_TASK_ID_FIELD_NUMBER: _ClassVar[int]
     CURRENT_AGENT_ID_FIELD_NUMBER: _ClassVar[int]
+    SYNTHETIC_FIELD_NUMBER: _ClassVar[int]
     run_id: str
     sequence: int
     session_id: str
@@ -188,7 +189,8 @@ class RefineAttempted(_message.Message):
     trigger_severity: str
     current_task_id: str
     current_agent_id: str
-    def __init__(self, run_id: _Optional[str] = ..., sequence: _Optional[int] = ..., session_id: _Optional[str] = ..., emitted_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., attempt_id: _Optional[str] = ..., drift_id: _Optional[str] = ..., trigger_kind: _Optional[str] = ..., trigger_severity: _Optional[str] = ..., current_task_id: _Optional[str] = ..., current_agent_id: _Optional[str] = ...) -> None: ...
+    synthetic: bool
+    def __init__(self, run_id: _Optional[str] = ..., sequence: _Optional[int] = ..., session_id: _Optional[str] = ..., emitted_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., attempt_id: _Optional[str] = ..., drift_id: _Optional[str] = ..., trigger_kind: _Optional[str] = ..., trigger_severity: _Optional[str] = ..., current_task_id: _Optional[str] = ..., current_agent_id: _Optional[str] = ..., synthetic: bool = ...) -> None: ...
 
 class RefineFailed(_message.Message):
     __slots__ = ("run_id", "sequence", "session_id", "emitted_at", "attempt_id", "drift_id", "trigger_kind", "trigger_severity", "failure_kind", "reason", "detail", "current_task_id", "current_agent_id")

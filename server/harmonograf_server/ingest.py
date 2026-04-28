@@ -1293,6 +1293,15 @@ class IngestPipeline:
             "annotation_id": getattr(payload, "annotation_id", "") or "",
             "id": getattr(payload, "id", "") or "",
             "recorded_at": self._now(),
+            # goldfive#271 follow-up: ``synthetic`` is True when goldfive
+            # marked the drift as plumbing rather than a real signal
+            # (e.g. ``Runner._install_revision`` synthesizing a USER_STEER
+            # drift on every plan install). The intervention aggregator
+            # filters synthetic drifts out of the user-facing list while
+            # keeping them in the in-memory ring + event timeline.
+            # Optional read so older goldfive builds (proto stub predates
+            # the field) flow through unchanged with default False.
+            "synthetic": bool(getattr(payload, "synthetic", False)),
         }
         ring = self._drifts_by_session.setdefault(ctx.session_id, [])
         ring.append(record)
@@ -1309,6 +1318,7 @@ class IngestPipeline:
             annotation_id=record["annotation_id"],
             drift_id=record["id"],
             recorded_at=record["recorded_at"],
+            synthetic=record["synthetic"],
         )
 
     def drifts_for_session(self, session_id: str) -> list[dict[str, Any]]:
@@ -1441,6 +1451,11 @@ class IngestPipeline:
         emitted_at_val: float | None = None
         if msg.HasField("emitted_at"):
             emitted_at_val = ts_to_float(msg.emitted_at)
+        # goldfive#271 follow-up: forward ``synthetic`` so the ring
+        # records can be filtered out of the user-facing interventions
+        # surface. Optional read so older proto stubs flow through with
+        # default False.
+        synthetic_flag = bool(getattr(msg, "synthetic", False))
         record: dict[str, Any] = {
             "run_id": msg.run_id or "",
             "sequence": int(msg.sequence or 0),
@@ -1452,6 +1467,7 @@ class IngestPipeline:
             "current_task_id": msg.current_task_id or "",
             "current_agent_id": msg.current_agent_id or "",
             "recorded_at": self._now(),
+            "synthetic": synthetic_flag,
         }
         ring = self._refine_attempts_by_session.setdefault(ctx.session_id, [])
         ring.append(record)
@@ -1469,6 +1485,7 @@ class IngestPipeline:
             current_task_id=record["current_task_id"],
             current_agent_id=record["current_agent_id"],
             recorded_at=record["recorded_at"],
+            synthetic=record["synthetic"],
         )
 
     async def _handle_refine_failed(self, ctx: StreamContext, msg: Any) -> None:

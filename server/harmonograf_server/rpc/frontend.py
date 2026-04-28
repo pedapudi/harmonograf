@@ -358,6 +358,12 @@ class FrontendServicerMixin:
                 # harmonograf#99) so reconnecting clients have the strict
                 # join key for autonomous-drift plan-revision merges.
                 ev.drift_detected.id = dr.get("id", "") or ""
+                # goldfive#271 follow-up: propagate ``synthetic`` so the
+                # reconnect replay matches the live path — the deriver
+                # filters synthetic drifts out of the user-facing
+                # interventions panel uniformly.
+                if dr.get("synthetic") and hasattr(ev.drift_detected, "synthetic"):
+                    ev.drift_detected.synthetic = True
                 ra = dr.get("recorded_at")
                 if isinstance(ra, (int, float)):
                     ts = float_to_ts(float(ra))
@@ -424,6 +430,13 @@ class FrontendServicerMixin:
                     current_task_id=ar.get("current_task_id", "") or "",
                     current_agent_id=ar.get("current_agent_id", "") or "",
                 )
+                # goldfive#271 follow-up: forward synthetic flag so the
+                # frontend deriver can filter the merged REFINE row out
+                # of the user-facing interventions panel. Set after
+                # construction so older proto stubs (pre-regen pin) flow
+                # through with the default False.
+                if ar.get("synthetic") and hasattr(rmsg, "synthetic"):
+                    rmsg.synthetic = True
                 ts_val = ar.get("emitted_at")
                 if not isinstance(ts_val, (int, float)):
                     ts_val = ar.get("recorded_at")
@@ -1394,6 +1407,11 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
         # harmonograf#99) so the frontend has the strict join key for
         # autonomous-drift plan-revision merges.
         ev.drift_detected.id = p.get("drift_id", "") or ""
+        # goldfive#271 follow-up: forward synthetic flag so the frontend
+        # deriver can filter plumbing drifts out of the user-facing
+        # interventions panel.
+        if p.get("synthetic") and hasattr(ev.drift_detected, "synthetic"):
+            ev.drift_detected.synthetic = True
         # Stamp ``emitted_at`` so the frontend renders a correct
         # session-relative timestamp. Previously this was omitted on the
         # live DELTA_DRIFT path, which caused the deriver to fall back to
@@ -1458,6 +1476,11 @@ def _delta_to_session_update(delta: Delta) -> Optional[frontend_pb2.SessionUpdat
             current_task_id=p.get("current_task_id", "") or "",
             current_agent_id=p.get("current_agent_id", "") or "",
         )
+        # goldfive#271 follow-up: forward synthetic flag onto the live
+        # SessionUpdate so the frontend deriver can filter synthetic
+        # refines out of the user-facing interventions panel.
+        if p.get("synthetic") and hasattr(rmsg, "synthetic"):
+            rmsg.synthetic = True
         # Prefer the goldfive-side emitted_at; fall back to ingest-side
         # recorded_at so the frontend always has a timestamp to render
         # (mirrors the DELTA_DRIFT emittedAt stamping).

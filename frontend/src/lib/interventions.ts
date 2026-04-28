@@ -274,6 +274,16 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
   for (const dr of input.drifts) {
     const driftKind = (dr.kind || '').toLowerCase();
     if (!driftKind) continue;
+    // goldfive#271 follow-up: skip plumbing-synthesized drifts. The
+    // ``USER_STEER`` drift ``Runner._install_revision`` fabricates on
+    // every plan install carries ``synthetic = true``; surfacing it on
+    // the interventions panel produces a phantom STEER card on every
+    // fresh user turn (v15 UI ``v15presmtx-1`` empirical evidence:
+    // REFINE:USER_STEER + STEER WARNING at 0:30 with no operator
+    // action). Synthetic drifts remain in the DriftRegistry / event
+    // timeline so audit + debug views still see them; only the
+    // user-facing interventions list filters them out.
+    if (dr.synthetic) continue;
     const isUser = USER_DRIFT_KINDS.has(driftKind);
     // harmonograf#99: for user-control drifts use annotationId (so we
     // merge onto the annotation); for autonomous drifts use driftId.
@@ -421,6 +431,16 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
       }
     }
     for (const att of attempts) {
+      // goldfive#271 follow-up: skip plumbing-synthesized refines. The
+      // ``USER_STEER`` drift ``Runner._install_revision`` fabricates on
+      // every plan install propagates to the paired
+      // ``RefineAttempted`` (the install pipeline routes through
+      // ``DefaultSteerer.apply_user_steer_with_plan`` which emits a
+      // refine_attempted carrying the same drift). Without this filter,
+      // synthetic-drift skipping in the drift loop above leaves a
+      // phantom ``REFINE:USER_STEER`` row in the panel for every fresh
+      // user turn.
+      if (att.synthetic) continue;
       const triggerKind = (att.triggerKind || '').toLowerCase();
       const triggerSeverity = (att.triggerSeverity || '').toLowerCase();
       const failed = att.attemptId
