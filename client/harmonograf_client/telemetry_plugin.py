@@ -1357,12 +1357,51 @@ class HarmonografTelemetryPlugin(BasePlugin):  # type: ignore[misc]
         Idempotent: the duplicate-install guard short-circuits on
         secondary plugin instances. Empty / non-text messages are
         silently dropped — no point surfacing an empty marker.
+
+        AgentTool sub-Runners (harmonograf#271): callbacks fired by a
+        child Runner whose session.id differs from the cached
+        ``_root_session_id`` are dropped. AgentTool builds those
+        Runners with a fresh ``InMemorySessionService`` session and
+        feeds them the coordinator's tool-call args as a synthetic
+        ``Content(role='user', ...)``; without the guard those args
+        surface in the interventions panel as if the operator typed
+        them. The legitimate mid-turn HITL path stays on the parent's
+        session id and continues to emit.
         """
         if self._maybe_disable_as_duplicate(invocation_context):
             return
         text = _extract_user_message_text(user_message)
         if not text:
             return
+        # AgentTool sub-Runner suppression (harmonograf#271).
+        # ADK's ``AgentTool.run_async`` spawns a child Runner with
+        # ``new_message=Content(role='user', parts=[args['request']])``
+        # so the coordinator's tool-call argument flows through the
+        # same ``on_user_message_callback`` path as a real operator
+        # turn. The plugin instance is shared (``include_plugins=True``
+        # on the child Runner), so without a guard each AgentTool
+        # invocation emits a spurious ``UserMessageReceived`` carrying
+        # the model's tool-call args verbatim — these surface in the
+        # interventions panel as if the operator typed them.
+        #
+        # Discriminator: AgentTool builds the child Runner against a
+        # fresh ``InMemorySessionService`` session, so the sub-Runner
+        # ctx's ``session.id`` differs from the cached
+        # ``_root_session_id`` (set by the parent's first
+        # ``before_run_callback``). The legitimate mid-turn HITL path
+        # uses the SAME invocation_id (parent's), keeping its session
+        # id == _root_session_id, so it still emits.
+        sub_runner_session = ""
+        if self._root_session_id is not None:
+            sub_runner_session = _adk_session_id(invocation_context)
+            if sub_runner_session and sub_runner_session != self._root_session_id:
+                log.debug(
+                    "telemetry_plugin: suppressing UserMessageReceived from "
+                    "AgentTool sub-Runner (root_sid=%s, sub_sid=%s)",
+                    self._root_session_id,
+                    sub_runner_session,
+                )
+                return
         # Author hint: ADK's ``invocation_context.user_id`` is the
         # operator-side identifier; default to "user" when absent so
         # the frontend always has a non-empty author label.
