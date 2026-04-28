@@ -250,6 +250,123 @@ class TestUserMessageEmission:
         assert env.payload.content == "from dict"
 
 
+class TestAgentToolSubRunnerSuppression:
+    """harmonograf#271: AgentTool spawns a child Runner with the
+    coordinator's tool-call args wrapped as ``Content(role='user',
+    ...)``. Because the child Runner inherits the parent's plugin
+    instance (``include_plugins=True``), every AgentTool invocation
+    used to fire ``on_user_message_callback`` and emit a spurious
+    ``UserMessageReceived`` carrying the model's args verbatim —
+    those then surfaced in the interventions panel as if the operator
+    had typed them.
+
+    Discriminator: AgentTool builds the child Runner against a fresh
+    ``InMemorySessionService`` session, so the sub-Runner ctx's
+    ``session.id`` differs from the cached ``_root_session_id`` (set
+    by the parent's first ``before_run_callback``). The plugin must
+    suppress those, while still emitting for the legitimate mid-turn
+    HITL path which stays on the parent's session id."""
+
+    @pytest.mark.asyncio
+    async def test_sub_runner_user_message_suppressed(
+        self, plugin: HarmonografTelemetryPlugin, client: Client
+    ) -> None:
+        """The coordinator's tool-call args, replayed by AgentTool as
+        a synthetic user message on a fresh sub-Runner session, must
+        NOT be emitted as a UserMessageReceived envelope."""
+        # 1. Parent run opens — establishes _root_session_id.
+        parent_ctx = _InvocationContext("inv-parent", "sess-user-msg", [plugin])
+        await plugin.before_run_callback(invocation_context=parent_ctx)
+        # Drain the parent's INVOCATION span_start so the assertion
+        # below is unambiguous.
+        _drain(client)
+        # 2. The parent's first user turn arrives — emits as expected.
+        await plugin.on_user_message_callback(
+            invocation_context=parent_ctx,
+            user_message=_Content(
+                [_Part(text="Create a presentation about solar panels.")]
+            ),
+        )
+        envs = _drain(client)
+        user_envs = [e for e in envs if e.kind is EnvelopeKind.USER_MESSAGE]
+        assert len(user_envs) == 1
+        assert user_envs[0].payload.content == (
+            "Create a presentation about solar panels."
+        )
+        # 3. AgentTool spawns a child Runner with a fresh session id
+        # and feeds the coordinator's tool-call args as a synthetic
+        # ``Content(role='user', ...)``. This must be suppressed.
+        sub_ctx = _InvocationContext(
+            "inv-child-research",
+            # Distinct session id — matches AgentTool's
+            # ``InMemorySessionService.create_session`` behaviour.
+            "sess-agent-tool-child",
+            [plugin],
+        )
+        await plugin.on_user_message_callback(
+            invocation_context=sub_ctx,
+            user_message=_Content(
+                [
+                    _Part(
+                        text=(
+                            "Gather all relevant facts, types, benefits, "
+                            "installation considerations, and technical details."
+                        )
+                    )
+                ]
+            ),
+        )
+        envs = _drain(client)
+        user_envs = [e for e in envs if e.kind is EnvelopeKind.USER_MESSAGE]
+        assert user_envs == [], (
+            "AgentTool sub-Runner user message must not surface; got "
+            f"{[e.payload.content for e in user_envs]}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_mid_turn_hitl_still_emits_on_parent_session(
+        self, plugin: HarmonografTelemetryPlugin, client: Client
+    ) -> None:
+        """Regression guard for the legitimate mid-turn path: a
+        user message that lands while the parent invocation is open
+        and shares the parent's session id must still emit (the
+        existing ``mid_turn=True`` semantics). The sub-Runner guard
+        only fires when the session id differs."""
+        ctx = _InvocationContext("inv-hitl", "sess-user-msg", [plugin])
+        await plugin.before_run_callback(invocation_context=ctx)
+        _drain(client)
+        await plugin.on_user_message_callback(
+            invocation_context=ctx,
+            user_message=_Content([_Part(text="interject!")]),
+        )
+        envs = _drain(client)
+        user_envs = [e for e in envs if e.kind is EnvelopeKind.USER_MESSAGE]
+        assert len(user_envs) == 1
+        assert user_envs[0].payload.content == "interject!"
+        assert user_envs[0].payload.mid_turn is True
+
+    @pytest.mark.asyncio
+    async def test_pre_root_user_message_emits(
+        self, plugin: HarmonografTelemetryPlugin, client: Client
+    ) -> None:
+        """Before any ``before_run_callback`` fires the cache is
+        ``None``: the discriminator must NOT short-circuit and the
+        message must emit normally. ADK orders
+        ``on_user_message_callback`` strictly before
+        ``before_run_callback`` on the root invocation."""
+        ctx = _InvocationContext("inv-pre-root", "sess-user-msg", [plugin])
+        # Note: no before_run_callback first.
+        assert plugin._root_session_id is None
+        await plugin.on_user_message_callback(
+            invocation_context=ctx,
+            user_message=_Content([_Part(text="first turn")]),
+        )
+        envs = _drain(client)
+        user_envs = [e for e in envs if e.kind is EnvelopeKind.USER_MESSAGE]
+        assert len(user_envs) == 1
+        assert user_envs[0].payload.content == "first turn"
+
+
 class TestDuplicateInstall:
     @pytest.mark.asyncio
     async def test_duplicate_plugin_skips_callback(
