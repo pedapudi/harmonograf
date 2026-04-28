@@ -422,3 +422,111 @@ class TestTransportMaterialization:
         )
         env = _drain(client)[0]
         assert _session_id_of_envelope(env) == "sess-user-msg"
+
+
+class TestGoldfiveReentryContract:
+    """harmonograf#234 / goldfive#325: when running under a
+    goldfive-wrapped agent tree, the inner ADK Runner re-fires
+    ``on_user_message_callback`` for goldfive's re-feed of the
+    operator's input (``OVERLAY_REPLAY``) and again for
+    goldfive-composed nudge / steer-restart bodies. The outer adk-web
+    Runner already emitted the operator's user_message as a USER_TURN,
+    so non-USER_TURN re-entry must NOT re-emit.
+
+    Plain ADK use is unaffected — the contextvar's default is
+    USER_TURN; if goldfive is not installed the ImportError fallback
+    keeps the plugin emitting as before.
+    """
+
+    @pytest.mark.asyncio
+    async def test_user_turn_emits(
+        self, plugin: HarmonografTelemetryPlugin, client: Client
+    ) -> None:
+        """The default contextvar value is USER_TURN — emission proceeds."""
+        pytest.importorskip("goldfive.adapters.adk_reentry")
+        from goldfive.adapters.adk_reentry import (  # type: ignore[import-not-found]
+            ReentryKind,
+            reentry,
+        )
+
+        ctx = _InvocationContext("inv-ut", "sess-user-msg", [plugin])
+        msg = _Content([_Part(text="operator typed this")])
+        with reentry(ReentryKind.USER_TURN):
+            await plugin.on_user_message_callback(
+                invocation_context=ctx, user_message=msg
+            )
+        envs = _drain(client)
+        user_envs = [e for e in envs if e.kind is EnvelopeKind.USER_MESSAGE]
+        assert len(user_envs) == 1
+        assert user_envs[0].payload.content == "operator typed this"
+
+    @pytest.mark.asyncio
+    async def test_overlay_replay_suppressed(
+        self, plugin: HarmonografTelemetryPlugin, client: Client
+    ) -> None:
+        """Goldfive re-feeding the operator's input via the inner
+        runner (OVERLAY_REPLAY) emits nothing."""
+        pytest.importorskip("goldfive.adapters.adk_reentry")
+        from goldfive.adapters.adk_reentry import (  # type: ignore[import-not-found]
+            ReentryKind,
+            reentry,
+        )
+
+        ctx = _InvocationContext("inv-or", "sess-user-msg", [plugin])
+        msg = _Content([_Part(text="operator typed this")])
+        with reentry(ReentryKind.OVERLAY_REPLAY):
+            await plugin.on_user_message_callback(
+                invocation_context=ctx, user_message=msg
+            )
+        envs = _drain(client)
+        user_envs = [e for e in envs if e.kind is EnvelopeKind.USER_MESSAGE]
+        assert user_envs == []
+
+    @pytest.mark.asyncio
+    async def test_nudge_replay_suppressed(
+        self, plugin: HarmonografTelemetryPlugin, client: Client
+    ) -> None:
+        """Goldfive-composed nudge replay (autonomous drift → refine
+        spawned a replacement task) is goldfive-authored framing, not
+        operator-typed; do not emit."""
+        pytest.importorskip("goldfive.adapters.adk_reentry")
+        from goldfive.adapters.adk_reentry import (  # type: ignore[import-not-found]
+            ReentryKind,
+            reentry,
+        )
+
+        ctx = _InvocationContext("inv-nr", "sess-user-msg", [plugin])
+        msg = _Content([_Part(text="please follow up on task X_v2")])
+        with reentry(ReentryKind.NUDGE_REPLAY):
+            await plugin.on_user_message_callback(
+                invocation_context=ctx, user_message=msg
+            )
+        envs = _drain(client)
+        user_envs = [e for e in envs if e.kind is EnvelopeKind.USER_MESSAGE]
+        assert user_envs == []
+
+    @pytest.mark.asyncio
+    async def test_steer_replay_suppressed(
+        self, plugin: HarmonografTelemetryPlugin, client: Client
+    ) -> None:
+        """Goldfive-composed steer-restart (operator STEER wrapped in
+        USER STEERING CONTROL framing) is goldfive-authored framing
+        around operator text; the operator's STEER turn was already
+        emitted by the outer runner."""
+        pytest.importorskip("goldfive.adapters.adk_reentry")
+        from goldfive.adapters.adk_reentry import (  # type: ignore[import-not-found]
+            ReentryKind,
+            reentry,
+        )
+
+        ctx = _InvocationContext("inv-sr", "sess-user-msg", [plugin])
+        msg = _Content(
+            [_Part(text="USER STEERING CONTROL — switch to topic Y")]
+        )
+        with reentry(ReentryKind.STEER_REPLAY):
+            await plugin.on_user_message_callback(
+                invocation_context=ctx, user_message=msg
+            )
+        envs = _drain(client)
+        user_envs = [e for e in envs if e.kind is EnvelopeKind.USER_MESSAGE]
+        assert user_envs == []
