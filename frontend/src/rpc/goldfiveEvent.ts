@@ -537,16 +537,6 @@ export function applyGoldfiveEvent(
       const duEarly = d as unknown as Record<string, unknown>;
       const authoredByForRecord =
         typeof duEarly.authoredBy === 'string' ? (duEarly.authoredBy as string) : '';
-      // Forward-compat read for DriftDetected.synthetic
-      // (goldfive#271 follow-up). Defaults to false on pre-merge events
-      // so the old wire shape stays render-identical. The intervention
-      // deriver filters ``synthetic = true`` rows out of the
-      // user-facing list to suppress the USER_STEER plumbing drift that
-      // ``Runner._install_revision`` fabricates on every plan install.
-      const syntheticForRecord =
-        typeof duEarly.synthetic === 'boolean'
-          ? (duEarly.synthetic as boolean)
-          : false;
       store.drifts.append({
         kind: kindStr,
         severity: sevStr,
@@ -565,7 +555,6 @@ export function applyGoldfiveEvent(
         // onto the drift row.
         driftId: d.id || '',
         authoredBy: authoredByForRecord,
-        synthetic: syntheticForRecord,
       });
       // Attribute the drift to an actor row so it shows up in gantt / graph /
       // trajectory without those views having to special-case drift events.
@@ -911,16 +900,6 @@ export function applyRefineAttempted(
   const recordedAbsMs = tsToMsAbs(event.emittedAt);
   const abs = recordedAbsMs || Date.now();
   const recordedMs = abs - sessionStartMs;
-  // Forward-compat read for RefineAttempted.synthetic (goldfive#271
-  // follow-up). False on pre-merge events; true when goldfive marked
-  // the triggering drift as plumbing (e.g. ``Runner._install_revision``
-  // synthesized USER_STEER). The intervention deriver filters
-  // synthetic refine rows out of the user-facing interventions panel.
-  const evtUnknown = event as unknown as Record<string, unknown>;
-  const syntheticForRecord =
-    typeof evtUnknown.synthetic === 'boolean'
-      ? (evtUnknown.synthetic as boolean)
-      : false;
   store.refineAttempts.append({
     runId: event.runId || '',
     attemptId: event.attemptId || '',
@@ -931,7 +910,6 @@ export function applyRefineAttempted(
     agentId: event.currentAgentId || '',
     recordedAtMs: recordedMs,
     recordedAtAbsoluteMs: abs,
-    synthetic: syntheticForRecord,
   });
 }
 

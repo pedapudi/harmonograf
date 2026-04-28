@@ -124,41 +124,29 @@ describe('deriveInterventions', () => {
     expect(rows[0].driftKind).toBe('user_steer');
   });
 
-  // goldfive#271 follow-up: Runner._install_revision fabricates a
-  // USER_STEER drift on every plan install so the install pipeline can
-  // route uniformly through DefaultSteerer.apply_user_steer_with_plan.
-  // The drift is plumbing, not an operator action; goldfive marks it
-  // synthetic=true on the wire and the deriver MUST filter it out of
-  // the user-facing interventions panel. v15 UI session
-  // ``v15presmtx-1`` showed REFINE:USER_STEER WARNING + STEER WARNING
-  // cards on the FIRST install at 0:30s with no operator action — this
-  // test pins that exact regression.
-  it('filters synthetic USER_STEER drifts from the interventions panel', () => {
+  // goldfive#271 Option A: Runner._install_revision no longer
+  // fabricates a USER_STEER drift on every plan install. Turn-1
+  // installs emit only PlanRevised (no DriftDetected); turn N+1
+  // installs emit NEW_WORK_DISCOVERED. So the deriver no longer
+  // needs to filter synthetic drifts — they don't exist. This test
+  // pins the new wire shape: a real operator STEER + an autonomous
+  // drift surface; nothing is dropped.
+  it('surfaces real operator STEER + autonomous drifts (Option A)', () => {
     const rows = deriveInterventions({
       annotations: [],
       drifts: [
-        // Synthetic: the install-pipeline drift. MUST be skipped.
+        // Real operator STEER — surfaces.
         mkDrift({
           seq: 0,
-          kind: 'user_steer',
-          severity: 'warning',
-          recordedAtMs: 30,
-          driftId: 'drift_install_1',
-          synthetic: true,
-        }),
-        // Non-synthetic: a genuine operator STEER. MUST surface.
-        mkDrift({
-          seq: 1,
           kind: 'user_steer',
           severity: 'warning',
           recordedAtMs: 90,
           driftId: 'drift_real_steer',
           annotationId: 'ann_real_2',
-          synthetic: false,
         }),
-        // Non-synthetic autonomous drift. MUST surface unchanged.
+        // Autonomous loop drift — surfaces unchanged.
         mkDrift({
-          seq: 2,
+          seq: 1,
           kind: 'looping_reasoning',
           severity: 'warning',
           recordedAtMs: 150,
@@ -167,8 +155,6 @@ describe('deriveInterventions', () => {
       ],
       plans: [],
     });
-    // The synthetic install drift is filtered; the real STEER and the
-    // autonomous loop drift remain.
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => r.driftKind)).toEqual([
       'user_steer',
@@ -177,102 +163,6 @@ describe('deriveInterventions', () => {
     expect(rows[0].kind).toBe('STEER');
     expect(rows[0].annotationId).toBe('ann_real_2');
     expect(rows[1].kind).toBe('LOOPING_REASONING');
-    // Belt-and-braces: the synthetic install drift's id MUST NOT appear
-    // anywhere in the surfaced rows (its triggerEventId would otherwise
-    // attract a downstream merge target and re-introduce the phantom).
-    for (const row of rows) {
-      expect(row.driftId).not.toBe('drift_install_1');
-    }
-  });
-
-  // goldfive#271 follow-up: v17 UI regression. PR #302 set
-  // ``synthetic = true`` on Runner._install_revision's drift and PR
-  // #219 made the deriver filter synthetic drifts. But the matching
-  // PlanRevised carries the synthetic drift's id as triggerEventId
-  // with no synthetic flag of its own (the proto field doesn't exist
-  // on PlanRevised) — so once the drift was filtered, the
-  // plan-revision row fell through the strict-id merge alone and
-  // surfaced as a phantom ``STEER WARNING -> REV 1`` card at 0:22 on
-  // every fresh user turn (v17 session
-  // 845dcbe8-0861-452f-b7ba-e37703458785). This test pins the third
-  // leak path: a plan-revision row whose triggerEventId matches a
-  // synthetic drift's id MUST be filtered too.
-  it('filters synthetic install plan-revisions from the interventions panel', () => {
-    const rows = deriveInterventions({
-      annotations: [
-        // Real operator STEER drives revision 2.
-        mkAnnotation({
-          id: 'ann_real',
-          createdAtMs: 240,
-          author: 'alice',
-          body: 'operator-Alice: refocus on flares',
-        }),
-      ],
-      drifts: [
-        // Synthetic install drift — filtered by the existing PR #219
-        // loop. We're checking the plan-revision filter doesn't depend
-        // on the drift surviving.
-        mkDrift({
-          seq: 0,
-          kind: 'user_steer',
-          severity: 'warning',
-          recordedAtMs: 100,
-          driftId: 'drift_install_v17',
-          synthetic: true,
-        }),
-        // Real operator STEER — surfaces as the user row, with rev 2
-        // outcome merged via strict-id (annotation_id == triggerEventId).
-        mkDrift({
-          seq: 1,
-          kind: 'user_steer',
-          severity: 'warning',
-          recordedAtMs: 250,
-          driftId: 'drift_real_steer',
-          annotationId: 'ann_real',
-          synthetic: false,
-        }),
-      ],
-      plans: [
-        // The synthetic install plan revision — triggerEventId matches
-        // the synthetic drift. MUST be filtered (was leaking pre-fix).
-        mkPlan({
-          id: 'plan_install_1',
-          createdAtMs: 100,
-          revisionKind: 'user_steer',
-          revisionSeverity: 'warning',
-          revisionIndex: 1,
-          revisionReason: 'Create a presentation about solar panels',
-          triggerEventId: 'drift_install_v17',
-        }),
-        // The real STEER's plan revision (rev 2) — strict-id-merges
-        // onto the annotation row. MUST surface via the merged user
-        // row, NOT as a separate goldfive/user STEER card.
-        mkPlan({
-          id: 'plan_real_2',
-          createdAtMs: 260,
-          revisionKind: 'user_steer',
-          revisionSeverity: 'warning',
-          revisionIndex: 2,
-          revisionReason: 'Forget solar panels, tell me about solar flares',
-          triggerEventId: 'ann_real',
-        }),
-      ],
-    });
-
-    // Only the real operator STEER (annotation row, with rev 2 outcome
-    // absorbed) surfaces. No phantom rev 1 STEER card.
-    expect(rows).toHaveLength(1);
-    expect(rows[0].source).toBe('user');
-    expect(rows[0].kind).toBe('STEER');
-    expect(rows[0].annotationId).toBe('ann_real');
-    expect(rows[0].outcome).toBe('plan_revised:r2');
-    expect(rows[0].planRevisionIndex).toBe(2);
-    // Belt-and-braces: rev 1 (the synthetic install) MUST NOT appear
-    // anywhere in the surfaced rows.
-    for (const row of rows) {
-      expect(row.planRevisionIndex).not.toBe(1);
-      expect(row.triggerEventId).not.toBe('drift_install_v17');
-    }
   });
 
   it('preserves annotation_id for deep-linking', () => {

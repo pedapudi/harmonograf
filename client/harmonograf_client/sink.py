@@ -325,14 +325,6 @@ class HarmonografSink:
             agent_id = self._compound(agent_id)
 
         seconds_val, nanos_val = self._read_emitted_at(event)
-        # goldfive#271 follow-up: forward ``synthetic`` from the
-        # goldfive payload so harmonograf's intervention deriver can
-        # filter the merged ``REFINE`` row out of the user-facing
-        # interventions panel when the underlying drift was just
-        # plumbing. Fall back to ``False`` on pre-merge goldfive builds
-        # that predate the field — proto3 default for bool is False so
-        # the wire shape stays render-identical.
-        synthetic_flag = bool(payload.get("synthetic", False))
         msg = ctor(
             run_id=str(event.get("run_id", "") or ""),
             sequence=max(0, int(event.get("sequence", 0) or 0)),
@@ -344,12 +336,6 @@ class HarmonografSink:
             current_task_id=str(payload.get("current_task_id", "") or ""),
             current_agent_id=agent_id,
         )
-        # Set ``synthetic`` after construction so older proto stubs that
-        # predate the field still work — the descriptor lookup below
-        # silently no-ops on a missing field, while a constructor kwarg
-        # would raise ``ValueError``.
-        if synthetic_flag and hasattr(msg, "synthetic"):
-            msg.synthetic = True
         if seconds_val or nanos_val:
             msg.emitted_at.seconds = seconds_val
             msg.emitted_at.nanos = nanos_val
