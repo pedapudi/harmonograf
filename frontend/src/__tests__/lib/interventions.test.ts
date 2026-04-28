@@ -124,6 +124,67 @@ describe('deriveInterventions', () => {
     expect(rows[0].driftKind).toBe('user_steer');
   });
 
+  // goldfive#271 follow-up: Runner._install_revision fabricates a
+  // USER_STEER drift on every plan install so the install pipeline can
+  // route uniformly through DefaultSteerer.apply_user_steer_with_plan.
+  // The drift is plumbing, not an operator action; goldfive marks it
+  // synthetic=true on the wire and the deriver MUST filter it out of
+  // the user-facing interventions panel. v15 UI session
+  // ``v15presmtx-1`` showed REFINE:USER_STEER WARNING + STEER WARNING
+  // cards on the FIRST install at 0:30s with no operator action — this
+  // test pins that exact regression.
+  it('filters synthetic USER_STEER drifts from the interventions panel', () => {
+    const rows = deriveInterventions({
+      annotations: [],
+      drifts: [
+        // Synthetic: the install-pipeline drift. MUST be skipped.
+        mkDrift({
+          seq: 0,
+          kind: 'user_steer',
+          severity: 'warning',
+          recordedAtMs: 30,
+          driftId: 'drift_install_1',
+          synthetic: true,
+        }),
+        // Non-synthetic: a genuine operator STEER. MUST surface.
+        mkDrift({
+          seq: 1,
+          kind: 'user_steer',
+          severity: 'warning',
+          recordedAtMs: 90,
+          driftId: 'drift_real_steer',
+          annotationId: 'ann_real_2',
+          synthetic: false,
+        }),
+        // Non-synthetic autonomous drift. MUST surface unchanged.
+        mkDrift({
+          seq: 2,
+          kind: 'looping_reasoning',
+          severity: 'warning',
+          recordedAtMs: 150,
+          driftId: 'drift_loop_3',
+        }),
+      ],
+      plans: [],
+    });
+    // The synthetic install drift is filtered; the real STEER and the
+    // autonomous loop drift remain.
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.driftKind)).toEqual([
+      'user_steer',
+      'looping_reasoning',
+    ]);
+    expect(rows[0].kind).toBe('STEER');
+    expect(rows[0].annotationId).toBe('ann_real_2');
+    expect(rows[1].kind).toBe('LOOPING_REASONING');
+    // Belt-and-braces: the synthetic install drift's id MUST NOT appear
+    // anywhere in the surfaced rows (its triggerEventId would otherwise
+    // attract a downstream merge target and re-introduce the phantom).
+    for (const row of rows) {
+      expect(row.driftId).not.toBe('drift_install_1');
+    }
+  });
+
   it('preserves annotation_id for deep-linking', () => {
     const rows = deriveInterventions({
       annotations: [mkAnnotation({ id: 'ann_steer_42' })],

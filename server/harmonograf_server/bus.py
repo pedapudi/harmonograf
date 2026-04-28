@@ -376,6 +376,7 @@ class SessionBus:
         annotation_id: str = "",
         drift_id: str = "",
         recorded_at: float | None = None,
+        synthetic: bool = False,
     ) -> None:
         # ``annotation_id`` is non-empty for user-control drifts (USER_STEER,
         # USER_CANCEL) minted from a ControlMessage with an annotation id in
@@ -393,6 +394,9 @@ class SessionBus:
         # frontend.py DELTA_DRIFT translator can stamp ``emitted_at`` on
         # the outgoing SessionUpdate — without this the frontend falls
         # back to a session-relative-ms of 0 for live drifts (closes #73).
+        # ``synthetic`` (goldfive#271 follow-up) flags drifts goldfive
+        # marked as plumbing rather than real signals; the frontend
+        # filters them out of the user-facing interventions panel.
         self.publish(
             Delta(
                 session_id,
@@ -407,6 +411,7 @@ class SessionBus:
                     "annotation_id": annotation_id,
                     "drift_id": drift_id,
                     "recorded_at": recorded_at,
+                    "synthetic": bool(synthetic),
                 },
             )
         )
@@ -474,6 +479,7 @@ class SessionBus:
         current_task_id: str = "",
         current_agent_id: str = "",
         recorded_at: float | None = None,
+        synthetic: bool = False,
     ) -> None:
         """Publish a ``refine_attempted`` record onto the session bus.
 
@@ -482,6 +488,10 @@ class SessionBus:
         clock; ``emitted_at`` is the goldfive-side wall clock from the
         envelope. Frontend prefers ``emitted_at`` and falls back to
         ``recorded_at`` (matches the DELTA_INVOCATION_CANCELLED pattern).
+        ``synthetic`` (goldfive#271 follow-up) flags refine rows whose
+        triggering drift was goldfive plumbing (e.g.
+        ``Runner._install_revision`` USER_STEER); the frontend filters
+        those out of the user-facing interventions panel.
         """
         self.publish(
             Delta(
@@ -498,6 +508,7 @@ class SessionBus:
                     "current_task_id": current_task_id,
                     "current_agent_id": current_agent_id,
                     "recorded_at": recorded_at,
+                    "synthetic": bool(synthetic),
                 },
             )
         )
