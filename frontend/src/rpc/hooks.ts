@@ -31,6 +31,22 @@ import {
 } from './goldfiveEvent';
 import { loadPlanHistory } from '../state/planHistoryLoader';
 
+// Repack the lanes for a single agent so concurrent spans land on distinct
+// sub-tracks (harmonograf#271). Convert paths leave new spans at lane=-1; the
+// renderer treats that as lane 0, so without a per-event repack every
+// concurrent live span stacks on top of its peers. Called from the live
+// arms (newSpan / endedSpan / goldfiveEvent) — burstComplete still does its
+// own per-agent sweep over the full snapshot.
+function repackAgentLanes(store: SessionStore, agentId: string): void {
+  if (!agentId) return;
+  const spans = store.spans.queryAgent(
+    agentId,
+    -Number.MAX_SAFE_INTEGER,
+    Number.MAX_SAFE_INTEGER,
+  );
+  packLanes(spans);
+}
+
 // Translate the generated SessionStatus enum to the closed string set
 // consumers actually care about. Unknown numeric values fall through to
 // 'UNKNOWN' so a forward-compatible server can't blow the UI up.
@@ -389,6 +405,12 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
                 if (ui.agentId.endsWith(':goldfive')) {
                   store.mergeGoldfiveAlias();
                 }
+                // harmonograf#271: repack lanes for the affected agent so
+                // concurrent spans land on distinct sub-tracks. Without
+                // this, every live span keeps its convertSpan default of
+                // lane=-1 (rendered as lane 0) and overlapping spans
+                // stack on top of each other on the same agent row.
+                repackAgentLanes(store, ui.agentId);
               }
               break;
             }
@@ -418,6 +440,7 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
             case 'endedSpan': {
               const existing = store.spans.get(kind.value.spanId);
               if (existing) {
+                const wasOpen = existing.endMs === null;
                 if (kind.value.endTime && origin) {
                   existing.endMs =
                     Number(kind.value.endTime.seconds) * 1000 +
@@ -441,6 +464,13 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
                   existing.payloadRefs = kind.value.payloadRefs.map(convertPayloadRef);
                 }
                 store.spans.update(existing);
+                // harmonograf#271: a finalized end time can free up a lane
+                // a later span had been forced past — repack so the lane
+                // assignment shrinks back when concurrency drops. Cheap
+                // (per-agent sort) and bounded by typical lane counts.
+                if (wasOpen) {
+                  repackAgentLanes(store, existing.agentId);
+                }
                 // If an INVOCATION span just ended and the agent has no other
                 // running INVOCATION spans, clear any stale taskReport so the
                 // Graph view doesn't keep showing "Thinking: …" after the agent
@@ -528,6 +558,13 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
                 origin?.startMs ?? 0,
                 sessionId,
               );
+              // harmonograf#271: several goldfive event types synthesize
+              // spans on the canonical goldfive actor row (drift, refine,
+              // judge, …). Repack that row so concurrent synthetic spans
+              // (e.g. a long refine_steer overlapping a judge call) get
+              // distinct sub-tracks. Repacking by ID is cheap and
+              // idempotent for events that don't append spans.
+              repackAgentLanes(store, store.resolveGoldfiveActorId());
               break;
             }
             case 'refineAttempted': {
@@ -551,6 +588,9 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
                 origin?.startMs ?? 0,
                 sessionId,
               );
+              // Repack the goldfive row: applyRefineFailed synthesizes a
+              // CUSTOM span there (harmonograf#271).
+              repackAgentLanes(store, store.resolveGoldfiveActorId());
               break;
             }
             case 'userMessage': {
@@ -565,6 +605,9 @@ export function useSessionWatch(sessionId: string | null): WatchSessionState {
                 origin?.startMs ?? 0,
                 sessionId,
               );
+              // Repack the user actor row: applyUserMessage synthesizes a
+              // USER_MESSAGE span there (harmonograf#271).
+              repackAgentLanes(store, '__user__');
               break;
             }
             case 'taskReport': {
