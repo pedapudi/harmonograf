@@ -128,17 +128,41 @@ interface FrameMetrics {
 // Shared row/lane → Y math. Used by drawBlocks, drawLinks, and drawDelegations
 // so a span's rendered Y center matches the arrow anchors exactly. Keep in
 // sync with the inline `laneTop = row.top + 2 + lane * laneH` formula used by
-// the block draw pass.
+// the block draw pass. `laneCount` lets the row scale vertically when an
+// agent has more than 3 concurrent spans so sub-tracks don't overlap or
+// bleed into the next agent's row (harmonograf#271).
 interface RowLayoutLite {
   top: number;
   height: number;
+  laneCount: number;
 }
-function laneCenterY(row: RowLayoutLite, lane: number): number {
+
+// Per-lane vertical pitch within a row. Divides the row into max(3, laneCount)
+// sub-tracks: with a 3-lane budget the math reduces to the legacy formula
+// (`floor(rowH/3)`) so existing visuals stay unchanged for the typical case;
+// with more lanes, rowHeight() has already scaled the row up so each lane
+// keeps the same visual height (~18px regular, ~40px focused).
+function laneHeightFor(rowH: number, laneCount: number): number {
+  const denom = Math.max(3, Math.max(1, laneCount));
+  return Math.max(SUB_LANE_HEIGHT_PX, Math.floor(rowH / denom));
+}
+
+function laneRect(
+  rowTop: number,
+  rowH: number,
+  laneCount: number,
+  lane: number,
+): { laneTop: number; rectH: number } {
   const laneIdx = lane >= 0 ? lane : 0;
-  const laneH = Math.max(SUB_LANE_HEIGHT_PX, Math.floor(row.height / 3));
-  const laneTop = row.top + 2 + laneIdx * laneH;
-  const laneBot = Math.min(row.top + row.height - 2, laneTop + laneH - 2);
+  const laneH = laneHeightFor(rowH, laneCount);
+  const laneTop = rowTop + 2 + laneIdx * laneH;
+  const laneBot = Math.min(rowTop + rowH - 2, laneTop + laneH - 2);
   const rectH = Math.max(6, laneBot - laneTop);
+  return { laneTop, rectH };
+}
+
+function laneCenterY(row: RowLayoutLite, lane: number): number {
+  const { laneTop, rectH } = laneRect(row.top, row.height, row.laneCount, lane);
   return laneTop + rectH / 2;
 }
 
@@ -918,6 +942,7 @@ export class GanttRenderer {
         y += rowH;
         continue;
       }
+      const laneCount = this.getLaneCount(agent.id);
       const rowDataX = GUTTER_WIDTH_PX + 10; // skip color strip
       const scratch: Span[] = [];
       spanIndex.queryAgent(agent.id, vs, ve, scratch);
@@ -930,10 +955,7 @@ export class GanttRenderer {
         );
         const x2 = msToPx(this.viewport, w, s.endMs ?? this.store.nowMs);
         const width = Math.max(MIN_BLOCK_WIDTH_PX, x2 - x1);
-        const laneH = Math.max(SUB_LANE_HEIGHT_PX, Math.floor(rowH / 3));
-        const laneTop = y + 2 + (s.lane >= 0 ? s.lane : 0) * laneH;
-        const laneBot = Math.min(y + rowH - 2, laneTop + laneH - 2);
-        const rectH = Math.max(6, laneBot - laneTop);
+        const { laneTop, rectH } = laneRect(y, rowH, laneCount, s.lane);
         if (width < MIN_BLOCK_WIDTH_PX * 2 && s.status !== 'AWAITING_HUMAN') {
           // Merge into a density stripe for this lane.
           const d = laneDensity.get(s.lane >= 0 ? s.lane : 0);
@@ -1169,12 +1191,13 @@ export class GanttRenderer {
     // Row layout lookup: top, height, center. We need top+height to resolve
     // per-span lane positions so link anchors land on the actual bar, not the
     // row's center line.
-    type RowLayout = { top: number; height: number; centerY: number };
+    type RowLayout = { top: number; height: number; centerY: number; laneCount: number };
     const rowLayout = new Map<string, RowLayout>();
     let y = TOP_MARGIN_PX;
     for (const agent of agents) {
       const rowH = this.rowHeight(agent.id);
-      rowLayout.set(agent.id, { top: y, height: rowH, centerY: y + rowH / 2 });
+      const laneCount = this.getLaneCount(agent.id);
+      rowLayout.set(agent.id, { top: y, height: rowH, centerY: y + rowH / 2, laneCount });
       y += rowH;
     }
     const spanCenterY = (s: Span, row: RowLayout): number =>
@@ -1276,12 +1299,13 @@ export class GanttRenderer {
     // NOT the row midline. On a 3-sub-lane row the INVOCATION bar sits at
     // ~row.top+10 while the midline is at row.top+28, so anchoring to
     // midline leaves the arrow floating below the bar (harmonograf#129).
-    type RowLayout = { top: number; height: number; centerY: number };
+    type RowLayout = { top: number; height: number; centerY: number; laneCount: number };
     const rowLayout = new Map<string, RowLayout>();
     let y = TOP_MARGIN_PX;
     for (const agent of agents) {
       const rowH = this.rowHeight(agent.id);
-      rowLayout.set(agent.id, { top: y, height: rowH, centerY: y + rowH / 2 });
+      const laneCount = this.getLaneCount(agent.id);
+      rowLayout.set(agent.id, { top: y, height: rowH, centerY: y + rowH / 2, laneCount });
       y += rowH;
     }
 
@@ -1775,7 +1799,7 @@ export class GanttRenderer {
 
       if (mode === 'ghost' || mode === 'hybrid') {
         // Ghost rect at predicted time, bottom lane of the row.
-        const laneH = Math.max(SUB_LANE_HEIGHT_PX, Math.floor(rowH / 3));
+        const laneH = laneHeightFor(rowH, this.getLaneCount(agent.id));
         const ghostH = Math.max(8, laneH - 4);
         const ghostY = y + rowH - ghostH - 3;
         for (const task of tasks) {
@@ -2220,6 +2244,7 @@ export class GanttRenderer {
     const scratch: Span[] = [];
     for (const agent of agents) {
       const rowH = this.rowHeight(agent.id);
+      const laneCount = this.getLaneCount(agent.id);
       scratch.length = 0;
       this.store.spans.queryAgent(agent.id, vs, ve, scratch);
       for (const s of scratch) {
@@ -2227,9 +2252,7 @@ export class GanttRenderer {
         const x1 = Math.max(GUTTER_WIDTH_PX + 10, msToPx(this.viewport, this.widthCss, s.startMs));
         const x2 = msToPx(this.viewport, this.widthCss, s.endMs ?? this.store.nowMs);
         const width = Math.max(MIN_BLOCK_WIDTH_PX, x2 - x1);
-        const laneH = Math.max(SUB_LANE_HEIGHT_PX, Math.floor(rowH / 3));
-        const laneTop = y + 2 + (s.lane >= 0 ? s.lane : 0) * laneH;
-        const rectH = Math.max(6, Math.min(y + rowH - 2, laneTop + laneH - 2) - laneTop);
+        const { laneTop, rectH } = laneRect(y, rowH, laneCount, s.lane);
         if (s.status === 'RUNNING') {
           ctx.globalAlpha = breathe * 0.35;
           ctx.fillStyle = cssVar('--md-sys-color-primary') || '#a8c8ff';
@@ -2261,6 +2284,7 @@ export class GanttRenderer {
       if (py >= y && py < y + rowH) {
         const vs = viewportStart(this.viewport);
         const ve = this.viewport.endMs;
+        const laneCount = this.getLaneCount(agent.id);
         scratch.length = 0;
         this.store.spans.queryAgent(agent.id, vs, ve, scratch);
         // Iterate back-to-front so topmost sublane wins.
@@ -2269,9 +2293,7 @@ export class GanttRenderer {
           const x1 = Math.max(GUTTER_WIDTH_PX + 10, msToPx(this.viewport, this.widthCss, s.startMs));
           const x2 = msToPx(this.viewport, this.widthCss, s.endMs ?? this.store.nowMs);
           const width = Math.max(MIN_BLOCK_WIDTH_PX, x2 - x1);
-          const laneH = Math.max(SUB_LANE_HEIGHT_PX, Math.floor(rowH / 3));
-          const laneTop = y + 2 + (s.lane >= 0 ? s.lane : 0) * laneH;
-          const rectH = Math.max(6, Math.min(y + rowH - 2, laneTop + laneH - 2) - laneTop);
+          const { laneTop, rectH } = laneRect(y, rowH, laneCount, s.lane);
           // Expand hit zone by 4px on each side so small blocks are easier to click.
           if (px >= x1 - 4 && px <= x1 + width + 4 && py >= laneTop && py <= laneTop + rectH) {
             return s.id;
@@ -2298,9 +2320,8 @@ export class GanttRenderer {
         );
         const x2 = msToPx(this.viewport, this.widthCss, s.endMs ?? this.store.nowMs);
         const width = Math.max(MIN_BLOCK_WIDTH_PX, x2 - x1);
-        const laneH = Math.max(SUB_LANE_HEIGHT_PX, Math.floor(rowH / 3));
-        const laneTop = y + 2 + (s.lane >= 0 ? s.lane : 0) * laneH;
-        const rectH = Math.max(6, Math.min(y + rowH - 2, laneTop + laneH - 2) - laneTop);
+        const laneCount = this.getLaneCount(agent.id);
+        const { laneTop, rectH } = laneRect(y, rowH, laneCount, s.lane);
         return { x: x1, y: laneTop, w: width, h: rectH };
       }
       y += rowH;
@@ -2310,7 +2331,35 @@ export class GanttRenderer {
 
   private rowHeight(agentId: string): number {
     if (this.hiddenAgentIds.has(agentId)) return ROW_HEIGHT_COLLAPSED_PX;
-    return agentId === this.focusedAgentId ? ROW_HEIGHT_FOCUSED_PX : ROW_HEIGHT_PX;
+    const base = agentId === this.focusedAgentId ? ROW_HEIGHT_FOCUSED_PX : ROW_HEIGHT_PX;
+    // harmonograf#271: when an agent has more than the default 3-lane budget
+    // of concurrent activity, expand the row vertically so each sub-track
+    // keeps its visual height (~18px regular, ~40px focused) instead of
+    // overlapping or bleeding into the next agent's row. baseLaneH is
+    // derived from the default 3-track budget so 1–3-lane rows render at
+    // exactly the legacy size.
+    const laneCount = this.getLaneCount(agentId);
+    if (laneCount <= 3) return base;
+    const baseLaneH = Math.max(SUB_LANE_HEIGHT_PX, Math.floor(base / 3));
+    return laneCount * baseLaneH + 4; // 2px top + 2px bottom padding
+  }
+
+  // Concurrency-derived lane count for a given agent: the highest lane index
+  // assigned by packLanes() across that agent's spans, plus one. Returns 0
+  // when the agent has no spans (in which case rowHeight() falls back to its
+  // default). Linear in the per-agent span count; cheap enough to call from
+  // every getRowLayout() / draw pass without caching.
+  private getLaneCount(agentId: string): number {
+    const spans = this.store.spans.queryAgent(
+      agentId,
+      -Number.MAX_SAFE_INTEGER,
+      Number.MAX_SAFE_INTEGER,
+    );
+    let max = -1;
+    for (const s of spans) {
+      if (s.lane > max) max = s.lane;
+    }
+    return max + 1;
   }
 
   // --- Perf ---------------------------------------------------------------

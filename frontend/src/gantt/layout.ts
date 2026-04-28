@@ -7,6 +7,10 @@ import type { Span } from './types';
 //
 // This function mutates spans in place. It does NOT guarantee stable lanes
 // across rebuilds — if you need stability, rebuild only affected agents.
+//
+// Returns the number of lanes used (= max concurrency at any timestamp). The
+// renderer uses this count to vertically size the agent's row so concurrent
+// spans render on distinct sub-tracks instead of overlapping (harmonograf#271).
 
 export function packLanes(spans: Span[]): number {
   // Sort (stable): startMs, then endMs ascending, so nested spans get lane 1+
