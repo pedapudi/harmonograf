@@ -194,10 +194,27 @@ async def list_interventions(
         logger.debug("drifts_for_session failed: %s", exc)
         drifts = []
 
+    # goldfive#271 follow-up: collect every synthetic drift's id BEFORE
+    # ``_project_drifts`` filters them out. The matching ``PlanRevised``
+    # carries the same id as ``trigger_event_id`` but no synthetic flag
+    # of its own (the proto field doesn't exist), so without this set the
+    # plan-revision row leaks into the panel as a phantom
+    # ``STEER WARNING -> REV 1`` card on every fresh user turn (v17 UI
+    # regression: drift filtered but plan row survived). Drift rows pass
+    # through their own ``synthetic`` filter in ``_project_drifts``;
+    # plan rows are filtered against this set in ``_project_plans``.
+    synthetic_trigger_ids: set[str] = set()
+    for dr in drifts:
+        if not dr.get("synthetic"):
+            continue
+        drift_id = str(dr.get("id") or "")
+        if drift_id:
+            synthetic_trigger_ids.add(drift_id)
+
     records: list[InterventionRecord] = []
     records.extend(_project_annotations(annotations))
     records.extend(_project_drifts(drifts))
-    records.extend(_project_plans(plans))
+    records.extend(_project_plans(plans, synthetic_trigger_ids=synthetic_trigger_ids))
 
     records.sort(key=lambda r: r.at)
     _attribute_outcomes(records, plans, legacy_window_ms=window_ms)
@@ -383,7 +400,11 @@ def _project_drifts(drifts: Iterable[dict[str, Any]]) -> list[InterventionRecord
     return out
 
 
-def _project_plans(plans: Iterable[TaskPlan]) -> list[InterventionRecord]:
+def _project_plans(
+    plans: Iterable[TaskPlan],
+    *,
+    synthetic_trigger_ids: frozenset[str] | set[str] | None = None,
+) -> list[InterventionRecord]:
     """Project every plan revision (index > 0) to an InterventionRecord.
 
     Unlike the pre-#99 projector, this one does **not** try to suppress
@@ -394,14 +415,35 @@ def _project_plans(plans: Iterable[TaskPlan]) -> list[InterventionRecord]:
 
     ``trigger_event_id`` comes off the persisted plan row (stamped by
     ingest.py::_on_plan_revised from ``PlanRevised.trigger_event_id``).
+
+    ``synthetic_trigger_ids``: set of drift ids whose originating
+    ``DriftDetected`` carried ``synthetic = True``. Plan rows whose
+    ``trigger_event_id`` is in this set are skipped — they are the
+    PlanRevised that goldfive's ``Runner._install_revision`` plumbing
+    fabricates on every fresh user turn (paired with a synthetic
+    USER_STEER drift). PR #302+#219 filter the synthetic drift +
+    refine_attempted; this filter closes the third leak path (the plan
+    revision itself), v17 UI regression evidence: a phantom
+    ``STEER WARNING -> REV 1`` card surfaced at 0:22 because the drift
+    was filtered before the strict-id merge could fold the plan onto
+    it, leaving the plan row to surface alone.
     """
 
+    skip_ids = synthetic_trigger_ids or frozenset()
     out: list[InterventionRecord] = []
     for plan in plans:
         rev_kind = (plan.revision_kind or "").lower()
         rev_index = int(plan.revision_index or 0)
         if not rev_kind or rev_index <= 0:
             # Initial plan submission — not an intervention.
+            continue
+        # goldfive#271 follow-up: drop the plan revision minted by
+        # ``Runner._install_revision``. Identified by a ``trigger_event_id``
+        # that matches a known synthetic drift (collected in
+        # :func:`list_interventions` before ``_project_drifts`` strips
+        # them out).
+        trig = plan.trigger_event_id or ""
+        if trig and trig in skip_ids:
             continue
         if rev_kind in _GOLDFIVE_REVISION_KINDS:
             source = "goldfive"

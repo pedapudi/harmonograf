@@ -246,6 +246,21 @@ export interface DeriveInput {
 export function deriveInterventions(input: DeriveInput): InterventionRow[] {
   const rows: InterventionRow[] = [];
 
+  // goldfive#271 follow-up: collect every synthetic drift's id BEFORE
+  // the drift-projection loop filters them out. The matching plan
+  // revision (Runner._install_revision's PlanRevised) carries the same
+  // id as triggerEventId but no synthetic flag of its own — without
+  // this set the plan-revision row leaks into the panel as a phantom
+  // ``STEER WARNING -> REV 1`` card on every fresh user turn (v17 UI
+  // regression at 0:22). PRs #302 + #219 filter the synthetic drift +
+  // refine_attempted; this set closes the third leak path (the plan
+  // revision itself).
+  const syntheticTriggerIds = new Set<string>();
+  for (const dr of input.drifts) {
+    if (!dr.synthetic) continue;
+    if (dr.driftId) syntheticTriggerIds.add(dr.driftId);
+  }
+
   for (const ann of input.annotations) {
     const label = annotationKindLabel(ann.kind);
     if (!label) continue;
@@ -312,6 +327,15 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
     const revKind = (plan.revisionKind || '').toLowerCase();
     const revIdx = plan.revisionIndex ?? 0;
     if (!revKind || revIdx <= 0) continue;
+    // goldfive#271 follow-up: drop the plan revision minted by
+    // ``Runner._install_revision``. Identified by a ``triggerEventId``
+    // that matches a known synthetic drift (collected above before the
+    // drift-projection loop strips them out). Closes the v17 UI
+    // regression where the synthetic drift was filtered but its paired
+    // PlanRevised still surfaced as a phantom ``STEER WARNING -> REV 1``.
+    if (plan.triggerEventId && syntheticTriggerIds.has(plan.triggerEventId)) {
+      continue;
+    }
     let source: InterventionSource;
     if (GOLDFIVE_REVISION_KINDS.has(revKind)) source = 'goldfive';
     else if (USER_DRIFT_KINDS.has(revKind)) source = 'user';
