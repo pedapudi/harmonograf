@@ -1062,3 +1062,410 @@ async def test_list_interventions_rpc_unknown_session_is_not_found(rpc_stack):
         assert exc.value.code() == grpc.StatusCode.NOT_FOUND
     finally:
         await ch.close()
+
+
+# ---------------------------------------------------------------------------
+# I6 — server-side condition_id collapse (goldfive#318 mirror)
+# ---------------------------------------------------------------------------
+#
+# The iter_1 escalation report's I6 finding flagged that a session with
+# 13 ``drift_detected`` events sharing 9 ``condition_id``s returned 18
+# rows from ``Harmonograf/ListInterventions`` instead of 9 collapsed
+# rows, and that severity transitions in the event stream did NOT
+# surface on the rows. These tests pin the server-side collapse fix so
+# the gRPC projection mirrors the frontend's groupDriftConditions
+# deriver: one row per condition_id, with count/first_seen/last_seen
+# metadata and an ordered list of severity_transitions.
+# ---------------------------------------------------------------------------
+
+
+async def test_collapse_two_drifts_same_condition_id_yields_one_row(store):
+    """Two drift_detected emits sharing condition_id collapse to one
+    survivor with count=2 and the latest emit's state.
+    """
+
+    sid = "sess_collapse_2"
+    await _seed_session(store, sid)
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "run_id": "r1",
+                    "kind": "looping_reasoning",
+                    "severity": "warning",
+                    "detail": "first observation",
+                    "current_task_id": "t1",
+                    "current_agent_id": "a",
+                    "id": "drift_1",
+                    "condition_id": "cond_loop_t1_a",
+                    "lifecycle": "opened",
+                    "recorded_at": 100.0,
+                },
+                {
+                    "run_id": "r1",
+                    "kind": "looping_reasoning",
+                    "severity": "warning",
+                    "detail": "second observation",
+                    "current_task_id": "t1",
+                    "current_agent_id": "a",
+                    "id": "drift_2",
+                    "condition_id": "cond_loop_t1_a",
+                    "lifecycle": "escalating",
+                    "recorded_at": 110.0,
+                },
+            ]
+        }
+    )
+
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+
+    assert len(records) == 1, (
+        f"expected collapse to one row; got {[(r.kind, r.at, r.detail if hasattr(r, 'detail') else r.body_or_reason) for r in records]!r}"
+    )
+    rec = records[0]
+    assert rec.condition_id == "cond_loop_t1_a"
+    assert rec.count == 2
+    assert rec.first_seen == 100.0
+    assert rec.last_seen == 110.0
+    # Survivor reflects the LATEST observation (second) — its body /
+    # lifecycle / trigger_event_id win so the row reads as the
+    # condition's CURRENT state.
+    assert rec.body_or_reason == "second observation"
+    assert rec.lifecycle == "escalating"
+    assert rec.trigger_event_id == "drift_2"
+    # No severity transition: both observations had severity=warning.
+    assert rec.severity_transitions == []
+
+
+async def test_collapse_three_distinct_condition_ids_yields_three_rows(store):
+    """Three drift_detected emits with DIFFERENT condition_ids stay as
+    three rows, each with count=1 (no collapse).
+    """
+
+    sid = "sess_collapse_3"
+    await _seed_session(store, sid)
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "kind": "looping_reasoning",
+                    "severity": "warning",
+                    "detail": "loop",
+                    "id": "d1",
+                    "condition_id": "cond_a",
+                    "lifecycle": "opened",
+                    "recorded_at": 100.0,
+                },
+                {
+                    "kind": "tool_error",
+                    "severity": "warning",
+                    "detail": "err",
+                    "id": "d2",
+                    "condition_id": "cond_b",
+                    "lifecycle": "opened",
+                    "recorded_at": 110.0,
+                },
+                {
+                    "kind": "confabulation_risk",
+                    "severity": "info",
+                    "detail": "conf",
+                    "id": "d3",
+                    "condition_id": "cond_c",
+                    "lifecycle": "opened",
+                    "recorded_at": 120.0,
+                },
+            ]
+        }
+    )
+
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    assert len(records) == 3
+    for rec in records:
+        assert rec.count == 1
+        assert rec.first_seen == rec.at
+        assert rec.last_seen == rec.at
+        assert rec.severity_transitions == []
+    assert {r.condition_id for r in records} == {"cond_a", "cond_b", "cond_c"}
+
+
+async def test_collapse_empty_condition_id_passes_through_pre_318(store):
+    """Pre-#318 events (empty condition_id) bypass the collapse pass —
+    backward compat: each emit gets its own row with count=1.
+    """
+
+    sid = "sess_collapse_empty"
+    await _seed_session(store, sid)
+    # Two drifts of the same kind, both with empty condition_id —
+    # represents pre-#318 goldfive output. Should NOT collapse.
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "kind": "looping_reasoning",
+                    "severity": "warning",
+                    "detail": "pre-318 emit 1",
+                    "id": "d1",
+                    "condition_id": "",
+                    "recorded_at": 100.0,
+                },
+                {
+                    "kind": "looping_reasoning",
+                    "severity": "warning",
+                    "detail": "pre-318 emit 2",
+                    "id": "d2",
+                    "condition_id": "",
+                    "recorded_at": 110.0,
+                },
+            ]
+        }
+    )
+
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    assert len(records) == 2
+    for rec in records:
+        assert rec.condition_id == ""
+        assert rec.count == 1
+        assert rec.severity_transitions == []
+
+
+async def test_collapse_severity_transition_warning_to_critical(store):
+    """A condition that bumps WARNING → CRITICAL across two emits
+    surfaces ONE row whose severity_transitions captures the bump.
+    """
+
+    sid = "sess_collapse_sev"
+    await _seed_session(store, sid)
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "kind": "looping_reasoning",
+                    "severity": "warning",
+                    "detail": "first emit",
+                    "id": "d1",
+                    "condition_id": "cond_x",
+                    "lifecycle": "opened",
+                    "prev_severity": "",  # OPENED has no prior — no transition
+                    "recorded_at": 100.0,
+                },
+                {
+                    "kind": "looping_reasoning",
+                    "severity": "critical",
+                    "detail": "second emit, bumped",
+                    "id": "d2",
+                    "condition_id": "cond_x",
+                    "lifecycle": "escalating",
+                    "prev_severity": "warning",  # the bump
+                    "recorded_at": 110.0,
+                },
+            ]
+        }
+    )
+
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    assert len(records) == 1
+    rec = records[0]
+    assert rec.count == 2
+    # Survivor reflects current state — CRITICAL.
+    assert rec.severity == "critical"
+    assert rec.lifecycle == "escalating"
+    # Severity transition surfaced on the collapsed row.
+    assert len(rec.severity_transitions) == 1
+    trans = rec.severity_transitions[0]
+    assert trans.frm == "warning"
+    assert trans.to == "critical"
+    assert trans.at == 110.0
+
+
+async def test_collapse_donates_outcome_from_earlier_emit(store):
+    """A multi-emit condition where an EARLY emit triggered a refine
+    has its outcome donated to the (latest) survivor row — so the
+    collapsed view does not lose the strict-id outcome attribution.
+    """
+
+    sid = "sess_collapse_outcome"
+    await _seed_session(store, sid)
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "kind": "looping_reasoning",
+                    "severity": "warning",
+                    "detail": "first (triggered refine)",
+                    "id": "drift_early",  # plan trigger_event_id matches this
+                    "condition_id": "cond_q",
+                    "lifecycle": "opened",
+                    "recorded_at": 100.0,
+                },
+                {
+                    "kind": "looping_reasoning",
+                    "severity": "warning",
+                    "detail": "second (no follow-up)",
+                    "id": "drift_late",
+                    "condition_id": "cond_q",
+                    "lifecycle": "escalating",
+                    "recorded_at": 110.0,
+                },
+            ]
+        }
+    )
+    # Plan revision strict-id-matches the EARLY drift.
+    await store.put_task_plan(
+        TaskPlan(
+            id="p1",
+            session_id=sid,
+            created_at=105.0,
+            summary="refined",
+            tasks=[],
+            edges=[],
+            revision_reason="loop refine",
+            revision_kind="looping_reasoning",
+            revision_severity="warning",
+            revision_index=2,
+            trigger_event_id="drift_early",
+        )
+    )
+
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    assert len(records) == 1
+    rec = records[0]
+    assert rec.count == 2
+    # Outcome donated from the early emit, even though survivor is the
+    # late emit (whose own trigger_event_id didn't match the plan).
+    assert rec.outcome == "plan_revised:r2"
+    assert rec.plan_revision_index == 2
+
+
+async def test_record_to_pb_emits_collapse_fields(store):
+    """The proto translation populates count / first_seen / last_seen /
+    lifecycle / severity_transitions on the wire so opt-in clients can
+    prefer server-collapsed data.
+    """
+
+    from harmonograf_server.interventions import record_to_pb
+    from harmonograf_server.pb.harmonograf.v1 import types_pb2
+
+    sid = "sess_pb_collapse"
+    await _seed_session(store, sid)
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "kind": "looping_reasoning",
+                    "severity": "warning",
+                    "detail": "first",
+                    "id": "d1",
+                    "condition_id": "cond_pb",
+                    "lifecycle": "opened",
+                    "recorded_at": 100.0,
+                },
+                {
+                    "kind": "looping_reasoning",
+                    "severity": "critical",
+                    "detail": "second",
+                    "id": "d2",
+                    "condition_id": "cond_pb",
+                    "lifecycle": "escalating",
+                    "prev_severity": "warning",
+                    "recorded_at": 110.0,
+                },
+            ]
+        }
+    )
+
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    assert len(records) == 1
+    pb = record_to_pb(records[0], types_pb2)
+    assert pb.condition_id == "cond_pb"
+    assert pb.count == 2
+    assert pb.lifecycle == "escalating"
+    assert pb.first_seen.seconds == 100
+    assert pb.last_seen.seconds == 110
+    assert len(pb.severity_transitions) == 1
+    trans = pb.severity_transitions[0]
+    # ``from`` is a Python keyword — read via getattr against the proto
+    # message (the descriptor still exposes the proto field name).
+    assert getattr(trans, "from") == "warning"
+    assert trans.to == "critical"
+    assert trans.at.seconds == 110
+
+
+async def test_collapse_iter1_escalation_scenario(store):
+    """Reproduce the iter_1 escalation: 13 drift events across 9
+    condition_ids → 9 rows from list_interventions (NOT 13 / 18).
+
+    This is the regression pin for I6's headline finding.
+    """
+
+    sid = "sess_iter1"
+    await _seed_session(store, sid)
+
+    # 9 distinct condition_ids; 4 of them have a duplicate emit so the
+    # total observation count is 13. Pattern matches the report: same
+    # condition_id repeats only for "logical drift evolved across emits"
+    # (lifecycle OPENED → ESCALATING / severity bumps).
+    raw_drifts: list[dict] = []
+    t = 1000.0
+    for i in range(9):
+        raw_drifts.append(
+            {
+                "kind": "looping_reasoning",
+                "severity": "warning",
+                "detail": f"first emit cond_{i}",
+                "id": f"d{i}_1",
+                "condition_id": f"cond_{i}",
+                "lifecycle": "opened",
+                "recorded_at": t,
+            }
+        )
+        t += 1.0
+    # Add 4 second-emits to 4 of the conditions. Two are pure re-emits
+    # (no severity bump), two bump severity to critical.
+    extras = [
+        ("cond_0", "warning", ""),
+        ("cond_1", "critical", "warning"),
+        ("cond_3", "warning", ""),
+        ("cond_5", "critical", "warning"),
+    ]
+    for cid, sev, prev in extras:
+        raw_drifts.append(
+            {
+                "kind": "looping_reasoning",
+                "severity": sev,
+                "detail": f"re-emit {cid}",
+                "id": f"{cid}_2",
+                "condition_id": cid,
+                "lifecycle": "escalating",
+                "prev_severity": prev,
+                "recorded_at": t,
+            }
+        )
+        t += 1.0
+    assert len(raw_drifts) == 13
+
+    drifts = _StubDrifts({sid: raw_drifts})
+    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+
+    # 9 rows, NOT 13 / 18.
+    assert len(records) == 9, (
+        f"expected 9 rows (one per condition_id); got {len(records)}: "
+        f"{[(r.condition_id, r.count) for r in records]!r}"
+    )
+    # 4 rows have count=2; 5 rows have count=1.
+    counts = sorted(r.count for r in records)
+    assert counts == [1, 1, 1, 1, 1, 2, 2, 2, 2]
+    # 2 severity transitions surface (cond_1 + cond_5), not 0.
+    transitioning_rows = [r for r in records if r.severity_transitions]
+    assert len(transitioning_rows) == 2
+    assert {r.condition_id for r in transitioning_rows} == {"cond_1", "cond_5"}
+    for r in transitioning_rows:
+        assert len(r.severity_transitions) == 1
+        assert r.severity_transitions[0].frm == "warning"
+        assert r.severity_transitions[0].to == "critical"
+    # Conditions that bumped to critical reflect that on the survivor row.
+    by_cid = {r.condition_id: r for r in records}
+    assert by_cid["cond_1"].severity == "critical"
+    assert by_cid["cond_5"].severity == "critical"
+    # Conditions that just re-emitted at warning stay warning.
+    assert by_cid["cond_0"].severity == "warning"
+    assert by_cid["cond_3"].severity == "warning"

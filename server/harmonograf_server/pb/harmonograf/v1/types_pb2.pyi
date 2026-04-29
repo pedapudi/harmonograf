@@ -314,7 +314,7 @@ class Annotation(_message.Message):
     def __init__(self, id: _Optional[str] = ..., session_id: _Optional[str] = ..., target: _Optional[_Union[AnnotationTarget, _Mapping]] = ..., author: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., kind: _Optional[_Union[AnnotationKind, str]] = ..., body: _Optional[str] = ..., delivered_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class Intervention(_message.Message):
-    __slots__ = ("at", "source", "kind", "body_or_reason", "author", "outcome", "plan_revision_index", "severity", "annotation_id", "drift_kind")
+    __slots__ = ("at", "source", "kind", "body_or_reason", "author", "outcome", "plan_revision_index", "severity", "annotation_id", "drift_kind", "condition_id", "count", "first_seen", "last_seen", "lifecycle", "severity_transitions")
     AT_FIELD_NUMBER: _ClassVar[int]
     SOURCE_FIELD_NUMBER: _ClassVar[int]
     KIND_FIELD_NUMBER: _ClassVar[int]
@@ -325,6 +325,12 @@ class Intervention(_message.Message):
     SEVERITY_FIELD_NUMBER: _ClassVar[int]
     ANNOTATION_ID_FIELD_NUMBER: _ClassVar[int]
     DRIFT_KIND_FIELD_NUMBER: _ClassVar[int]
+    CONDITION_ID_FIELD_NUMBER: _ClassVar[int]
+    COUNT_FIELD_NUMBER: _ClassVar[int]
+    FIRST_SEEN_FIELD_NUMBER: _ClassVar[int]
+    LAST_SEEN_FIELD_NUMBER: _ClassVar[int]
+    LIFECYCLE_FIELD_NUMBER: _ClassVar[int]
+    SEVERITY_TRANSITIONS_FIELD_NUMBER: _ClassVar[int]
     at: _timestamp_pb2.Timestamp
     source: str
     kind: str
@@ -335,4 +341,19 @@ class Intervention(_message.Message):
     severity: str
     annotation_id: str
     drift_kind: str
-    def __init__(self, at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., source: _Optional[str] = ..., kind: _Optional[str] = ..., body_or_reason: _Optional[str] = ..., author: _Optional[str] = ..., outcome: _Optional[str] = ..., plan_revision_index: _Optional[int] = ..., severity: _Optional[str] = ..., annotation_id: _Optional[str] = ..., drift_kind: _Optional[str] = ...) -> None: ...
+    condition_id: str
+    count: int
+    first_seen: _timestamp_pb2.Timestamp
+    last_seen: _timestamp_pb2.Timestamp
+    lifecycle: str
+    severity_transitions: _containers.RepeatedCompositeFieldContainer[SeverityTransition]
+    def __init__(self, at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., source: _Optional[str] = ..., kind: _Optional[str] = ..., body_or_reason: _Optional[str] = ..., author: _Optional[str] = ..., outcome: _Optional[str] = ..., plan_revision_index: _Optional[int] = ..., severity: _Optional[str] = ..., annotation_id: _Optional[str] = ..., drift_kind: _Optional[str] = ..., condition_id: _Optional[str] = ..., count: _Optional[int] = ..., first_seen: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., last_seen: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., lifecycle: _Optional[str] = ..., severity_transitions: _Optional[_Iterable[_Union[SeverityTransition, _Mapping]]] = ...) -> None: ...
+
+class SeverityTransition(_message.Message):
+    __slots__ = ("to", "at")
+    FROM_FIELD_NUMBER: _ClassVar[int]
+    TO_FIELD_NUMBER: _ClassVar[int]
+    AT_FIELD_NUMBER: _ClassVar[int]
+    to: str
+    at: _timestamp_pb2.Timestamp
+    def __init__(self, to: _Optional[str] = ..., at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., **kwargs) -> None: ...

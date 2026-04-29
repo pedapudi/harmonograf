@@ -522,6 +522,26 @@ def _drift_severity_pb_to_string(value: int) -> str:
     return name.lower()
 
 
+def _drift_lifecycle_pb_to_string(value: int) -> str:
+    """Convert a ``goldfive.v1.DriftLifecycle`` enum int to its lowercase value.
+
+    Returns the empty string on UNSPECIFIED so pre-#318 events (and
+    callers that simply did not stamp the field) keep a clean column —
+    the intervention aggregator's collapse pass treats empty as "no
+    server-side condition tracking" and falls back to one row per emit.
+    """
+
+    try:
+        name = goldfive_types_pb2.DriftLifecycle.Name(value)
+    except (ValueError, AttributeError):
+        return ""
+    if name == "DRIFT_LIFECYCLE_UNSPECIFIED":
+        return ""
+    if name.startswith("DRIFT_LIFECYCLE_"):
+        return name[len("DRIFT_LIFECYCLE_"):].lower()
+    return name.lower()
+
+
 def _drift_kind_string_to_pb(value: str) -> int:
     if not value:
         return goldfive_types_pb2.DRIFT_KIND_UNSPECIFIED
