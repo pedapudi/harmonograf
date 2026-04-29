@@ -188,3 +188,112 @@
   letter-spacing: 0.4px;
   color: var(--md-sys-color-on-surface-variant, #9da3b4);
 }
+
+/* goldfive#318 frontend collapse: lifecycle chip, severity-transition
+   marker, and observation expansion. Sized to nest into the existing
+   row layout without bumping the line height. The lifecycle chip uses
+   the same pill geometry as the agent chip so the row reads as a row of
+   small status indicators rather than a competing column. */
+
+.hg-interventions-list__lifecycle {
+  flex-shrink: 0;
+  font-size: 9px;
+  letter-spacing: 0.4px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  text-transform: uppercase;
+  background: rgba(168, 200, 255, 0.10);
+  color: var(--md-sys-color-on-surface-variant, #c3c6cf);
+}
+
+.hg-interventions-list__lifecycle[data-lifecycle='opened'] {
+  background: rgba(168, 200, 255, 0.18);
+  color: #5b8def;
+}
+
+.hg-interventions-list__lifecycle[data-lifecycle='escalating'] {
+  background: rgba(245, 158, 11, 0.20);
+  color: #f59e0b;
+}
+
+.hg-interventions-list__lifecycle[data-lifecycle='resolved'] {
+  background: rgba(58, 155, 138, 0.20);
+  color: #3a9b8a;
+}
+
+.hg-interventions-list__lifecycle[data-lifecycle='human_intervention_required'] {
+  background: rgba(224, 94, 74, 0.20);
+  color: #e05e4a;
+}
+
+/* Severity-transition marker — shown when prev_severity != severity on
+   any observation in the condition. Renders the from→to as a tight
+   string ("warning → critical") so operators see the bump without
+   expanding. */
+.hg-interventions-list__transition {
+  flex-shrink: 0;
+  font-size: 9px;
+  letter-spacing: 0.2px;
+  font-weight: 500;
+  text-transform: uppercase;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+}
+
+/* Inline expansion control under a grouped condition row. Sits just
+   below the row at a small indent so its association is unambiguous. */
+.hg-interventions-list__condition-control {
+  display: flex;
+  padding: 0 6px 0 22px;
+  margin-top: -1px;
+}
+
+.hg-interventions-list__expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 0;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--md-sys-color-on-surface-variant, #9da3b4);
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.hg-interventions-list__expand:hover {
+  opacity: 1;
+  color: var(--md-sys-color-on-surface, #e2e2e9);
+}
+
+/* Per-observation breakdown — sub-rows shown when a grouped condition
+   is expanded. Indented past the swatch column so the visual hierarchy
+   reads "this is rolled up into the row above". */
+.hg-interventions-list__observations {
+  list-style: none;
+  margin: 1px 0 2px 0;
+  padding: 0 0 0 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.hg-interventions-list__observation {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--md-sys-color-on-surface-variant, #c3c6cf);
+}
+
+.hg-interventions-list__observation:hover {
+  background: rgba(168, 200, 255, 0.05);
+}

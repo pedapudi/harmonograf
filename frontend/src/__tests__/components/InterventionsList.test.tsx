@@ -156,3 +156,252 @@ describe('<InterventionsList />', () => {
     expect(onRowClick).toHaveBeenCalledWith(r);
   });
 });
+
+// goldfive#318 frontend follow-up: condition grouping render. The
+// deriver collapses observations sharing a condition_id; the renderer
+// surfaces a count badge + a click-to-expand control that reveals each
+// observation as a sub-row.
+describe('<InterventionsList /> — drift condition grouping (goldfive#318)', () => {
+  it('single-observation condition: shows a lifecycle chip but no expansion control', () => {
+    render(
+      <InterventionsList
+        rows={[
+          row({
+            key: 'drift-cond:cond-A',
+            atMs: 1000,
+            source: 'drift',
+            kind: 'LOOPING_REASONING',
+            bodyOrReason: 'loop detected',
+            severity: 'warning',
+            conditionId: 'cond-A',
+            currentLifecycle: 'opened',
+            observationCount: 1,
+          }),
+        ]}
+      />,
+    );
+    const lc = screen.getByTestId(
+      'interventions-list-row-drift-cond:cond-A-lifecycle',
+    );
+    expect(lc.textContent).toBe('OPENED');
+    expect(
+      screen.queryByTestId(
+        'interventions-list-row-drift-cond:cond-A-expand',
+      ),
+    ).toBeNull();
+  });
+
+  it('multi-observation condition: count badge present; clicking expands observations', () => {
+    render(
+      <InterventionsList
+        rows={[
+          row({
+            key: 'drift-cond:cond-X',
+            atMs: 2000,
+            source: 'drift',
+            kind: 'LOOPING_REASONING',
+            severity: 'critical',
+            conditionId: 'cond-X',
+            currentLifecycle: 'escalating',
+            observationCount: 3,
+            severityTransitions: [
+              { fromSeverity: 'warning', toSeverity: 'critical', atMs: 1500 },
+            ],
+            observations: [
+              {
+                seq: 1,
+                atMs: 1000,
+                severity: 'warning',
+                prevSeverity: '',
+                lifecycle: 'opened',
+                detail: 'first observation',
+                driftId: 'd1',
+              },
+              {
+                seq: 2,
+                atMs: 1500,
+                severity: 'critical',
+                prevSeverity: 'warning',
+                lifecycle: 'escalating',
+                detail: 'severity bumped',
+                driftId: 'd2',
+              },
+              {
+                seq: 3,
+                atMs: 2000,
+                severity: 'critical',
+                prevSeverity: '',
+                lifecycle: 'escalating',
+                detail: 'still escalating',
+                driftId: 'd3',
+              },
+            ],
+          }),
+        ]}
+      />,
+    );
+    const expand = screen.getByTestId(
+      'interventions-list-row-drift-cond:cond-X-expand',
+    );
+    expect(expand.textContent).toContain('3 observations');
+    expect(expand.getAttribute('aria-expanded')).toBe('false');
+    // Observations panel is hidden until expand.
+    expect(
+      screen.queryByTestId(
+        'interventions-list-row-drift-cond:cond-X-observations',
+      ),
+    ).toBeNull();
+    fireEvent.click(expand);
+    expect(expand.getAttribute('aria-expanded')).toBe('true');
+    const list = screen.getByTestId(
+      'interventions-list-row-drift-cond:cond-X-observations',
+    );
+    // All three observations rendered as sub-rows.
+    expect(list.querySelectorAll('li')).toHaveLength(3);
+    expect(screen.getByTestId('interventions-list-obs-2').textContent)
+      .toContain('warning → critical');
+  });
+
+  it('severity transition surfaces on the row chrome (warning → critical)', () => {
+    render(
+      <InterventionsList
+        rows={[
+          row({
+            key: 'drift-cond:cond-T',
+            atMs: 1000,
+            source: 'drift',
+            kind: 'LOOPING_REASONING',
+            severity: 'critical',
+            conditionId: 'cond-T',
+            currentLifecycle: 'escalating',
+            observationCount: 2,
+            severityTransitions: [
+              { fromSeverity: 'warning', toSeverity: 'critical', atMs: 1000 },
+            ],
+            observations: [],
+          }),
+        ]}
+      />,
+    );
+    const t = screen.getByTestId(
+      'interventions-list-row-drift-cond:cond-T-transition',
+    );
+    expect(t.textContent).toMatch(/warning\s*→\s*critical/);
+  });
+
+  it('lifecycle chip data attribute reflects current lifecycle', () => {
+    render(
+      <InterventionsList
+        rows={[
+          row({
+            key: 'drift-cond:cond-R',
+            atMs: 1000,
+            source: 'drift',
+            kind: 'LOOPING_REASONING',
+            severity: 'warning',
+            conditionId: 'cond-R',
+            currentLifecycle: 'resolved',
+            observationCount: 2,
+            observations: [
+              {
+                seq: 1,
+                atMs: 100,
+                severity: 'warning',
+                prevSeverity: '',
+                lifecycle: 'opened',
+                detail: '',
+                driftId: 'd1',
+              },
+              {
+                seq: 2,
+                atMs: 1000,
+                severity: 'warning',
+                prevSeverity: '',
+                lifecycle: 'resolved',
+                detail: '',
+                driftId: 'd2',
+              },
+            ],
+          }),
+        ]}
+      />,
+    );
+    const lc = screen.getByTestId(
+      'interventions-list-row-drift-cond:cond-R-lifecycle',
+    );
+    expect(lc.getAttribute('data-lifecycle')).toBe('resolved');
+    expect(lc.textContent).toBe('RESOLVED');
+  });
+
+  it('pre-#318 row (no conditionId) renders unchanged — no lifecycle chip, no expand control', () => {
+    render(
+      <InterventionsList
+        rows={[
+          row({
+            key: 'drift:42',
+            atMs: 1000,
+            source: 'drift',
+            kind: 'LOOPING_REASONING',
+            severity: 'warning',
+            // conditionId / currentLifecycle / observationCount left
+            // undefined to model the legacy emit path.
+          }),
+        ]}
+      />,
+    );
+    expect(
+      screen.queryByTestId('interventions-list-row-drift:42-lifecycle'),
+    ).toBeNull();
+    expect(
+      screen.queryByTestId('interventions-list-row-drift:42-expand'),
+    ).toBeNull();
+    expect(
+      screen.queryByTestId('interventions-list-row-drift:42-transition'),
+    ).toBeNull();
+  });
+
+  it('clicking the expand control does not bubble to the row click handler', () => {
+    const onRowClick = vi.fn();
+    render(
+      <InterventionsList
+        rows={[
+          row({
+            key: 'drift-cond:cond-Z',
+            atMs: 1000,
+            source: 'drift',
+            kind: 'LOOPING_REASONING',
+            conditionId: 'cond-Z',
+            observationCount: 2,
+            observations: [
+              {
+                seq: 1,
+                atMs: 500,
+                severity: 'warning',
+                prevSeverity: '',
+                lifecycle: 'opened',
+                detail: '',
+                driftId: 'd1',
+              },
+              {
+                seq: 2,
+                atMs: 1000,
+                severity: 'warning',
+                prevSeverity: '',
+                lifecycle: 'escalating',
+                detail: '',
+                driftId: 'd2',
+              },
+            ],
+          }),
+        ]}
+        onRowClick={onRowClick}
+      />,
+    );
+    fireEvent.click(
+      screen.getByTestId(
+        'interventions-list-row-drift-cond:cond-Z-expand',
+      ),
+    );
+    expect(onRowClick).not.toHaveBeenCalled();
+  });
+});

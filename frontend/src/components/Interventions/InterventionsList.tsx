@@ -54,13 +54,41 @@ function fmtOutcome(outcome: string): string {
   return `→ ${outcome}`;
 }
 
+// goldfive#318 (frontend follow-up): render lifecycle as a short uppercase
+// label so the chip reads at a glance ("OPENED", "ESCALATING", "RESOLVED",
+// "HUMAN INTV"). Empty string when goldfive emitted UNSPECIFIED — the chip
+// is suppressed in that case (see render guards below).
+function fmtLifecycle(lifecycle: string): string {
+  const lc = (lifecycle || '').toLowerCase();
+  if (!lc) return '';
+  if (lc === 'human_intervention_required') return 'HUMAN INTV';
+  return lc.toUpperCase();
+}
+
 export function InterventionsList({ rows, onRowClick }: InterventionsListProps) {
   const [expanded, setExpanded] = useState(false);
+  // Per-row expansion state for grouped drift conditions
+  // (goldfive#318). Keyed by row.key so re-renders don't churn the
+  // open set as long as the conditionId stays stable. A Set kept in
+  // local component state is enough — no global store concept needed
+  // because the expansion is purely cosmetic.
+  const [expandedConditions, setExpandedConditions] = useState<Set<string>>(
+    () => new Set(),
+  );
   const isEmpty = rows.length === 0;
   // Empty → collapsed by default, with a toggle to un-collapse so the
   // user can still see the "no interventions recorded" hint if they want.
   // Non-empty → always shown (no toggle chrome).
   const show = !isEmpty || expanded;
+
+  function toggleCondition(key: string) {
+    setExpandedConditions((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   return (
     <div
@@ -110,6 +138,18 @@ export function InterventionsList({ rows, onRowClick }: InterventionsListProps) 
                   ? row.targetAgentId.split(':').pop() ?? ''
                   : row.targetAgentId
                 : '';
+            // goldfive#318: collapsed-condition chrome. A row with
+            // ``observationCount > 1`` renders a count badge + an
+            // expansion caret; clicking the caret reveals each
+            // observation as a sub-row. Lifecycle chip renders for any
+            // row that has a non-empty currentLifecycle (single-shot or
+            // grouped).
+            const obsCount = row.observationCount ?? 0;
+            const isGrouped = obsCount > 1;
+            const isExpanded = expandedConditions.has(row.key);
+            const lifecycleLabel = fmtLifecycle(row.currentLifecycle ?? '');
+            const transitions = row.severityTransitions ?? [];
+            const observations = row.observations ?? [];
             return (
               <li key={row.key} className="hg-interventions-list__row-item">
                 <Tag
@@ -117,6 +157,7 @@ export function InterventionsList({ rows, onRowClick }: InterventionsListProps) 
                   className="hg-interventions-list__row"
                   data-testid={`interventions-list-row-${row.key}`}
                   data-source={row.source}
+                  data-grouped={isGrouped ? 'true' : undefined}
                   onClick={clickable ? () => onRowClick?.(row) : undefined}
                 >
                   <span
@@ -140,6 +181,35 @@ export function InterventionsList({ rows, onRowClick }: InterventionsListProps) 
                       {row.severity}
                     </span>
                   )}
+                  {/* goldfive#318: lifecycle chip + severity-transition
+                      marker. The chip renders as a subtle uppercase pill
+                      next to the kind so operators can read the current
+                      condition state at a glance. The transition marker
+                      shows the most recent severity bump (e.g.
+                      "warning → critical") — when multiple transitions
+                      exist we summarise as the first→last severity so
+                      the row stays one line. */}
+                  {lifecycleLabel && (
+                    <span
+                      className="hg-interventions-list__lifecycle"
+                      data-lifecycle={(row.currentLifecycle ?? '').toLowerCase()}
+                      data-testid={`interventions-list-row-${row.key}-lifecycle`}
+                    >
+                      {lifecycleLabel}
+                    </span>
+                  )}
+                  {transitions.length > 0 && (
+                    <span
+                      className="hg-interventions-list__transition"
+                      data-testid={`interventions-list-row-${row.key}-transition`}
+                      title={transitions
+                        .map((t) => `${t.fromSeverity} → ${t.toSeverity}`)
+                        .join(', ')}
+                    >
+                      {transitions[0].fromSeverity} →{' '}
+                      {transitions[transitions.length - 1].toSeverity}
+                    </span>
+                  )}
                   {agentLabel && (
                     <span
                       className="hg-interventions-list__agent"
@@ -159,6 +229,85 @@ export function InterventionsList({ rows, onRowClick }: InterventionsListProps) 
                     </span>
                   )}
                 </Tag>
+                {/* goldfive#318: count badge + expansion control rendered
+                    as a SECOND control under the row to keep the click
+                    targets distinct (clicking the row pans the Gantt;
+                    clicking the caret expands the observations). */}
+                {isGrouped && (
+                  <div className="hg-interventions-list__condition-control">
+                    <button
+                      type="button"
+                      className="hg-interventions-list__expand"
+                      data-testid={`interventions-list-row-${row.key}-expand`}
+                      aria-expanded={isExpanded}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleCondition(row.key);
+                      }}
+                    >
+                      <span
+                        className="hg-interventions-list__caret"
+                        aria-hidden="true"
+                      >
+                        {isExpanded ? '▾' : '▸'}
+                      </span>
+                      {obsCount} observations
+                    </button>
+                  </div>
+                )}
+                {isGrouped && isExpanded && (
+                  <ul
+                    className="hg-interventions-list__observations"
+                    data-testid={`interventions-list-row-${row.key}-observations`}
+                  >
+                    {observations.map((obs) => {
+                      const obsLabel = fmtLifecycle(obs.lifecycle);
+                      const showTransition =
+                        obs.prevSeverity &&
+                        obs.prevSeverity !== obs.severity;
+                      return (
+                        <li
+                          key={`obs-${obs.seq}`}
+                          className="hg-interventions-list__observation"
+                          data-testid={`interventions-list-obs-${obs.seq}`}
+                        >
+                          <span className="hg-interventions-list__at">
+                            {fmtAt(obs.atMs)}
+                          </span>
+                          {obsLabel && (
+                            <span
+                              className="hg-interventions-list__lifecycle"
+                              data-lifecycle={obs.lifecycle.toLowerCase()}
+                            >
+                              {obsLabel}
+                            </span>
+                          )}
+                          {obs.severity && obs.severity !== 'info' && (
+                            <span
+                              className="hg-interventions-list__severity"
+                              data-severity={obs.severity}
+                            >
+                              {obs.severity}
+                            </span>
+                          )}
+                          {showTransition && (
+                            <span className="hg-interventions-list__transition">
+                              {obs.prevSeverity} → {obs.severity}
+                            </span>
+                          )}
+                          {obs.detail && (
+                            <span
+                              className="hg-interventions-list__body"
+                              title={obs.detail}
+                            >
+                              {obs.detail}
+                            </span>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </li>
             );
           })}
