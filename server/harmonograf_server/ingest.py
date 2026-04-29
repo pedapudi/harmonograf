@@ -28,6 +28,7 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Optional, Protocol
 from harmonograf_server.bus import SessionBus
 from harmonograf_server.convert import (
     _drift_kind_pb_to_string,
+    _drift_lifecycle_pb_to_string,
     _drift_severity_pb_to_string,
     attr_map_to_dict,
     goldfive_pb_plan_to_storage,
@@ -1283,6 +1284,14 @@ class IngestPipeline:
         # key when a follow-up PlanRevised was triggered by an autonomous
         # drift — the aggregator merges plan rows whose trigger_event_id
         # matches this drift's id.
+        # goldfive#318 / harmonograf I6: ``condition_id`` is stable
+        # across re-emits of the same logical drift so the intervention
+        # aggregator can collapse N observations onto one row.
+        # ``lifecycle`` and ``prev_severity`` give the renderer the
+        # current condition state and let the aggregator surface
+        # severity transitions on the collapsed row. Empty strings are
+        # used for pre-#318 events (UNSPECIFIED enums) so the collapse
+        # pass safely degrades to one-row-per-emit.
         record: dict[str, Any] = {
             "run_id": run_id,
             "kind": _drift_kind_pb_to_string(payload.kind),
@@ -1292,6 +1301,13 @@ class IngestPipeline:
             "current_agent_id": payload.current_agent_id,
             "annotation_id": getattr(payload, "annotation_id", "") or "",
             "id": getattr(payload, "id", "") or "",
+            "condition_id": getattr(payload, "condition_id", "") or "",
+            "lifecycle": _drift_lifecycle_pb_to_string(
+                getattr(payload, "lifecycle", 0) or 0
+            ),
+            "prev_severity": _drift_severity_pb_to_string(
+                getattr(payload, "prev_severity", 0) or 0
+            ),
             "recorded_at": self._now(),
         }
         ring = self._drifts_by_session.setdefault(ctx.session_id, [])

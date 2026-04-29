@@ -299,6 +299,28 @@ message Annotation {
 //   drift_kind    — raw lowercase drift kind name for drift-sourced rows;
 //                   kept separate from ``kind`` so the tree-agnostic
 //                   renderer does not need to know drift taxonomy
+//
+// Server-side condition collapse (harmonograf I6 / goldfive#318):
+//   condition_id  — opaque goldfive-minted id stable across re-emits of
+//                   the same logical drift (kind+task+agent within a turn).
+//                   Empty for pre-#318 events / annotation-only rows.
+//   count         — number of underlying ``drift_detected`` observations
+//                   that collapsed onto this row (>= 1). Defaults to 1
+//                   for non-collapsed rows so consumers can render a
+//                   uniform "count" badge unconditionally.
+//   first_seen    — wall-clock of the first observation in the condition.
+//                   Equals ``at`` when count == 1.
+//   last_seen     — wall-clock of the latest observation. Equals ``at``
+//                   when count == 1; ``at`` always tracks the latest emit.
+//   lifecycle     — current lifecycle of the condition (OPENED / UPDATED /
+//                   CLOSED) as a lowercase string. Empty for pre-#318
+//                   events / non-drift rows.
+//   severity_transitions
+//                 — ordered list of severity bumps observed across the
+//                   collapsed observations (where prev_severity != severity
+//                   on the underlying ``DriftDetected``). Empty when no
+//                   transitions occurred. Each entry's ``at`` matches the
+//                   observation that recorded the transition.
 message Intervention {
   google.protobuf.Timestamp at = 1;
   string source = 2;
@@ -310,6 +332,23 @@ message Intervention {
   string severity = 8;
   string annotation_id = 9;
   string drift_kind = 10;
+  string condition_id = 11;
+  int32 count = 12;
+  google.protobuf.Timestamp first_seen = 13;
+  google.protobuf.Timestamp last_seen = 14;
+  string lifecycle = 15;
+  repeated SeverityTransition severity_transitions = 16;
+}
+
+// One severity transition observed across a collapsed condition's
+// underlying drift_detected observations. Surfaced on
+// ``Intervention.severity_transitions`` so the UI can show a bump
+// marker (e.g. WARNING → CRITICAL) without re-fetching the source
+// drift events.
+message SeverityTransition {
+  string from = 1;
+  string to = 2;
+  google.protobuf.Timestamp at = 3;
 }
 
 // ---------------------------------------------------------------------------

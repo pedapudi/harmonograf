@@ -52,7 +52,7 @@ render the same way without taxonomy hooks.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
 from harmonograf_server.storage import (
@@ -106,6 +106,21 @@ _GOLDFIVE_REVISION_KINDS: frozenset[str] = frozenset(
 
 
 @dataclass
+class SeverityTransition:
+    """One severity bump observed within a collapsed condition.
+
+    Surfaced on :class:`InterventionRecord.severity_transitions` and
+    translated to :class:`types_pb2.SeverityTransition` at the RPC
+    boundary. ``frm`` (from) is the severity before the transition;
+    ``to`` is the severity recorded on the observation that bumped.
+    """
+
+    frm: str
+    to: str
+    at: float
+
+
+@dataclass
 class InterventionRecord:
     """In-memory projection used during aggregation.
 
@@ -137,6 +152,30 @@ class InterventionRecord:
     #   * For a plan-revision row, equals the ``PlanRevised.trigger_event_id``
     #     goldfive stamped on the wire.
     trigger_event_id: str = ""
+    # goldfive#318 / harmonograf I6: condition-collapse fields. The
+    # aggregator's collapse pass (:func:`_collapse_by_condition_id`)
+    # groups drift rows sharing a ``condition_id`` into one survivor and
+    # populates the rest. Pre-#318 paths leave ``condition_id`` empty,
+    # in which case the row passes through with ``count=1`` and the
+    # frontend renders it as a single-emit row.
+    condition_id: str = ""
+    lifecycle: str = ""  # current lifecycle of the condition
+    # ``prev_severity`` is set on per-emit drift rows before collapse so
+    # the collapser can compute ``severity_transitions``. Cleared on the
+    # surviving collapsed row (the bumps live in ``severity_transitions``).
+    prev_severity: str = ""
+    count: int = 1
+    first_seen: float = 0.0
+    last_seen: float = 0.0
+    severity_transitions: list[SeverityTransition] = field(default_factory=list)
+    # Internal: set of trigger_event_ids that the condition-collapse
+    # absorbed from non-survivor observations. Used by
+    # :func:`_merge_by_trigger_event_id` to fold plan rows that
+    # strict-id-matched a non-survivor (typical: an early drift emit
+    # triggered a refine; that drift's plan row's trigger_event_id is
+    # the early drift's id, NOT the survivor's). Not surfaced on the
+    # proto.
+    absorbed_trigger_event_ids: set[str] = field(default_factory=set)
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +240,15 @@ async def list_interventions(
 
     records.sort(key=lambda r: r.at)
     _attribute_outcomes(records, plans, legacy_window_ms=window_ms)
+    # I6 (harmonograf-side fix for goldfive#318): collapse drift / user
+    # rows that share a goldfive-minted ``condition_id`` into one
+    # survivor before the trigger_event_id merge. This is the SERVER
+    # mirror of the frontend's groupDriftConditions deriver — the gRPC
+    # ``ListInterventions`` projection now carries already-collapsed
+    # rows so historical fetches don't return one row per emit.
+    # Backward-compat: rows with empty ``condition_id`` (pre-#318
+    # events, annotation-only rows, plan rows) pass through untouched.
+    records = _collapse_by_condition_id(records)
     records = _merge_by_trigger_event_id(records)
     # Tier 2 — opt-in legacy time-window merge for plan rows with NO
     # trigger_event_id (pre-#99 data or goldfive-bridge misconfigured).
@@ -359,6 +407,15 @@ def _project_drifts(drifts: Iterable[dict[str, Any]]) -> list[InterventionRecord
         # autonomous drifts use the drift.id so a subsequent refine's
         # PlanRevised can strict-match back to this drift row.
         trig = ann_id if is_user and ann_id else drift_id
+        # goldfive#318 / harmonograf I6: pull condition_id / lifecycle /
+        # prev_severity off the drift ring record so the collapse pass
+        # can group multiple emits of the same condition_id onto one
+        # row. ``count``/``first_seen``/``last_seen`` start as the
+        # per-observation values; the collapser overwrites them on the
+        # survivor when group size > 1.
+        condition_id = str(dr.get("condition_id") or "")
+        lifecycle = str(dr.get("lifecycle") or "")
+        prev_severity = str(dr.get("prev_severity") or "")
         out.append(
             InterventionRecord(
                 at=float(at),
@@ -369,6 +426,12 @@ def _project_drifts(drifts: Iterable[dict[str, Any]]) -> list[InterventionRecord
                 drift_kind=drift_kind,
                 annotation_id=ann_id,
                 trigger_event_id=trig,
+                condition_id=condition_id,
+                lifecycle=lifecycle,
+                prev_severity=prev_severity,
+                count=1,
+                first_seen=float(at),
+                last_seen=float(at),
             )
         )
     return out
@@ -537,6 +600,136 @@ def _legacy_find_matching_revision(
     return best
 
 
+def _collapse_by_condition_id(
+    records: list[InterventionRecord],
+) -> list[InterventionRecord]:
+    """Collapse drift rows sharing a ``condition_id`` into one survivor.
+
+    Mirror of the frontend's ``groupDriftConditions`` deriver in
+    ``frontend/src/lib/interventions.ts``. Server-side collapse fires on
+    the historical fetch (``ListInterventions``) so a session with N
+    observations of the same logical drift returns ONE row instead of N
+    — fixing the iter_1 escalation report's I6 finding (13 drift events,
+    9 condition_ids → server returned 18 rows instead of 9).
+
+    Contract:
+
+      * Only rows with a non-empty ``condition_id`` participate. Pre-#318
+        events / annotation-only rows / plan rows have empty
+        ``condition_id`` and pass through untouched.
+      * Rows are grouped by ``condition_id`` regardless of source. In
+        practice the source is always ``"drift"`` or ``"user"`` (only
+        :func:`_project_drifts` populates ``condition_id`` today), but
+        the predicate is condition-id-presence so a future projector
+        that stamps a condition can join the same group.
+      * Survivor = the latest observation in the group (by ``at``), so
+        the row's ``severity``/``lifecycle``/``trigger_event_id``/
+        ``outcome`` reflect the CURRENT state of the condition. This
+        matches the frontend deriver's choice and the operator
+        intuition: a drift's "row" should show what the condition is
+        right now, not what it was when first observed.
+      * ``count`` = group size. ``first_seen`` = earliest ``at``;
+        ``last_seen`` = latest ``at``. ``at`` itself is updated to
+        ``last_seen`` (already true since survivor is latest).
+      * ``severity_transitions`` collects every observation in the
+        group whose ``prev_severity != severity`` (and both non-empty).
+        The list is wall-clock-ordered so consumers can render
+        "WARNING → CRITICAL @ t" markers along the row's timeline.
+      * ``outcome`` / ``plan_revision_index`` are donated from any
+        non-survivor observation that already attributed an outcome
+        (typical: an early emit triggered a refine; later emits are
+        plain ``recorded``). This preserves the strict-id outcome
+        attribution done in :func:`_attribute_outcomes` even though we
+        keep the latest emit as the row's identity.
+
+    The merge stays single-pass — no quadratic scan — by indexing
+    groups in a dict keyed on ``condition_id`` and iterating the input
+    once. Order is preserved for passthrough rows; collapsed rows take
+    their position from the survivor's ``at``.
+    """
+
+    passthrough: list[InterventionRecord] = []
+    groups: dict[str, list[InterventionRecord]] = {}
+    for rec in records:
+        if not rec.condition_id:
+            passthrough.append(rec)
+            continue
+        groups.setdefault(rec.condition_id, []).append(rec)
+
+    if not groups:
+        return records
+
+    survivors: list[InterventionRecord] = list(passthrough)
+    for _cid, group in groups.items():
+        if len(group) == 1:
+            # Single-observation condition still gets count/first_seen/
+            # last_seen populated (already are from _project_drifts) so
+            # the proto layer can emit the metadata uniformly. Pass it
+            # through.
+            survivors.append(group[0])
+            continue
+
+        group.sort(key=lambda r: r.at)
+        survivor = group[-1]
+        first_at = group[0].at
+        last_at = group[-1].at
+
+        # Compute severity transitions from EVERY observation in the
+        # group (not just the survivor). prev_severity is stamped per
+        # emit by goldfive#318 so a transition lives on the observation
+        # that bumped — we walk the sorted group and emit one entry per
+        # observed bump.
+        transitions: list[SeverityTransition] = []
+        for obs in group:
+            if obs.prev_severity and obs.severity and obs.prev_severity != obs.severity:
+                transitions.append(
+                    SeverityTransition(
+                        frm=obs.prev_severity,
+                        to=obs.severity,
+                        at=obs.at,
+                    )
+                )
+
+        # Donate outcome / plan_revision_index from any non-survivor
+        # that already attributed (typical: an early emit triggered a
+        # refine; the survivor — latest emit — is plain "recorded").
+        # Survivor wins ties so the latest condition state is stable.
+        if not survivor.outcome or survivor.outcome == "recorded":
+            for obs in group:
+                if obs is survivor:
+                    continue
+                if obs.outcome and obs.outcome != "recorded":
+                    survivor.outcome = obs.outcome
+                    if obs.plan_revision_index and not survivor.plan_revision_index:
+                        survivor.plan_revision_index = obs.plan_revision_index
+                    break
+
+        survivor.count = len(group)
+        survivor.first_seen = first_at
+        survivor.last_seen = last_at
+        # Clear prev_severity on the collapsed row — the bumps now live
+        # in severity_transitions; leaving prev_severity set on a multi-
+        # observation row would imply "the row itself is a transition"
+        # which is misleading for a collapsed condition view.
+        survivor.prev_severity = ""
+        survivor.severity_transitions = transitions
+        # Absorb every non-survivor's trigger_event_id so the strict-id
+        # merge that runs next can fold any plan row that
+        # strict-id-matched an earlier emit. Without this, a refine
+        # triggered by emit #1 would surface as a phantom standalone
+        # plan card next to the collapsed row (the plan's
+        # trigger_event_id matches d1, but the survivor's is d2).
+        for obs in group:
+            if obs is survivor:
+                continue
+            if obs.trigger_event_id:
+                survivor.absorbed_trigger_event_ids.add(obs.trigger_event_id)
+        survivors.append(survivor)
+
+    survivors.sort(key=lambda r: r.at)
+    return survivors
+
+
 def _merge_by_trigger_event_id(
     records: list[InterventionRecord],
 ) -> list[InterventionRecord]:
@@ -565,11 +758,27 @@ def _merge_by_trigger_event_id(
     window never collapse silently.
     """
 
+    # Build an alias map: any trigger_event_id absorbed by a collapsed
+    # condition (see :func:`_collapse_by_condition_id`) routes to the
+    # survivor's own trigger_event_id. This lets a plan row that
+    # strict-id-matched an early (now-discarded) emit fold onto the
+    # collapsed survivor instead of surfacing as a phantom card.
+    alias: dict[str, str] = {}
+    for rec in records:
+        if rec.absorbed_trigger_event_ids and rec.trigger_event_id:
+            for ate in rec.absorbed_trigger_event_ids:
+                # Multiple survivors mapping the same alias is a logic
+                # bug (two conditions don't share an emit's id). First
+                # writer wins; rare collisions surface as the original
+                # row passing through.
+                alias.setdefault(ate, rec.trigger_event_id)
+
     grouped: dict[str, list[InterventionRecord]] = {}
     passthrough: list[InterventionRecord] = []
     for rec in records:
-        if rec.trigger_event_id:
-            grouped.setdefault(rec.trigger_event_id, []).append(rec)
+        key = alias.get(rec.trigger_event_id, rec.trigger_event_id)
+        if key:
+            grouped.setdefault(key, []).append(rec)
         else:
             passthrough.append(rec)
 
@@ -587,8 +796,24 @@ def _merge_by_trigger_event_id(
                 survivor = rec
                 break
         if survivor is None:
-            # No annotation row — prefer the drift row (has drift_kind set
-            # but no plan_revision_index), then fall back to earliest.
+            # No annotation row — prefer a condition-collapse drift row
+            # (count > 1 OR condition_id set). After
+            # :func:`_collapse_by_condition_id` runs, this is the row
+            # carrying the per-observation breakdown that the proto
+            # surfaces as ``count`` / ``severity_transitions`` /
+            # ``first_seen`` / ``last_seen``. It would still match the
+            # next preference branch (drift_kind set), but that branch
+            # rejects rows whose plan_revision_index was already
+            # populated by the collapse-time outcome donation. So we
+            # promote condition-bearing drift rows ahead of that gate.
+            for rec in group:
+                if rec.drift_kind and (rec.count > 1 or rec.condition_id):
+                    survivor = rec
+                    break
+        if survivor is None:
+            # No condition-bearing drift — prefer the drift row (has
+            # drift_kind set but no plan_revision_index), then fall back
+            # to earliest.
             for rec in group:
                 if rec.drift_kind and not rec.plan_revision_index:
                     survivor = rec
@@ -650,6 +875,18 @@ def _count_cascade_cancels(
 # ---------------------------------------------------------------------------
 
 
+def _ts_set(ts_msg: Any, value: float) -> None:
+    """Helper: stamp a ``google.protobuf.Timestamp`` from a float.
+
+    Skips when ``value`` is falsy (defaults to the zero timestamp), so
+    unset fields stay unset rather than encoding 1970-01-01.
+    """
+    if not value:
+        return
+    ts_msg.seconds = int(value)
+    ts_msg.nanos = int((value - int(value)) * 1e9)
+
+
 def record_to_pb(rec: InterventionRecord, types_pb2_mod: Any) -> Any:
     """Translate an ``InterventionRecord`` to the generated proto message.
 
@@ -657,6 +894,12 @@ def record_to_pb(rec: InterventionRecord, types_pb2_mod: Any) -> Any:
     so the aggregator stays importable in contexts where the generated
     stubs are not on ``sys.path`` (e.g. unit tests that only exercise
     the pure aggregation logic).
+
+    The condition-collapse fields (goldfive#318 / harmonograf I6) are
+    additive: clients ignoring them see the legacy projection
+    unchanged, while opt-in clients can prefer ``count`` /
+    ``severity_transitions`` over the WatchSession streaming path's
+    per-emit events.
     """
 
     pb = types_pb2_mod.Intervention(
@@ -669,8 +912,24 @@ def record_to_pb(rec: InterventionRecord, types_pb2_mod: Any) -> Any:
         severity=rec.severity,
         annotation_id=rec.annotation_id,
         drift_kind=rec.drift_kind,
+        condition_id=rec.condition_id,
+        # ``count`` defaults to 1 even on non-collapsed rows so consumers
+        # can read it unconditionally (the per-emit projection from
+        # _project_drifts already initializes count=1).
+        count=int(rec.count or 1),
+        lifecycle=rec.lifecycle,
     )
-    if rec.at:
-        pb.at.seconds = int(rec.at)
-        pb.at.nanos = int((rec.at - int(rec.at)) * 1e9)
+    _ts_set(pb.at, rec.at)
+    _ts_set(pb.first_seen, rec.first_seen or rec.at)
+    _ts_set(pb.last_seen, rec.last_seen or rec.at)
+    for trans in rec.severity_transitions:
+        st = pb.severity_transitions.add()
+        # ``from`` is a Python keyword so the proto field is set via
+        # the generated message's attribute name (``getattr`` to keep
+        # the generator's mangling tolerant — generated code uses
+        # ``setattr(msg, 'from', value)`` because the descriptor still
+        # exposes the proto field name).
+        setattr(st, "from", trans.frm)
+        st.to = trans.to
+        _ts_set(st.at, trans.at)
     return pb
