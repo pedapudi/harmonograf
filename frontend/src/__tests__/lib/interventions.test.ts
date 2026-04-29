@@ -701,3 +701,305 @@ describe('deriveInterventions — targetPlanId (Item 5 of UX cleanup batch)', ()
     expect(driftRow?.targetPlanId).toBe('plan-A');
   });
 });
+
+// goldfive#318 frontend follow-up: drift condition grouping. The
+// upstream proto adds condition_id / lifecycle / prev_severity (additive,
+// goldfive PR #318); this deriver collapses observations sharing a
+// condition_id into one survivor row that carries the per-observation
+// breakdown for click-to-expand rendering. Backward compat: empty
+// condition_id passes through one-row-per-event.
+describe('deriveInterventions — drift condition grouping (goldfive#318)', () => {
+  it('one observation with conditionId stays a single row but carries currentLifecycle', () => {
+    const rows = deriveInterventions({
+      annotations: [],
+      drifts: [
+        mkDrift({
+          seq: 1,
+          kind: 'looping_reasoning',
+          severity: 'warning',
+          recordedAtMs: 100,
+          driftId: 'd1',
+          conditionId: 'cond-A',
+          lifecycle: 'opened',
+          prevSeverity: '',
+        }),
+      ],
+      plans: [],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].source).toBe('drift');
+    expect(rows[0].conditionId).toBe('cond-A');
+    expect(rows[0].observationCount).toBe(1);
+    expect(rows[0].currentLifecycle).toBe('opened');
+    // No transitions because prev_severity matches current.
+    expect(rows[0].severityTransitions ?? []).toHaveLength(0);
+  });
+
+  it('multiple observations sharing a conditionId collapse to one row with observationCount > 1', () => {
+    const rows = deriveInterventions({
+      annotations: [],
+      drifts: [
+        mkDrift({
+          seq: 1,
+          kind: 'looping_reasoning',
+          severity: 'warning',
+          recordedAtMs: 100,
+          driftId: 'd1',
+          conditionId: 'cond-X',
+          lifecycle: 'opened',
+        }),
+        mkDrift({
+          seq: 2,
+          kind: 'looping_reasoning',
+          severity: 'critical',
+          recordedAtMs: 200,
+          driftId: 'd2',
+          conditionId: 'cond-X',
+          lifecycle: 'escalating',
+          prevSeverity: 'warning',
+        }),
+        mkDrift({
+          seq: 3,
+          kind: 'looping_reasoning',
+          severity: 'critical',
+          recordedAtMs: 300,
+          driftId: 'd3',
+          conditionId: 'cond-X',
+          lifecycle: 'escalating',
+        }),
+      ],
+      plans: [],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].conditionId).toBe('cond-X');
+    expect(rows[0].observationCount).toBe(3);
+    // Survivor reflects the latest observation's atMs / severity / lifecycle.
+    expect(rows[0].atMs).toBe(300);
+    expect(rows[0].severity).toBe('critical');
+    expect(rows[0].currentLifecycle).toBe('escalating');
+    // Per-observation breakdown is in chronological order with the
+    // backing record's lifecycle/severity preserved.
+    expect(rows[0].observations).toHaveLength(3);
+    expect(rows[0].observations?.[0].lifecycle).toBe('opened');
+    expect(rows[0].observations?.[1].lifecycle).toBe('escalating');
+    // Stable React key for the collapsed row.
+    expect(rows[0].key).toBe('drift-cond:cond-X');
+  });
+
+  it('severity transition WARNING → CRITICAL surfaces as a transition entry', () => {
+    const rows = deriveInterventions({
+      annotations: [],
+      drifts: [
+        mkDrift({
+          seq: 1,
+          severity: 'warning',
+          recordedAtMs: 100,
+          conditionId: 'cond-T',
+          lifecycle: 'opened',
+        }),
+        mkDrift({
+          seq: 2,
+          severity: 'critical',
+          recordedAtMs: 200,
+          conditionId: 'cond-T',
+          lifecycle: 'escalating',
+          prevSeverity: 'warning',
+        }),
+      ],
+      plans: [],
+    });
+    expect(rows).toHaveLength(1);
+    const t = rows[0].severityTransitions ?? [];
+    expect(t).toHaveLength(1);
+    expect(t[0]).toEqual({
+      fromSeverity: 'warning',
+      toSeverity: 'critical',
+      atMs: 200,
+    });
+  });
+
+  it('lifecycle progression OPENED → ESCALATING → RESOLVED reads currentLifecycle as the latest', () => {
+    const rows = deriveInterventions({
+      annotations: [],
+      drifts: [
+        mkDrift({
+          seq: 1,
+          severity: 'warning',
+          recordedAtMs: 100,
+          conditionId: 'cond-L',
+          lifecycle: 'opened',
+        }),
+        mkDrift({
+          seq: 2,
+          severity: 'critical',
+          recordedAtMs: 200,
+          conditionId: 'cond-L',
+          lifecycle: 'escalating',
+          prevSeverity: 'warning',
+        }),
+        mkDrift({
+          seq: 3,
+          severity: 'warning',
+          recordedAtMs: 300,
+          conditionId: 'cond-L',
+          lifecycle: 'resolved',
+        }),
+      ],
+      plans: [],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].currentLifecycle).toBe('resolved');
+    expect(rows[0].observationCount).toBe(3);
+    expect(rows[0].observations?.map((o) => o.lifecycle)).toEqual([
+      'opened',
+      'escalating',
+      'resolved',
+    ]);
+  });
+
+  it('two distinct conditions render as two separate rows', () => {
+    const rows = deriveInterventions({
+      annotations: [],
+      drifts: [
+        mkDrift({
+          seq: 1,
+          kind: 'looping_reasoning',
+          severity: 'warning',
+          recordedAtMs: 100,
+          conditionId: 'cond-A',
+          lifecycle: 'opened',
+        }),
+        mkDrift({
+          seq: 2,
+          kind: 'goal_drift',
+          severity: 'warning',
+          recordedAtMs: 200,
+          conditionId: 'cond-B',
+          lifecycle: 'opened',
+        }),
+      ],
+      plans: [],
+    });
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((r) => r.conditionId))).toEqual(
+      new Set(['cond-A', 'cond-B']),
+    );
+  });
+
+  it('pre-#318 events with empty conditionId render one row per event (backward compat)', () => {
+    const rows = deriveInterventions({
+      annotations: [],
+      drifts: [
+        mkDrift({
+          seq: 1,
+          severity: 'warning',
+          recordedAtMs: 100,
+          driftId: 'd1',
+          conditionId: '',
+        }),
+        mkDrift({
+          seq: 2,
+          severity: 'critical',
+          recordedAtMs: 200,
+          driftId: 'd2',
+          conditionId: '',
+        }),
+      ],
+      plans: [],
+    });
+    expect(rows).toHaveLength(2);
+    // Neither row carries a non-empty conditionId / observationCount —
+    // they pass through the grouping step untouched.
+    for (const r of rows) {
+      expect(r.conditionId).toBeFalsy();
+      expect(r.observationCount).toBeUndefined();
+    }
+  });
+
+  it('mixed: empty + populated conditionIds — populated groups, empty pass through', () => {
+    const rows = deriveInterventions({
+      annotations: [],
+      drifts: [
+        // Two observations sharing cond-X — collapse.
+        mkDrift({
+          seq: 1,
+          severity: 'warning',
+          recordedAtMs: 100,
+          conditionId: 'cond-X',
+          lifecycle: 'opened',
+        }),
+        mkDrift({
+          seq: 2,
+          severity: 'critical',
+          recordedAtMs: 150,
+          conditionId: 'cond-X',
+          lifecycle: 'escalating',
+          prevSeverity: 'warning',
+        }),
+        // Standalone legacy event with no conditionId — passes through.
+        mkDrift({
+          seq: 3,
+          severity: 'warning',
+          recordedAtMs: 200,
+          driftId: 'd-legacy',
+          conditionId: '',
+        }),
+      ],
+      plans: [],
+    });
+    // Two surviving rows: one collapsed (cond-X) + one legacy.
+    expect(rows).toHaveLength(2);
+    const grouped = rows.find((r) => r.conditionId === 'cond-X');
+    const legacy = rows.find((r) => !r.conditionId);
+    expect(grouped?.observationCount).toBe(2);
+    expect(legacy?.observationCount).toBeUndefined();
+  });
+
+  it('absorbs plan-revision outcome on the survivor (latest observation drove the refine)', () => {
+    // Models the goldfive 1263967e... case from session
+    // 61ddf449-...: an opened observation followed by an escalating
+    // observation; the latter carries the drift id that triggered the
+    // refine.
+    const rows = deriveInterventions({
+      annotations: [],
+      drifts: [
+        mkDrift({
+          seq: 1,
+          severity: 'warning',
+          recordedAtMs: 100,
+          driftId: 'drift-1',
+          conditionId: 'cond-Y',
+          lifecycle: 'opened',
+        }),
+        mkDrift({
+          seq: 2,
+          severity: 'critical',
+          recordedAtMs: 200,
+          driftId: 'drift-2',
+          conditionId: 'cond-Y',
+          lifecycle: 'escalating',
+          prevSeverity: 'warning',
+        }),
+      ],
+      plans: [
+        mkPlan({
+          id: 'p-1',
+          createdAtMs: 250,
+          revisionKind: 'looping_reasoning',
+          revisionIndex: 2,
+          // Plan revision triggered by the LATER drift event.
+          triggerEventId: 'drift-2',
+        }),
+      ],
+    });
+    // Drift+plan strict-id merge collapses the LATER observation +
+    // plan; the EARLIER observation is independent. Then condition
+    // grouping collapses both observations into one survivor that
+    // carries the plan_revised outcome from the latest.
+    expect(rows.filter((r) => r.conditionId === 'cond-Y')).toHaveLength(1);
+    const survivor = rows.find((r) => r.conditionId === 'cond-Y')!;
+    expect(survivor.observationCount).toBe(2);
+    expect(survivor.outcome).toBe('plan_revised:r2');
+    expect(survivor.planRevisionIndex).toBe(2);
+  });
+});

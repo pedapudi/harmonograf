@@ -27,6 +27,7 @@ import {
   TaskEdgeSchema,
   TaskStatus,
   DriftKind,
+  DriftLifecycle,
   DriftSeverity,
 } from '../../pb/goldfive/v1/types_pb';
 import { useApprovalsStore } from '../../state/approvalsStore';
@@ -653,6 +654,75 @@ describe('applyGoldfiveEvent', () => {
       // Idempotent: rebasing with the same start must not shift anything.
       store.rebaseRelativeTimestamps(2000);
       expect(store.delegations.list()[0].observedAtMs).toBe(3000);
+    });
+
+    // goldfive#318 frontend follow-up: condition_id / lifecycle /
+    // prev_severity arrive on every DriftDetected and land on the
+    // DriftRecord. UNSPECIFIED lifecycle / SEVERITY_UNSPECIFIED prev
+    // collapse to empty strings so the deriver treats the record as
+    // single-shot.
+    it('driftDetected condition_id / lifecycle / prev_severity flow into the DriftRecord', () => {
+      const store = new SessionStore();
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev-drift-cond',
+          runId: 'run-1',
+          sequence: 0n,
+          emittedAt: create(TimestampSchema, { seconds: 5n, nanos: 0 }),
+          payload: {
+            case: 'driftDetected',
+            value: create(DriftDetectedSchema, {
+              kind: DriftKind.LOOPING_REASONING,
+              severity: DriftSeverity.CRITICAL,
+              detail: 'escalating',
+              currentTaskId: 't-1',
+              currentAgentId: 'agent-a',
+              id: 'drift-cond-1',
+              conditionId: 'cond-X',
+              lifecycle: DriftLifecycle.ESCALATING,
+              prevSeverity: DriftSeverity.WARNING,
+            }),
+          },
+        }),
+        store,
+        0,
+      );
+      const drifts = store.drifts.list();
+      expect(drifts).toHaveLength(1);
+      expect(drifts[0].conditionId).toBe('cond-X');
+      expect(drifts[0].lifecycle).toBe('escalating');
+      expect(drifts[0].prevSeverity).toBe('warning');
+    });
+
+    it('driftDetected pre-#318 (no condition_id / UNSPECIFIED lifecycle) lands with empty fields', () => {
+      const store = new SessionStore();
+      applyGoldfiveEvent(
+        create(EventSchema, {
+          eventId: 'ev-drift-legacy',
+          runId: 'run-1',
+          sequence: 0n,
+          emittedAt: create(TimestampSchema, { seconds: 5n, nanos: 0 }),
+          payload: {
+            case: 'driftDetected',
+            value: create(DriftDetectedSchema, {
+              kind: DriftKind.LOOPING_REASONING,
+              severity: DriftSeverity.WARNING,
+              detail: 'legacy',
+              currentTaskId: 't-1',
+              currentAgentId: 'agent-a',
+              id: 'drift-legacy-1',
+              // condition_id, lifecycle, prev_severity all defaulted.
+            }),
+          },
+        }),
+        store,
+        0,
+      );
+      const drifts = store.drifts.list();
+      expect(drifts).toHaveLength(1);
+      expect(drifts[0].conditionId).toBe('');
+      expect(drifts[0].lifecycle).toBe('');
+      expect(drifts[0].prevSeverity).toBe('');
     });
 
     it('driftDetected during the live-path race recovers after rebase', () => {
