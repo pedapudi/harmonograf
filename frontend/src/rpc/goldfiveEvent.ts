@@ -28,6 +28,7 @@ import type {
 } from '../pb/goldfive/v1/types_pb.js';
 import {
   DriftKind as GoldfiveDriftKindEnum,
+  DriftLifecycle as GoldfiveDriftLifecycleEnum,
   DriftSeverity as GoldfiveDriftSeverityEnum,
 } from '../pb/goldfive/v1/types_pb.js';
 import type {
@@ -313,6 +314,15 @@ function driftSeverityToString(n: number): string {
   return name.toLowerCase();
 }
 
+// goldfive#318: DriftLifecycle wires as an int. UNSPECIFIED → '' so
+// callers treat it as "single-shot, no condition tracking" (the legacy
+// per-event view) without having to special-case the enum value.
+function driftLifecycleToString(n: number): string {
+  const name = GoldfiveDriftLifecycleEnum[n];
+  if (!name || name === 'UNSPECIFIED') return '';
+  return name.toLowerCase();
+}
+
 export function convertGoldfiveTask(t: GoldfiveTask): Task {
   return {
     id: t.id,
@@ -537,6 +547,16 @@ export function applyGoldfiveEvent(
       const duEarly = d as unknown as Record<string, unknown>;
       const authoredByForRecord =
         typeof duEarly.authoredBy === 'string' ? (duEarly.authoredBy as string) : '';
+      // goldfive#318 (PR1, additive): condition_id / lifecycle /
+      // prev_severity. Empty / UNSPECIFIED on pre-#318 sessions; the
+      // intervention deriver falls back to per-event rendering when
+      // ``conditionId`` is empty so backward compat is preserved.
+      const lifecycleStr = driftLifecycleToString(
+        d.lifecycle as unknown as number,
+      );
+      const prevSevStr = driftSeverityToString(
+        d.prevSeverity as unknown as number,
+      );
       store.drifts.append({
         kind: kindStr,
         severity: sevStr,
@@ -555,6 +575,9 @@ export function applyGoldfiveEvent(
         // onto the drift row.
         driftId: d.id || '',
         authoredBy: authoredByForRecord,
+        conditionId: d.conditionId || '',
+        lifecycle: lifecycleStr,
+        prevSeverity: prevSevStr,
       });
       // Attribute the drift to an actor row so it shows up in gantt / graph /
       // trajectory without those views having to special-case drift events.

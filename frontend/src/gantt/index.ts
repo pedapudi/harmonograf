@@ -649,6 +649,23 @@ export interface DriftRecord {
   // the orchestrator minted itself), or "" when the producing goldfive
   // build predates the field. Surfaced in the intervention detail pane.
   authoredBy?: string;
+  // goldfive#318 (goldfive#271 PR1, additive): stable identifier for the
+  // drift CONDITION. Multiple ``DriftDetected`` emits with the same
+  // ``conditionId`` describe one logical drift evolving through its
+  // lifecycle (OPENED → ESCALATING → RESOLVED). Empty string on legacy
+  // sessions / not-yet-routed emit paths — the frontend deriver falls
+  // back to per-event rendering for those (one synthetic condition each)
+  // so backward compat is preserved.
+  conditionId?: string;
+  // goldfive#318: lifecycle phase at the time of this emit. Lowercase
+  // string ('opened' | 'escalating' | 'resolved' | 'human_intervention_required'),
+  // empty when goldfive emitted UNSPECIFIED (treat as single-shot).
+  lifecycle?: string;
+  // goldfive#318: severity prior to this transition. Only meaningful
+  // when ``lifecycle === 'escalating'`` — otherwise empty. Lets the
+  // grouping renderer surface "WARNING → CRITICAL" markers without
+  // having to remember the previous emit's severity itself.
+  prevSeverity?: string;
 }
 
 // Drift registry — in-memory list of DriftDetected events received during
