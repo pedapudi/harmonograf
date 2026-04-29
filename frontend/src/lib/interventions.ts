@@ -175,6 +175,16 @@ export interface InterventionRow {
   // ascending. Surfaced as sub-rows in the expanded view; absent /
   // undefined on un-grouped rows.
   observations?: ReadonlyArray<DriftObservation>;
+  // Plan id this intervention is scoped to (Item 5 of UX cleanup batch /
+  // PR #184 follow-up). When a session contains multiple plans (different
+  // plan_ids), the per-plan ``InterventionsList`` filter scopes to this
+  // field so a row produced under one plan doesn't render under every
+  // other plan with the same revisionIndex. Empty when the deriver could
+  // not pin the intervention to a specific plan (e.g. a drift that fired
+  // before any plan landed) — the renderer falls back to attaching it to
+  // the earliest plan in that case so the row still renders exactly
+  // once.
+  targetPlanId?: string;
 }
 
 // One row's worth of detail per ``DriftDetected`` event inside a grouped
@@ -189,16 +199,6 @@ export interface DriftObservation {
   lifecycle: string;
   detail: string;
   driftId: string;
-  // Plan id this intervention is scoped to (Item 5 of UX cleanup batch /
-  // PR #184 follow-up). When a session contains multiple plans (different
-  // plan_ids), the per-plan ``InterventionsList`` filter scopes to this
-  // field so a row produced under one plan doesn't render under every
-  // other plan with the same revisionIndex. Empty when the deriver could
-  // not pin the intervention to a specific plan (e.g. a drift that fired
-  // before any plan landed) — the renderer falls back to attaching it to
-  // the earliest plan in that case so the row still renders exactly
-  // once.
-  targetPlanId?: string;
 }
 
 // Drift kinds emitted by goldfive when the user pulled the trigger. Mirrors
