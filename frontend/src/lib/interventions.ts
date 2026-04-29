@@ -137,6 +137,58 @@ export interface InterventionRow {
   // (after supersedes-reroute this is the SUCCESSOR id). Absent on
   // every other source.
   transitionTaskId?: string;
+  // goldfive#318 (frontend follow-up to PR #318): drift condition
+  // grouping. When multiple ``DriftDetected`` events share a
+  // ``condition_id`` (same logical drift evolving through OPENED →
+  // ESCALATING → RESOLVED), the deriver collapses them into a single
+  // ``InterventionRow`` carrying these aggregate fields. The
+  // ``InterventionsList`` renderer surfaces a count badge + a
+  // click-to-expand affordance that reveals the individual observations.
+  //
+  // Empty / undefined on rows that do NOT participate in condition
+  // grouping (every non-drift source, plus drift events whose
+  // ``conditionId`` is empty — pre-#318 sessions, see backward-compat
+  // note in ``groupDriftConditions``).
+  conditionId?: string;
+  // Lifecycle phase of the most recent observation in the condition
+  // (lowercase: 'opened' | 'escalating' | 'resolved' |
+  // 'human_intervention_required'). Empty when the condition has only
+  // legacy (UNSPECIFIED) lifecycle observations. Renderer surfaces it
+  // as a small chip alongside the row.
+  currentLifecycle?: string;
+  // Number of observations rolled into this row. ``1`` (or undefined)
+  // means a single emit — no count badge, no expansion. >1 means the
+  // row is collapsed and the renderer should show "(N observations)"
+  // and offer a click-to-expand affordance.
+  observationCount?: number;
+  // Severity transitions collected across the condition's observations
+  // (each ``prev_severity → severity`` step where the two differ).
+  // Empty / undefined on un-grouped rows or on conditions where every
+  // observation kept the same severity. Each entry's ``atMs`` is
+  // session-relative, mirroring ``InterventionRow.atMs``.
+  severityTransitions?: ReadonlyArray<{
+    fromSeverity: string;
+    toSeverity: string;
+    atMs: number;
+  }>;
+  // Per-observation breakdown for the collapsed row. Sorted by atMs
+  // ascending. Surfaced as sub-rows in the expanded view; absent /
+  // undefined on un-grouped rows.
+  observations?: ReadonlyArray<DriftObservation>;
+}
+
+// One row's worth of detail per ``DriftDetected`` event inside a grouped
+// drift condition. Decoupled from ``DriftRecord`` so the renderer
+// doesn't have to know about the gantt store shape; the deriver
+// projects the fields it needs.
+export interface DriftObservation {
+  seq: number;
+  atMs: number;
+  severity: string;
+  prevSeverity: string;
+  lifecycle: string;
+  detail: string;
+  driftId: string;
   // Plan id this intervention is scoped to (Item 5 of UX cleanup batch /
   // PR #184 follow-up). When a session contains multiple plans (different
   // plan_ids), the per-plan ``InterventionsList`` filter scopes to this
@@ -295,6 +347,12 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
       driftId: dr.driftId || '',
       attemptId: '',
       failureKind: '',
+      // goldfive#318: condition grouping fields. Defaulted to empty /
+      // undefined here so a single observation renders as before; the
+      // post-merge ``groupDriftConditions`` step collapses rows sharing
+      // a non-empty ``conditionId`` into one with ``observationCount > 1``
+      // and the per-observation breakdown.
+      conditionId: dr.conditionId || '',
     });
   }
 
@@ -616,6 +674,16 @@ export function deriveInterventions(input: DeriveInput): InterventionRow[] {
     merged = legacyTimeWindowMerge(merged, windowMs);
   }
 
+  // goldfive#318 (frontend follow-up): collapse drift rows that share a
+  // ``conditionId`` into a single condition row with the observations
+  // rolled in. Runs AFTER the strict-id merge so a condition observation
+  // that already absorbed a PlanRevised outcome keeps it on the survivor.
+  // Drift rows whose ``conditionId`` is empty (pre-#318 sessions, or
+  // emit paths that haven't been routed through the lifecycle helpers)
+  // pass through untouched — one row per observation, matching legacy
+  // behaviour.
+  merged = groupDriftConditions(merged, input.drifts);
+
   return merged;
 }
 
@@ -863,6 +931,165 @@ function legacyTimeWindowMerge(
     survivors.push(row);
   }
   return survivors;
+}
+
+// goldfive#318 (frontend follow-up): collapse drift / user rows that
+// share a goldfive-minted ``condition_id`` into one survivor row that
+// carries the per-observation breakdown. Backward-compat: rows whose
+// ``conditionId`` is empty (pre-#318 sessions; emit paths that
+// goldfive hasn't routed through the lifecycle helpers) pass through
+// untouched so they still render one row per emit — matching the
+// legacy view.
+//
+// The deriver only groups rows whose original source was a drift event
+// (``source === 'drift'`` for autonomous drifts, ``source === 'user'``
+// for user-control drifts that came from a goldfive ``DriftDetected``).
+// Annotation-only user rows (typed by an operator with no backing
+// drift) carry no ``conditionId`` and pass through untouched even when
+// they sit in the user lane.
+//
+// Survivor pick: the most recent observation in the condition. That
+// row carries:
+//   * the latest severity + lifecycle (so the chip reads as the
+//     condition's CURRENT state),
+//   * any ``outcome`` already attributed (typically by a successful
+//     refine — the latest observation is the one that triggered it),
+//   * a per-observation breakdown so the renderer can expand to a
+//     timeline of every emit.
+//
+// Severity transitions are collected from the underlying drift records
+// (preserving wall-clock order) rather than the post-merge rows so a
+// drift that absorbed a plan-revised outcome still surfaces its own
+// prev_severity bumps in the expansion.
+function groupDriftConditions(
+  rows: InterventionRow[],
+  drifts: readonly DriftRecord[],
+): InterventionRow[] {
+  // Index drifts by seq so we can pull observation context (lifecycle,
+  // prev_severity, detail) from the source record. Each drift row's
+  // ``key`` is ``drift:${seq}`` so we can route rows back to the
+  // backing record without piping fresh fields through every survivor
+  // in ``mergeByTriggerEventId``.
+  const driftBySeq = new Map<number, DriftRecord>();
+  for (const dr of drifts) driftBySeq.set(dr.seq, dr);
+
+  const driftBySeqByCond = new Map<string, DriftRecord[]>();
+  for (const dr of drifts) {
+    const cid = dr.conditionId || '';
+    if (!cid) continue;
+    const arr = driftBySeqByCond.get(cid);
+    if (arr) arr.push(dr);
+    else driftBySeqByCond.set(cid, [dr]);
+  }
+  for (const arr of driftBySeqByCond.values()) {
+    arr.sort((a, b) => a.recordedAtMs - b.recordedAtMs);
+  }
+
+  // Group rows by conditionId (only drift-bearing rows participate;
+  // every other row passes through untouched).
+  const passthrough: InterventionRow[] = [];
+  const groups = new Map<string, InterventionRow[]>();
+  for (const row of rows) {
+    if (!row.conditionId) {
+      passthrough.push(row);
+      continue;
+    }
+    const g = groups.get(row.conditionId);
+    if (g) g.push(row);
+    else groups.set(row.conditionId, [row]);
+  }
+  if (groups.size === 0) return rows;
+
+  const survivors: InterventionRow[] = [...passthrough];
+  for (const [cid, group] of groups) {
+    if (group.length === 1) {
+      // Single-observation condition. Still annotate the row with
+      // ``observationCount = 1`` + ``currentLifecycle`` (from the
+      // backing drift) so the renderer can show a lifecycle chip
+      // without expanding chrome.
+      const single = group[0];
+      const driftRecs = driftBySeqByCond.get(cid) ?? [];
+      const annotated = annotateSingleObservation(single, driftRecs[0]);
+      survivors.push(annotated);
+      continue;
+    }
+    // Multi-observation condition. Survivor = latest observation (so
+    // the row's outcome / triggerEventId / kind reflect the most
+    // recent emit, which is also the one that typically drove a
+    // refine). The earlier observations roll into ``observations`` for
+    // expansion.
+    group.sort((a, b) => a.atMs - b.atMs);
+    const survivor: InterventionRow = { ...group[group.length - 1] };
+    const driftRecs = driftBySeqByCond.get(cid) ?? [];
+    const observations: DriftObservation[] = [];
+    const transitions: Array<{ fromSeverity: string; toSeverity: string; atMs: number }> = [];
+    for (const dr of driftRecs) {
+      const lc = dr.lifecycle || '';
+      const prev = dr.prevSeverity || '';
+      observations.push({
+        seq: dr.seq,
+        atMs: dr.recordedAtMs,
+        severity: dr.severity || '',
+        prevSeverity: prev,
+        lifecycle: lc,
+        detail: dr.detail || '',
+        driftId: dr.driftId || '',
+      });
+      // Severity transition surfacing. Goldfive populates prev_severity
+      // only when lifecycle == ESCALATING (per proto comment) but we
+      // accept any prev != current as a transition so we degrade
+      // gracefully if a future emitter populates it on RESOLVED too.
+      if (prev && prev !== (dr.severity || '')) {
+        transitions.push({
+          fromSeverity: prev,
+          toSeverity: dr.severity || '',
+          atMs: dr.recordedAtMs,
+        });
+      }
+    }
+    // Determine current lifecycle/severity from the latest observation
+    // in the backing-record list (more authoritative than the row,
+    // which may have lost lifecycle through merging).
+    const latest = driftRecs[driftRecs.length - 1];
+    survivor.conditionId = cid;
+    survivor.observationCount = observations.length;
+    survivor.observations = observations;
+    survivor.severityTransitions = transitions;
+    survivor.currentLifecycle = latest?.lifecycle || '';
+    if (latest && latest.severity) survivor.severity = latest.severity;
+    // Stable React key: derived from the conditionId so a re-render
+    // doesn't churn the row identity if a fresh observation lands.
+    survivor.key = `drift-cond:${cid}`;
+    survivors.push(survivor);
+  }
+  survivors.sort((a, b) => a.atMs - b.atMs);
+  return survivors;
+}
+
+function annotateSingleObservation(
+  row: InterventionRow,
+  drift: DriftRecord | undefined,
+): InterventionRow {
+  if (!drift) return row;
+  const lc = drift.lifecycle || '';
+  if (!lc) return row;
+  const annotated: InterventionRow = { ...row };
+  annotated.currentLifecycle = lc;
+  annotated.observationCount = 1;
+  // Even single-observation conditions can carry a prev_severity if
+  // goldfive opened the condition mid-escalation (rare but possible).
+  // Surface it so the renderer can show "prev → current" without
+  // guessing.
+  if (drift.prevSeverity && drift.prevSeverity !== drift.severity) {
+    annotated.severityTransitions = [
+      {
+        fromSeverity: drift.prevSeverity,
+        toSeverity: drift.severity || '',
+        atMs: drift.recordedAtMs,
+      },
+    ];
+  }
+  return annotated;
 }
 
 // Convenience adapter: pull the three inputs from a live SessionStore +
