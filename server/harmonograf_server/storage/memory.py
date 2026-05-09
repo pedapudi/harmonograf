@@ -13,6 +13,8 @@ from typing import Optional
 
 from intervaltree import Interval, IntervalTree
 
+from goldfive.types import replace_task
+
 from harmonograf_server.storage.base import (
     Agent,
     AgentStatus,
@@ -435,19 +437,24 @@ class InMemoryStore(Store):
             plan = self._task_plans.get(plan_id)
             if plan is None:
                 return None
-            for t in plan.tasks:
-                if t.id == task_id:
-                    t.status = status
-                    if bound_span_id is not None:
-                        t.bound_span_id = bound_span_id
-                    # harmonograf#110: same preserve-semantics as sqlite —
-                    # keep an existing cancel_reason when no fresh one is
-                    # supplied (e.g. BLOCKED transition after CANCELLED
-                    # must not blank the reason).
-                    if cancel_reason:
-                        t.cancel_reason = cancel_reason
-                    return copy.deepcopy(t)
-            return None
+            if not any(t.id == task_id for t in plan.tasks):
+                return None
+            # goldfive#247 made Task frozen — rebuild via the canonical
+            # ``replace_task`` helper instead of in-place assignment.
+            changes: dict = {"status": status}
+            if bound_span_id is not None:
+                changes["bound_span_id"] = bound_span_id
+            # harmonograf#110: same preserve-semantics as sqlite —
+            # keep an existing cancel_reason when no fresh one is
+            # supplied (e.g. BLOCKED transition after CANCELLED
+            # must not blank the reason).
+            if cancel_reason:
+                changes["cancel_reason"] = cancel_reason
+            new_plan = replace_task(plan, task_id, **changes)
+            self._task_plans[plan_id] = new_plan
+            return copy.deepcopy(
+                next(t for t in new_plan.tasks if t.id == task_id)
+            )
 
     # task plan revisions ------------------------------------------------
     async def put_task_plan_revision(
