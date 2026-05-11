@@ -1320,6 +1320,65 @@ class SqliteStore(Store):
             )
             return t
 
+    async def update_task_assignee(
+        self,
+        plan_id: str,
+        task_id: str,
+        assignee_agent_id: str,
+    ) -> Optional[Task]:
+        # harmonograf#261: stamp ``tasks.assignee_agent_id`` for a row
+        # whose owning plan was installed at plan_submitted time with an
+        # empty assignee. ``DelegationObserved`` carries the actual
+        # ``(task_id, to_agent)`` binding goldfive's observational pin
+        # already wrote to ``session.plan``; this query closes the
+        # observability gap so the UI / SELECT shows the bound agent.
+        # Status / bound_span_id / cancel_reason are explicitly NOT
+        # touched — assignee is the only field this path owns.
+        new_assignee = assignee_agent_id or ""
+        async with self._lock:
+            async with self.db.execute(
+                "SELECT * FROM tasks WHERE plan_id = ? AND id = ?",
+                (plan_id, task_id),
+            ) as cur:
+                row = await cur.fetchone()
+                if row is None:
+                    return None
+            existing = row["assignee_agent_id"] or ""
+            cancel_reason_val = (
+                row["cancel_reason"]
+                if "cancel_reason" in row.keys()
+                else ""
+            ) or ""
+            if existing == new_assignee:
+                return Task(
+                    id=row["id"],
+                    title=row["title"] or "",
+                    description=row["description"] or "",
+                    assignee_agent_id=existing,
+                    status=TaskStatus(row["status"]),
+                    predicted_start_ms=row["predicted_start_ms"] or 0,
+                    predicted_duration_ms=row["predicted_duration_ms"] or 0,
+                    bound_span_id=row["bound_span_id"] or "",
+                    cancel_reason=cancel_reason_val,
+                )
+            await self.db.execute(
+                "UPDATE tasks SET assignee_agent_id = ? "
+                "WHERE plan_id = ? AND id = ?",
+                (new_assignee, plan_id, task_id),
+            )
+            await self.db.commit()
+            return Task(
+                id=row["id"],
+                title=row["title"] or "",
+                description=row["description"] or "",
+                assignee_agent_id=new_assignee,
+                status=TaskStatus(row["status"]),
+                predicted_start_ms=row["predicted_start_ms"] or 0,
+                predicted_duration_ms=row["predicted_duration_ms"] or 0,
+                bound_span_id=row["bound_span_id"] or "",
+                cancel_reason=cancel_reason_val,
+            )
+
     # task plan revisions ------------------------------------------------
     async def put_task_plan_revision(
         self, revision: TaskPlanRevision
