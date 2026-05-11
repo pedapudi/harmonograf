@@ -1031,12 +1031,19 @@ class FrontendServicerMixin:
         return resp
 
     async def _count_plan_revision_events(self, session_id: str) -> int:
-        """Total ``plan_submitted`` + ``plan_revised`` events for a session.
+        """Total ``plan_submitted`` + non-dry-run ``plan_revised`` events
+        for a session.
 
         Used by ``GetSessionPlanHistory``'s lazy-migration trigger. We
         accept an under-count: ``list_goldfive_events`` filters server-side
         by kind, and de-dup is implicit on
         ``(session_id, run_id, sequence)``.
+
+        harmonograf#257 / goldfive#379: dry-run ``plan_revised`` events
+        do NOT land in ``task_plan_revisions`` (mirrors the live-ingest
+        gate), so counting them here would make ``expected > len(rows)``
+        forever and trigger the lazy backfill on every call. Parse each
+        envelope and skip the dry-run preview rows.
         """
 
         submitted = await self._store.list_goldfive_events(
@@ -1045,7 +1052,18 @@ class FrontendServicerMixin:
         revised = await self._store.list_goldfive_events(
             session_id, kind="plan_revised"
         )
-        return len(submitted) + len(revised)
+        real_revised = 0
+        for rec in revised:
+            try:
+                event = goldfive_events_pb2.Event()
+                event.ParseFromString(rec.payload_bytes or b"")
+            except Exception:  # noqa: BLE001 — defensive: treat corrupt rows as real
+                real_revised += 1
+                continue
+            if bool(getattr(event.plan_revised, "dry_run", False)):
+                continue
+            real_revised += 1
+        return len(submitted) + real_revised
 
     async def _backfill_task_plan_revisions(self, session_id: str) -> None:
         """Replay persisted ``plan_submitted`` / ``plan_revised`` events
@@ -1089,6 +1107,15 @@ class FrontendServicerMixin:
                 event_reason = ""
                 event_revision_index: Optional[int] = None
             elif rec.kind == "plan_revised":
+                # harmonograf#257 / goldfive#379: mirror the live-ingest
+                # dry-run gate. A dry-run PlanRevised is observation-only
+                # (planner produced a preview, goldfive did NOT mutate
+                # ``session.plan``) and must not pollute the
+                # ``task_plan_revisions`` history either — backfill replay
+                # of the same audit stream should reach the same derived
+                # state as the live path did.
+                if bool(getattr(event.plan_revised, "dry_run", False)):
+                    continue
                 pb_plan = event.plan_revised.plan
                 event_trigger_id = (
                     getattr(event.plan_revised, "trigger_event_id", "") or ""

@@ -992,6 +992,29 @@ class IngestPipeline:
     async def _on_plan_revised(
         self, ctx: StreamContext, payload: Any, run_id: str
     ) -> None:
+        # harmonograf#257 / goldfive#379: ``PlanRevised.dry_run=True``
+        # marks a "would-have-applied" annotation goldfive emits when
+        # running in ``SteeringConfig.observation_only`` mode — the
+        # planner produced a revised plan but goldfive did NOT mutate
+        # ``session.plan`` / enqueue ``GOLDFIVE_STEER`` / cancel the
+        # in-flight invocation. Treating it like a real revision would
+        # corrupt ``task_plans`` (the latest-snapshot table) by clobbering
+        # the authoritative prior plan with the dry-run preview. Skip the
+        # derived-state writes entirely; the ``goldfive_events`` audit row
+        # was already persisted upstream in ``handle_goldfive_event`` so
+        # operators can still reconstruct what goldfive would have
+        # suggested by replaying the event stream.
+        if bool(getattr(payload, "dry_run", False)):
+            logger.debug(
+                "dropping dry-run PlanRevised from derived-state writes "
+                "session_id=%s run_id=%s plan_id=%s revision_index=%d "
+                "(observation_only mode; goldfive_events row preserved)",
+                ctx.session_id,
+                run_id,
+                getattr(payload.plan, "id", "") or "",
+                int(getattr(payload, "revision_index", 0) or 0),
+            )
+            return
         # The revision metadata lives both on ``payload.plan`` (inline in
         # goldfive's ``Plan``) and as flattened top-level fields on the
         # PlanRevised event. Prefer the event-level fields when the plan
