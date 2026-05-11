@@ -1811,6 +1811,68 @@ class IngestPipeline:
             invocation_id=payload.invocation_id,
             observed_at=observed_at,
         )
+        # harmonograf#261 / goldfive#259: stamp the persisted task row's
+        # ``assignee_agent_id`` from the wire. goldfive's observational
+        # pin mutates ``session.plan`` so ``report_task_*`` resolves, but
+        # it does NOT emit a ``PlanRevised`` (per #259 brief: "pin is not
+        # a revision"). Without this stamp the DB-backed ``tasks`` row
+        # keeps the empty assignee from the original ``plan_submitted``,
+        # and the UI shows ``assignee=-`` for every task even after the
+        # binding succeeded. ``task_id`` + ``to_agent`` are required (the
+        # event is a cross-agent A2A signal; orphan delegations without
+        # a bound task carry empty task_id and skip this path).
+        if payload.task_id and payload.to_agent:
+            await self._apply_delegation_assignee(
+                ctx, payload.task_id, payload.to_agent
+            )
+
+    async def _apply_delegation_assignee(
+        self,
+        ctx: StreamContext,
+        task_id: str,
+        assignee_agent_id: str,
+    ) -> None:
+        """Persist ``DelegationObserved.to_agent`` onto ``tasks.assignee_agent_id``.
+
+        Mirrors ``_apply_goldfive_task_status``'s plan-lookup discipline:
+        consult the in-memory index, fall back to a storage scan when
+        the index is cold (pipeline restart mid-session), and bail
+        silently when the task is unknown — same posture as the existing
+        task-status apply path so a missing plan never raises into the
+        ingest dispatch loop.
+        """
+        plan_id = self._task_index.get(ctx.session_id, {}).get(task_id)
+        if plan_id is None:
+            plans = await self._store.list_task_plans_for_session(
+                ctx.session_id
+            )
+            for p in plans:
+                for t in p.tasks:
+                    if t.id == task_id:
+                        plan_id = p.id
+                        self._task_index.setdefault(
+                            ctx.session_id, {}
+                        )[task_id] = plan_id
+                        break
+                if plan_id is not None:
+                    break
+        if plan_id is None:
+            logger.debug(
+                "delegation_observed task_id=%s has no matching plan in "
+                "session_id=%s — skipping assignee stamp",
+                task_id,
+                ctx.session_id,
+            )
+            return
+        updated = await self._store.update_task_assignee(
+            plan_id, task_id, assignee_agent_id
+        )
+        if updated is not None:
+            # Re-publish so live subscribers (Gantt / Trajectory) refresh
+            # the task card with the new assignee. ``publish_task_status``
+            # carries the full ``Task`` snapshot including the freshly
+            # stamped ``assignee_agent_id``.
+            self._bus.publish_task_status(ctx.session_id, plan_id, updated)
 
     async def _resolve_invocation_span_for_task(
         self, session_id: str, task_id: str

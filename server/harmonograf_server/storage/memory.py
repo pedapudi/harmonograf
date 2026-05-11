@@ -456,6 +456,34 @@ class InMemoryStore(Store):
                 next(t for t in new_plan.tasks if t.id == task_id)
             )
 
+    async def update_task_assignee(
+        self,
+        plan_id: str,
+        task_id: str,
+        assignee_agent_id: str,
+    ) -> Optional[Task]:
+        # harmonograf#261: ingest stamps ``assignee_agent_id`` from a
+        # ``DelegationObserved`` event so the DB matches goldfive's
+        # observational pin. Idempotent — no-op when the row already
+        # carries the same assignee. Returns None when the plan or task
+        # is unknown (the caller falls back to a deferred index lookup).
+        async with self._lock:
+            plan = self._task_plans.get(plan_id)
+            if plan is None:
+                return None
+            current = next((t for t in plan.tasks if t.id == task_id), None)
+            if current is None:
+                return None
+            if (current.assignee_agent_id or "") == (assignee_agent_id or ""):
+                return copy.deepcopy(current)
+            new_plan = replace_task(
+                plan, task_id, assignee_agent_id=assignee_agent_id or ""
+            )
+            self._task_plans[plan_id] = new_plan
+            return copy.deepcopy(
+                next(t for t in new_plan.tasks if t.id == task_id)
+            )
+
     # task plan revisions ------------------------------------------------
     async def put_task_plan_revision(
         self, revision: TaskPlanRevision

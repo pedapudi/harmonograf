@@ -462,6 +462,28 @@ class Store(ABC):
         cancel_reason: str = "",
     ) -> Optional[Task]: ...
 
+    @abstractmethod
+    async def update_task_assignee(
+        self,
+        plan_id: str,
+        task_id: str,
+        assignee_agent_id: str,
+    ) -> Optional[Task]:
+        """Stamp a task's ``assignee_agent_id`` without touching status.
+
+        Used by the ingest layer when a ``DelegationObserved`` event lands
+        carrying ``(task_id, to_agent)`` (harmonograf#261). goldfive's
+        observational pin (``goldfive#259``) updates its in-memory
+        ``session.plan`` so ``report_task_*`` resolves, but it does not
+        emit a ``PlanRevised`` (pinning is not a revision). The wire's
+        ``DelegationObserved.task_id`` is the only signal that lets the
+        DB-backed ``tasks.assignee_agent_id`` row catch up.
+
+        Returns the updated ``Task`` on success, or ``None`` if the
+        ``(plan_id, task_id)`` row does not exist. Idempotent —
+        re-applying the same assignee is a no-op.
+        """
+
     # task plan revisions --------------------------------------------------
     #
     # Sibling table to ``task_plans``. ``put_task_plan`` upserts on the bare
