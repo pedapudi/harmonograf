@@ -529,16 +529,52 @@ class HarmonografSink:
         )
 
     def _emit_llm_call_end(self, event_pb: Any) -> None:
-        """``GoldfiveLLMCallEnd`` → ``SpanEnd``."""
+        """``GoldfiveLLMCallEnd`` → ``SpanEnd``.
+
+        Status translation:
+
+        * ``"failed"``    → ``SPAN_STATUS_FAILED`` + ``ErrorInfo`` populated.
+        * ``"cancelled"`` → ``SPAN_STATUS_CANCELLED`` (goldfive#266). The
+          ``end.error`` carries a benign lifecycle reason
+          ("drained at run boundary") rather than a CancelledError stack;
+          we propagate it as the span's error message so operators can
+          read the reason inline but it does NOT render red. Distinct
+          from ``failed`` so the frontend's status filter renders
+          shutdown-initiated teardowns differently from genuine errors.
+        * anything else   → ``SPAN_STATUS_COMPLETED`` (success path).
+        """
         end = event_pb.goldfive_llm_call_end
         span_id = end.span_id or self._derive_span_id(event_pb)
         wire_status = (end.status or "").lower()
-        status = "FAILED" if wire_status == "failed" else "COMPLETED"
-        error = (
-            {"type": "goldfive_llm_call", "message": end.error}
-            if wire_status == "failed" and end.error
-            else None
-        )
+        if wire_status == "failed":
+            status: str = "FAILED"
+        elif wire_status == "cancelled":
+            # goldfive#266 — drain-initiated teardown of an in-flight
+            # judge / drift task at run boundary. Routine lifecycle,
+            # NOT an error. Map onto the dedicated CANCELLED SpanStatus
+            # so harmonograf's frontend can render it as a neutral
+            # cancel (gray / muted) rather than a red FAILED span.
+            status = "CANCELLED"
+        else:
+            status = "COMPLETED"
+        if wire_status == "failed" and end.error:
+            error: dict[str, Any] | None = {
+                "type": "goldfive_llm_call",
+                "message": end.error,
+            }
+        elif wire_status == "cancelled" and end.error:
+            # Surface the benign cancel-reason as the span's error
+            # message so operators can read it inline. Type is
+            # deliberately ``goldfive_llm_call_cancelled`` (not
+            # ``goldfive_llm_call``) so frontends that pattern-match
+            # error.type can render cancels distinctly from genuine
+            # errors even before they upgrade to the SpanStatus axis.
+            error = {
+                "type": "goldfive_llm_call_cancelled",
+                "message": end.error,
+            }
+        else:
+            error = None
         attributes: dict[str, Any] = {}
         if end.name:
             # Echo the call name on end so out-of-order End-before-Start
