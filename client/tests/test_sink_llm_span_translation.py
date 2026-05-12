@@ -201,6 +201,85 @@ class TestGoldfiveLLMCallEnd:
         assert se.error.type == "goldfive_llm_call"
         assert se.error.message == "timeout after 30s"
 
+    @pytest.mark.asyncio
+    async def test_cancelled_status_maps_to_span_status_cancelled(
+        self, sink: HarmonografSink, client: Client
+    ) -> None:
+        """goldfive#266 — drain-initiated cancel surfaces as
+        ``SPAN_STATUS_CANCELLED``, not ``SPAN_STATUS_FAILED``.
+
+        Live session 4538863f-0dea-4fe8-97b4-5f660ee2cb7f surfaced
+        routine run-boundary teardowns of in-flight ``judge_reasoning``
+        calls as red FAILED spans with CancelledError stack traces.
+        goldfive now emits ``status="cancelled"`` (with a benign
+        ``error="drained at run boundary"``) for those cases; this sink
+        must map that distinct wire status onto the dedicated
+        ``SPAN_STATUS_CANCELLED`` enum so the frontend can render it
+        neutrally instead of as an error.
+        """
+
+        def setup(e: ge.Event) -> None:
+            end = e.goldfive_llm_call_end
+            end.span_id = "span-judge-drained"
+            end.name = "judge_reasoning"
+            end.end_time_ns = 1_700_000_000_500_000_000
+            end.status = "cancelled"
+            end.error = "drained at run boundary"
+
+        evt = _event(setup)
+        await sink.emit(evt)
+
+        envs = _drain(client)
+        assert len(envs) == 1
+        se = envs[0].payload
+        types_pb2 = client._types_pb2
+        # Status: CANCELLED, NOT FAILED — the routine-lifecycle marker
+        # that lets harmonograf's frontend render the span neutrally.
+        assert se.status == types_pb2.SPAN_STATUS_CANCELLED
+        # The lifecycle reason rides through on error.message so
+        # operators can read "why was this cancelled?" inline, but the
+        # ``type`` is the distinct ``goldfive_llm_call_cancelled``
+        # variant so pattern-matchers on the old type don't flag it
+        # as an error.
+        assert se.error.type == "goldfive_llm_call_cancelled"
+        assert se.error.message == "drained at run boundary"
+        # Attributes echo the wire status verbatim for downstream
+        # filters (e.g. status='cancelled' lane).
+        assert (
+            se.attributes["goldfive.status"].string_value == "cancelled"
+        )
+
+    @pytest.mark.asyncio
+    async def test_cancelled_status_without_error_omits_error_info(
+        self, sink: HarmonografSink, client: Client
+    ) -> None:
+        """A cancelled span with no error text omits ErrorInfo entirely.
+
+        The goldfive helper always populates the reason today, but a
+        future code path or a custom span emitter might not. The sink
+        must not synthesize an ErrorInfo for the empty-reason case —
+        the SpanStatus enum carries the cancel signal on its own.
+        """
+
+        def setup(e: ge.Event) -> None:
+            end = e.goldfive_llm_call_end
+            end.span_id = "span-judge-no-reason"
+            end.name = "judge_reasoning"
+            end.end_time_ns = 1_700_000_000_500_000_000
+            end.status = "cancelled"
+            # No end.error.
+
+        evt = _event(setup)
+        await sink.emit(evt)
+
+        envs = _drain(client)
+        assert len(envs) == 1
+        se = envs[0].payload
+        types_pb2 = client._types_pb2
+        assert se.status == types_pb2.SPAN_STATUS_CANCELLED
+        assert se.error.message == ""
+        assert se.error.type == ""
+
 
 # ---------------------------------------------------------------------------
 # ReasoningJudgeInvoked → SpanStart + SpanEnd (pair)
