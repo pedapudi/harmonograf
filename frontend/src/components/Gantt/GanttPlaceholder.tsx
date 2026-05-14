@@ -64,6 +64,13 @@ export function GanttPlaceholder() {
   // and we only fire once per session id to avoid fighting subsequent user
   // pans. The ref key is sessionId-scoped so rejoining a different session
   // re-evaluates.
+  //
+  // harmonograf#286: after fitting, also freeze the renderer's session-
+  // relative "now" at the last span end. Without the freeze, the frame loop
+  // keeps advancing `store.nowMs` from wall-clock since session.created_at
+  // — for a session reopened hours later that pushes the live cursor (and
+  // any open-bar growth) far past activity. Freezing pins the cursor and
+  // matches what the user expects from a finished/quiet run.
   const autofittedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!sessionId || !useLive || !activeRenderer) return;
@@ -73,8 +80,10 @@ export function GanttPlaceholder() {
     // Guard: if the session has zero spans (e.g. a stillborn run), fitAll
     // would collapse to a 0-width window. Skip and let the default 5-min
     // viewport stand — there's nothing to look at anyway.
-    if (store.spans.maxEndMs() <= 0) return;
+    const maxEndMs = store.spans.maxEndMs();
+    if (maxEndMs <= 0) return;
     activeRenderer.fitAll();
+    activeRenderer.freezeAt(maxEndMs);
     autofittedRef.current = sessionId;
   }, [
     sessionId,
