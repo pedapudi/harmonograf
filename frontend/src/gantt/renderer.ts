@@ -105,16 +105,76 @@ interface EdgeLayout {
 // redraw. Persisted so the hit-test pass and the overlay pulse highlight
 // share one source of truth with the primary draw call and the bezier is
 // never sampled against stale control points.
+//
+// harmonograf#241: the source (tail) and target (head) endpoints now sit at
+// distinct x positions — srcX anchors at the delegating agent's INVOCATION
+// end (the moment the hand-off happened on the coordinator's bar), tgtX
+// anchors at the delegation_observed timestamp (where the sub-agent's
+// INVOCATION will appear). When the source span is still running we anchor
+// srcX at session "now" so the tail tracks the live edge of the bar; when
+// no source span is found, or its end is past the observation, srcX falls
+// back to tgtX (recovers the legacy vertical curve so the edge stays
+// visible). `curveOffset` is now only consulted on that degenerate
+// srcX === tgtX path; for the common slanted case the bezier control
+// points run along the segment itself.
 interface DelegationEdgeLayout {
   seq: number;
   record: DelegationRecord;
-  // Both endpoints sit at the same x (delegation is instantaneous), so we
-  // only store one x value and the two y anchors + the horizontal curve
-  // offset — the bezier is fully determined by these.
-  x: number;
+  srcX: number;
+  tgtX: number;
   srcY: number;
   tgtY: number;
+  // Horizontal nudge for the degenerate (srcX === tgtX) curve so the
+  // bezier doesn't collapse into a zero-width vertical line. Unused when
+  // srcX !== tgtX.
   curveOffset: number;
+}
+
+// Shared bezier control points for a delegation curve. Centralizes the
+// degenerate-vs-slanted decision so drawDelegations, hitTestDelegation,
+// the midpoint glyph pass, and the overlay (hover + pulse) all sample the
+// same geometry. Returns P0..P3 of a cubic bezier.
+function delegationBezier(e: DelegationEdgeLayout): {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  x3: number;
+  y3: number;
+} {
+  const dx = e.tgtX - e.srcX;
+  if (dx === 0) {
+    // Degenerate fallback: both anchors share x. Bump control points to
+    // the right so the path doesn't collapse to a vertical line.
+    return {
+      x0: e.srcX,
+      y0: e.srcY,
+      x1: e.srcX + e.curveOffset,
+      y1: e.srcY,
+      x2: e.srcX + e.curveOffset,
+      y2: e.tgtY,
+      x3: e.srcX,
+      y3: e.tgtY,
+    };
+  }
+  // Slanted curve from (srcX, srcY) to (tgtX, tgtY). Control points sit
+  // at the horizontal midpoint of the segment but at each endpoint's y so
+  // the curve leaves the source bar horizontally before sloping toward
+  // the target — reads as a clear "hand-off then arrive" gesture rather
+  // than a diagonal line.
+  const midX = e.srcX + dx / 2;
+  return {
+    x0: e.srcX,
+    y0: e.srcY,
+    x1: midX,
+    y1: e.srcY,
+    x2: midX,
+    y2: e.tgtY,
+    x3: e.tgtX,
+    y3: e.tgtY,
+  };
 }
 
 interface FrameMetrics {
@@ -1309,13 +1369,18 @@ export class GanttRenderer {
       y += rowH;
     }
 
-    // Finds the INVOCATION span to anchor the arrow endpoint to on a
-    // given agent row at `atMs`. Prefers a span active at `atMs`; falls
-    // back to the most recent INVOCATION that ended before `atMs`, and
-    // finally to lane-0 math (same visual position the INVOCATION bar
-    // will occupy once it arrives) so the arrow stays stable on the live
-    // path even before the target row's INVOCATION span is reported.
-    const anchorY = (agentId: string, atMs: number): number | undefined => {
+    // Picks the INVOCATION span to anchor an endpoint to on a given agent
+    // row at `atMs`. Prefers a span active at `atMs`; falls back to the
+    // most recent INVOCATION that ended before `atMs`; finally lane-0
+    // math (same visual position the bar will occupy once it arrives) so
+    // the arrow stays stable on the live path even before the target
+    // row's INVOCATION span is reported. Returned `span` is undefined
+    // when no INVOCATION fits — callers fall back to the row's lane-0
+    // center via the returned `y`.
+    const pickAnchorSpan = (
+      agentId: string,
+      atMs: number,
+    ): { y: number; span: Span | undefined } | undefined => {
       const row = rowLayout.get(agentId);
       if (!row) return undefined;
       const pad = Math.max(this.viewport.windowMs * 0.5, 1);
@@ -1328,16 +1393,13 @@ export class GanttRenderer {
         if (s.startMs > atMs) continue;
         const end = s.endMs ?? Number.POSITIVE_INFINITY;
         if (end >= atMs) {
-          // Active at atMs — strongest match, prefer the latest-started
-          // one if multiple overlap (rare: invocation spans usually don't
-          // stack on a single row).
           if (!active || s.startMs > active.startMs) active = s;
         } else if (!mostRecentCompleted || s.startMs > mostRecentCompleted.startMs) {
           mostRecentCompleted = s;
         }
       }
       const chosen = active ?? mostRecentCompleted;
-      return laneCenterY(row, chosen ? chosen.lane : 0);
+      return { y: laneCenterY(row, chosen ? chosen.lane : 0), span: chosen };
     };
 
     const dataLeft = GUTTER_WIDTH_PX + 10;
@@ -1354,17 +1416,59 @@ export class GanttRenderer {
       if (d.observedAtMs < vs - margin || d.observedAtMs > ve + margin) {
         continue;
       }
-      const srcY = anchorY(d.fromAgentId, d.observedAtMs);
-      const tgtY = anchorY(d.toAgentId, d.observedAtMs);
-      if (srcY === undefined || tgtY === undefined) continue;
-      const x = msToPx(this.viewport, w, d.observedAtMs);
-      if (x < dataLeft || x > dataRight) continue;
+      const srcAnchor = pickAnchorSpan(d.fromAgentId, d.observedAtMs);
+      const tgtAnchor = pickAnchorSpan(d.toAgentId, d.observedAtMs);
+      if (!srcAnchor || !tgtAnchor) continue;
+
+      // Tail X — harmonograf#241. The tail should anchor at the END of
+      // the delegating agent's INVOCATION (the moment the hand-off
+      // actually happened on the coordinator's bar), NOT at the
+      // observed-time of the delegation_observed event. The previous
+      // behavior placed both endpoints at observedAtMs which, for
+      // delegations dispatched near session start, visually collapsed
+      // the tail onto the leftmost x position. Edge-case fallbacks:
+      //   * Source span still RUNNING (endMs null) → use store.nowMs so
+      //     the tail tracks the live edge of the bar.
+      //   * No source span found → degenerate to observedAtMs (tgtX);
+      //     delegationBezier() draws the legacy vertical curve so the
+      //     edge stays visible.
+      //   * Source span endMs is AFTER observedAtMs (rare clock drift) →
+      //     also degenerate to observedAtMs; a tail past the head would
+      //     read as the arrow going backwards in time.
+      const tgtMs = d.observedAtMs;
+      let srcMs: number;
+      const srcSpan = srcAnchor.span;
+      if (!srcSpan) {
+        srcMs = tgtMs;
+      } else if (srcSpan.endMs === null) {
+        const nowMs = this.store.nowMs;
+        srcMs = nowMs > srcSpan.startMs ? nowMs : tgtMs;
+      } else if (srcSpan.endMs > tgtMs) {
+        srcMs = tgtMs;
+      } else {
+        srcMs = srcSpan.endMs;
+      }
+      // Clamp the tail to not precede the source span's own start —
+      // protects against fixtures where the source span has an end past
+      // its start in negative direction (shouldn't happen but is cheap
+      // to defend against).
+      if (srcSpan && srcMs < srcSpan.startMs) srcMs = srcSpan.startMs;
+
+      const srcX = msToPx(this.viewport, w, srcMs);
+      const tgtX = msToPx(this.viewport, w, tgtMs);
+      // Viewport cull — drop only when BOTH endpoints sit off the same
+      // edge of the data area. A delegation whose tail starts before the
+      // visible window but lands inside it should still render.
+      if ((srcX < dataLeft && tgtX < dataLeft) || (srcX > dataRight && tgtX > dataRight)) {
+        continue;
+      }
       this.delegationEdges.push({
         seq: d.seq,
         record: d,
-        x,
-        srcY,
-        tgtY,
+        srcX,
+        tgtX,
+        srcY: srcAnchor.y,
+        tgtY: tgtAnchor.y,
         curveOffset,
       });
     }
@@ -1377,21 +1481,21 @@ export class GanttRenderer {
     ctx.setLineDash([4, 3]);
     ctx.strokeStyle = color;
     for (const e of this.delegationEdges) {
-      // Same-time, different-row edge: draw a shallow curve so the path
-      // doesn't collapse into a zero-width vertical line. Offset the
-      // control points horizontally by a fixed nudge.
+      const b = delegationBezier(e);
       ctx.beginPath();
-      ctx.moveTo(e.x, e.srcY);
-      ctx.bezierCurveTo(
-        e.x + e.curveOffset, e.srcY,
-        e.x + e.curveOffset, e.tgtY,
-        e.x, e.tgtY,
-      );
+      ctx.moveTo(b.x0, b.y0);
+      ctx.bezierCurveTo(b.x1, b.y1, b.x2, b.y2, b.x3, b.y3);
       ctx.stroke();
     }
 
     // Midpoint glyph pass — unsharp without lineDash so the symbol reads
-    // as a single solid mark instead of picking up the dash pattern.
+    // as a single solid mark instead of picking up the dash pattern. For
+    // the slanted geometry the bezier with horizontal-midpoint controls
+    // has its t=0.5 sample at ((srcX+tgtX)/2, (srcY+tgtY)/2); for the
+    // degenerate (srcX === tgtX) case the t=0.5 sample collapses to
+    // (srcX + 3/4 * curveOffset, (srcY+tgtY)/2). Both reduce to "midpoint
+    // of the curve's bounding box-ish region", which the glyph nudges +4
+    // to the right of.
     ctx.setLineDash([]);
     ctx.globalAlpha = 0.6;
     ctx.fillStyle = color;
@@ -1399,10 +1503,9 @@ export class GanttRenderer {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     for (const e of this.delegationEdges) {
-      // Midpoint of a bezier with equal-x endpoints and offset control
-      // points collapses to (x + 3/4 * offset, (srcY+tgtY)/2). Hand-fit
-      // so the glyph clears the curve's crest.
-      ctx.fillText('↪↪', e.x + 4, (e.srcY + e.tgtY) / 2);
+      const glyphX =
+        e.srcX === e.tgtX ? e.srcX + 4 : (e.srcX + e.tgtX) / 2;
+      ctx.fillText('↪↪', glyphX, (e.srcY + e.tgtY) / 2);
     }
     ctx.restore();
   }
@@ -1425,26 +1528,30 @@ export class GanttRenderer {
     // Walk back-to-front so the latest delegation wins when curves overlap.
     for (let i = edges.length - 1; i >= 0; i--) {
       const e = edges[i];
-      // Quick bbox reject. The curve hugs x..x+curveOffset in the x-axis;
-      // y is bounded by the two anchors, padded for rounding.
-      const minX = e.x - tol;
-      const maxX = e.x + e.curveOffset + tol;
+      // Quick bbox reject. For the slanted curve (srcX != tgtX) the
+      // bezier with horizontal-midpoint controls stays inside the
+      // x-rectangle [min(srcX,tgtX), max(srcX,tgtX)]; for the degenerate
+      // (srcX === tgtX) curve the right-bulging control points push the
+      // path out to srcX + curveOffset. Pick whichever envelope contains
+      // both shapes.
+      const xLo = Math.min(e.srcX, e.tgtX);
+      const xHi = Math.max(e.srcX, e.tgtX);
+      const minX = xLo - tol;
+      const maxX = (e.srcX === e.tgtX ? e.srcX + e.curveOffset : xHi) + tol;
       const minY = Math.min(e.srcY, e.tgtY) - tol;
       const maxY = Math.max(e.srcY, e.tgtY) + tol;
       if (px < minX || px > maxX || py < minY || py > maxY) continue;
-      // Bezier coefficients for the curve drawn in drawDelegations:
-      //   P0 = (x, srcY)
-      //   P1 = (x + off, srcY)
-      //   P2 = (x + off, tgtY)
-      //   P3 = (x, tgtY)
-      const x0 = e.x;
-      const y0 = e.srcY;
-      const x1 = e.x + e.curveOffset;
-      const y1 = e.srcY;
-      const x2 = e.x + e.curveOffset;
-      const y2 = e.tgtY;
-      const x3 = e.x;
-      const y3 = e.tgtY;
+      // Bezier coefficients shared with drawDelegations / overlay pulse /
+      // hover via delegationBezier() so all four sample the same geometry.
+      const b = delegationBezier(e);
+      const x0 = b.x0;
+      const y0 = b.y0;
+      const x1 = b.x1;
+      const y1 = b.y1;
+      const x2 = b.x2;
+      const y2 = b.y2;
+      const x3 = b.x3;
+      const y3 = b.y3;
       let prevX = x0;
       let prevY = y0;
       for (let j = 1; j <= samples; j++) {
@@ -2129,17 +2236,14 @@ export class GanttRenderer {
           (d) => d.seq === this.hoveredDelegationSeq,
         );
         if (e) {
+          const b = delegationBezier(e);
           ctx.strokeStyle = color;
           ctx.globalAlpha = 0.85;
           ctx.lineWidth = 2;
           ctx.setLineDash([4, 3]);
           ctx.beginPath();
-          ctx.moveTo(e.x, e.srcY);
-          ctx.bezierCurveTo(
-            e.x + e.curveOffset, e.srcY,
-            e.x + e.curveOffset, e.tgtY,
-            e.x, e.tgtY,
-          );
+          ctx.moveTo(b.x0, b.y0);
+          ctx.bezierCurveTo(b.x1, b.y1, b.x2, b.y2, b.x3, b.y3);
           ctx.stroke();
         }
       }
@@ -2148,6 +2252,7 @@ export class GanttRenderer {
           (d) => d.seq === this.pulsingDelegationSeq,
         );
         if (e) {
+          const b = delegationBezier(e);
           const remaining = Math.max(0, this.pulseUntilMs - nowMs);
           const fade = remaining / 500; // 1 → 0 across 500ms.
           ctx.strokeStyle = color;
@@ -2155,12 +2260,8 @@ export class GanttRenderer {
           ctx.lineWidth = 2.5 + 2 * fade;
           ctx.setLineDash([]);
           ctx.beginPath();
-          ctx.moveTo(e.x, e.srcY);
-          ctx.bezierCurveTo(
-            e.x + e.curveOffset, e.srcY,
-            e.x + e.curveOffset, e.tgtY,
-            e.x, e.tgtY,
-          );
+          ctx.moveTo(b.x0, b.y0);
+          ctx.bezierCurveTo(b.x1, b.y1, b.x2, b.y2, b.x3, b.y3);
           ctx.stroke();
         }
         // Keep asking for more frames until the deadline passes so the

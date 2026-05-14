@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { GanttRenderer } from '../../gantt/renderer';
 import { SessionStore } from '../../gantt/index';
 import {
+  GUTTER_WIDTH_PX,
   ROW_HEIGHT_PX,
   SUB_LANE_HEIGHT_PX,
   TOP_MARGIN_PX,
@@ -299,5 +300,229 @@ describe('GanttRenderer delegation anchor (harmonograf#129)', () => {
     expect(e.tgtY).toBe(subBarY);
 
     r.detach();
+  });
+});
+
+// harmonograf#241: delegation arrow TAIL must anchor at the source span's
+// END time (where the hand-off actually happened on the coordinator's
+// bar), NOT at the observed-time of the delegation_observed event. The
+// previous behavior set both endpoints to observedAtMs which collapsed
+// the tail onto a single x — for delegations dispatched near session
+// start that put the tail right at the leftmost data position. The
+// arrowhead (target side) is unchanged.
+describe('GanttRenderer delegation tail anchoring (harmonograf#241)', () => {
+  function pxAt(ms: number, windowMs = 10_000, widthCss = 1200): number {
+    // Mirror msToPx(): viewport.startMs is endMs - windowMs.
+    const startMs = 10_000 - windowMs;
+    const dataW = widthCss - GUTTER_WIDTH_PX;
+    return GUTTER_WIDTH_PX + ((ms - startMs) / windowMs) * dataW;
+  }
+
+  it('tail anchors at the source INVOCATION end when the source has completed before observation', () => {
+    // Scenario: coordinator runs 0→500ms, completes; sub starts at 700ms.
+    // Delegation observed at 700ms (sub start). Tail x must land at the
+    // coordinator's endMs (500), NOT at observedAtMs (700) — though in
+    // this fixture observedAtMs===subStart so head/tail differ visibly.
+    const store = new SessionStore();
+    mkAgent(store, 'coord');
+    mkAgent(store, 'sub');
+
+    store.spans.append(
+      mkSpan({
+        id: 'inv-coord',
+        agentId: 'coord',
+        startMs: 0,
+        endMs: 500,
+        status: 'COMPLETED',
+      }),
+    );
+    store.spans.append(
+      mkSpan({
+        id: 'inv-sub',
+        agentId: 'sub',
+        startMs: 700,
+        endMs: 4_000,
+        status: 'COMPLETED',
+      }),
+    );
+
+    store.delegations.append({
+      fromAgentId: 'coord',
+      toAgentId: 'sub',
+      taskId: 't-1',
+      invocationId: 'inv-1',
+      observedAtMs: 700,
+    });
+
+    const r = new GanttRenderer(store);
+    r.attach(stubCanvas(), stubCanvas(), stubCanvas());
+    r.resize(1200, 200, 1);
+    r.setViewport({
+      endMs: 10_000,
+      windowMs: 10_000,
+      liveFollow: false,
+      replay: false,
+    });
+    drawBlocks(r);
+
+    const edges = r._delegationLayoutsForTesting();
+    expect(edges).toHaveLength(1);
+    const e = edges[0];
+
+    // Head (tgtX) lands at observedAtMs=700; tail (srcX) lands at coord
+    // endMs=500. The two must differ — that's the whole point of the fix.
+    expect(e.tgtX).toBeCloseTo(pxAt(700), 5);
+    expect(e.srcX).toBeCloseTo(pxAt(500), 5);
+    expect(e.srcX).toBeLessThan(e.tgtX);
+  });
+
+  it('tail uses observed time when source span endMs is AFTER observation (clock drift safeguard)', () => {
+    // Scenario: coordinator INVOCATION end stamp is past the
+    // delegation_observed event (an agent's own bar can outlive the
+    // hand-off when it spawns then continues to do other things). Tail
+    // must NOT precede head — fall back to observedAtMs.
+    const store = new SessionStore();
+    mkAgent(store, 'coord');
+    mkAgent(store, 'sub');
+
+    store.spans.append(
+      mkSpan({
+        id: 'inv-coord',
+        agentId: 'coord',
+        startMs: 0,
+        endMs: 5_000, // past the delegation
+        status: 'COMPLETED',
+      }),
+    );
+    store.spans.append(
+      mkSpan({
+        id: 'inv-sub',
+        agentId: 'sub',
+        startMs: 1_000,
+        endMs: 4_000,
+        status: 'COMPLETED',
+      }),
+    );
+
+    store.delegations.append({
+      fromAgentId: 'coord',
+      toAgentId: 'sub',
+      taskId: 't-1',
+      invocationId: 'inv-1',
+      observedAtMs: 1_000,
+    });
+
+    const r = new GanttRenderer(store);
+    r.attach(stubCanvas(), stubCanvas(), stubCanvas());
+    r.resize(1200, 200, 1);
+    r.setViewport({
+      endMs: 10_000,
+      windowMs: 10_000,
+      liveFollow: false,
+      replay: false,
+    });
+    drawBlocks(r);
+
+    const edges = r._delegationLayoutsForTesting();
+    expect(edges).toHaveLength(1);
+    const e = edges[0];
+
+    // Degenerate fallback: srcX === tgtX (both at observedAtMs).
+    expect(e.srcX).toBe(e.tgtX);
+    expect(e.tgtX).toBeCloseTo(pxAt(1_000), 5);
+  });
+
+  it('tail anchors at store.nowMs when the source span is still RUNNING', () => {
+    // Scenario: coordinator is still RUNNING when the delegation is
+    // observed. Tail tracks the session's "now" cursor so the live edge
+    // of the bar holds the arrow's tail — same visual contract as the
+    // bar itself, which the renderer paints out to nowMs while running.
+    const store = new SessionStore();
+    mkAgent(store, 'coord');
+    mkAgent(store, 'sub');
+
+    store.spans.append(
+      mkSpan({
+        id: 'inv-coord',
+        agentId: 'coord',
+        startMs: 0,
+        endMs: null,
+        status: 'RUNNING',
+      }),
+    );
+    store.spans.append(
+      mkSpan({
+        id: 'inv-sub',
+        agentId: 'sub',
+        startMs: 2_000,
+        endMs: null,
+        status: 'RUNNING',
+      }),
+    );
+
+    store.delegations.append({
+      fromAgentId: 'coord',
+      toAgentId: 'sub',
+      taskId: 't-1',
+      invocationId: 'inv-1',
+      observedAtMs: 2_000,
+    });
+    // Session has progressed past the delegation moment.
+    store.nowMs = 1_500;
+
+    const r = new GanttRenderer(store);
+    r.attach(stubCanvas(), stubCanvas(), stubCanvas());
+    r.resize(1200, 200, 1);
+    r.setViewport({
+      endMs: 10_000,
+      windowMs: 10_000,
+      liveFollow: false,
+      replay: false,
+    });
+    drawBlocks(r);
+
+    const edges = r._delegationLayoutsForTesting();
+    expect(edges).toHaveLength(1);
+    const e = edges[0];
+
+    // Tail at nowMs (1500), head at observedAtMs (2000).
+    expect(e.srcX).toBeCloseTo(pxAt(1_500), 5);
+    expect(e.tgtX).toBeCloseTo(pxAt(2_000), 5);
+    expect(e.srcX).toBeLessThan(e.tgtX);
+  });
+
+  it('falls back to observedAtMs when no source INVOCATION span has been reported yet', () => {
+    // Scenario: source row has no INVOCATION span yet (delegation
+    // ingested before the coordinator's span landed). Tail degenerates
+    // to observedAtMs so the arrow stays visible.
+    const store = new SessionStore();
+    mkAgent(store, 'coord');
+    mkAgent(store, 'sub');
+
+    store.delegations.append({
+      fromAgentId: 'coord',
+      toAgentId: 'sub',
+      taskId: 't-1',
+      invocationId: 'inv-1',
+      observedAtMs: 1_500,
+    });
+
+    const r = new GanttRenderer(store);
+    r.attach(stubCanvas(), stubCanvas(), stubCanvas());
+    r.resize(1200, 200, 1);
+    r.setViewport({
+      endMs: 10_000,
+      windowMs: 10_000,
+      liveFollow: false,
+      replay: false,
+    });
+    drawBlocks(r);
+
+    const edges = r._delegationLayoutsForTesting();
+    expect(edges).toHaveLength(1);
+    const e = edges[0];
+
+    expect(e.srcX).toBe(e.tgtX);
+    expect(e.tgtX).toBeCloseTo(pxAt(1_500), 5);
   });
 });
