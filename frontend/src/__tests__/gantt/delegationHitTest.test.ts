@@ -9,14 +9,23 @@ import { GanttRenderer } from '../../gantt/renderer';
 // _seedDelegationLayoutsForTesting shim and assert the hit-test returns
 // the expected record for points-near-bezier and null for far points.
 //
-// Geometry under test — bezier P0..P3 matching drawDelegations():
-//   P0 = (x, srcY)
-//   P1 = (x + off, srcY)
-//   P2 = (x + off, tgtY)
-//   P3 = (x, tgtY)
-// For (x=500, srcY=100, tgtY=200, off=24), the midpoint of the curve
-// evaluates to roughly (518, 150). Points within ~6px of any sampled
-// segment should hit; points far from the curve should miss.
+// Geometry under test — bezier P0..P3 matching drawDelegations(). The
+// renderer now supports two shapes:
+//   * Degenerate (srcX === tgtX): right-bulging curve via curveOffset.
+//       P0 = (srcX, srcY)
+//       P1 = (srcX + off, srcY)
+//       P2 = (srcX + off, tgtY)
+//       P3 = (srcX, tgtY)
+//     For (srcX=500, srcY=100, tgtY=200, off=24), the t=0.5 sample
+//     evaluates to roughly (518, 150).
+//   * Slanted (srcX !== tgtX, harmonograf#241): horizontal-then-vertical
+//     bezier between the two endpoints.
+//       P0 = (srcX, srcY); P1 = (midX, srcY)
+//       P2 = (midX, tgtY); P3 = (tgtX, tgtY)
+//
+// Most legacy assertions here exercise the degenerate path because they
+// were written before #241 split srcX/tgtX. The fix(#241) describe block
+// at the bottom covers the slanted geometry explicitly.
 
 function mkRecord(
   seq: number,
@@ -48,7 +57,7 @@ describe('GanttRenderer.hitTestDelegation', () => {
     const r = mkRenderer();
     const rec = mkRecord(0);
     r._seedDelegationLayoutsForTesting([
-      { seq: rec.seq, record: rec, x: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
+      { seq: rec.seq, record: rec, srcX: 500, tgtX: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
     ]);
     // Midpoint of the bezier is at (x + 3/4 * off, (srcY+tgtY)/2) = (518, 150).
     expect(r.hitTestDelegation(518, 150)).toBe(rec);
@@ -58,7 +67,7 @@ describe('GanttRenderer.hitTestDelegation', () => {
     const r = mkRenderer();
     const rec = mkRecord(0);
     r._seedDelegationLayoutsForTesting([
-      { seq: rec.seq, record: rec, x: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
+      { seq: rec.seq, record: rec, srcX: 500, tgtX: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
     ]);
     // A tolerance of 6px means (501, 101) sits on the source-anchor region.
     expect(r.hitTestDelegation(501, 101)).toBe(rec);
@@ -69,7 +78,7 @@ describe('GanttRenderer.hitTestDelegation', () => {
     const r = mkRenderer();
     const rec = mkRecord(0);
     r._seedDelegationLayoutsForTesting([
-      { seq: rec.seq, record: rec, x: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
+      { seq: rec.seq, record: rec, srcX: 500, tgtX: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
     ]);
     // Point well outside the bezier's bounding bump.
     expect(r.hitTestDelegation(100, 100)).toBeNull();
@@ -85,8 +94,8 @@ describe('GanttRenderer.hitTestDelegation', () => {
     // hitTestDelegation must return the `newer` one since it was appended
     // later in the Registry's array.
     r._seedDelegationLayoutsForTesting([
-      { seq: older.seq, record: older, x: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
-      { seq: newer.seq, record: newer, x: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
+      { seq: older.seq, record: older, srcX: 500, tgtX: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
+      { seq: newer.seq, record: newer, srcX: 500, tgtX: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
     ]);
     expect(r.hitTestDelegation(518, 150)).toBe(newer);
   });
@@ -95,7 +104,7 @@ describe('GanttRenderer.hitTestDelegation', () => {
     const r = mkRenderer();
     const rec = mkRecord(0);
     r._seedDelegationLayoutsForTesting([
-      { seq: rec.seq, record: rec, x: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
+      { seq: rec.seq, record: rec, srcX: 500, tgtX: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
     ]);
     // x > x + off + tol (≈ 530): out of bbox.
     expect(r.hitTestDelegation(540, 150)).toBeNull();
@@ -108,8 +117,8 @@ describe('GanttRenderer.hitTestDelegation', () => {
     const a = mkRecord(0);
     const b = mkRecord(1);
     r._seedDelegationLayoutsForTesting([
-      { seq: a.seq, record: a, x: 200, srcY: 100, tgtY: 200, curveOffset: 24 },
-      { seq: b.seq, record: b, x: 400, srcY: 300, tgtY: 400, curveOffset: 24 },
+      { seq: a.seq, record: a, srcX: 200, tgtX: 200, srcY: 100, tgtY: 200, curveOffset: 24 },
+      { seq: b.seq, record: b, srcX: 400, tgtX: 400, srcY: 300, tgtY: 400, curveOffset: 24 },
     ]);
     expect(r.hitTestDelegation(218, 150)).toBe(a);
     expect(r.hitTestDelegation(418, 350)).toBe(b);
@@ -125,7 +134,7 @@ describe('GanttRenderer delegation hover/click callbacks', () => {
     const r = new GanttRenderer(store, { onDelegationClick });
     const rec = mkRecord(0);
     r._seedDelegationLayoutsForTesting([
-      { seq: rec.seq, record: rec, x: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
+      { seq: rec.seq, record: rec, srcX: 500, tgtX: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
     ]);
     r.handleClick(518, 150);
     expect(onDelegationClick).toHaveBeenCalledTimes(1);
@@ -138,7 +147,7 @@ describe('GanttRenderer delegation hover/click callbacks', () => {
     const r = new GanttRenderer(store, { onDelegationHoverChange });
     const rec = mkRecord(0);
     r._seedDelegationLayoutsForTesting([
-      { seq: rec.seq, record: rec, x: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
+      { seq: rec.seq, record: rec, srcX: 500, tgtX: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
     ]);
     r.handlePointerMove(518, 150);
     r.handlePointerMove(100, 100);
@@ -155,7 +164,7 @@ describe('GanttRenderer delegation hover/click callbacks', () => {
     const r = new GanttRenderer(store, { onDelegationClick });
     const rec = mkRecord(0);
     r._seedDelegationLayoutsForTesting([
-      { seq: rec.seq, record: rec, x: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
+      { seq: rec.seq, record: rec, srcX: 500, tgtX: 500, srcY: 100, tgtY: 200, curveOffset: 24 },
     ]);
     r.handleClick(100, 100);
     expect(onDelegationClick).not.toHaveBeenCalled();
