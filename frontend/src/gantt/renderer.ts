@@ -583,7 +583,17 @@ export class GanttRenderer {
   }
 
   fitAll(): void {
-    const maxEnd = Math.max(this.store.spans.maxEndMs(), this.store.nowMs, 1);
+    // harmonograf#286: when spans exist, fit strictly to them. Folding
+    // `store.nowMs` into the bound was correct only when there were no spans
+    // yet (a fresh live session). On a re-opened COMPLETED session — or a
+    // LIVE session whose server stream stopped without SessionEnded — `nowMs`
+    // is advanced every frame by real wall-clock since `wallClockStartMs`
+    // (anchored to session.created_at). Hours or days later that value dwarfs
+    // `maxEndMs()` (minutes), so fitAll picked a 6h-clamped window that
+    // squashes every span into the leftmost pixel column. Bound to span data
+    // when we have any; only fall back to `nowMs` for the no-spans-yet case.
+    const spanEndMs = this.store.spans.maxEndMs();
+    const maxEnd = spanEndMs > 0 ? spanEndMs : Math.max(this.store.nowMs, 1);
     const window = Math.min(ZOOM_MAX_MS, Math.max(ZOOM_MIN_MS, maxEnd * 1.05));
     // Clamp so the left edge never sits before session start (t=0).
     const endMs = Math.max(window, maxEnd);
