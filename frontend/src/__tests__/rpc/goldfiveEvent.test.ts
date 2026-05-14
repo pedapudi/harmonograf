@@ -126,6 +126,50 @@ describe('applyGoldfiveEvent', () => {
     expect(stored!.edges[6]).toEqual({ fromTaskId: 't6', toTaskId: 't7' });
   });
 
+  // goldfive#423 PR 3: ``Task.discovered`` round-trips through
+  // convertGoldfiveTask. Forecast tasks land as ``discovered=false``;
+  // tasks the framework installed reactively land as ``discovered=true``.
+  // Without the round-trip the frontend can't render the discovery
+  // accent and the plan view silently degrades back to forecast-styled
+  // cards even when the wire frame says otherwise.
+  it('plan_submitted carries Task.discovered through convertGoldfiveTask', () => {
+    const store = new SessionStore();
+    const forecast = makePbTask('forecast');
+    const discoveredTask = create(TaskSchema, {
+      id: 'disc',
+      title: 'discovered',
+      description: '',
+      assigneeAgentId: 'agent-a',
+      status: TaskStatus.PENDING,
+      predictedStartMs: 0n,
+      predictedDurationMs: 0n,
+      discovered: true,
+      discoveryIdentityHash: 'agent-a:abc',
+    });
+    const plan = create(PlanSchema, {
+      id: 'p-disc',
+      runId: 'run-1',
+      tasks: [forecast, discoveredTask],
+    });
+    applyGoldfiveEvent(
+      create(EventSchema, {
+        eventId: 'ev-disc',
+        runId: 'run-1',
+        sequence: 0n,
+        payload: { case: 'planSubmitted', value: create(PlanSubmittedSchema, { plan }) },
+      }),
+      store,
+      0,
+    );
+    const stored = store.tasks.getPlan('p-disc');
+    expect(stored).toBeDefined();
+    // Forecast task: explicit false on the converted shape (back-compat
+    // default — proto3 omits the field but the converter coerces).
+    expect(stored!.tasks.find((t) => t.id === 'forecast')!.discovered).toBe(false);
+    // Discovered task: true.
+    expect(stored!.tasks.find((t) => t.id === 'disc')!.discovered).toBe(true);
+  });
+
   it('task_started / task_completed / task_failed / task_blocked / task_cancelled mutate status by task_id', () => {
     const store = new SessionStore();
     applyGoldfiveEvent(

@@ -178,4 +178,89 @@ describe('<TaskStagesGraph />', () => {
       expect(p.getAttribute('marker-end')).toBe('url(#hg-stages-arrow)'),
     );
   });
+
+  // goldfive#423 PR 3 — plan-descriptive-growth rendering. Tasks installed
+  // reactively at delegation-observed time (``discovered=true``) must
+  // surface visually as distinct from forecast tasks. The tests assert:
+  //   1. A plan with NO discovered tasks renders identically — same card
+  //      count, no DISC badge, no ``--discovered`` class. This is the
+  //      back-compat / visual-baseline check.
+  //   2. A task with ``discovered=true`` carries the
+  //      ``hg-stages__card--discovered`` class + a ``data-discovered``
+  //      attribute, and a DISC pill text node is rendered.
+  //   3. A mixed plan (some discovered, some not) renders exactly the
+  //      expected subset with the discovery accent.
+  //   4. A legacy fixture WITHOUT the ``discovered`` field at all
+  //      (omitted, undefined) renders as non-discovered — this proves
+  //      back-compat for proto frames that predate the field.
+  describe('discovered-task rendering (goldfive#423)', () => {
+    it('renders no DISC badge or accent class on a plan with no discovered tasks', () => {
+      const plan = mkPlan([mkTask('t1'), mkTask('t2')], [['t1', 't2']]);
+      const { container } = render(<TaskStagesGraph plan={plan} />);
+      expect(container.querySelectorAll('g.hg-stages__card--discovered')).toHaveLength(0);
+      expect(container.querySelectorAll('g.hg-stages__card-disc-badge')).toHaveLength(0);
+      // Card count + class set are otherwise unchanged.
+      expect(container.querySelectorAll('g.hg-stages__card')).toHaveLength(2);
+    });
+
+    it('renders a discovered task with the --discovered class + DISC badge', () => {
+      const discovered: Task = { ...mkTask('t-disc'), discovered: true };
+      const plan = mkPlan([discovered], []);
+      const { container } = render(<TaskStagesGraph plan={plan} />);
+      const cards = container.querySelectorAll('g.hg-stages__card');
+      expect(cards).toHaveLength(1);
+      expect(cards[0].classList.contains('hg-stages__card--discovered')).toBe(true);
+      expect(cards[0].getAttribute('data-discovered')).toBe('true');
+      // The DISC pill renders the literal text "DISC" inside a badge group.
+      const badge = container.querySelector('g.hg-stages__card-disc-badge');
+      expect(badge).toBeTruthy();
+      expect(badge?.textContent).toContain('DISC');
+      // testid is opt-in so downstream consumers can target it.
+      expect(
+        container.querySelector('[data-testid="task-card-discovered-t-disc"]'),
+      ).toBeTruthy();
+    });
+
+    it('only marks discovered tasks in a mixed plan', () => {
+      const forecast = mkTask('forecast');
+      const discovered: Task = { ...mkTask('disc'), discovered: true };
+      const plan = mkPlan([forecast, discovered], []);
+      const { container } = render(<TaskStagesGraph plan={plan} />);
+      const cardForecast = container.querySelector(
+        'g.hg-stages__card[data-discovered]',
+      );
+      expect(cardForecast?.textContent).toContain('Title disc');
+      // forecast card is NOT flagged
+      const cardsByDisc = Array.from(
+        container.querySelectorAll('g.hg-stages__card'),
+      ).map((c) => c.getAttribute('data-discovered'));
+      expect(cardsByDisc).toEqual([null, 'true']);
+      expect(container.querySelectorAll('g.hg-stages__card-disc-badge')).toHaveLength(1);
+    });
+
+    it('renders a legacy task (no `discovered` field at all) as non-discovered', () => {
+      // ``mkTask`` doesn't set ``discovered`` — the field is undefined.
+      // The renderer must coerce undefined → false (back-compat path for
+      // proto frames predating #423).
+      const legacyTask = mkTask('legacy');
+      // Defensive: strip the field if a future ``mkTask`` ever sets it.
+      delete (legacyTask as { discovered?: boolean }).discovered;
+      const plan = mkPlan([legacyTask], []);
+      const { container } = render(<TaskStagesGraph plan={plan} />);
+      expect(
+        container.querySelectorAll('g.hg-stages__card--discovered'),
+      ).toHaveLength(0);
+      expect(
+        container.querySelectorAll('g.hg-stages__card-disc-badge'),
+      ).toHaveLength(0);
+    });
+
+    it('appends the (discovered at runtime) hint to the tooltip', () => {
+      const discovered: Task = { ...mkTask('t1'), discovered: true };
+      const plan = mkPlan([discovered], []);
+      const { container } = render(<TaskStagesGraph plan={plan} />);
+      const title = container.querySelector('g.hg-stages__card title');
+      expect(title?.textContent).toContain('discovered at runtime');
+    });
+  });
 });

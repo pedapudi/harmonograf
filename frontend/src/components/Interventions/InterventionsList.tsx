@@ -65,8 +65,28 @@ function fmtLifecycle(lifecycle: string): string {
   return lc.toUpperCase();
 }
 
+// goldfive#423 PR 3: framework-synthesised NEW_WORK_DISCOVERED drifts
+// fire at INFO severity (sub-agent-authored discoveries remain WARNING —
+// see design doc §4.6). We expose two affordances:
+//  1. A "Hide observational discoveries" toggle (off by default — users
+//     should still see them) that filters out exactly this triple
+//     (``driftKind === 'new_work_discovered' && severity === 'info'``).
+//  2. A subtle ``data-observational="true"`` attribute on those rows so
+//     the CSS can render them with lower contrast. We do NOT downgrade
+//     `severity` itself because the row still needs to surface the
+//     drift's actual severity in the detail pane.
+function isObservationalDiscovery(row: InterventionRow): boolean {
+  return (
+    row.driftKind === 'new_work_discovered' && (row.severity || '') === 'info'
+  );
+}
+
 export function InterventionsList({ rows, onRowClick }: InterventionsListProps) {
   const [expanded, setExpanded] = useState(false);
+  // goldfive#423 PR 3: filter toggle for INFO-severity NEW_WORK_DISCOVERED
+  // rows (framework-synthesised observational discoveries). Default off —
+  // users should see them by default per the PR brief.
+  const [hideObservational, setHideObservational] = useState(false);
   // Per-row expansion state for grouped drift conditions
   // (goldfive#318). Keyed by row.key so re-renders don't churn the
   // open set as long as the conditionId stays stable. A Set kept in
@@ -75,7 +95,12 @@ export function InterventionsList({ rows, onRowClick }: InterventionsListProps) 
   const [expandedConditions, setExpandedConditions] = useState<Set<string>>(
     () => new Set(),
   );
-  const isEmpty = rows.length === 0;
+
+  const observationalCount = rows.filter(isObservationalDiscovery).length;
+  const visibleRows = hideObservational
+    ? rows.filter((r) => !isObservationalDiscovery(r))
+    : rows;
+  const isEmpty = visibleRows.length === 0;
   // Empty → collapsed by default, with a toggle to un-collapse so the
   // user can still see the "no interventions recorded" hint if they want.
   // Non-empty → always shown (no toggle chrome).
@@ -112,8 +137,27 @@ export function InterventionsList({ rows, onRowClick }: InterventionsListProps) 
           </button>
         ) : (
           <span className="hg-interventions-list__label">
-            Interventions ({rows.length})
+            Interventions ({visibleRows.length}
+            {hideObservational && observationalCount > 0
+              ? ` of ${rows.length}`
+              : ''}
+            )
           </span>
+        )}
+        {observationalCount > 0 && (
+          <label
+            className="hg-interventions-list__filter"
+            data-testid="interventions-list-observational-filter"
+            title="Framework-synthesised NEW_WORK_DISCOVERED drifts fire at INFO severity (goldfive#423). Toggle to hide them from this list."
+          >
+            <input
+              type="checkbox"
+              data-testid="interventions-list-observational-toggle"
+              checked={hideObservational}
+              onChange={(e) => setHideObservational(e.target.checked)}
+            />
+            <span>Hide observational discoveries ({observationalCount})</span>
+          </label>
         )}
       </div>
       {show && isEmpty && (
@@ -121,7 +165,7 @@ export function InterventionsList({ rows, onRowClick }: InterventionsListProps) 
       )}
       {show && !isEmpty && (
         <ul className="hg-interventions-list__rows">
-          {rows.map((row) => {
+          {visibleRows.map((row) => {
             const color = SOURCE_COLOR[row.source] ?? SOURCE_COLOR.goldfive;
             const glyph =
               SOURCE_GLYPH[row.source] ?? SOURCE_GLYPH.goldfive;
@@ -150,6 +194,9 @@ export function InterventionsList({ rows, onRowClick }: InterventionsListProps) 
             const lifecycleLabel = fmtLifecycle(row.currentLifecycle ?? '');
             const transitions = row.severityTransitions ?? [];
             const observations = row.observations ?? [];
+            // goldfive#423 PR 3: observational-discovery rows render at
+            // lower contrast (CSS hooks off ``data-observational``).
+            const observational = isObservationalDiscovery(row);
             return (
               <li key={row.key} className="hg-interventions-list__row-item">
                 <Tag
@@ -158,6 +205,7 @@ export function InterventionsList({ rows, onRowClick }: InterventionsListProps) 
                   data-testid={`interventions-list-row-${row.key}`}
                   data-source={row.source}
                   data-grouped={isGrouped ? 'true' : undefined}
+                  data-observational={observational ? 'true' : undefined}
                   onClick={clickable ? () => onRowClick?.(row) : undefined}
                 >
                   <span

@@ -127,6 +127,19 @@ export interface Task {
    *  authoritative chain; the positional heuristic is the fallback only
    *  for revisions that pre-date the field or where the LLM omitted it. */
   supersedes: string;
+  /** goldfive proto field (goldfive#423 PR 1; design doc
+   *  PLAN-DESCRIPTIVE-GROWTH.md §4.1): when true, this task was
+   *  installed reactively at delegation-observed time rather than by
+   *  initial planning or a planner-authored refine. The plan view
+   *  renders discovered cards with a distinct (dashed) border and a
+   *  small "DISC" badge so operators can tell at a glance which tasks
+   *  represent live discovery vs. forecast.
+   *
+   *  Optional / defaults to ``false``: legacy proto frames from before
+   *  the field landed deserialize to ``false`` (the back-compat default
+   *  encoded in the proto), and hand-built test plans / fixtures don't
+   *  have to know about the field. */
+  discovered?: boolean;
 }
 
 export interface TaskEdge {

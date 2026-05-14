@@ -256,6 +256,42 @@ export function TaskPlanPanel({
 
   const summaryText = plan.summary || plan.id;
 
+  // goldfive#423 PR 3 (plan-descriptive-growth): count of tasks the
+  // framework discovered reactively. We count off the same source the
+  // graph renders from (cumulative chain canonicals in cumulative mode,
+  // plain plan.tasks in latest-only mode) so the badge matches what the
+  // user actually sees on the canvas. ``discovered`` defaults to false
+  // for legacy proto frames + hand-built test plans, so plans with no
+  // discovered tasks render a 0 here and the badge is suppressed below.
+  const discoveredCount = (() => {
+    if (isCumulative && cumulative) {
+      // In cumulative mode we want the count to match the visible
+      // chain-canonical cards. ``cumulative.tasks`` is the union of all
+      // tasks across revisions but the renderer collapses chains; for
+      // the count we want one tick per chain whose canonical is
+      // discovered, which is approximately the same as counting tasks
+      // with discovered=true (the discovered flag is intrinsic to the
+      // task, not the chain, but in practice a chain's canonical is the
+      // latest task and its discovered-ness is what matters). Counting
+      // the raw cumulative tasks list slightly over-counts when a
+      // discovered task was later superseded, but the over-count is
+      // bounded and the UX still reads correctly ("how many discovery
+      // events touched this plan"). A precise count would require the
+      // collapsed chain list which isn't computed here; the trade-off
+      // is documented for any future refinement.
+      let n = 0;
+      for (const t of cumulative.tasks) {
+        if (t.discovered) n++;
+      }
+      return n;
+    }
+    let n = 0;
+    for (const t of plan.tasks) {
+      if (t.discovered) n++;
+    }
+    return n;
+  })();
+
   return (
     <div
       style={{ display: 'flex', flexDirection: 'column', position: 'relative' }}
@@ -273,6 +309,27 @@ export function TaskPlanPanel({
         <div style={{ flex: 1, minWidth: 0 }}>
           <PlanSummary summary={summaryText} />
         </div>
+        {discoveredCount > 0 && (
+          <span
+            data-testid="task-plan-discovered-count"
+            title="Tasks added during execution by the framework's discovery overlay (goldfive#423)"
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              padding: '1px 6px',
+              borderRadius: 9,
+              background: 'var(--md-sys-color-tertiary-container, #5d4037)',
+              color: 'var(--md-sys-color-on-tertiary-container, #ffd8c9)',
+              border: '1px solid var(--md-sys-color-tertiary, #ffb59f)',
+              flexShrink: 0,
+              marginTop: 2,
+              letterSpacing: 0.3,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            +{discoveredCount} discovered
+          </span>
+        )}
         <label
           style={{
             display: 'flex',

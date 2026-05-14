@@ -394,6 +394,16 @@ export function TaskStagesGraph({
             title.length > maxChars ? title.slice(0, maxChars - 1) + '…' : title;
           const selected = task.id === selectedTaskId;
           const running = task.status === 'RUNNING';
+          // goldfive#423 PR 1 / 3 (plan-descriptive-growth): tasks
+          // installed reactively at delegation-observed time render with
+          // a dashed border and a small "DISC" pill in the bottom-right
+          // corner. Cross-axis with status fill — discovered status is
+          // independent of execution status, so we layer the dashed
+          // border + badge on top of the regular card without changing
+          // the fill. Legacy frames (proto < #423) and hand-built test
+          // plans without the field render exactly as before because
+          // ``discovered`` defaults to ``false``.
+          const discovered = Boolean(task.discovered);
           const agentColor = agentColorFor?.(task.assigneeAgentId) ?? null;
           const rawAgentName = agentNameFor?.(task.assigneeAgentId) ?? '';
           const agentLabel =
@@ -406,13 +416,17 @@ export function TaskStagesGraph({
             'hg-stages__card',
             selected ? 'hg-stages__card--selected' : '',
             running ? 'hg-stages__card--running' : '',
+            discovered ? 'hg-stages__card--discovered' : '',
           ]
             .filter(Boolean)
             .join(' ');
           const reason = task.cancelReason || '';
           const showReason =
             reason && (task.status === 'CANCELLED' || task.status === 'FAILED');
-          const tooltipText = showReason ? `${title}\n${reason}` : title;
+          const tooltipBase = showReason ? `${title}\n${reason}` : title;
+          const tooltipText = discovered
+            ? `${tooltipBase}\n(discovered at runtime)`
+            : tooltipBase;
           return (
             <g
               key={task.id}
@@ -420,6 +434,8 @@ export function TaskStagesGraph({
               transform={`translate(${x}, ${y})`}
               onClick={() => onTaskClick?.(task)}
               data-status={task.status}
+              data-discovered={discovered ? 'true' : undefined}
+              data-testid={discovered ? `task-card-discovered-${task.id}` : undefined}
             >
               <title>{tooltipText}</title>
               <rect
@@ -453,6 +469,32 @@ export function TaskStagesGraph({
                 >
                   {agentLabel}
                 </text>
+              )}
+              {discovered && (
+                // "DISC" pill anchored to the bottom-right corner. Kept
+                // SVG-native (no overlay div) so the badge tracks the card
+                // through any future zoom/pan transform on the canvas.
+                <g
+                  className="hg-stages__card-disc-badge"
+                  transform={`translate(${CARD_WIDTH - 28}, ${CARD_HEIGHT - 11})`}
+                  pointerEvents="none"
+                >
+                  <rect
+                    width={24}
+                    height={9}
+                    rx={2}
+                    ry={2}
+                    className="hg-stages__card-disc-badge-bg"
+                  />
+                  <text
+                    className="hg-stages__card-disc-badge-text"
+                    x={12}
+                    y={7}
+                    textAnchor="middle"
+                  >
+                    DISC
+                  </text>
+                </g>
               )}
             </g>
           );

@@ -69,6 +69,44 @@
   animation: hg-stages-running-pulse 1.6s ease-in-out infinite;
 }
 
+/* goldfive#423 PR 3 (plan-descriptive-growth): tasks the framework
+   discovered reactively at delegation-observed time render with a
+   dashed accent border and a tiny "DISC" pill so they read as distinct
+   from forecast tasks at a glance. The dashed pattern is orthogonal to
+   the execution-status fill (cards can be both RUNNING and discovered
+   — the running pulse and the dashed accent are both expressed as
+   stroke modifiers; the running pulse animation overrides the dash on
+   the same selector, which is intentional: running state takes
+   precedence for live visibility). The DISC pill below picks up where
+   the dashed border leaves off when the card is RUNNING. */
+.hg-stages__card--discovered .hg-stages__card-rect {
+  stroke: var(--md-sys-color-tertiary, #ffb59f);
+  stroke-width: 1.25;
+  stroke-dasharray: 4 3;
+}
+
+/* When the card is also selected, the selection ring (solid, slightly
+   wider) wins over the dashed accent so the user can still see the
+   selected state clearly. */
+.hg-stages__card--discovered.hg-stages__card--selected .hg-stages__card-rect {
+  stroke-dasharray: none;
+}
+
+.hg-stages__card-disc-badge-bg {
+  fill: var(--md-sys-color-tertiary-container, #5d4037);
+  stroke: var(--md-sys-color-tertiary, #ffb59f);
+  stroke-width: 0.75;
+  opacity: 0.95;
+}
+
+.hg-stages__card-disc-badge-text {
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  fill: var(--md-sys-color-on-tertiary-container, #ffd8c9);
+  pointer-events: none;
+}
+
 @keyframes hg-stages-running-pulse {
   0%, 100% {
     stroke: var(--md-sys-color-primary, #a8c8ff);

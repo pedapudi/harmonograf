@@ -405,3 +405,163 @@ describe('<InterventionsList /> — drift condition grouping (goldfive#318)', ()
     expect(onRowClick).not.toHaveBeenCalled();
   });
 });
+
+// goldfive#423 PR 3 — observational discovery filter + dimming.
+// Framework-synthesised NEW_WORK_DISCOVERED drifts fire at INFO
+// severity (design doc §4.6). Sub-agent-authored discoveries remain at
+// WARNING. The list:
+//   1. Renders an INFO new_work_discovered row at lower contrast (the
+//      ``data-observational`` attribute is set on the row).
+//   2. Surfaces a checkbox to hide observational rows. The toggle is OFF
+//      by default — users SHOULD see the rows by default.
+//   3. WARNING new_work_discovered rows render normally (no
+//      data-observational attribute), even when sourced from the same
+//      drift kind.
+describe('<InterventionsList /> — observational discovery filter (goldfive#423)', () => {
+  it('flags INFO-severity new_work_discovered rows with data-observational', () => {
+    render(
+      <InterventionsList
+        rows={[
+          row({
+            key: 'd-obs',
+            atMs: 1000,
+            source: 'drift',
+            kind: 'NEW_WORK_DISCOVERED',
+            driftKind: 'new_work_discovered',
+            severity: 'info',
+          }),
+        ]}
+      />,
+    );
+    const r = screen.getByTestId('interventions-list-row-d-obs');
+    expect(r.getAttribute('data-observational')).toBe('true');
+  });
+
+  it('does NOT flag WARNING-severity new_work_discovered (sub-agent-authored)', () => {
+    render(
+      <InterventionsList
+        rows={[
+          row({
+            key: 'd-actionable',
+            atMs: 1000,
+            source: 'drift',
+            kind: 'NEW_WORK_DISCOVERED',
+            driftKind: 'new_work_discovered',
+            severity: 'warning',
+          }),
+        ]}
+      />,
+    );
+    const r = screen.getByTestId('interventions-list-row-d-actionable');
+    expect(r.getAttribute('data-observational')).toBeNull();
+  });
+
+  it('renders the filter toggle only when at least one observational row exists', () => {
+    // No observational rows → toggle is suppressed.
+    const { rerender } = render(
+      <InterventionsList
+        rows={[
+          row({
+            key: 'd-w',
+            source: 'drift',
+            kind: 'LOOPING_REASONING',
+            driftKind: 'looping_reasoning',
+            severity: 'warning',
+          }),
+        ]}
+      />,
+    );
+    expect(
+      screen.queryByTestId('interventions-list-observational-toggle'),
+    ).toBeNull();
+
+    // Add an observational row → toggle appears.
+    rerender(
+      <InterventionsList
+        rows={[
+          row({
+            key: 'd-w',
+            source: 'drift',
+            kind: 'LOOPING_REASONING',
+            driftKind: 'looping_reasoning',
+            severity: 'warning',
+          }),
+          row({
+            key: 'd-obs',
+            source: 'drift',
+            kind: 'NEW_WORK_DISCOVERED',
+            driftKind: 'new_work_discovered',
+            severity: 'info',
+          }),
+        ]}
+      />,
+    );
+    expect(
+      screen.getByTestId('interventions-list-observational-toggle'),
+    ).toBeTruthy();
+  });
+
+  it('toggle is off by default — observational rows visible', () => {
+    render(
+      <InterventionsList
+        rows={[
+          row({
+            key: 'd-obs',
+            source: 'drift',
+            kind: 'NEW_WORK_DISCOVERED',
+            driftKind: 'new_work_discovered',
+            severity: 'info',
+          }),
+        ]}
+      />,
+    );
+    const toggle = screen.getByTestId(
+      'interventions-list-observational-toggle',
+    ) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(screen.getByTestId('interventions-list-row-d-obs')).toBeTruthy();
+  });
+
+  it('flipping the toggle hides observational rows but keeps actionable rows', () => {
+    render(
+      <InterventionsList
+        rows={[
+          row({
+            key: 'd-w',
+            source: 'drift',
+            kind: 'LOOPING_REASONING',
+            driftKind: 'looping_reasoning',
+            severity: 'warning',
+          }),
+          row({
+            key: 'd-obs',
+            source: 'drift',
+            kind: 'NEW_WORK_DISCOVERED',
+            driftKind: 'new_work_discovered',
+            severity: 'info',
+          }),
+          row({
+            key: 'd-actionable',
+            source: 'drift',
+            kind: 'NEW_WORK_DISCOVERED',
+            driftKind: 'new_work_discovered',
+            severity: 'warning',
+          }),
+        ]}
+      />,
+    );
+    const toggle = screen.getByTestId(
+      'interventions-list-observational-toggle',
+    );
+    fireEvent.click(toggle);
+    // Observational row vanishes…
+    expect(
+      screen.queryByTestId('interventions-list-row-d-obs'),
+    ).toBeNull();
+    // …but actionable rows stay.
+    expect(screen.getByTestId('interventions-list-row-d-w')).toBeTruthy();
+    expect(
+      screen.getByTestId('interventions-list-row-d-actionable'),
+    ).toBeTruthy();
+  });
+});

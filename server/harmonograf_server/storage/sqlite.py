@@ -237,6 +237,15 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- enum int (0 UNSPECIFIED / 1 REPLACE / 2 CORRECT).
     supersedes TEXT NOT NULL DEFAULT '',
     supersedes_kind INTEGER NOT NULL DEFAULT 0,
+    -- goldfive#423 PR 1 (plan-descriptive-growth): ``discovered`` flags
+    -- tasks installed reactively at delegation-observed time (the
+    -- framework's discovery overlay) vs. tasks the planner authored
+    -- up front. ``discovery_identity_hash`` is the dedup key
+    -- ``(agent_name, args-token-set)`` PR 2 reads to avoid synthesising
+    -- repeat discoveries. Defaults preserve back-compat for legacy
+    -- rows and for plans that never trigger a discovery.
+    discovered INTEGER NOT NULL DEFAULT 0,
+    discovery_identity_hash TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (plan_id, id),
     FOREIGN KEY (plan_id) REFERENCES task_plans(id) ON DELETE CASCADE
 );
@@ -418,6 +427,22 @@ class SqliteStore(Store):
         if "supersedes_kind" not in task_cols:
             await self._db.execute(
                 "ALTER TABLE tasks ADD COLUMN supersedes_kind INTEGER NOT NULL DEFAULT 0"
+            )
+        # goldfive#423 PR 1 (plan-descriptive-growth): ``Task.discovered``
+        # + ``discovery_identity_hash`` round-trip columns. Initial-plan
+        # forecast tasks keep the defaults (False / ""); tasks installed
+        # reactively at delegation-observed time carry ``discovered=1``
+        # and the identity hash. The frontend renders these distinctly
+        # (dashed border + "DISC" badge); without persistence the
+        # GetSessionPlanHistory replay would silently lose the marker
+        # and reconnects would see forecast-styled cards.
+        if "discovered" not in task_cols:
+            await self._db.execute(
+                "ALTER TABLE tasks ADD COLUMN discovered INTEGER NOT NULL DEFAULT 0"
+            )
+        if "discovery_identity_hash" not in task_cols:
+            await self._db.execute(
+                "ALTER TABLE tasks ADD COLUMN discovery_identity_hash TEXT NOT NULL DEFAULT ''"
             )
         # goldfive#271 Phase 3 Addition B: event_id column on
         # goldfive_events. Pre-existing dev DBs predate the column;
@@ -1170,8 +1195,9 @@ class SqliteStore(Store):
                                            assignee_agent_id, status,
                                            predicted_start_ms, predicted_duration_ms,
                                            bound_span_id,
-                                           supersedes, supersedes_kind)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                           supersedes, supersedes_kind,
+                                           discovered, discovery_identity_hash)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             plan.id,
@@ -1185,6 +1211,14 @@ class SqliteStore(Store):
                             t.bound_span_id or None,
                             getattr(t, "supersedes", "") or "",
                             int(sup_kind_int or 0),
+                            # goldfive#423 PR 1 (plan-descriptive-growth):
+                            # ``discovered`` is bool on the dataclass;
+                            # sqlite stores it as 0/1. ``getattr`` falls
+                            # back to False if the dataclass predates the
+                            # field (defensive — the goldfive Python
+                            # dataclass already has it as of #423).
+                            1 if bool(getattr(t, "discovered", False)) else 0,
+                            getattr(t, "discovery_identity_hash", "") or "",
                         ),
                     )
                 await self.db.commit()
@@ -1232,6 +1266,22 @@ class SqliteStore(Store):
                             if "supersedes_kind" in row_keys
                             else 0
                         ),
+                        # goldfive#423 PR 1: ``discovered`` /
+                        # ``discovery_identity_hash`` round-trip. Pre-#423
+                        # DBs without these columns fall back to the
+                        # back-compat defaults (False / "") so legacy rows
+                        # render as non-discovered (the design's explicit
+                        # back-compat path).
+                        discovered=bool(
+                            r["discovered"]
+                            if "discovered" in row_keys
+                            else 0
+                        ),
+                        discovery_identity_hash=(
+                            r["discovery_identity_hash"]
+                            if "discovery_identity_hash" in row_keys
+                            else ""
+                        ) or "",
                     )
                 )
         return TaskPlan(

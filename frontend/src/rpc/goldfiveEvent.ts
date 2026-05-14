@@ -336,6 +336,12 @@ export function convertGoldfiveTask(t: GoldfiveTask): Task {
     // goldfive#237: authoritative supersession link set by the refine LLM
     // on replacement tasks. Defaults to '' on original / legacy plans.
     supersedes: t.supersedes ?? '',
+    // goldfive#423 PR 1 (plan-descriptive-growth): true when the task was
+    // installed reactively at delegation-observed time. Legacy proto frames
+    // from before the field landed deserialize to ``false`` here — proto3
+    // bool default. Stored unconditionally so downstream rendering can
+    // branch without re-checking for ``undefined``.
+    discovered: Boolean(t.discovered),
   };
 }
 

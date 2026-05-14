@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file harmonograf/v1/types.proto.
  */
 export const file_harmonograf_v1_types: GenFile = /*@__PURE__*/
-  fileDesc("ChpoYXJtb25vZ3JhZi92MS90eXBlcy5wcm90bxIOaGFybW9ub2dyYWYudjEirgIKB1Nlc3Npb24SCgoCaWQYASABKAkSDQoFdGl0bGUYAiABKAkSLgoKY3JlYXRlZF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi0KBnN0YXR1cxgFIAEoDjIdLmhhcm1vbm9ncmFmLnYxLlNlc3Npb25TdGF0dXMSEQoJYWdlbnRfaWRzGAYgAygJEjcKCG1ldGFkYXRhGAcgAygLMiUuaGFybW9ub2dyYWYudjEuU2Vzc2lvbi5NZXRhZGF0YUVudHJ5Gi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASKrAwoFQWdlbnQSCgoCaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEiwKCWZyYW1ld29yaxgEIAEoDjIZLmhhcm1vbm9ncmFmLnYxLkZyYW1ld29yaxIZChFmcmFtZXdvcmtfdmVyc2lvbhgFIAEoCRIwCgxjYXBhYmlsaXRpZXMYBiADKA4yGi5oYXJtb25vZ3JhZi52MS5DYXBhYmlsaXR5EjUKCG1ldGFkYXRhGAcgAygLMiMuaGFybW9ub2dyYWYudjEuQWdlbnQuTWV0YWRhdGFFbnRyeRIwCgxjb25uZWN0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjIKDmxhc3RfaGVhcnRiZWF0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIrCgZzdGF0dXMYCiABKA4yGy5oYXJtb25vZ3JhZi52MS5BZ2VudFN0YXR1cxovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiawoIU3BhbkxpbmsSFgoOdGFyZ2V0X3NwYW5faWQYASABKAkSFwoPdGFyZ2V0X2FnZW50X2lkGAIgASgJEi4KCHJlbGF0aW9uGAMgASgOMhwuaGFybW9ub2dyYWYudjEuTGlua1JlbGF0aW9uIsIBCg5BdHRyaWJ1dGVWYWx1ZRIWCgxzdHJpbmdfdmFsdWUYASABKAlIABITCglpbnRfdmFsdWUYAiABKANIABIWCgxkb3VibGVfdmFsdWUYAyABKAFIABIUCgpib29sX3ZhbHVlGAQgASgISAASFQoLYnl0ZXNfdmFsdWUYBSABKAxIABI1CgthcnJheV92YWx1ZRgGIAEoCzIeLmhhcm1vbm9ncmFmLnYxLkF0dHJpYnV0ZUFycmF5SABCBwoFdmFsdWUiQAoOQXR0cmlidXRlQXJyYXkSLgoGdmFsdWVzGAEgAygLMh4uaGFybW9ub2dyYWYudjEuQXR0cmlidXRlVmFsdWUiaAoKUGF5bG9hZFJlZhIOCgZkaWdlc3QYASABKAkSDAoEc2l6ZRgCIAEoAxIMCgRtaW1lGAMgASgJEg8KB3N1bW1hcnkYBCABKAkSDAoEcm9sZRgFIAEoCRIPCgdldmljdGVkGAYgASgIIjkKCUVycm9ySW5mbxIMCgR0eXBlGAEgASgJEg8KB21lc3NhZ2UYAiABKAkSDQoFc3RhY2sYAyABKAkitwQKBFNwYW4SCgoCaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIQCghhZ2VudF9pZBgDIAEoCRIWCg5wYXJlbnRfc3Bhbl9pZBgEIAEoCRImCgRraW5kGAUgASgOMhguaGFybW9ub2dyYWYudjEuU3BhbktpbmQSEwoLa2luZF9zdHJpbmcYBiABKAkSKgoGc3RhdHVzGAcgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIMCgRuYW1lGAggASgJEi4KCnN0YXJ0X3RpbWUYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiwKCGVuZF90aW1lGAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI4CgphdHRyaWJ1dGVzGAsgAygLMiQuaGFybW9ub2dyYWYudjEuU3Bhbi5BdHRyaWJ1dGVzRW50cnkSMAoMcGF5bG9hZF9yZWZzGAwgAygLMhouaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlZhInCgVsaW5rcxgNIAMoCzIYLmhhcm1vbm9ncmFmLnYxLlNwYW5MaW5rEigKBWVycm9yGA4gASgLMhkuaGFybW9ub2dyYWYudjEuRXJyb3JJbmZvGlEKD0F0dHJpYnV0ZXNFbnRyeRILCgNrZXkYASABKAkSLQoFdmFsdWUYAiABKAsyHi5oYXJtb25vZ3JhZi52MS5BdHRyaWJ1dGVWYWx1ZToCOAEiZQoQQW5ub3RhdGlvblRhcmdldBIRCgdzcGFuX2lkGAEgASgJSAASNAoKYWdlbnRfdGltZRgCIAEoCzIeLmhhcm1vbm9ncmFmLnYxLkFnZW50VGltZVBvaW50SABCCAoGdGFyZ2V0IkoKDkFnZW50VGltZVBvaW50EhAKCGFnZW50X2lkGAEgASgJEiYKAmF0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKMAgoKQW5ub3RhdGlvbhIKCgJpZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEjAKBnRhcmdldBgDIAEoCzIgLmhhcm1vbm9ncmFmLnYxLkFubm90YXRpb25UYXJnZXQSDgoGYXV0aG9yGAQgASgJEi4KCmNyZWF0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiwKBGtpbmQYBiABKA4yHi5oYXJtb25vZ3JhZi52MS5Bbm5vdGF0aW9uS2luZBIMCgRib2R5GAcgASgJEjAKDGRlbGl2ZXJlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAi5wEKDEludGVydmVudGlvbhImCgJhdBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDgoGc291cmNlGAIgASgJEgwKBGtpbmQYAyABKAkSFgoOYm9keV9vcl9yZWFzb24YBCABKAkSDgoGYXV0aG9yGAUgASgJEg8KB291dGNvbWUYBiABKAkSGwoTcGxhbl9yZXZpc2lvbl9pbmRleBgHIAEoBRIQCghzZXZlcml0eRgIIAEoCRIVCg1hbm5vdGF0aW9uX2lkGAkgASgJEhIKCmRyaWZ0X2tpbmQYCiABKAkqggEKDVNlc3Npb25TdGF0dXMSHgoaU0VTU0lPTl9TVEFUVVNfVU5TUEVDSUZJRUQQABIXChNTRVNTSU9OX1NUQVRVU19MSVZFEAESHAoYU0VTU0lPTl9TVEFUVVNfQ09NUExFVEVEEAISGgoWU0VTU0lPTl9TVEFUVVNfQUJPUlRFRBADKoABCgtBZ2VudFN0YXR1cxIcChhBR0VOVF9TVEFUVVNfVU5TUEVDSUZJRUQQABIaChZBR0VOVF9TVEFUVVNfQ09OTkVDVEVEEAESHQoZQUdFTlRfU1RBVFVTX0RJU0NPTk5FQ1RFRBACEhgKFEFHRU5UX1NUQVRVU19DUkFTSEVEEAMqTwoJRnJhbWV3b3JrEhkKFUZSQU1FV09SS19VTlNQRUNJRklFRBAAEhQKEEZSQU1FV09SS19DVVNUT00QARIRCg1GUkFNRVdPUktfQURLEAIqzQEKCkNhcGFiaWxpdHkSGgoWQ0FQQUJJTElUWV9VTlNQRUNJRklFRBAAEhsKF0NBUEFCSUxJVFlfUEFVU0VfUkVTVU1FEAESFQoRQ0FQQUJJTElUWV9DQU5DRUwQAhIVChFDQVBBQklMSVRZX1JFV0lORBADEhcKE0NBUEFCSUxJVFlfU1RFRVJJTkcQBBIcChhDQVBBQklMSVRZX0hVTUFOX0lOX0xPT1AQBRIhCh1DQVBBQklMSVRZX0lOVEVSQ0VQVF9UUkFOU0ZFUhAGKowCCghTcGFuS2luZBIZChVTUEFOX0tJTkRfVU5TUEVDSUZJRUQQABIYChRTUEFOX0tJTkRfSU5WT0NBVElPThABEhYKElNQQU5fS0lORF9MTE1fQ0FMTBACEhcKE1NQQU5fS0lORF9UT09MX0NBTEwQAxIaChZTUEFOX0tJTkRfVVNFUl9NRVNTQUdFEAQSGwoXU1BBTl9LSU5EX0FHRU5UX01FU1NBR0UQBRIWChJTUEFOX0tJTkRfVFJBTlNGRVIQBhIcChhTUEFOX0tJTkRfV0FJVF9GT1JfSFVNQU4QBxIVChFTUEFOX0tJTkRfUExBTk5FRBAIEhQKEFNQQU5fS0lORF9DVVNUT00QCSrJAQoKU3BhblN0YXR1cxIbChdTUEFOX1NUQVRVU19VTlNQRUNJRklFRBAAEhcKE1NQQU5fU1RBVFVTX1BFTkRJTkcQARIXChNTUEFOX1NUQVRVU19SVU5OSU5HEAISGQoVU1BBTl9TVEFUVVNfQ09NUExFVEVEEAMSFgoSU1BBTl9TVEFUVVNfRkFJTEVEEAQSGQoVU1BBTl9TVEFUVVNfQ0FOQ0VMTEVEEAUSHgoaU1BBTl9TVEFUVVNfQVdBSVRJTkdfSFVNQU4QBiq9AQoMTGlua1JlbGF0aW9uEh0KGUxJTktfUkVMQVRJT05fVU5TUEVDSUZJRUQQABIZChVMSU5LX1JFTEFUSU9OX0lOVk9LRUQQARIcChhMSU5LX1JFTEFUSU9OX1dBSVRJTkdfT04QAhIeChpMSU5LX1JFTEFUSU9OX1RSSUdHRVJFRF9CWRADEhkKFUxJTktfUkVMQVRJT05fRk9MTE9XUxAEEhoKFkxJTktfUkVMQVRJT05fUkVQTEFDRVMQBSqQAQoOQW5ub3RhdGlvbktpbmQSHwobQU5OT1RBVElPTl9LSU5EX1VOU1BFQ0lGSUVEEAASGwoXQU5OT1RBVElPTl9LSU5EX0NPTU1FTlQQARIcChhBTk5PVEFUSU9OX0tJTkRfU1RFRVJJTkcQAhIiCh5BTk5PVEFUSU9OX0tJTkRfSFVNQU5fUkVTUE9OU0UQA0JCWkBnaXRodWIuY29tL3BlZGFwdWRpL2hhcm1vbm9ncmFmL2dlbi9oYXJtb25vZ3JhZi92MTtoYXJtb25vZ3JhZnYxYgZwcm90bzM", [file_google_protobuf_timestamp]);
+  fileDesc("ChpoYXJtb25vZ3JhZi92MS90eXBlcy5wcm90bxIOaGFybW9ub2dyYWYudjEirgIKB1Nlc3Npb24SCgoCaWQYASABKAkSDQoFdGl0bGUYAiABKAkSLgoKY3JlYXRlZF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi0KBnN0YXR1cxgFIAEoDjIdLmhhcm1vbm9ncmFmLnYxLlNlc3Npb25TdGF0dXMSEQoJYWdlbnRfaWRzGAYgAygJEjcKCG1ldGFkYXRhGAcgAygLMiUuaGFybW9ub2dyYWYudjEuU2Vzc2lvbi5NZXRhZGF0YUVudHJ5Gi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASKrAwoFQWdlbnQSCgoCaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEiwKCWZyYW1ld29yaxgEIAEoDjIZLmhhcm1vbm9ncmFmLnYxLkZyYW1ld29yaxIZChFmcmFtZXdvcmtfdmVyc2lvbhgFIAEoCRIwCgxjYXBhYmlsaXRpZXMYBiADKA4yGi5oYXJtb25vZ3JhZi52MS5DYXBhYmlsaXR5EjUKCG1ldGFkYXRhGAcgAygLMiMuaGFybW9ub2dyYWYudjEuQWdlbnQuTWV0YWRhdGFFbnRyeRIwCgxjb25uZWN0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjIKDmxhc3RfaGVhcnRiZWF0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIrCgZzdGF0dXMYCiABKA4yGy5oYXJtb25vZ3JhZi52MS5BZ2VudFN0YXR1cxovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiawoIU3BhbkxpbmsSFgoOdGFyZ2V0X3NwYW5faWQYASABKAkSFwoPdGFyZ2V0X2FnZW50X2lkGAIgASgJEi4KCHJlbGF0aW9uGAMgASgOMhwuaGFybW9ub2dyYWYudjEuTGlua1JlbGF0aW9uIsIBCg5BdHRyaWJ1dGVWYWx1ZRIWCgxzdHJpbmdfdmFsdWUYASABKAlIABITCglpbnRfdmFsdWUYAiABKANIABIWCgxkb3VibGVfdmFsdWUYAyABKAFIABIUCgpib29sX3ZhbHVlGAQgASgISAASFQoLYnl0ZXNfdmFsdWUYBSABKAxIABI1CgthcnJheV92YWx1ZRgGIAEoCzIeLmhhcm1vbm9ncmFmLnYxLkF0dHJpYnV0ZUFycmF5SABCBwoFdmFsdWUiQAoOQXR0cmlidXRlQXJyYXkSLgoGdmFsdWVzGAEgAygLMh4uaGFybW9ub2dyYWYudjEuQXR0cmlidXRlVmFsdWUiaAoKUGF5bG9hZFJlZhIOCgZkaWdlc3QYASABKAkSDAoEc2l6ZRgCIAEoAxIMCgRtaW1lGAMgASgJEg8KB3N1bW1hcnkYBCABKAkSDAoEcm9sZRgFIAEoCRIPCgdldmljdGVkGAYgASgIIjkKCUVycm9ySW5mbxIMCgR0eXBlGAEgASgJEg8KB21lc3NhZ2UYAiABKAkSDQoFc3RhY2sYAyABKAkitwQKBFNwYW4SCgoCaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIQCghhZ2VudF9pZBgDIAEoCRIWCg5wYXJlbnRfc3Bhbl9pZBgEIAEoCRImCgRraW5kGAUgASgOMhguaGFybW9ub2dyYWYudjEuU3BhbktpbmQSEwoLa2luZF9zdHJpbmcYBiABKAkSKgoGc3RhdHVzGAcgASgOMhouaGFybW9ub2dyYWYudjEuU3BhblN0YXR1cxIMCgRuYW1lGAggASgJEi4KCnN0YXJ0X3RpbWUYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiwKCGVuZF90aW1lGAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI4CgphdHRyaWJ1dGVzGAsgAygLMiQuaGFybW9ub2dyYWYudjEuU3Bhbi5BdHRyaWJ1dGVzRW50cnkSMAoMcGF5bG9hZF9yZWZzGAwgAygLMhouaGFybW9ub2dyYWYudjEuUGF5bG9hZFJlZhInCgVsaW5rcxgNIAMoCzIYLmhhcm1vbm9ncmFmLnYxLlNwYW5MaW5rEigKBWVycm9yGA4gASgLMhkuaGFybW9ub2dyYWYudjEuRXJyb3JJbmZvGlEKD0F0dHJpYnV0ZXNFbnRyeRILCgNrZXkYASABKAkSLQoFdmFsdWUYAiABKAsyHi5oYXJtb25vZ3JhZi52MS5BdHRyaWJ1dGVWYWx1ZToCOAEiZQoQQW5ub3RhdGlvblRhcmdldBIRCgdzcGFuX2lkGAEgASgJSAASNAoKYWdlbnRfdGltZRgCIAEoCzIeLmhhcm1vbm9ncmFmLnYxLkFnZW50VGltZVBvaW50SABCCAoGdGFyZ2V0IkoKDkFnZW50VGltZVBvaW50EhAKCGFnZW50X2lkGAEgASgJEiYKAmF0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKMAgoKQW5ub3RhdGlvbhIKCgJpZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEjAKBnRhcmdldBgDIAEoCzIgLmhhcm1vbm9ncmFmLnYxLkFubm90YXRpb25UYXJnZXQSDgoGYXV0aG9yGAQgASgJEi4KCmNyZWF0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiwKBGtpbmQYBiABKA4yHi5oYXJtb25vZ3JhZi52MS5Bbm5vdGF0aW9uS2luZBIMCgRib2R5GAcgASgJEjAKDGRlbGl2ZXJlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiwAMKDEludGVydmVudGlvbhImCgJhdBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDgoGc291cmNlGAIgASgJEgwKBGtpbmQYAyABKAkSFgoOYm9keV9vcl9yZWFzb24YBCABKAkSDgoGYXV0aG9yGAUgASgJEg8KB291dGNvbWUYBiABKAkSGwoTcGxhbl9yZXZpc2lvbl9pbmRleBgHIAEoBRIQCghzZXZlcml0eRgIIAEoCRIVCg1hbm5vdGF0aW9uX2lkGAkgASgJEhIKCmRyaWZ0X2tpbmQYCiABKAkSFAoMY29uZGl0aW9uX2lkGAsgASgJEg0KBWNvdW50GAwgASgFEi4KCmZpcnN0X3NlZW4YDSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi0KCWxhc3Rfc2VlbhgOIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEQoJbGlmZWN5Y2xlGA8gASgJEkAKFHNldmVyaXR5X3RyYW5zaXRpb25zGBAgAygLMiIuaGFybW9ub2dyYWYudjEuU2V2ZXJpdHlUcmFuc2l0aW9uIlYKElNldmVyaXR5VHJhbnNpdGlvbhIMCgRmcm9tGAEgASgJEgoKAnRvGAIgASgJEiYKAmF0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCqCAQoNU2Vzc2lvblN0YXR1cxIeChpTRVNTSU9OX1NUQVRVU19VTlNQRUNJRklFRBAAEhcKE1NFU1NJT05fU1RBVFVTX0xJVkUQARIcChhTRVNTSU9OX1NUQVRVU19DT01QTEVURUQQAhIaChZTRVNTSU9OX1NUQVRVU19BQk9SVEVEEAMqgAEKC0FnZW50U3RhdHVzEhwKGEFHRU5UX1NUQVRVU19VTlNQRUNJRklFRBAAEhoKFkFHRU5UX1NUQVRVU19DT05ORUNURUQQARIdChlBR0VOVF9TVEFUVVNfRElTQ09OTkVDVEVEEAISGAoUQUdFTlRfU1RBVFVTX0NSQVNIRUQQAypPCglGcmFtZXdvcmsSGQoVRlJBTUVXT1JLX1VOU1BFQ0lGSUVEEAASFAoQRlJBTUVXT1JLX0NVU1RPTRABEhEKDUZSQU1FV09SS19BREsQAirNAQoKQ2FwYWJpbGl0eRIaChZDQVBBQklMSVRZX1VOU1BFQ0lGSUVEEAASGwoXQ0FQQUJJTElUWV9QQVVTRV9SRVNVTUUQARIVChFDQVBBQklMSVRZX0NBTkNFTBACEhUKEUNBUEFCSUxJVFlfUkVXSU5EEAMSFwoTQ0FQQUJJTElUWV9TVEVFUklORxAEEhwKGENBUEFCSUxJVFlfSFVNQU5fSU5fTE9PUBAFEiEKHUNBUEFCSUxJVFlfSU5URVJDRVBUX1RSQU5TRkVSEAYqjAIKCFNwYW5LaW5kEhkKFVNQQU5fS0lORF9VTlNQRUNJRklFRBAAEhgKFFNQQU5fS0lORF9JTlZPQ0FUSU9OEAESFgoSU1BBTl9LSU5EX0xMTV9DQUxMEAISFwoTU1BBTl9LSU5EX1RPT0xfQ0FMTBADEhoKFlNQQU5fS0lORF9VU0VSX01FU1NBR0UQBBIbChdTUEFOX0tJTkRfQUdFTlRfTUVTU0FHRRAFEhYKElNQQU5fS0lORF9UUkFOU0ZFUhAGEhwKGFNQQU5fS0lORF9XQUlUX0ZPUl9IVU1BThAHEhUKEVNQQU5fS0lORF9QTEFOTkVEEAgSFAoQU1BBTl9LSU5EX0NVU1RPTRAJKskBCgpTcGFuU3RhdHVzEhsKF1NQQU5fU1RBVFVTX1VOU1BFQ0lGSUVEEAASFwoTU1BBTl9TVEFUVVNfUEVORElORxABEhcKE1NQQU5fU1RBVFVTX1JVTk5JTkcQAhIZChVTUEFOX1NUQVRVU19DT01QTEVURUQQAxIWChJTUEFOX1NUQVRVU19GQUlMRUQQBBIZChVTUEFOX1NUQVRVU19DQU5DRUxMRUQQBRIeChpTUEFOX1NUQVRVU19BV0FJVElOR19IVU1BThAGKr0BCgxMaW5rUmVsYXRpb24SHQoZTElOS19SRUxBVElPTl9VTlNQRUNJRklFRBAAEhkKFUxJTktfUkVMQVRJT05fSU5WT0tFRBABEhwKGExJTktfUkVMQVRJT05fV0FJVElOR19PThACEh4KGkxJTktfUkVMQVRJT05fVFJJR0dFUkVEX0JZEAMSGQoVTElOS19SRUxBVElPTl9GT0xMT1dTEAQSGgoWTElOS19SRUxBVElPTl9SRVBMQUNFUxAFKpABCg5Bbm5vdGF0aW9uS2luZBIfChtBTk5PVEFUSU9OX0tJTkRfVU5TUEVDSUZJRUQQABIbChdBTk5PVEFUSU9OX0tJTkRfQ09NTUVOVBABEhwKGEFOTk9UQVRJT05fS0lORF9TVEVFUklORxACEiIKHkFOTk9UQVRJT05fS0lORF9IVU1BTl9SRVNQT05TRRADQkJaQGdpdGh1Yi5jb20vcGVkYXB1ZGkvaGFybW9ub2dyYWYvZ2VuL2hhcm1vbm9ncmFmL3YxO2hhcm1vbm9ncmFmdjFiBnByb3RvMw", [file_google_protobuf_timestamp]);
 
 /**
  * Session is the unit a user opens in the console. Multiple agents
@@ -572,6 +572,28 @@ export const AnnotationSchema: GenMessage<Annotation> = /*@__PURE__*/
  *                   kept separate from ``kind`` so the tree-agnostic
  *                   renderer does not need to know drift taxonomy
  *
+ * Server-side condition collapse (harmonograf I6 / goldfive#318):
+ *   condition_id  — opaque goldfive-minted id stable across re-emits of
+ *                   the same logical drift (kind+task+agent within a turn).
+ *                   Empty for pre-#318 events / annotation-only rows.
+ *   count         — number of underlying ``drift_detected`` observations
+ *                   that collapsed onto this row (>= 1). Defaults to 1
+ *                   for non-collapsed rows so consumers can render a
+ *                   uniform "count" badge unconditionally.
+ *   first_seen    — wall-clock of the first observation in the condition.
+ *                   Equals ``at`` when count == 1.
+ *   last_seen     — wall-clock of the latest observation. Equals ``at``
+ *                   when count == 1; ``at`` always tracks the latest emit.
+ *   lifecycle     — current lifecycle of the condition (OPENED / UPDATED /
+ *                   CLOSED) as a lowercase string. Empty for pre-#318
+ *                   events / non-drift rows.
+ *   severity_transitions
+ *                 — ordered list of severity bumps observed across the
+ *                   collapsed observations (where prev_severity != severity
+ *                   on the underlying ``DriftDetected``). Empty when no
+ *                   transitions occurred. Each entry's ``at`` matches the
+ *                   observation that recorded the transition.
+ *
  * @generated from message harmonograf.v1.Intervention
  */
 export type Intervention = Message<"harmonograf.v1.Intervention"> & {
@@ -624,6 +646,36 @@ export type Intervention = Message<"harmonograf.v1.Intervention"> & {
    * @generated from field: string drift_kind = 10;
    */
   driftKind: string;
+
+  /**
+   * @generated from field: string condition_id = 11;
+   */
+  conditionId: string;
+
+  /**
+   * @generated from field: int32 count = 12;
+   */
+  count: number;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp first_seen = 13;
+   */
+  firstSeen?: Timestamp;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp last_seen = 14;
+   */
+  lastSeen?: Timestamp;
+
+  /**
+   * @generated from field: string lifecycle = 15;
+   */
+  lifecycle: string;
+
+  /**
+   * @generated from field: repeated harmonograf.v1.SeverityTransition severity_transitions = 16;
+   */
+  severityTransitions: SeverityTransition[];
 };
 
 /**
@@ -632,6 +684,39 @@ export type Intervention = Message<"harmonograf.v1.Intervention"> & {
  */
 export const InterventionSchema: GenMessage<Intervention> = /*@__PURE__*/
   messageDesc(file_harmonograf_v1_types, 11);
+
+/**
+ * One severity transition observed across a collapsed condition's
+ * underlying drift_detected observations. Surfaced on
+ * ``Intervention.severity_transitions`` so the UI can show a bump
+ * marker (e.g. WARNING → CRITICAL) without re-fetching the source
+ * drift events.
+ *
+ * @generated from message harmonograf.v1.SeverityTransition
+ */
+export type SeverityTransition = Message<"harmonograf.v1.SeverityTransition"> & {
+  /**
+   * @generated from field: string from = 1;
+   */
+  from: string;
+
+  /**
+   * @generated from field: string to = 2;
+   */
+  to: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp at = 3;
+   */
+  at?: Timestamp;
+};
+
+/**
+ * Describes the message harmonograf.v1.SeverityTransition.
+ * Use `create(SeverityTransitionSchema)` to create a new message.
+ */
+export const SeverityTransitionSchema: GenMessage<SeverityTransition> = /*@__PURE__*/
+  messageDesc(file_harmonograf_v1_types, 12);
 
 /**
  * Status of a session in the registry.
