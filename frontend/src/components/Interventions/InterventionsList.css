@@ -17,6 +17,43 @@
   align-items: center;
   gap: 6px;
   padding: 2px 0;
+  flex-wrap: wrap;
+}
+
+/* goldfive#423 PR 3: filter toggle for observational (INFO-severity)
+   NEW_WORK_DISCOVERED rows. Reads as ancillary chrome — small, muted,
+   adjacent to the label. Only rendered when at least one such row exists. */
+.hg-interventions-list__filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 0 4px;
+  font-size: 10px;
+  letter-spacing: 0.2px;
+  color: var(--md-sys-color-on-surface-variant, #9da3b4);
+  opacity: 0.75;
+  cursor: pointer;
+}
+
+.hg-interventions-list__filter:hover {
+  opacity: 1;
+}
+
+.hg-interventions-list__filter input {
+  cursor: pointer;
+}
+
+/* goldfive#423 PR 3: observational-discovery rows render at lower
+   contrast so they read as observational vs. actionable. The data
+   attribute (set in TSX) is preferred over a class so the filter logic
+   stays declarative on the row level. */
+.hg-interventions-list__row[data-observational='true'] {
+  opacity: 0.6;
+}
+
+.hg-interventions-list__row[data-observational='true']:hover {
+  opacity: 0.95;
 }
 
 .hg-interventions-list__label {

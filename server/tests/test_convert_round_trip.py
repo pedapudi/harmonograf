@@ -248,6 +248,129 @@ async def test_storage_round_trip_legacy_plan(store):
     assert fetched.tasks[0].supersedes_kind == SupersessionKind.UNSPECIFIED
 
 
+# ---- goldfive#423 PR 1 / PR 3: plan-descriptive-growth round-trip -------
+
+
+def _build_plan_pb_with_discovery(
+    *,
+    plan_id: str = "p1",
+    tasks: list[tuple[str, bool, str]] | None = None,
+) -> gt.Plan:
+    """``tasks`` is ``(task_id, discovered, discovery_identity_hash)``."""
+
+    plan = gt.Plan()
+    plan.id = plan_id
+    plan.run_id = "run-disc"
+    plan.summary = "discovery round-trip"
+    for tid, disc, ident in tasks or []:
+        t = plan.tasks.add()
+        t.id = tid
+        t.title = f"task {tid}"
+        t.status = gt.TASK_STATUS_PENDING
+        if disc:
+            t.discovered = True
+        if ident:
+            t.discovery_identity_hash = ident
+    return plan
+
+
+def test_pb_to_storage_preserves_discovered_overlay():
+    """goldfive#423 PR 1: ``Task.discovered`` + ``discovery_identity_hash``
+    survive pb → storage. Without this, the frontend's discovery-accent
+    rendering (PR 3) silently degrades to forecast-styled cards.
+    """
+
+    pb = _build_plan_pb_with_discovery(
+        plan_id="p-disc",
+        tasks=[
+            ("forecast", False, ""),
+            ("discovered", True, "agent-a:abc123"),
+        ],
+    )
+    stored = goldfive_pb_plan_to_storage(
+        pb, session_id="sess-1", created_at=1.0
+    )
+    by_id = {t.id: t for t in stored.tasks}
+    assert by_id["forecast"].discovered is False
+    assert by_id["forecast"].discovery_identity_hash == ""
+    assert by_id["discovered"].discovered is True
+    assert by_id["discovered"].discovery_identity_hash == "agent-a:abc123"
+
+
+def test_storage_to_pb_preserves_discovered_overlay():
+    """Inverse: storage → pb writes the overlay fields back."""
+
+    pb = _build_plan_pb_with_discovery(
+        plan_id="p-disc",
+        tasks=[
+            ("forecast", False, ""),
+            ("discovered", True, "agent-a:abc123"),
+        ],
+    )
+    stored = goldfive_pb_plan_to_storage(
+        pb, session_id="sess-1", created_at=1.0
+    )
+    pb_out = storage_plan_to_goldfive_pb(stored)
+    by_id = {t.id: t for t in pb_out.tasks}
+    # proto3 bool default is False — explicit False yields field-not-set.
+    assert by_id["forecast"].discovered is False
+    assert by_id["forecast"].discovery_identity_hash == ""
+    assert by_id["discovered"].discovered is True
+    assert by_id["discovered"].discovery_identity_hash == "agent-a:abc123"
+
+
+@pytest.mark.asyncio
+async def test_storage_round_trip_preserves_discovered_overlay(store):
+    """Plan write → read preserves the discovery overlay on both stores."""
+
+    pb = _build_plan_pb_with_discovery(
+        plan_id="p-store-disc",
+        tasks=[
+            ("forecast", False, ""),
+            ("discovered", True, "agent-a:abc"),
+        ],
+    )
+    stored = goldfive_pb_plan_to_storage(
+        pb,
+        session_id="sess-store",
+        created_at=42.0,
+        invocation_span_id="span-1",
+        planner_agent_id="agent-1",
+    )
+    await store.put_task_plan(stored)
+    fetched = await store.get_task_plan("p-store-disc")
+    assert fetched is not None
+    by_id = {t.id: t for t in fetched.tasks}
+    assert by_id["forecast"].discovered is False
+    assert by_id["forecast"].discovery_identity_hash == ""
+    assert by_id["discovered"].discovered is True
+    assert by_id["discovered"].discovery_identity_hash == "agent-a:abc"
+
+
+@pytest.mark.asyncio
+async def test_storage_round_trip_legacy_plan_defaults_discovered_false(store):
+    """Legacy pb without the new fields lands as discovered=False / hash=''.
+
+    Forward-compat: the back-compat default is False / "" — the entire
+    rendering branch is suppressed on legacy frames.
+    """
+
+    # ``_build_plan_pb`` from the supersedes block doesn't set discovered.
+    pb = _build_plan_pb(
+        plan_id="p-legacy-disc",
+        run_id="",
+        tasks=[("only", "", 0)],
+    )
+    stored = goldfive_pb_plan_to_storage(
+        pb, session_id="sess-store", created_at=1.0
+    )
+    await store.put_task_plan(stored)
+    fetched = await store.get_task_plan("p-legacy-disc")
+    assert fetched is not None
+    assert fetched.tasks[0].discovered is False
+    assert fetched.tasks[0].discovery_identity_hash == ""
+
+
 # ---- migration: pre-existing DB without the new columns ----------------
 
 
@@ -322,6 +445,11 @@ async def test_sqlite_migration_adds_columns_no_data_loss(tmp_path: Path):
         assert got.tasks[0].id == "t_legacy"
         assert got.tasks[0].supersedes == ""
         assert got.tasks[0].supersedes_kind == SupersessionKind.UNSPECIFIED
+        # goldfive#423 PR 1 / 3: legacy rows without ``discovered`` columns
+        # land as ``discovered=False`` / ``discovery_identity_hash=""``
+        # after migration (the back-compat default specified in the proto).
+        assert got.tasks[0].discovered is False
+        assert got.tasks[0].discovery_identity_hash == ""
 
         # Fresh writes can use the new columns.
         pb = _build_plan_pb(
@@ -338,5 +466,22 @@ async def test_sqlite_migration_adds_columns_no_data_loss(tmp_path: Path):
         assert rebuilt.run_id == "run-fresh"
         assert rebuilt.tasks[0].supersedes == "t_legacy"
         assert rebuilt.tasks[0].supersedes_kind == SupersessionKind.REPLACE
+
+        # goldfive#423 PR 1 / 3: fresh writes with the discovery overlay
+        # survive the migration path on the same legacy-DB store. Pins
+        # that the ALTER TABLE actually added the column AND that the
+        # INSERT path writes it.
+        pb_disc = _build_plan_pb_with_discovery(
+            plan_id="plan_disc",
+            tasks=[("t_disc", True, "agent-z:hash-7")],
+        )
+        stored_disc = goldfive_pb_plan_to_storage(
+            pb_disc, session_id="sess_legacy", created_at=3.0
+        )
+        await store.put_task_plan(stored_disc)
+        rebuilt_disc = await store.get_task_plan("plan_disc")
+        assert rebuilt_disc is not None
+        assert rebuilt_disc.tasks[0].discovered is True
+        assert rebuilt_disc.tasks[0].discovery_identity_hash == "agent-z:hash-7"
     finally:
         await store.close()

@@ -383,6 +383,13 @@ def goldfive_pb_task_to_storage(pb: Any) -> Task:
         supersedes_kind=_supersession_kind_pb_to_storage(
             int(getattr(pb, "supersedes_kind", 0) or 0)
         ),
+        # goldfive#423 PR 1 (plan-descriptive-growth): pass through the
+        # ``discovered`` + ``discovery_identity_hash`` fields. Both
+        # default to safe back-compat values (False / "") when the
+        # incoming pb predates the field — ``getattr`` falls back to
+        # those defaults if the wire frame is older than the proto.
+        discovered=bool(getattr(pb, "discovered", False)),
+        discovery_identity_hash=getattr(pb, "discovery_identity_hash", "") or "",
     )
 
 
@@ -588,6 +595,16 @@ def storage_task_to_goldfive_pb(task: Task) -> Any:
         kind_pb = _supersession_kind_storage_to_pb(supersedes_kind)
         if kind_pb:
             pb.supersedes_kind = kind_pb
+    # goldfive#423 PR 1 (plan-descriptive-growth): round-trip the
+    # discovered overlay. Only stamp the fields when they carry a
+    # non-default payload so the wire shape for plans without any
+    # discovered tasks stays byte-identical to pre-#423.
+    discovered = bool(getattr(task, "discovered", False))
+    if discovered:
+        pb.discovered = True
+    discovery_identity_hash = getattr(task, "discovery_identity_hash", "") or ""
+    if discovery_identity_hash:
+        pb.discovery_identity_hash = discovery_identity_hash
     return pb
 
 
