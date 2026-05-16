@@ -24,7 +24,13 @@ import pytest
 
 from harmonograf_client.buffer import EnvelopeKind
 from harmonograf_client.client import Client
-from harmonograf_client.replay import ReplayStats, _is_dict_envelope, replay_events
+from harmonograf_client.replay import (
+    ReplayStats,
+    _is_dict_envelope,
+    _run,
+    build_parser,
+    replay_events,
+)
 from harmonograf_client.sink import HarmonografSink
 
 from tests._fixtures import FakeTransport, make_factory
@@ -232,6 +238,47 @@ class TestMixedAndResilience:
         assert stats.emitted == 1
 
     @pytest.mark.asyncio
+    async def test_json_object_that_is_not_a_goldfive_event_skipped(
+        self, tmp_path: Path, sink: HarmonografSink, client: Client
+    ) -> None:
+        """A line that is a valid JSON object but not a parseable
+        ``goldfive.v1.Event`` (a type mismatch ``ignore_unknown_fields``
+        cannot paper over) raises ``json_format.ParseError`` — it must be
+        counted as ``skipped_unparseable`` and the replay must continue.
+
+        This is a distinct path from the corrupt-JSON skip (which never
+        reaches the proto parser) and was previously untested."""
+        path = _write_jsonl(
+            tmp_path,
+            [
+                # ``sequence`` is a scalar field on Event; handing it a
+                # nested object is a type error proto-JSON cannot parse.
+                json.dumps(
+                    {
+                        "eventId": "e0",
+                        "sequence": {"not": "a scalar"},
+                        "runStarted": {"runId": "run-xyz"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "eventId": "e1",
+                        "runId": "run-xyz",
+                        "sequence": "2",
+                        "runCompleted": {"runId": "run-xyz"},
+                    }
+                ),
+            ],
+        )
+        stats = await replay_events(path, sink)
+        assert stats.skipped_unparseable == 1
+        assert stats.proto_events == 1  # the well-formed event still lands
+        assert stats.emitted == 1
+
+        env = _drain(client)[0]
+        assert env.payload.WhichOneof("payload") == "run_completed"
+
+    @pytest.mark.asyncio
     async def test_mixed_proto_and_dict_in_one_file(
         self, tmp_path: Path, sink: HarmonografSink, client: Client
     ) -> None:
@@ -269,6 +316,75 @@ class TestMixedAndResilience:
         assert stats.proto_events == 2
         assert stats.dict_events == 1
         assert stats.emitted == 3
+
+
+# ---- _run exit codes -------------------------------------------------------
+
+
+class TestRunExitCodes:
+    """``_run`` is the CLI body; its exit codes are the contract a zicato
+    hook (or an operator) keys on. These drive ``_run`` directly with a
+    parsed args namespace. The error cases below never reach the network
+    (missing / empty file) or point at a guaranteed-dead port, so no
+    harmonograf server is needed."""
+
+    @pytest.mark.asyncio
+    async def test_missing_file_returns_2(self, tmp_path: Path) -> None:
+        args = build_parser().parse_args(
+            [str(tmp_path / "does-not-exist.jsonl")]
+        )
+        assert await _run(args) == 2
+
+    @pytest.mark.asyncio
+    async def test_directory_argument_returns_2(self, tmp_path: Path) -> None:
+        # A directory is not a file — ``path.is_file()`` is False, so the
+        # CLI rejects it cleanly instead of raising IsADirectoryError on
+        # open().
+        args = build_parser().parse_args([str(tmp_path)])
+        assert await _run(args) == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_file_returns_1(self, tmp_path: Path) -> None:
+        # Nothing is emitted, so nothing can be buffered/undelivered —
+        # ``_run`` reaches the ``emitted == 0`` branch and returns 1
+        # regardless of whether a server is reachable.
+        path = tmp_path / "events.jsonl"
+        path.write_text("", encoding="utf-8")
+        args = build_parser().parse_args([str(path)])
+        assert await _run(args) == 1
+
+    @pytest.mark.asyncio
+    async def test_blank_only_file_returns_1(self, tmp_path: Path) -> None:
+        path = tmp_path / "events.jsonl"
+        path.write_text("\n\n   \n\n", encoding="utf-8")
+        args = build_parser().parse_args([str(path)])
+        assert await _run(args) == 1
+
+    @pytest.mark.asyncio
+    async def test_undelivered_run_returns_3(self, tmp_path: Path) -> None:
+        """Events that parse but never reach the server (here: a dead
+        port) must exit 3, not 0 — a green exit on a dropped run would
+        let a caller treat it as ingested."""
+        path = _write_jsonl(
+            tmp_path,
+            [
+                json.dumps(
+                    {
+                        "eventId": "e0",
+                        "runId": "run-xyz",
+                        "sequence": "1",
+                        "sessionId": "run-xyz",
+                        "runStarted": {"runId": "run-xyz"},
+                    }
+                )
+            ],
+        )
+        # Port 1 is privileged and never has a harmonograf server; the
+        # short flush timeout keeps the test fast.
+        args = build_parser().parse_args(
+            [str(path), "--server", "127.0.0.1:1", "--flush-timeout", "0.5"]
+        )
+        assert await _run(args) == 3
 
 
 # ---- ReplayStats -----------------------------------------------------------
