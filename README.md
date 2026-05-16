@@ -237,6 +237,7 @@ materialise live in the harmonograf tab. Ctrl-C tears all three down.
 | [docs/overview.md](docs/overview.md) | Longer-form writeup: motivation, design principles, current features, non-goals, roadmap. |
 | [docs/goldfive-integration.md](docs/goldfive-integration.md) | How harmonograf consumes goldfive: `HarmonografTelemetryPlugin`, `HarmonografSink`, `observe()`, `goldfive_event` envelope, per-ADK-agent rows, session unification. |
 | [docs/standalone-observability.md](docs/standalone-observability.md) | Non-ADK flow: emit spans from any Python process with `harmonograf_client.Client`. |
+| [docs/zicato-handoff.md](docs/zicato-handoff.md) | Replaying a finished run's goldfive `events.jsonl` from disk with `harmonograf-replay`; deep-linking a zicato run into harmonograf as its execution view. |
 | [docs/operator-quickstart.md](docs/operator-quickstart.md) | Flags, retention, health probes, bearer-token auth, STEER from the UI — the ops-facing reference. |
 | [docs/reporting-tools.md](docs/reporting-tools.md) | Redirect to goldfive's reporting-tool reference (owned there post-migration). |
 | [docs/user-guide/](docs/user-guide/) | Navigating the UI: Gantt, graph, trajectory, inspector, transport bar, keyboard shortcuts. |
