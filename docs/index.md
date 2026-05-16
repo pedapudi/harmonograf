@@ -59,6 +59,7 @@ to observe and steer them.
 | [overview.md](overview.md) | Longer-form motivation and design principles; what ships today and what's deliberately out of scope. |
 | [goldfive-integration.md](goldfive-integration.md) | The `goldfive.wrap` + `observe()` contract: per-ADK-agent rows, session unification, intervention emission. |
 | [standalone-observability.md](standalone-observability.md) | The non-ADK path: emit spans from any Python process with `harmonograf_client.Client`. |
+| [zicato-handoff.md](zicato-handoff.md) | Replay a finished run's goldfive `events.jsonl` from disk with `harmonograf-replay`; deep-link a zicato run into harmonograf as its execution view. |
 | [reporting-tools.md](reporting-tools.md) | Redirect to the goldfive reporting-tool reference (the tools live in goldfive post-migration). |
 | [user-guide/index.md](user-guide/index.md) | UI reference hub — overview of regions of the shell and the contents list below. |
 | [user-guide/sessions.md](user-guide/sessions.md) | Session picker, filters, attention badges. |
