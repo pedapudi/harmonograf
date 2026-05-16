@@ -196,7 +196,26 @@ async def _run(args: argparse.Namespace) -> int:
         # whole run before this process dies.
         client.shutdown(flush_timeout=args.flush_timeout)
 
-    session_id = client.session_id or "(unassigned)"
+    # Delivery accounting. Replay is fire-and-forget on the wire — events
+    # are pushed onto the transport buffer and a background send loop
+    # drains them. The CLI must still tell an operator (or a zicato hook
+    # shelling out to replay) whether the run actually *landed*, so a
+    # dropped run is not mistaken for an ingested one.
+    #
+    # The reliable "reached a server" signal is ``client.session_id``:
+    # the transport's ``assigned_session_id`` is set ONLY when the server
+    # answers the Hello with a Welcome. Buffer emptiness is NOT a sound
+    # signal — the send loop pops envelopes off the ring buffer into an
+    # in-flight gRPC call before that call can fail, so the ring can read
+    # empty even though nothing was acked.
+    #
+    # ``client.session_id`` is empty here only when no Welcome ever
+    # arrived (server down, wrong --server, auth rejected). It is
+    # non-empty — the run id from the file, or a server-minted id if the
+    # events carried no session_id — once the run has landed.
+    delivered_session_id = client.session_id
+    dropped = client._events.stats_snapshot().dropped_total
+    session_id = delivered_session_id or "(unassigned)"
     logger.info("replay complete: %s", stats)
     print(f"replayed {path}")
     print(f"  {stats}")
@@ -205,6 +224,28 @@ async def _run(args: argparse.Namespace) -> int:
     if stats.emitted == 0:
         logger.warning("no events emitted — is %s a goldfive events.jsonl?", path)
         return 1
+    if not delivered_session_id:
+        logger.error(
+            "the run did NOT reach %s — no session was assigned within the "
+            "%.1fs flush window (server down / wrong --server / auth "
+            "rejected); raise --flush-timeout for a slow link or fix the "
+            "address",
+            args.server,
+            args.flush_timeout,
+        )
+        return 3
+    if dropped > 0:
+        # The run reached the server, but the ring overflowed mid-replay
+        # and shed events before they could be sent — the session landed
+        # incomplete. Surface it: a partial session is misleading.
+        logger.error(
+            "%d event(s) dropped by buffer overflow during replay — "
+            "session %s is INCOMPLETE; the link could not keep up with "
+            "the file (raise the client buffer or slow the producer)",
+            dropped,
+            delivered_session_id,
+        )
+        return 3
     return 0
 
 
