@@ -26,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file goldfive/v1/events.proto.
  */
 export const file_goldfive_v1_events: GenFile = /*@__PURE__*/
-  fileDesc("Chhnb2xkZml2ZS92MS9ldmVudHMucHJvdG8SC2dvbGRmaXZlLnYxItwOCgVFdmVudBIQCghldmVudF9pZBgBIAEoCRIOCgZydW5faWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAQSLgoKZW1pdHRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKc2Vzc2lvbl9pZBgFIAEoCRIuCgtydW5fc3RhcnRlZBgKIAEoCzIXLmdvbGRmaXZlLnYxLlJ1blN0YXJ0ZWRIABIwCgxnb2FsX2Rlcml2ZWQYCyABKAsyGC5nb2xkZml2ZS52MS5Hb2FsRGVyaXZlZEgAEjQKDnBsYW5fc3VibWl0dGVkGAwgASgLMhouZ29sZGZpdmUudjEuUGxhblN1Ym1pdHRlZEgAEjAKDHBsYW5fcmV2aXNlZBgNIAEoCzIYLmdvbGRmaXZlLnYxLlBsYW5SZXZpc2VkSAASMAoMdGFza19zdGFydGVkGA4gASgLMhguZ29sZGZpdmUudjEuVGFza1N0YXJ0ZWRIABIyCg10YXNrX3Byb2dyZXNzGA8gASgLMhkuZ29sZGZpdmUudjEuVGFza1Byb2dyZXNzSAASNAoOdGFza19jb21wbGV0ZWQYECABKAsyGi5nb2xkZml2ZS52MS5UYXNrQ29tcGxldGVkSAASLgoLdGFza19mYWlsZWQYESABKAsyFy5nb2xkZml2ZS52MS5UYXNrRmFpbGVkSAASMAoMdGFza19ibG9ja2VkGBIgASgLMhguZ29sZGZpdmUudjEuVGFza0Jsb2NrZWRIABI0Cg50YXNrX2NhbmNlbGxlZBgTIAEoCzIaLmdvbGRmaXZlLnYxLlRhc2tDYW5jZWxsZWRIABI0Cg5kcmlmdF9kZXRlY3RlZBgUIAEoCzIaLmdvbGRmaXZlLnYxLkRyaWZ0RGV0ZWN0ZWRIABIyCg1ydW5fY29tcGxldGVkGBUgASgLMhkuZ29sZGZpdmUudjEuUnVuQ29tcGxldGVkSAASLgoLcnVuX2Fib3J0ZWQYFiABKAsyFy5nb2xkZml2ZS52MS5SdW5BYm9ydGVkSAASQAoUY29udmVyc2F0aW9uX3N0YXJ0ZWQYFyABKAsyIC5nb2xkZml2ZS52MS5Db252ZXJzYXRpb25TdGFydGVkSAASPAoSY29udmVyc2F0aW9uX2VuZGVkGBggASgLMh4uZ29sZGZpdmUudjEuQ29udmVyc2F0aW9uRW5kZWRIABI8ChJhcHByb3ZhbF9yZXF1ZXN0ZWQYGSABKAsyHi5nb2xkZml2ZS52MS5BcHByb3ZhbFJlcXVlc3RlZEgAEjgKEGFwcHJvdmFsX2dyYW50ZWQYGiABKAsyHC5nb2xkZml2ZS52MS5BcHByb3ZhbEdyYW50ZWRIABI6ChFhcHByb3ZhbF9yZWplY3RlZBgbIAEoCzIdLmdvbGRmaXZlLnYxLkFwcHJvdmFsUmVqZWN0ZWRIABJHChhhZ2VudF9pbnZvY2F0aW9uX3N0YXJ0ZWQYHCABKAsyIy5nb2xkZml2ZS52MS5BZ2VudEludm9jYXRpb25TdGFydGVkSAASSwoaYWdlbnRfaW52b2NhdGlvbl9jb21wbGV0ZWQYHSABKAsyJS5nb2xkZml2ZS52MS5BZ2VudEludm9jYXRpb25Db21wbGV0ZWRIABI+ChNkZWxlZ2F0aW9uX29ic2VydmVkGB4gASgLMh8uZ29sZGZpdmUudjEuRGVsZWdhdGlvbk9ic2VydmVkSAASRQoXcmVhc29uaW5nX2p1ZGdlX2ludm9rZWQYHyABKAsyIi5nb2xkZml2ZS52MS5SZWFzb25pbmdKdWRnZUludm9rZWRIABJEChdnb2xkZml2ZV9sbG1fY2FsbF9zdGFydBggIAEoCzIhLmdvbGRmaXZlLnYxLkdvbGRmaXZlTExNQ2FsbFN0YXJ0SAASQAoVZ29sZGZpdmVfbGxtX2NhbGxfZW5kGCEgASgLMh8uZ29sZGZpdmUudjEuR29sZGZpdmVMTE1DYWxsRW5kSAASQAoUaW52b2NhdGlvbl9jYW5jZWxsZWQYIiABKAsyIC5nb2xkZml2ZS52MS5JbnZvY2F0aW9uQ2FuY2VsbGVkSAASOgoRdGFza190cmFuc2l0aW9uZWQYIyABKAsyHS5nb2xkZml2ZS52MS5UYXNrVHJhbnNpdGlvbmVkSAASRQoXdGFza190cmFuc2l0aW9uX3JlZnVzZWQYJCABKAsyIi5nb2xkZml2ZS52MS5UYXNrVHJhbnNpdGlvblJlZnVzZWRIABJNChtpbnZvY2F0aW9uX2JvdW5kYXJ5X2VudGVyZWQYJSABKAsyJi5nb2xkZml2ZS52MS5JbnZvY2F0aW9uQm91bmRhcnlFbnRlcmVkSAASSwoaaW52b2NhdGlvbl9ib3VuZGFyeV9leGl0ZWQYJiABKAsyJS5nb2xkZml2ZS52MS5JbnZvY2F0aW9uQm91bmRhcnlFeGl0ZWRIAEIJCgdwYXlsb2FkImIKClJ1blN0YXJ0ZWQSDgoGcnVuX2lkGAEgASgJEhQKDGdvYWxfc3VtbWFyeRgCIAEoCRIuCgpzdGFydGVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCIvCgtHb2FsRGVyaXZlZBIgCgVnb2FscxgBIAMoCzIRLmdvbGRmaXZlLnYxLkdvYWwiMAoNUGxhblN1Ym1pdHRlZBIfCgRwbGFuGAEgASgLMhEuZ29sZGZpdmUudjEuUGxhbiK5AQoQUGxhblJldmlzaW9uRGlmZhIWCg5hZGRlZF90YXNrX2lkcxgBIAMoCRIYChByZW1vdmVkX3Rhc2tfaWRzGAIgAygJEhkKEW1vZGlmaWVkX3Rhc2tfaWRzGAMgAygJEioKC2FkZGVkX2VkZ2VzGAQgAygLMhUuZ29sZGZpdmUudjEuVGFza0VkZ2USLAoNcmVtb3ZlZF9lZGdlcxgFIAMoCzIVLmdvbGRmaXZlLnYxLlRhc2tFZGdlIt4CCgtQbGFuUmV2aXNlZBIfCgRwbGFuGAEgASgLMhEuZ29sZGZpdmUudjEuUGxhbhIqCgpkcmlmdF9raW5kGAIgASgOMhYuZ29sZGZpdmUudjEuRHJpZnRLaW5kEiwKCHNldmVyaXR5GAMgASgOMhouZ29sZGZpdmUudjEuRHJpZnRTZXZlcml0eRIOCgZyZWFzb24YBCABKAkSFgoOcmV2aXNpb25faW5kZXgYBSABKA0SKwoEZGlmZhgGIAEoCzIdLmdvbGRmaXZlLnYxLlBsYW5SZXZpc2lvbkRpZmYSGAoQdHJpZ2dlcl9ldmVudF9pZBgHIAEoCRIcChRyZWZpbmVfaW5wdXRfc3VtbWFyeRgIIAEoCRIdChVyZWZpbmVfb3V0cHV0X3N1bW1hcnkYCSABKAkSFwoPdGFyZ2V0X2FnZW50X2lkGAogASgJEg8KB2RyeV9ydW4YCyABKAgiLgoLVGFza1N0YXJ0ZWQSDwoHdGFza19pZBgBIAEoCRIOCgZkZXRhaWwYAiABKAkiQQoMVGFza1Byb2dyZXNzEg8KB3Rhc2tfaWQYASABKAkSEAoIZnJhY3Rpb24YAiABKAISDgoGZGV0YWlsGAMgASgJIqEBCg1UYXNrQ29tcGxldGVkEg8KB3Rhc2tfaWQYASABKAkSDwoHc3VtbWFyeRgCIAEoCRI8CglhcnRpZmFjdHMYAyADKAsyKS5nb2xkZml2ZS52MS5UYXNrQ29tcGxldGVkLkFydGlmYWN0c0VudHJ5GjAKDkFydGlmYWN0c0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiQgoKVGFza0ZhaWxlZBIPCgd0YXNrX2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCRITCgtyZWNvdmVyYWJsZRgDIAEoCCI/CgtUYXNrQmxvY2tlZBIPCgd0YXNrX2lkGAEgASgJEg8KB2Jsb2NrZXIYAiABKAkSDgoGbmVlZGVkGAMgASgJIjAKDVRhc2tDYW5jZWxsZWQSDwoHdGFza19pZBgBIAEoCRIOCgZyZWFzb24YAiABKAkiwgMKDURyaWZ0RGV0ZWN0ZWQSJAoEa2luZBgBIAEoDjIWLmdvbGRmaXZlLnYxLkRyaWZ0S2luZBIsCghzZXZlcml0eRgCIAEoDjIaLmdvbGRmaXZlLnYxLkRyaWZ0U2V2ZXJpdHkSDgoGZGV0YWlsGAMgASgJEhcKD2N1cnJlbnRfdGFza19pZBgEIAEoCRIYChBjdXJyZW50X2FnZW50X2lkGAUgASgJEhUKDWFubm90YXRpb25faWQYBiABKAkSCgoCaWQYByABKAkSFQoNdHJpZ2dlcl9pbnB1dBgIIAEoCRITCgthdXRob3JlZF9ieRgJIAEoCRIgChhzdXBwcmVzc2VkX2J5X3VzZXJfc3RlZXIYCiABKAgSFAoMY29uZGl0aW9uX2lkGAwgASgJEi4KCWxpZmVjeWNsZRgNIAEoDjIbLmdvbGRmaXZlLnYxLkRyaWZ0TGlmZWN5Y2xlEjEKDXByZXZfc2V2ZXJpdHkYDiABKA4yGi5nb2xkZml2ZS52MS5EcmlmdFNldmVyaXR5Eh8KF29ic2VydmVkX3JldmlzaW9uX2luZGV4GA8gASgFSgQICxAMUglzeW50aGV0aWMiJwoMUnVuQ29tcGxldGVkEhcKD291dGNvbWVfc3VtbWFyeRgBIAEoCSIcCgpSdW5BYm9ydGVkEg4KBnJlYXNvbhgBIAEoCSJeChNDb252ZXJzYXRpb25TdGFydGVkEhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCRIuCgpzdGFydGVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJQChFDb252ZXJzYXRpb25FbmRlZBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSEgoKdHVybl9jb3VudBgCIAEoDRIOCgZyZWFzb24YAyABKAkixgEKEUFwcHJvdmFsUmVxdWVzdGVkEhEKCXRhcmdldF9pZBgBIAEoCRIMCgRraW5kGAIgASgJEg4KBnByb21wdBgDIAEoCRIPCgd0YXNrX2lkGAQgASgJEj4KCG1ldGFkYXRhGAUgAygLMiwuZ29sZGZpdmUudjEuQXBwcm92YWxSZXF1ZXN0ZWQuTWV0YWRhdGFFbnRyeRovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiNAoPQXBwcm92YWxHcmFudGVkEhEKCXRhcmdldF9pZBgBIAEoCRIOCgZkZXRhaWwYAiABKAkiNQoQQXBwcm92YWxSZWplY3RlZBIRCgl0YXJnZXRfaWQYASABKAkSDgoGZGV0YWlsGAIgASgJIqIBChZBZ2VudEludm9jYXRpb25TdGFydGVkEhIKCmFnZW50X25hbWUYASABKAkSDwoHdGFza19pZBgCIAEoCRIVCg1pbnZvY2F0aW9uX2lkGAMgASgJEhwKFHBhcmVudF9pbnZvY2F0aW9uX2lkGAQgASgJEi4KCnN0YXJ0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIpkBChhBZ2VudEludm9jYXRpb25Db21wbGV0ZWQSEgoKYWdlbnRfbmFtZRgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEhUKDWludm9jYXRpb25faWQYAyABKAkSDwoHc3VtbWFyeRgEIAEoCRIwCgxjb21wbGV0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIocBChlJbnZvY2F0aW9uQm91bmRhcnlFbnRlcmVkEhUKDWludm9jYXRpb25faWQYASABKAkSEgoKYWdlbnRfbmFtZRgCIAEoCRIPCgd0YXNrX2lkGAMgASgJEi4KCmVudGVyZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIpUBChhJbnZvY2F0aW9uQm91bmRhcnlFeGl0ZWQSFQoNaW52b2NhdGlvbl9pZBgBIAEoCRISCgphZ2VudF9uYW1lGAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSDgoGcmVhc29uGAQgASgJEi0KCWV4aXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiqwEKEkRlbGVnYXRpb25PYnNlcnZlZBISCgpmcm9tX2FnZW50GAEgASgJEhAKCHRvX2FnZW50GAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSFQoNaW52b2NhdGlvbl9pZBgEIAEoCRIvCgtvYnNlcnZlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFgoOdG9vbF9hcmdzX2pzb24YBiABKAki7wEKFVJlYXNvbmluZ0p1ZGdlSW52b2tlZBIOCgZydW5faWQYASABKAkSDwoHdGFza19pZBgCIAEoCRIYChBzdWJqZWN0X2FnZW50X2lkGAMgASgJEg0KBW1vZGVsGAQgASgJEhIKCmVsYXBzZWRfbXMYBSABKAMSFwoPcmVhc29uaW5nX2lucHV0GAYgASgJEhQKDHJhd19yZXNwb25zZRgHIAEoCRIPCgdvbl90YXNrGAggASgIEhAKCHNldmVyaXR5GAkgASgJEg4KBnJlYXNvbhgKIAEoCRIWCg5jbGFzc2lmaWNhdGlvbhgLIAEoCSK0AQoUR29sZGZpdmVMTE1DYWxsU3RhcnQSDwoHc3Bhbl9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEg0KBW1vZGVsGAMgASgJEg8KB3Rhc2tfaWQYBCABKAkSFQoNc3RhcnRfdGltZV9ucxgFIAEoAxIVCg1pbnB1dF9wcmV2aWV3GAYgASgJEhcKD3RhcmdldF9hZ2VudF9pZBgHIAEoCRIWCg50YXJnZXRfdGFza19pZBgIIAEoCSLhAQoSR29sZGZpdmVMTE1DYWxsRW5kEg8KB3NwYW5faWQYASABKAkSDAoEbmFtZRgCIAEoCRITCgtlbmRfdGltZV9ucxgDIAEoAxIOCgZzdGF0dXMYBCABKAkSDQoFZXJyb3IYBSABKAkSFQoNaW5wdXRfcHJldmlldxgGIAEoCRIWCg5vdXRwdXRfcHJldmlldxgHIAEoCRIXCg90YXJnZXRfYWdlbnRfaWQYCCABKAkSFgoOdGFyZ2V0X3Rhc2tfaWQYCSABKAkSGAoQZGVjaXNpb25fc3VtbWFyeRgKIAEoCSKrAQoTSW52b2NhdGlvbkNhbmNlbGxlZBIVCg1pbnZvY2F0aW9uX2lkGAEgASgJEhIKCmFnZW50X25hbWUYAiABKAkSDgoGcmVhc29uGAMgASgJEhAKCHNldmVyaXR5GAQgASgJEhAKCGRyaWZ0X2lkGAUgASgJEhIKCmRyaWZ0X2tpbmQYBiABKAkSDgoGZGV0YWlsGAcgASgJEhEKCXRvb2xfbmFtZRgIIAEoCSKeAQoQVGFza1RyYW5zaXRpb25lZBIPCgd0YXNrX2lkGAEgASgJEhMKC2Zyb21fc3RhdHVzGAIgASgJEhEKCXRvX3N0YXR1cxgDIAEoCRIOCgZzb3VyY2UYBCABKAkSFgoOcmV2aXNpb25fc3RhbXAYBSABKAUSEgoKYWdlbnRfbmFtZRgGIAEoCRIVCg1pbnZvY2F0aW9uX2lkGAcgASgJIsEBChVUYXNrVHJhbnNpdGlvblJlZnVzZWQSDwoHdGFza19pZBgBIAEoCRIWCg5hdHRlbXB0ZWRfZnJvbRgCIAEoCRIUCgxhdHRlbXB0ZWRfdG8YAyABKAkSDgoGcmVhc29uGAQgASgJEhQKDHBpbl9yZXZpc2lvbhgFIAEoBRIYChBjdXJyZW50X3JldmlzaW9uGAYgASgFEhIKCmFnZW50X25hbWUYByABKAkSFQoNaW52b2NhdGlvbl9pZBgIIAEoCUI5WjdnaXRodWIuY29tL3BlZGFwdWRpL2dvbGRmaXZlL2dlbi9nb2xkZml2ZS92MTtnb2xkZml2ZXYxYgZwcm90bzM", [file_google_protobuf_timestamp, file_goldfive_v1_types]);
+  fileDesc("Chhnb2xkZml2ZS92MS9ldmVudHMucHJvdG8SC2dvbGRmaXZlLnYxIuYRCgVFdmVudBIQCghldmVudF9pZBgBIAEoCRIOCgZydW5faWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAQSLgoKZW1pdHRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKc2Vzc2lvbl9pZBgFIAEoCRIuCgtydW5fc3RhcnRlZBgKIAEoCzIXLmdvbGRmaXZlLnYxLlJ1blN0YXJ0ZWRIABIwCgxnb2FsX2Rlcml2ZWQYCyABKAsyGC5nb2xkZml2ZS52MS5Hb2FsRGVyaXZlZEgAEjQKDnBsYW5fc3VibWl0dGVkGAwgASgLMhouZ29sZGZpdmUudjEuUGxhblN1Ym1pdHRlZEgAEjAKDHBsYW5fcmV2aXNlZBgNIAEoCzIYLmdvbGRmaXZlLnYxLlBsYW5SZXZpc2VkSAASMAoMdGFza19zdGFydGVkGA4gASgLMhguZ29sZGZpdmUudjEuVGFza1N0YXJ0ZWRIABIyCg10YXNrX3Byb2dyZXNzGA8gASgLMhkuZ29sZGZpdmUudjEuVGFza1Byb2dyZXNzSAASNAoOdGFza19jb21wbGV0ZWQYECABKAsyGi5nb2xkZml2ZS52MS5UYXNrQ29tcGxldGVkSAASLgoLdGFza19mYWlsZWQYESABKAsyFy5nb2xkZml2ZS52MS5UYXNrRmFpbGVkSAASMAoMdGFza19ibG9ja2VkGBIgASgLMhguZ29sZGZpdmUudjEuVGFza0Jsb2NrZWRIABI0Cg50YXNrX2NhbmNlbGxlZBgTIAEoCzIaLmdvbGRmaXZlLnYxLlRhc2tDYW5jZWxsZWRIABI0Cg5kcmlmdF9kZXRlY3RlZBgUIAEoCzIaLmdvbGRmaXZlLnYxLkRyaWZ0RGV0ZWN0ZWRIABIyCg1ydW5fY29tcGxldGVkGBUgASgLMhkuZ29sZGZpdmUudjEuUnVuQ29tcGxldGVkSAASLgoLcnVuX2Fib3J0ZWQYFiABKAsyFy5nb2xkZml2ZS52MS5SdW5BYm9ydGVkSAASQAoUY29udmVyc2F0aW9uX3N0YXJ0ZWQYFyABKAsyIC5nb2xkZml2ZS52MS5Db252ZXJzYXRpb25TdGFydGVkSAASPAoSY29udmVyc2F0aW9uX2VuZGVkGBggASgLMh4uZ29sZGZpdmUudjEuQ29udmVyc2F0aW9uRW5kZWRIABI8ChJhcHByb3ZhbF9yZXF1ZXN0ZWQYGSABKAsyHi5nb2xkZml2ZS52MS5BcHByb3ZhbFJlcXVlc3RlZEgAEjgKEGFwcHJvdmFsX2dyYW50ZWQYGiABKAsyHC5nb2xkZml2ZS52MS5BcHByb3ZhbEdyYW50ZWRIABI6ChFhcHByb3ZhbF9yZWplY3RlZBgbIAEoCzIdLmdvbGRmaXZlLnYxLkFwcHJvdmFsUmVqZWN0ZWRIABJHChhhZ2VudF9pbnZvY2F0aW9uX3N0YXJ0ZWQYHCABKAsyIy5nb2xkZml2ZS52MS5BZ2VudEludm9jYXRpb25TdGFydGVkSAASSwoaYWdlbnRfaW52b2NhdGlvbl9jb21wbGV0ZWQYHSABKAsyJS5nb2xkZml2ZS52MS5BZ2VudEludm9jYXRpb25Db21wbGV0ZWRIABI+ChNkZWxlZ2F0aW9uX29ic2VydmVkGB4gASgLMh8uZ29sZGZpdmUudjEuRGVsZWdhdGlvbk9ic2VydmVkSAASRQoXcmVhc29uaW5nX2p1ZGdlX2ludm9rZWQYHyABKAsyIi5nb2xkZml2ZS52MS5SZWFzb25pbmdKdWRnZUludm9rZWRIABJEChdnb2xkZml2ZV9sbG1fY2FsbF9zdGFydBggIAEoCzIhLmdvbGRmaXZlLnYxLkdvbGRmaXZlTExNQ2FsbFN0YXJ0SAASQAoVZ29sZGZpdmVfbGxtX2NhbGxfZW5kGCEgASgLMh8uZ29sZGZpdmUudjEuR29sZGZpdmVMTE1DYWxsRW5kSAASQAoUaW52b2NhdGlvbl9jYW5jZWxsZWQYIiABKAsyIC5nb2xkZml2ZS52MS5JbnZvY2F0aW9uQ2FuY2VsbGVkSAASOgoRdGFza190cmFuc2l0aW9uZWQYIyABKAsyHS5nb2xkZml2ZS52MS5UYXNrVHJhbnNpdGlvbmVkSAASRQoXdGFza190cmFuc2l0aW9uX3JlZnVzZWQYJCABKAsyIi5nb2xkZml2ZS52MS5UYXNrVHJhbnNpdGlvblJlZnVzZWRIABJNChtpbnZvY2F0aW9uX2JvdW5kYXJ5X2VudGVyZWQYJSABKAsyJi5nb2xkZml2ZS52MS5JbnZvY2F0aW9uQm91bmRhcnlFbnRlcmVkSAASSwoaaW52b2NhdGlvbl9ib3VuZGFyeV9leGl0ZWQYJiABKAsyJS5nb2xkZml2ZS52MS5JbnZvY2F0aW9uQm91bmRhcnlFeGl0ZWRIABJDChZzdGVlcmluZ19kZWNpc2lvbl9tYWRlGCcgASgLMiEuZ29sZGZpdmUudjEuU3RlZXJpbmdEZWNpc2lvbk1hZGVIABJJChlsYWRkZXJfdHJhbnNpdGlvbl9kZWNpZGVkGCggASgLMiQuZ29sZGZpdmUudjEuTGFkZGVyVHJhbnNpdGlvbkRlY2lkZWRIABJJChlkZXRlY3Rvcl9kaXNwYXRjaF9vcmRlcmVkGCkgASgLMiQuZ29sZGZpdmUudjEuRGV0ZWN0b3JEaXNwYXRjaE9yZGVyZWRIABI0Cg5wb2xpY3lfYXBwbGllZBgqIAEoCzIaLmdvbGRmaXZlLnYxLlBvbGljeUFwcGxpZWRIABI7ChJyZXRyeV9idWRnZXRfc3BlbnQYKyABKAsyHS5nb2xkZml2ZS52MS5SZXRyeUJ1ZGdldFNwZW50SAASOgoRanVkZ2VtZW50X2VtaXR0ZWQYLCABKAsyHS5nb2xkZml2ZS52MS5KdWRnZW1lbnRFbWl0dGVkSABCCQoHcGF5bG9hZCJiCgpSdW5TdGFydGVkEg4KBnJ1bl9pZBgBIAEoCRIUCgxnb2FsX3N1bW1hcnkYAiABKAkSLgoKc3RhcnRlZF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiLwoLR29hbERlcml2ZWQSIAoFZ29hbHMYASADKAsyES5nb2xkZml2ZS52MS5Hb2FsIjAKDVBsYW5TdWJtaXR0ZWQSHwoEcGxhbhgBIAEoCzIRLmdvbGRmaXZlLnYxLlBsYW4iuQEKEFBsYW5SZXZpc2lvbkRpZmYSFgoOYWRkZWRfdGFza19pZHMYASADKAkSGAoQcmVtb3ZlZF90YXNrX2lkcxgCIAMoCRIZChFtb2RpZmllZF90YXNrX2lkcxgDIAMoCRIqCgthZGRlZF9lZGdlcxgEIAMoCzIVLmdvbGRmaXZlLnYxLlRhc2tFZGdlEiwKDXJlbW92ZWRfZWRnZXMYBSADKAsyFS5nb2xkZml2ZS52MS5UYXNrRWRnZSLeAgoLUGxhblJldmlzZWQSHwoEcGxhbhgBIAEoCzIRLmdvbGRmaXZlLnYxLlBsYW4SKgoKZHJpZnRfa2luZBgCIAEoDjIWLmdvbGRmaXZlLnYxLkRyaWZ0S2luZBIsCghzZXZlcml0eRgDIAEoDjIaLmdvbGRmaXZlLnYxLkRyaWZ0U2V2ZXJpdHkSDgoGcmVhc29uGAQgASgJEhYKDnJldmlzaW9uX2luZGV4GAUgASgNEisKBGRpZmYYBiABKAsyHS5nb2xkZml2ZS52MS5QbGFuUmV2aXNpb25EaWZmEhgKEHRyaWdnZXJfZXZlbnRfaWQYByABKAkSHAoUcmVmaW5lX2lucHV0X3N1bW1hcnkYCCABKAkSHQoVcmVmaW5lX291dHB1dF9zdW1tYXJ5GAkgASgJEhcKD3RhcmdldF9hZ2VudF9pZBgKIAEoCRIPCgdkcnlfcnVuGAsgASgIIi4KC1Rhc2tTdGFydGVkEg8KB3Rhc2tfaWQYASABKAkSDgoGZGV0YWlsGAIgASgJIkEKDFRhc2tQcm9ncmVzcxIPCgd0YXNrX2lkGAEgASgJEhAKCGZyYWN0aW9uGAIgASgCEg4KBmRldGFpbBgDIAEoCSKhAQoNVGFza0NvbXBsZXRlZBIPCgd0YXNrX2lkGAEgASgJEg8KB3N1bW1hcnkYAiABKAkSPAoJYXJ0aWZhY3RzGAMgAygLMikuZ29sZGZpdmUudjEuVGFza0NvbXBsZXRlZC5BcnRpZmFjdHNFbnRyeRowCg5BcnRpZmFjdHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIkIKClRhc2tGYWlsZWQSDwoHdGFza19pZBgBIAEoCRIOCgZyZWFzb24YAiABKAkSEwoLcmVjb3ZlcmFibGUYAyABKAgiPwoLVGFza0Jsb2NrZWQSDwoHdGFza19pZBgBIAEoCRIPCgdibG9ja2VyGAIgASgJEg4KBm5lZWRlZBgDIAEoCSIwCg1UYXNrQ2FuY2VsbGVkEg8KB3Rhc2tfaWQYASABKAkSDgoGcmVhc29uGAIgASgJIsIDCg1EcmlmdERldGVjdGVkEiQKBGtpbmQYASABKA4yFi5nb2xkZml2ZS52MS5EcmlmdEtpbmQSLAoIc2V2ZXJpdHkYAiABKA4yGi5nb2xkZml2ZS52MS5EcmlmdFNldmVyaXR5Eg4KBmRldGFpbBgDIAEoCRIXCg9jdXJyZW50X3Rhc2tfaWQYBCABKAkSGAoQY3VycmVudF9hZ2VudF9pZBgFIAEoCRIVCg1hbm5vdGF0aW9uX2lkGAYgASgJEgoKAmlkGAcgASgJEhUKDXRyaWdnZXJfaW5wdXQYCCABKAkSEwoLYXV0aG9yZWRfYnkYCSABKAkSIAoYc3VwcHJlc3NlZF9ieV91c2VyX3N0ZWVyGAogASgIEhQKDGNvbmRpdGlvbl9pZBgMIAEoCRIuCglsaWZlY3ljbGUYDSABKA4yGy5nb2xkZml2ZS52MS5EcmlmdExpZmVjeWNsZRIxCg1wcmV2X3NldmVyaXR5GA4gASgOMhouZ29sZGZpdmUudjEuRHJpZnRTZXZlcml0eRIfChdvYnNlcnZlZF9yZXZpc2lvbl9pbmRleBgPIAEoBUoECAsQDFIJc3ludGhldGljIicKDFJ1bkNvbXBsZXRlZBIXCg9vdXRjb21lX3N1bW1hcnkYASABKAkiHAoKUnVuQWJvcnRlZBIOCgZyZWFzb24YASABKAkiXgoTQ29udmVyc2F0aW9uU3RhcnRlZBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSLgoKc3RhcnRlZF9hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiUAoRQ29udmVyc2F0aW9uRW5kZWQSFwoPY29udmVyc2F0aW9uX2lkGAEgASgJEhIKCnR1cm5fY291bnQYAiABKA0SDgoGcmVhc29uGAMgASgJIsYBChFBcHByb3ZhbFJlcXVlc3RlZBIRCgl0YXJnZXRfaWQYASABKAkSDAoEa2luZBgCIAEoCRIOCgZwcm9tcHQYAyABKAkSDwoHdGFza19pZBgEIAEoCRI+CghtZXRhZGF0YRgFIAMoCzIsLmdvbGRmaXZlLnYxLkFwcHJvdmFsUmVxdWVzdGVkLk1ldGFkYXRhRW50cnkaLwoNTWV0YWRhdGFFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIjQKD0FwcHJvdmFsR3JhbnRlZBIRCgl0YXJnZXRfaWQYASABKAkSDgoGZGV0YWlsGAIgASgJIjUKEEFwcHJvdmFsUmVqZWN0ZWQSEQoJdGFyZ2V0X2lkGAEgASgJEg4KBmRldGFpbBgCIAEoCSKiAQoWQWdlbnRJbnZvY2F0aW9uU3RhcnRlZBISCgphZ2VudF9uYW1lGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkSFQoNaW52b2NhdGlvbl9pZBgDIAEoCRIcChRwYXJlbnRfaW52b2NhdGlvbl9pZBgEIAEoCRIuCgpzdGFydGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKZAQoYQWdlbnRJbnZvY2F0aW9uQ29tcGxldGVkEhIKCmFnZW50X25hbWUYASABKAkSDwoHdGFza19pZBgCIAEoCRIVCg1pbnZvY2F0aW9uX2lkGAMgASgJEg8KB3N1bW1hcnkYBCABKAkSMAoMY29tcGxldGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKHAQoZSW52b2NhdGlvbkJvdW5kYXJ5RW50ZXJlZBIVCg1pbnZvY2F0aW9uX2lkGAEgASgJEhIKCmFnZW50X25hbWUYAiABKAkSDwoHdGFza19pZBgDIAEoCRIuCgplbnRlcmVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKVAQoYSW52b2NhdGlvbkJvdW5kYXJ5RXhpdGVkEhUKDWludm9jYXRpb25faWQYASABKAkSEgoKYWdlbnRfbmFtZRgCIAEoCRIPCgd0YXNrX2lkGAMgASgJEg4KBnJlYXNvbhgEIAEoCRItCglleGl0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIqsBChJEZWxlZ2F0aW9uT2JzZXJ2ZWQSEgoKZnJvbV9hZ2VudBgBIAEoCRIQCgh0b19hZ2VudBgCIAEoCRIPCgd0YXNrX2lkGAMgASgJEhUKDWludm9jYXRpb25faWQYBCABKAkSLwoLb2JzZXJ2ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhYKDnRvb2xfYXJnc19qc29uGAYgASgJIu8BChVSZWFzb25pbmdKdWRnZUludm9rZWQSDgoGcnVuX2lkGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkSGAoQc3ViamVjdF9hZ2VudF9pZBgDIAEoCRINCgVtb2RlbBgEIAEoCRISCgplbGFwc2VkX21zGAUgASgDEhcKD3JlYXNvbmluZ19pbnB1dBgGIAEoCRIUCgxyYXdfcmVzcG9uc2UYByABKAkSDwoHb25fdGFzaxgIIAEoCBIQCghzZXZlcml0eRgJIAEoCRIOCgZyZWFzb24YCiABKAkSFgoOY2xhc3NpZmljYXRpb24YCyABKAkitAEKFEdvbGRmaXZlTExNQ2FsbFN0YXJ0Eg8KB3NwYW5faWQYASABKAkSDAoEbmFtZRgCIAEoCRINCgVtb2RlbBgDIAEoCRIPCgd0YXNrX2lkGAQgASgJEhUKDXN0YXJ0X3RpbWVfbnMYBSABKAMSFQoNaW5wdXRfcHJldmlldxgGIAEoCRIXCg90YXJnZXRfYWdlbnRfaWQYByABKAkSFgoOdGFyZ2V0X3Rhc2tfaWQYCCABKAki4QEKEkdvbGRmaXZlTExNQ2FsbEVuZBIPCgdzcGFuX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSEwoLZW5kX3RpbWVfbnMYAyABKAMSDgoGc3RhdHVzGAQgASgJEg0KBWVycm9yGAUgASgJEhUKDWlucHV0X3ByZXZpZXcYBiABKAkSFgoOb3V0cHV0X3ByZXZpZXcYByABKAkSFwoPdGFyZ2V0X2FnZW50X2lkGAggASgJEhYKDnRhcmdldF90YXNrX2lkGAkgASgJEhgKEGRlY2lzaW9uX3N1bW1hcnkYCiABKAkiqwEKE0ludm9jYXRpb25DYW5jZWxsZWQSFQoNaW52b2NhdGlvbl9pZBgBIAEoCRISCgphZ2VudF9uYW1lGAIgASgJEg4KBnJlYXNvbhgDIAEoCRIQCghzZXZlcml0eRgEIAEoCRIQCghkcmlmdF9pZBgFIAEoCRISCgpkcmlmdF9raW5kGAYgASgJEg4KBmRldGFpbBgHIAEoCRIRCgl0b29sX25hbWUYCCABKAkingEKEFRhc2tUcmFuc2l0aW9uZWQSDwoHdGFza19pZBgBIAEoCRITCgtmcm9tX3N0YXR1cxgCIAEoCRIRCgl0b19zdGF0dXMYAyABKAkSDgoGc291cmNlGAQgASgJEhYKDnJldmlzaW9uX3N0YW1wGAUgASgFEhIKCmFnZW50X25hbWUYBiABKAkSFQoNaW52b2NhdGlvbl9pZBgHIAEoCSLBAQoVVGFza1RyYW5zaXRpb25SZWZ1c2VkEg8KB3Rhc2tfaWQYASABKAkSFgoOYXR0ZW1wdGVkX2Zyb20YAiABKAkSFAoMYXR0ZW1wdGVkX3RvGAMgASgJEg4KBnJlYXNvbhgEIAEoCRIUCgxwaW5fcmV2aXNpb24YBSABKAUSGAoQY3VycmVudF9yZXZpc2lvbhgGIAEoBRISCgphZ2VudF9uYW1lGAcgASgJEhUKDWludm9jYXRpb25faWQYCCABKAki2wIKFFN0ZWVyaW5nRGVjaXNpb25NYWRlEhUKDWRldGVjdG9yX25hbWUYASABKAkSDwoHb3V0Y29tZRgCIAEoCRIOCgZyZWFzb24YAyABKAkSDQoFc2NvcmUYBCABKAISGwoTY29uc2lkZXJlZF9zZXZlcml0eRgFIAEoCRIXCg9jaG9zZW5fc2V2ZXJpdHkYBiABKAkSJQodY29uc2lkZXJlZF9pbnRlcnZlbnRpb25fbGV2ZWwYByABKAkSIQoZY2hvc2VuX2ludGVydmVudGlvbl9sZXZlbBgIIAEoCRIQCghkcmlmdF9pZBgJIAEoCRIuCgpkZWNpZGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1pbnZvY2F0aW9uX2lkGAsgASgJEg8KB3Rhc2tfaWQYDCABKAkSEgoKYWdlbnRfbmFtZRgNIAEoCSKHAQoXTGFkZGVyVHJhbnNpdGlvbkRlY2lkZWQSEgoKZnJvbV9sZXZlbBgBIAEoCRIQCgh0b19sZXZlbBgCIAEoCRIOCgZyZWFzb24YAyABKAkSEgoKZHJpZnRfa2luZBgEIAEoCRIQCghkcmlmdF9pZBgFIAEoCRIQCghzZXZlcml0eRgGIAEoCSJBChdEZXRlY3RvckRpc3BhdGNoT3JkZXJlZBIWCg5kaXNwYXRjaF9vcmRlchgBIAMoCRIOCgZyZWFzb24YAiABKAkiVQoNUG9saWN5QXBwbGllZBITCgtwb2xpY3lfbmFtZRgBIAEoCRIPCgdvdXRjb21lGAIgASgJEg4KBnJlYXNvbhgDIAEoCRIOCgZkZXRhaWwYBCABKAkiYAoQUmV0cnlCdWRnZXRTcGVudBIRCglvcGVyYXRpb24YASABKAkSDwoHYXR0ZW1wdBgCIAEoDRIYChBidWRnZXRfcmVtYWluaW5nGAMgASgNEg4KBnJlYXNvbhgEIAEoCSLVAgoQSnVkZ2VtZW50RW1pdHRlZBISCgpqdWRnZV9uYW1lGAEgASgJEhQKDHZlcmRpY3Rfa2luZBgCIAEoCRISCgpkcmlmdF9raW5kGAMgASgJEhAKCHNldmVyaXR5GAQgASgJEhQKDHJ1YnJpY19zY29yZRgFIAEoAhJOChFydWJyaWNfZGltZW5zaW9ucxgGIAMoCzIzLmdvbGRmaXZlLnYxLkp1ZGdlbWVudEVtaXR0ZWQuUnVicmljRGltZW5zaW9uc0VudHJ5EhYKDmJvb2xlYW5fcmVzdWx0GAcgASgIEhUKDW51bWVyaWNfdmFsdWUYCCABKAISEwoLbWV0cmljX25hbWUYCSABKAkSDgoGZGV0YWlsGAogASgJGjcKFVJ1YnJpY0RpbWVuc2lvbnNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAI6AjgBQjlaN2dpdGh1Yi5jb20vcGVkYXB1ZGkvZ29sZGZpdmUvZ2VuL2dvbGRmaXZlL3YxO2dvbGRmaXZldjFiBnByb3RvMw", [file_google_protobuf_timestamp, file_goldfive_v1_types]);
 
 /**
  * Event is the uniform envelope wrapping every goldfive event. Sinks
@@ -257,6 +257,42 @@ export type Event = Message<"goldfive.v1.Event"> & {
      */
     value: InvocationBoundaryExited;
     case: "invocationBoundaryExited";
+  } | {
+    /**
+     * @generated from field: goldfive.v1.SteeringDecisionMade steering_decision_made = 39;
+     */
+    value: SteeringDecisionMade;
+    case: "steeringDecisionMade";
+  } | {
+    /**
+     * @generated from field: goldfive.v1.LadderTransitionDecided ladder_transition_decided = 40;
+     */
+    value: LadderTransitionDecided;
+    case: "ladderTransitionDecided";
+  } | {
+    /**
+     * @generated from field: goldfive.v1.DetectorDispatchOrdered detector_dispatch_ordered = 41;
+     */
+    value: DetectorDispatchOrdered;
+    case: "detectorDispatchOrdered";
+  } | {
+    /**
+     * @generated from field: goldfive.v1.PolicyApplied policy_applied = 42;
+     */
+    value: PolicyApplied;
+    case: "policyApplied";
+  } | {
+    /**
+     * @generated from field: goldfive.v1.RetryBudgetSpent retry_budget_spent = 43;
+     */
+    value: RetryBudgetSpent;
+    case: "retryBudgetSpent";
+  } | {
+    /**
+     * @generated from field: goldfive.v1.JudgementEmitted judgement_emitted = 44;
+     */
+    value: JudgementEmitted;
+    case: "judgementEmitted";
   } | { case: undefined; value?: undefined };
 };
 
@@ -2018,4 +2054,509 @@ export type TaskTransitionRefused = Message<"goldfive.v1.TaskTransitionRefused">
  */
 export const TaskTransitionRefusedSchema: GenMessage<TaskTransitionRefused> = /*@__PURE__*/
   messageDesc(file_goldfive_v1_events, 30);
+
+/**
+ * Emitted on every detector evaluation regardless of outcome. Pairs
+ * with ``DriftDetected``: when a detector decides to fire, both events
+ * emit (the ``DriftDetected.id`` matches ``SteeringDecisionMade.drift_id``);
+ * when a detector decides NOT to fire, only ``SteeringDecisionMade``
+ * emits.
+ *
+ * Downstream optimizers consume the silent-path emissions to learn
+ * what goldfive considered before deciding to stay quiet — without it,
+ * the only training signal for tuning detector thresholds is the
+ * positive class (drifts that fired). The negative class
+ * (``outcome="no_drift"``) closes the loop.
+ *
+ * ``considered_*`` fields capture what the detector evaluated; the
+ * ``chosen_*`` fields record what the steerer eventually applied (post
+ * observation-only gating, suppression-window dedup, intervention
+ * ladder routing). On a no-fire path the ``chosen_*`` fields echo the
+ * considered values when the detector's own score crossed a threshold
+ * but the steerer chose not to act; they are empty when the detector
+ * itself decided no drift was present.
+ *
+ * @generated from message goldfive.v1.SteeringDecisionMade
+ */
+export type SteeringDecisionMade = Message<"goldfive.v1.SteeringDecisionMade"> & {
+  /**
+   * Symbolic name of the detector that produced this decision —
+   * ``"reasoning_judge"``, ``"goal_drift"``, ``"tool_loops"``,
+   * ``"capability_check"``, ``"confabulation_risk"``,
+   * ``"reflective_check"``, etc. Free-form string; consumers MUST
+   * tolerate unknown values.
+   *
+   * @generated from field: string detector_name = 1;
+   */
+  detectorName: string;
+
+  /**
+   * ``"no_drift"``         — detector ran, decided not to fire.
+   * ``"drift_emitted"``    — detector fired AND the steerer dispatched
+   *                          the drift (paired ``DriftDetected`` is on
+   *                          the wire with matching ``drift_id``).
+   * ``"drift_suppressed"`` — detector fired but the steerer suppressed
+   *                          the dispatch (observation-only mode, a
+   *                          fresher user-steer was active, the
+   *                          drift was a stale verdict against an
+   *                          already-revised plan, etc.). The paired
+   *                          ``DriftDetected`` event is still emitted
+   *                          for observability with the relevant
+   *                          ``suppressed_*`` flag set.
+   *
+   * @generated from field: string outcome = 2;
+   */
+  outcome: string;
+
+  /**
+   * One-line human-readable reason for the outcome — e.g.
+   * ``"cosine 0.42 below 0.6 healthy bound"``, ``"observation_only=true"``,
+   * ``"stale verdict against revision 7 (live=8)"``. Optional; empty
+   * when no specific reason applies.
+   *
+   * @generated from field: string reason = 3;
+   */
+  reason: string;
+
+  /**
+   * Detector-specific scalar score that drove the decision (e.g.
+   * cosine similarity for reasoning detectors, repeat-count for
+   * tool-loops normalised to ``count / threshold``). 0.0 when no
+   * single score summarises the decision (e.g. categorical detectors).
+   *
+   * @generated from field: float score = 4;
+   */
+  score: number;
+
+  /**
+   * The severity the detector considered — ``"info"`` / ``"warning"``
+   * / ``"critical"``, or ``""`` when no drift would have fired.
+   *
+   * @generated from field: string considered_severity = 5;
+   */
+  consideredSeverity: string;
+
+  /**
+   * The severity the steerer actually applied (may differ when the
+   * intervention ladder demotes / promotes the level). Empty on
+   * ``no_drift`` outcomes.
+   *
+   * @generated from field: string chosen_severity = 6;
+   */
+  chosenSeverity: string;
+
+  /**
+   * The intervention level the detector / steerer considered. Bare
+   * lowercase string of the ``InterventionLevel`` enum
+   * (``"observe"`` / ``"absorb"`` / ``"nudge"`` / ``"cancel_reinvoke"``
+   * / ``"pause_escalate"`` / ``"terminate"``), or ``""`` when no
+   * level was considered.
+   *
+   * @generated from field: string considered_intervention_level = 7;
+   */
+  consideredInterventionLevel: string;
+
+  /**
+   * The intervention level actually applied. Empty when no
+   * intervention fired (``outcome != "drift_emitted"``).
+   *
+   * @generated from field: string chosen_intervention_level = 8;
+   */
+  chosenInterventionLevel: string;
+
+  /**
+   * Cross-reference to the paired ``DriftDetected.id`` when
+   * ``outcome != "no_drift"``. Empty on the silent path.
+   *
+   * @generated from field: string drift_id = 9;
+   */
+  driftId: string;
+
+  /**
+   * Wall-clock time at which the decision was finalised. Advisory; use
+   * the Event envelope's ``sequence`` for ordering.
+   *
+   * @generated from field: google.protobuf.Timestamp decided_at = 10;
+   */
+  decidedAt?: Timestamp;
+
+  /**
+   * ADK invocation_id of the dispatch the decision concerns, when
+   * resolvable. Empty for trajectory-level decisions (e.g. the
+   * periodic goal-drift judge) and for decisions made before an
+   * invocation_id is available.
+   *
+   * @generated from field: string invocation_id = 11;
+   */
+  invocationId: string;
+
+  /**
+   * Task the decision is attributed to, when bound. Empty when the
+   * detector is trajectory-level.
+   *
+   * @generated from field: string task_id = 12;
+   */
+  taskId: string;
+
+  /**
+   * Agent the decision is attributed to (the reasoning subject for
+   * judge detectors; the dispatch target for tool detectors). Empty
+   * when no agent is bound.
+   *
+   * @generated from field: string agent_name = 13;
+   */
+  agentName: string;
+};
+
+/**
+ * Describes the message goldfive.v1.SteeringDecisionMade.
+ * Use `create(SteeringDecisionMadeSchema)` to create a new message.
+ */
+export const SteeringDecisionMadeSchema: GenMessage<SteeringDecisionMade> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 31);
+
+/**
+ * Emitted whenever the steerer's intervention ladder picks a level
+ * for a freshly-emitted drift. The ladder maps
+ * ``(DriftKind, DriftSeverity, occurrence_count)`` to an
+ * :class:`InterventionLevel`; this event records the input + chosen
+ * level so an optimizer can reconstruct the ladder table from
+ * telemetry alone.
+ *
+ * ``from_level`` is RESERVED and currently always emitted as ``""``.
+ * The intervention ladder is stateless per call (it derives the level
+ * purely from ``(kind, severity, occurrence_count)``), so the steerer
+ * does not carry a prior-level slot. Consumers that want true level
+ * transitions reconstruct them by joining LadderTransitionDecided rows
+ * on ``(drift_kind, current task)`` ordered by ``sequence`` — the
+ * ``reason`` field already distinguishes first-occurrence from repeat.
+ * The field is kept on the wire so a future stateful ladder can
+ * populate it without a proto change.
+ *
+ * @generated from message goldfive.v1.LadderTransitionDecided
+ */
+export type LadderTransitionDecided = Message<"goldfive.v1.LadderTransitionDecided"> & {
+  /**
+   * RESERVED — always ``""`` today. See the message-level comment:
+   * the ladder is stateless, so there is no prior-level slot to
+   * stamp. Reconstruct transitions consumer-side via the join on
+   * ``(drift_kind, task)`` ordered by ``sequence``.
+   *
+   * @generated from field: string from_level = 1;
+   */
+  fromLevel: string;
+
+  /**
+   * Bare lowercase ``InterventionLevel`` enum name the ladder picked.
+   * One of ``observe`` / ``absorb`` / ``nudge`` / ``cancel_reinvoke``
+   * / ``pause_escalate`` / ``terminate``.
+   *
+   * @generated from field: string to_level = 2;
+   */
+  toLevel: string;
+
+  /**
+   * One-line human-readable explanation — typically
+   * ``"first occurrence"`` / ``"repeat (count=N)"`` /
+   * ``"severity=critical short-circuits"``.
+   *
+   * @generated from field: string reason = 3;
+   */
+  reason: string;
+
+  /**
+   * ``DriftKind`` value as ``DRIFT_KIND_*`` string (matching the
+   * proto enum name so consumers can parse with ``DriftKind.Value``).
+   *
+   * @generated from field: string drift_kind = 4;
+   */
+  driftKind: string;
+
+  /**
+   * Cross-reference to ``DriftDetected.id`` for the drift that
+   * triggered the ladder lookup.
+   *
+   * @generated from field: string drift_id = 5;
+   */
+  driftId: string;
+
+  /**
+   * ``DriftSeverity`` value as ``DRIFT_SEVERITY_*`` string.
+   *
+   * @generated from field: string severity = 6;
+   */
+  severity: string;
+};
+
+/**
+ * Describes the message goldfive.v1.LadderTransitionDecided.
+ * Use `create(LadderTransitionDecidedSchema)` to create a new message.
+ */
+export const LadderTransitionDecidedSchema: GenMessage<LadderTransitionDecided> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 32);
+
+/**
+ * Emitted once per session (or each time the steerer recomputes the
+ * dispatch order — typically just at first observation) recording the
+ * detector dispatch ordering. The ordering is deterministic in
+ * goldfive today but the contract reserves the freedom to reorder /
+ * skip detectors based on runtime config (e.g. ``reasoning_drift_mode``
+ * disables embedding detectors), and an optimizer that wants to learn
+ * "what runs when" needs to see the snapshot rather than infer from
+ * fire patterns.
+ *
+ * @generated from message goldfive.v1.DetectorDispatchOrdered
+ */
+export type DetectorDispatchOrdered = Message<"goldfive.v1.DetectorDispatchOrdered"> & {
+  /**
+   * Symbolic detector names in dispatch order. Names mirror those used
+   * by ``SteeringDecisionMade.detector_name``.
+   *
+   * @generated from field: repeated string dispatch_order = 1;
+   */
+  dispatchOrder: string[];
+
+  /**
+   * One-line description of why the order is what it is — typically
+   * ``"default"`` / ``"reasoning_drift_mode=disabled excludes embedding detectors"``
+   * etc.
+   *
+   * @generated from field: string reason = 2;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message goldfive.v1.DetectorDispatchOrdered.
+ * Use `create(DetectorDispatchOrderedSchema)` to create a new message.
+ */
+export const DetectorDispatchOrderedSchema: GenMessage<DetectorDispatchOrdered> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 33);
+
+/**
+ * Generic policy-decision event for any steerer ``else-if`` branch
+ * that isn't a ``DriftDetected``. Examples: observation-only mode
+ * gating an emit, the same-turn dedup skipping a re-fire, the
+ * supersedes-integration set_session_plan path, a user-steer
+ * cooldown suppressing a follow-up drift. Each is a steerer policy
+ * that an optimizer should be able to count, not a detector-level
+ * signal.
+ *
+ * @generated from message goldfive.v1.PolicyApplied
+ */
+export type PolicyApplied = Message<"goldfive.v1.PolicyApplied"> & {
+  /**
+   * Stable symbolic name of the policy — e.g.
+   * ``"observation_only_gate"`` / ``"supersession_integration"`` /
+   * ``"user_steer_cooldown"`` / ``"same_turn_dedup"`` /
+   * ``"refine_failure_threshold"``.
+   *
+   * @generated from field: string policy_name = 1;
+   */
+  policyName: string;
+
+  /**
+   * What the policy did — typically ``"applied"`` / ``"skipped"`` /
+   * ``"suppressed"``. Free-form; consumers MUST tolerate unknown values.
+   *
+   * @generated from field: string outcome = 2;
+   */
+  outcome: string;
+
+  /**
+   * Brief explanation for the outcome.
+   *
+   * @generated from field: string reason = 3;
+   */
+  reason: string;
+
+  /**
+   * Optional structured detail (e.g. ``"task_id=t1 count=3"``);
+   * empty when no per-call detail applies.
+   *
+   * @generated from field: string detail = 4;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message goldfive.v1.PolicyApplied.
+ * Use `create(PolicyAppliedSchema)` to create a new message.
+ */
+export const PolicyAppliedSchema: GenMessage<PolicyApplied> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 34);
+
+/**
+ * Emitted on each refine attempt (success or failure) recording the
+ * per-call retry-budget state. The budget is
+ * ``LLMPlanner._max_refine_attempts`` (default 2); each event records
+ * the attempt number and how many attempts remain.
+ *
+ * @generated from message goldfive.v1.RetryBudgetSpent
+ */
+export type RetryBudgetSpent = Message<"goldfive.v1.RetryBudgetSpent"> & {
+  /**
+   * Symbolic operation name — ``"refine"`` / ``"refine_user_steer"``
+   * / ``"generate"`` / ``"plan_template_validate"``.
+   *
+   * @generated from field: string operation = 1;
+   */
+  operation: string;
+
+  /**
+   * 1-indexed attempt number (1 = first try).
+   *
+   * @generated from field: uint32 attempt = 2;
+   */
+  attempt: number;
+
+  /**
+   * How many further attempts are allowed before the operation gives
+   * up. ``0`` when this attempt exhausted the budget.
+   *
+   * @generated from field: uint32 budget_remaining = 3;
+   */
+  budgetRemaining: number;
+
+  /**
+   * One-line reason / outcome — e.g. ``"call_llm raised: ..."`` on a
+   * retry, ``"validated"`` on success, ``"budget_exhausted"`` after
+   * the final attempt.
+   *
+   * @generated from field: string reason = 4;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message goldfive.v1.RetryBudgetSpent.
+ * Use `create(RetryBudgetSpentSchema)` to create a new message.
+ */
+export const RetryBudgetSpentSchema: GenMessage<RetryBudgetSpent> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 35);
+
+/**
+ * Emitted on every :class:`Judge.evaluate` call that produced a
+ * populated verdict (an empty-default verdict is treated as "no
+ * signal" and skipped — see :mod:`goldfive.judges.base`).
+ *
+ * ``verdict_kind`` selects which of the verdict-flavour fields the
+ * consumer should read. The runtime picks the first populated
+ * flavour in the order: drift, rubric, boolean, numeric. When a
+ * drift-flavoured verdict fires the runtime ALSO emits the legacy
+ * :class:`DriftDetected` envelope so pre-judges consumers keep
+ * working — :class:`JudgementEmitted` is additive, not a
+ * replacement.
+ *
+ * Fields not relevant to the selected ``verdict_kind`` retain their
+ * proto-default zero values (empty string / 0.0 / false / empty
+ * map). Consumers MUST switch on ``verdict_kind`` rather than
+ * inferring the flavour from field-population heuristics so a judge
+ * that opts to populate ``detail`` on a numeric verdict doesn't
+ * confuse downstream readers.
+ *
+ * @generated from message goldfive.v1.JudgementEmitted
+ */
+export type JudgementEmitted = Message<"goldfive.v1.JudgementEmitted"> & {
+  /**
+   * Stable identifier for the judge that produced this verdict —
+   * the value the judge implementation sets on its ``name`` class
+   * attribute. Used as the join key for per-judge time series in
+   * downstream consumers. Always non-empty on emitted events.
+   *
+   * @generated from field: string judge_name = 1;
+   */
+  judgeName: string;
+
+  /**
+   * One of ``"drift"`` / ``"rubric"`` / ``"boolean"`` / ``"numeric"``.
+   * Free-form string for forward-compat — readers MUST tolerate
+   * unknown values and SHOULD surface them as-is rather than
+   * dropping the event.
+   *
+   * @generated from field: string verdict_kind = 2;
+   */
+  verdictKind: string;
+
+  /**
+   * Drift kind as the bare lowercase string (e.g. ``"off_topic"``,
+   * ``"goal_drift"``). Populated when ``verdict_kind == "drift"``;
+   * empty otherwise.
+   *
+   * @generated from field: string drift_kind = 3;
+   */
+  driftKind: string;
+
+  /**
+   * Severity as the bare lowercase string (``"info"`` /
+   * ``"warning"`` / ``"critical"``). Populated for drift verdicts;
+   * empty otherwise.
+   *
+   * @generated from field: string severity = 4;
+   */
+  severity: string;
+
+  /**
+   * Aggregate rubric score. Domain-defined range; goldfive does not
+   * interpret the value. Populated when ``verdict_kind == "rubric"``;
+   * 0.0 otherwise (the proto-default — consumers MUST gate reads on
+   * ``verdict_kind``).
+   *
+   * @generated from field: float rubric_score = 5;
+   */
+  rubricScore: number;
+
+  /**
+   * Per-dimension rubric sub-scores keyed on dimension name (e.g.
+   * ``"format"``, ``"evidence_quality"``). Populated when
+   * ``verdict_kind == "rubric"``; empty map otherwise.
+   *
+   * @generated from field: map<string, float> rubric_dimensions = 6;
+   */
+  rubricDimensions: { [key: string]: number };
+
+  /**
+   * Boolean pass / fail result. Populated when
+   * ``verdict_kind == "boolean"``; ``false`` (the proto-default)
+   * otherwise.
+   *
+   * @generated from field: bool boolean_result = 7;
+   */
+  booleanResult: boolean;
+
+  /**
+   * Single numeric metric value. Populated when
+   * ``verdict_kind == "numeric"``; 0.0 otherwise.
+   *
+   * @generated from field: float numeric_value = 8;
+   */
+  numericValue: number;
+
+  /**
+   * Name of the metric carried by ``numeric_value`` (e.g.
+   * ``"cost_usd"``, ``"latency_ms"``, ``"tokens_out"``). Populated
+   * when ``verdict_kind == "numeric"``; empty otherwise.
+   *
+   * @generated from field: string metric_name = 9;
+   */
+  metricName: string;
+
+  /**
+   * One-line human-readable explanation. Populated on any flavour
+   * when the judge has a short rationale to surface to operators
+   * (Gantt tooltip / log line). Up to 512 chars on the wire;
+   * producers SHOULD truncate longer rationales with the
+   * " … [truncated]" convention used elsewhere in this file.
+   *
+   * @generated from field: string detail = 10;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message goldfive.v1.JudgementEmitted.
+ * Use `create(JudgementEmittedSchema)` to create a new message.
+ */
+export const JudgementEmittedSchema: GenMessage<JudgementEmitted> = /*@__PURE__*/
+  messageDesc(file_goldfive_v1_events, 36);
 
