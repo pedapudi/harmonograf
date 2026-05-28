@@ -80,10 +80,10 @@ async def main() -> None:
     server = os.environ.get("HARMONOGRAF_SERVER", "127.0.0.1:7531")
     plan = build_plan()
     runner = Runner(
-        agent=CallableAdapter(worker, name="worker"),
+        agent=CallableAdapter(worker, available_agents=["worker"]),
         planner=StaticPlanner(plan=plan),
         executor=SequentialExecutor(),
-        goal_deriver=PassthroughGoalDeriver(),
+        goal_deriver=PassthroughGoalDeriver("Research, draft, review."),
         sinks=[],
     )
     # Attach a HarmonografSink via the observe() convenience helper. This
@@ -94,8 +94,12 @@ async def main() -> None:
         name="goldfive-orchestrated-demo",
         server_addr=server,
     )
-    outcome = await runner.run("Research, draft, and review a short summary.")
-    print(f"done: {outcome.final_task_id}")
+    try:
+        outcome = await runner.run("Research, draft, and review a short summary.")
+    finally:
+        await runner.close()
+    print(f"success={outcome.success}, reason={outcome.reason!r}")
+    print(f"run_id={outcome.session.run_id}")
 
 
 if __name__ == "__main__":
