@@ -90,6 +90,29 @@ def build_parser() -> argparse.ArgumentParser:
             "disables auth. /healthz and /readyz are always unauthenticated."
         ),
     )
+    # ---- console UI serving (static_site.py) ------------------------
+    p.add_argument(
+        "--web-root",
+        default="",
+        help=(
+            "directory to serve the built console SPA from on the web port "
+            "(alongside gRPC-Web + health); empty auto-locates the packaged "
+            "console, then ../frontend/dist. If no bundle is found the server "
+            "logs a warning and serves gRPC-Web + health only."
+        ),
+    )
+    p.add_argument(
+        "--public-base-url",
+        default="",
+        help=(
+            "public gRPC-Web base URL the browser should use to reach this "
+            "server; injected into the served index.html as "
+            "window.__HARMONOGRAF_API__. Empty derives it per-request from the "
+            "Host / X-Forwarded-* headers, so one bundle works behind any "
+            "host/port (set this only behind a reverse proxy that rewrites the "
+            "path or terminates on a different public URL)."
+        ),
+    )
     p.add_argument(
         "--legacy-plan-attribution-window-ms",
         type=float,
@@ -159,6 +182,8 @@ def config_from_args(argv: list[str] | None = None) -> ServerConfig:
         log_format=args.log_format,
         metrics_interval_seconds=args.metrics_interval_seconds,
         auth_token=args.auth_token,
+        web_root=args.web_root,
+        public_base_url=args.public_base_url,
         legacy_plan_attribution_window_ms=args.legacy_plan_attribution_window_ms,
         heartbeat_timeout_seconds=args.heartbeat_timeout_seconds,
         payload_max_bytes=args.payload_max_bytes,

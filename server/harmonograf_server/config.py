@@ -24,6 +24,18 @@ class ServerConfig:
     metrics_interval_seconds: float = 30.0  # 0 disables periodic metrics
     auth_token: str = ""  # empty string disables shared-secret auth
 
+    # ---- console UI serving (static_site.py) -------------------------
+    # The web port serves the built console SPA alongside gRPC-Web +
+    # health. ``web_root`` overrides where the bundle is read from; empty
+    # auto-locates (packaged _console dir, then ../frontend/dist). When no
+    # bundle is found the server logs a warning and serves gRPC-Web +
+    # health only. ``public_base_url`` (if set) is injected verbatim into
+    # the served index.html as the SPA's gRPC-Web endpoint
+    # (window.__HARMONOGRAF_API__); empty derives it per-request from the
+    # Host / X-Forwarded-* headers so one bundle works behind any host/port.
+    web_root: str = ""
+    public_base_url: str = ""
+
     # Opt-in legacy time-window fallback for plan-revision attribution
     # (pre-strict-id-dedup behaviour from before harmonograf#99). Default
     # 0 disables the fallback — plan revisions without a trigger_event_id

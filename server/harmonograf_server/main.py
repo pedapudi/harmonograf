@@ -39,6 +39,7 @@ from harmonograf_server.pb import service_pb2_grpc
 from harmonograf_server.metrics import metrics_loop
 from harmonograf_server.retention import retention_loop
 from harmonograf_server.rpc.telemetry import TelemetryServicer, heartbeat_sweeper
+from harmonograf_server.static_site import build_static_router
 from harmonograf_server.storage import make_store
 
 
@@ -177,7 +178,17 @@ class Harmonograf:
         # CORS middleware sits outside auth so preflights succeed even
         # before the browser attaches the bearer token.
         grpc_web_app = asgi_cors(grpc_web_app)
-        self._web_app = build_health_router(self.store, grpc_web_app)
+        # Health router answers /healthz + /readyz and forwards everything
+        # else to gRPC-Web. The static layer wraps that: it serves the
+        # built console SPA (with runtime endpoint injection + SPA fallback)
+        # for browser GET/HEAD paths and forwards gRPC-Web + health through.
+        health_app = build_health_router(self.store, grpc_web_app)
+        self._web_app = build_static_router(
+            health_app,
+            web_root=self.cfg.web_root,
+            web_port=self.cfg.web_port,
+            public_base_url=self.cfg.public_base_url,
+        )
         self._web_shutdown = asyncio.Event()
         hc = HypercornConfig()
         hc.bind = [f"{self.cfg.host}:{self.cfg.web_port}"]

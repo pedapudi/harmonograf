@@ -13,7 +13,7 @@ CLIENT_PB := $(ROOT)/client/harmonograf_client/pb
 FRONTEND_PB := $(ROOT)/frontend/src/pb
 
 .PHONY: help proto proto-python proto-ts \
-        server-install client-install frontend-install install \
+        server-install client-install frontend-install install console \
         server-run frontend-dev demo demo-presentation demo-presentation-orchestrated demo-standalone .demo-agents-stage \
         test server-test client-test frontend-test e2e \
         lint format clean stats
@@ -24,6 +24,7 @@ help:
 	@echo "  proto-python     Regenerate Python stubs under server/ and client/"
 	@echo "  proto-ts         Regenerate TypeScript stubs under frontend/"
 	@echo "  install          Install all components"
+	@echo "  console          Build the frontend and stage it into the server wheel"
 	@echo "  server-run       Run the server in dev mode"
 	@echo "  frontend-dev     Run the Vite dev server"
 	@echo "  demo             Boot server + frontend + adk web (shows both presentation_agent variants)"
@@ -106,6 +107,26 @@ client-install:
 
 frontend-install:
 	@cd $(ROOT)/frontend && pnpm install --frozen-lockfile
+
+# ---------------------------------------------------------------------------
+# Console bundle (ship the built SPA inside the server wheel)
+# ---------------------------------------------------------------------------
+
+# Where the wheel expects the bundled console (see server/pyproject.toml
+# force-include + static_site.py importlib.resources lookup).
+CONSOLE_DIR := $(ROOT)/server/harmonograf_server/_console
+
+# Build the frontend and stage it into the server package so the wheel ships
+# the UI. Run this before packaging the server (`uv build server`, etc.).
+# The server's static_site.py also auto-locates ../frontend/dist in a repo
+# checkout, so `make console` is only required for producing a distributable
+# wheel — local `make server-run` works without it.
+console:
+	@cd $(ROOT)/frontend && pnpm install --frozen-lockfile && pnpm build
+	@rm -rf $(CONSOLE_DIR)
+	@mkdir -p $(CONSOLE_DIR)
+	@cp -R $(ROOT)/frontend/dist/. $(CONSOLE_DIR)/
+	@echo "Console staged into $(CONSOLE_DIR) (shipped in the server wheel)."
 
 # ---------------------------------------------------------------------------
 # Run
@@ -322,4 +343,5 @@ clean:
 	@find $(ROOT) -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
 	@find $(ROOT) -type d -name .pytest_cache -prune -exec rm -rf {} + 2>/dev/null || true
 	@rm -rf $(ROOT)/frontend/dist
+	@rm -rf $(CONSOLE_DIR)
 	@echo "Clean done. Run 'make proto' to regenerate stubs."
