@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Shell } from './components/shell/Shell';
 import { StressPage } from './gantt/StressPage';
 import { useUiStore } from './state/uiStore';
-import { useSessionsStore } from './state/sessionsStore';
 import { sessionIdFromHash } from './lib/sessionRoute';
 
 // Minimal hash router. The stress harness is dev-only and intentionally not
@@ -18,28 +17,28 @@ function useHashRoute(): string {
 }
 
 // Reads a `#/session/<id>` deep link and selects that session in the UI store.
-// Runs on the initial hash and on every hashchange. Because the deep-linked id
-// may not have arrived from ListSessions yet (sessions still loading), it
-// records the desired id and (re)applies the selection whenever the sessions
-// list changes — selecting the session as soon as it appears. Setting
-// currentSessionId here also pre-empts SessionsSyncer's newest-session
-// auto-select, so a deep link opens straight into its trace.
+// Applies each distinct deep-link target exactly once — on the initial hash and
+// again whenever the hash changes to a new session. The selection is eager: the
+// id need not have arrived from ListSessions yet (WatchSession/ListSessions will
+// populate it), and setting currentSessionId here also pre-empts SessionsSyncer's
+// newest-first auto-select, so a deep link opens straight into its trace.
+//
+// Crucially this does NOT re-fire on every sessions poll: doing so would yank the
+// user back to the deep-linked session ~every 5s after they navigate away via the
+// picker (which updates the store, not the hash), trapping them on that session.
 function useSessionDeepLink(hash: string): void {
   const setCurrentSession = useUiStore((s) => s.setCurrentSession);
-  const sessions = useSessionsStore((s) => s.sessions);
-
   const wantedId = sessionIdFromHash(hash);
+  const appliedId = useRef<string | null>(null);
 
   useEffect(() => {
     if (!wantedId) return;
-    // Already selected — nothing to do.
-    const current = useUiStore.getState().currentSessionId;
-    if (current === wantedId) return;
-    // If the session is known, select it now. If not, select it eagerly
-    // anyway: WatchSession/ListSessions will populate it, and this still
-    // blocks SessionsSyncer's newest-first auto-select from racing ahead.
+    // Apply this target once; let a later manual selection (picker) stick.
+    if (appliedId.current === wantedId) return;
+    appliedId.current = wantedId;
+    if (useUiStore.getState().currentSessionId === wantedId) return;
     setCurrentSession(wantedId);
-  }, [wantedId, sessions, setCurrentSession]);
+  }, [wantedId, setCurrentSession]);
 }
 
 export default function App() {

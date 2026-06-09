@@ -79,6 +79,33 @@ describe('App #/session/<id> deep link', () => {
     expect(useUiStore.getState().currentSessionId).toBe('sess-late');
   });
 
+  it('does not bounce back to the deep link after a manual selection', () => {
+    // Regression: the effect must apply the deep link once, not re-fire on
+    // every ListSessions poll. Otherwise a user who deep-links to sess-a and
+    // then picks sess-b (which updates the store, not the hash) gets dragged
+    // back to sess-a on the next poll.
+    setHash('#/session/sess-a');
+    const { rerender } = render(<App />);
+    expect(useUiStore.getState().currentSessionId).toBe('sess-a');
+
+    // User picks another session via the picker.
+    act(() => {
+      useUiStore.getState().setCurrentSession('sess-b');
+    });
+
+    // A ListSessions poll lands (new sessions array) and App re-renders.
+    act(() => {
+      useSessionsStore.setState({
+        sessions: [{ id: 'sess-a' } as RpcSession, { id: 'sess-b' } as RpcSession],
+        loading: false,
+        error: null,
+      });
+    });
+    rerender(<App />);
+
+    expect(useUiStore.getState().currentSessionId).toBe('sess-b');
+  });
+
   it('does not select anything for the default route', () => {
     setHash('#/');
     render(<App />);

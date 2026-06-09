@@ -17,8 +17,12 @@ browser the whole console — no separate static host or frontend dev server.
 
 - `GET /` and `GET /index.html` → the SPA's `index.html`.
 - `GET /assets/*` and any other real file in the web root → served directly.
-- Any other non-API path that isn't a real file → falls back to `index.html`,
-  so client-side hash routes such as `#/session/<id>` load when deep-linked.
+  Content-hashed `/assets/*` are sent `Cache-Control: immutable`; `index.html`
+  is sent `no-cache` so a redeploy is picked up.
+- Any other **extension-less** non-API path → falls back to `index.html`, so
+  client-side hash routes such as `#/session/<id>` load when deep-linked. A
+  missing *file-like* path (`*.js`, `*.svg`, …) returns `404` rather than HTML,
+  to avoid handing the browser a MIME-mismatched `index.html`.
 - gRPC-Web requests (`application/grpc-web*`), gRPC service-method paths
   (`/<pkg>.<Service>/<Method>`), and the health routes are never intercepted —
   they always reach the gRPC-Web / health app.

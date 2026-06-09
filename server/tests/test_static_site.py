@@ -21,6 +21,8 @@ import pytest
 from harmonograf_server.config import ServerConfig
 from harmonograf_server.main import Harmonograf
 from harmonograf_server.static_site import (
+    _inject_runtime_config,
+    _safe_join,
     build_static_router,
     locate_web_root,
 )
@@ -225,6 +227,73 @@ def test_locate_web_root_prefers_explicit(tmp_path):
     # A bogus explicit root falls through (here to the repo dev fallback or
     # None); the function must not return the bogus path.
     assert locate_web_root(str(tmp_path / "nope")) != str(tmp_path / "nope")
+
+
+@pytest.mark.asyncio
+async def test_missing_file_like_path_returns_404(tmp_path):
+    """A request for a concrete asset that doesn't exist must 404, not serve
+    the SPA fallback (returning index.html for a missing .js/.svg only yields
+    MIME errors in the browser)."""
+    root = _make_web_root(tmp_path)
+
+    async def inner(scope, receive, send):  # pragma: no cover
+        raise AssertionError("inner should not be called")
+
+    app = build_static_router(inner, web_root=root, web_port=7532)
+    status, headers, body = await _collect(app, _http_scope("/does-not-exist.js"))
+    assert status == 404
+    assert headers[b"content-type"].startswith(b"text/plain")
+    assert b"window.__HARMONOGRAF_API__" not in body
+
+
+@pytest.mark.asyncio
+async def test_assets_get_immutable_cache_header(tmp_path):
+    """Vite content-hashes /assets/*, so they are served cache-immutable."""
+    root = _make_web_root(tmp_path)
+
+    async def inner(scope, receive, send):  # pragma: no cover
+        raise AssertionError("inner should not be called")
+
+    app = build_static_router(inner, web_root=root, web_port=7532)
+    _, headers, _ = await _collect(app, _http_scope("/assets/index.js"))
+    assert b"immutable" in headers.get(b"cache-control", b"")
+
+
+@pytest.mark.asyncio
+async def test_head_request_sends_no_body_but_keeps_content_length(tmp_path):
+    """HEAD carries the headers (incl. the GET Content-Length) but no body."""
+    root = _make_web_root(tmp_path)
+
+    async def inner(scope, receive, send):  # pragma: no cover
+        raise AssertionError("inner should not be called")
+
+    app = build_static_router(inner, web_root=root, web_port=7532)
+    status, headers, body = await _collect(app, _http_scope("/", method="HEAD"))
+    assert status == 200
+    assert body == b""
+    # Content-Length reflects what a GET would have returned (non-zero).
+    assert int(headers[b"content-length"]) > 0
+
+
+def test_safe_join_rejects_traversal(tmp_path):
+    """Path traversal must not escape the web root."""
+    root = _make_web_root(tmp_path)
+    # A benign nested path resolves inside root.
+    inside = _safe_join(root, "/assets/index.js")
+    assert inside is not None and inside.startswith(os.path.abspath(root))
+    # Climbing out of root is refused.
+    assert _safe_join(root, "/../../etc/passwd") is None
+    assert _safe_join(root, "/../" + os.path.basename(root) + "_sibling/x") is None
+
+
+def test_inject_runtime_config_escapes_hostile_url():
+    """A crafted endpoint can't break out of the JS string or the <script>."""
+    html = '<html><head><script type="module" src="/a.js"></script></head></html>'
+    out = _inject_runtime_config(html, '"></script><script>alert(1)//')
+    # No raw closing tag survives to terminate our injected <script> early.
+    assert "</script><script>alert(1)" not in out
+    # The original module script is preserved exactly once.
+    assert out.count('<script type="module"') == 1
 
 
 # ---- end-to-end through Harmonograf -------------------------------------

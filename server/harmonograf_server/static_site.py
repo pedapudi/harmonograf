@@ -8,9 +8,10 @@ layer that:
   * serves ``index.html`` at ``/`` (and as the SPA fallback),
   * serves hashed asset files under ``/assets/*`` and any other real file
     in the web root (favicon, etc.),
-  * falls back to ``index.html`` for any *other* GET/HEAD path that is not
-    a real file — so client-side hash routes like ``/#/session/<id>`` load
-    the SPA when deep-linked, and
+  * falls back to ``index.html`` for any *other* extension-less GET/HEAD
+    path that is not a real file — so client-side hash routes like
+    ``/#/session/<id>`` load the SPA when deep-linked, while a missing
+    file-like path (``*.js``/``*.svg`` …) returns 404 rather than HTML, and
   * never touches gRPC-Web requests (content-type ``application/grpc-web*``)
     or the health routes — those flow straight through to ``inner``.
 
@@ -33,6 +34,8 @@ gRPC-Web + health, just without the bundled UI.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
 import re
@@ -121,6 +124,17 @@ def _content_type(path: str) -> str:
     return _CONTENT_TYPES.get(ext.lower(), "application/octet-stream")
 
 
+def _looks_like_file(path: str) -> bool:
+    """True when the last path segment has a file extension (e.g. ``.js``,
+    ``.svg``). Such a request is for a concrete asset, so when it isn't found
+    we return 404 rather than the SPA fallback — handing back ``index.html``
+    (text/html) for a missing ``.js``/``.css`` only yields confusing MIME
+    errors in the browser. Navigation/hash routes have no extension and still
+    fall through to the SPA."""
+
+    return "." in os.path.basename(path)
+
+
 def _is_grpc_web(scope: dict) -> bool:
     for k, v in scope.get("headers") or ():
         if k.lower() == b"content-type" and v.lower().startswith(b"application/grpc-web"):
@@ -147,14 +161,13 @@ def _inject_runtime_config(html: str, api_base_url: str) -> str:
     gRPC-Web endpoint at runtime. Injected just before the first module
     script so it runs before the app boots."""
 
-    # JS string-literal escaping for the URL (it is operator-controlled but
-    # be defensive about quotes / closing tags anyway).
-    safe = (
-        api_base_url.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("</", "<\\/")
-    )
-    snippet = f'<script>window.__HARMONOGRAF_API__ = "{safe}";</script>'
+    # Emit a valid JS string literal. ``json.dumps`` handles all string
+    # escaping (quotes, backslashes, control chars, U+2028/U+2029); the URL is
+    # largely operator-controlled but can be host/X-Forwarded-Host-derived, so
+    # we additionally neutralise ``</`` (which JSON leaves intact) to keep a
+    # crafted value from closing the <script> element early.
+    literal = json.dumps(api_base_url).replace("</", "<\\/")
+    snippet = f"<script>window.__HARMONOGRAF_API__ = {literal};</script>"
     needle = "<script type=\"module\""
     idx = html.find(needle)
     if idx != -1:
@@ -207,13 +220,31 @@ def build_static_router(
 ) -> ASGIApp:
     """Wrap ``inner`` (gRPC-Web + health) with static SPA serving.
 
-    ``web_root`` is an explicit override; when ``None`` the bundle is
-    auto-located. ``public_base_url`` (if non-empty) is injected verbatim as
-    the SPA's gRPC-Web endpoint; otherwise it is derived per-request from the
-    Host / forwarding headers.
+    ``web_root`` is an explicit override; when falsy (``None``/``""``) the
+    bundle is auto-located. ``public_base_url`` (if non-empty) is injected
+    verbatim as the SPA's gRPC-Web endpoint; otherwise it is derived
+    per-request from the Host / forwarding headers.
     """
 
     root = locate_web_root(web_root)
+    # Read index.html once at startup: it is an immutable build artifact, so
+    # re-reading it per request would only add blocking disk I/O to the shared
+    # event loop (which also serves gRPC-Web streaming). Only the per-request
+    # endpoint injection varies, and that is done in memory below. A read
+    # failure here degrades to "no bundle" (gRPC-Web + health only).
+    index_template: Optional[str] = None
+    if root is not None:
+        index_path = os.path.join(root, "index.html")
+        try:
+            with open(index_path, "r", encoding="utf-8") as f:
+                index_template = f.read()
+        except OSError:
+            logger.exception(
+                "failed to read index.html at %s; serving gRPC-Web + health only",
+                index_path,
+            )
+            root = None
+
     if root is None:
         logger.warning(
             "console UI bundle not found (looked for index.html via "
@@ -224,9 +255,17 @@ def build_static_router(
     else:
         logger.info("serving console UI from %s", root)
 
-    index_path = os.path.join(root, "index.html") if root else None
-
-    async def _send_bytes(send, status: int, body: bytes, content_type: str, *, extra_headers=None) -> None:
+    async def _send_bytes(
+        send,
+        status: int,
+        body: bytes,
+        content_type: str,
+        *,
+        extra_headers=None,
+        head: bool = False,
+    ) -> None:
+        # Content-Length always reflects the GET body; a HEAD response carries
+        # the headers but no body (RFC 9110 §9.3.2).
         headers = [
             (b"content-type", content_type.encode("latin-1")),
             (b"content-length", str(len(body)).encode("latin-1")),
@@ -234,24 +273,18 @@ def build_static_router(
         if extra_headers:
             headers.extend(extra_headers)
         await send({"type": "http.response.start", "status": status, "headers": headers})
-        await send({"type": "http.response.body", "body": body})
+        await send({"type": "http.response.body", "body": b"" if head else body})
 
-    async def _serve_index(scope, send, *, status: int = 200) -> None:
-        try:
-            with open(index_path, "r", encoding="utf-8") as f:
-                html = f.read()
-        except OSError:
-            logger.exception("failed to read index.html at %s", index_path)
-            await _send_bytes(send, 500, b"internal error\n", "text/plain; charset=utf-8")
-            return
+    async def _serve_index(scope, send, *, status: int = 200, head: bool = False) -> None:
         api_base = _resolve_api_base_url(scope, public_base_url, web_port)
-        html = _inject_runtime_config(html, api_base)
+        html = _inject_runtime_config(index_template, api_base)
         await _send_bytes(
             send,
             status,
             html.encode("utf-8"),
             "text/html; charset=utf-8",
             extra_headers=[(b"cache-control", b"no-cache")],
+            head=head,
         )
 
     async def app(scope, receive, send):
@@ -276,26 +309,52 @@ def build_static_router(
             await inner(scope, receive, send)
             return
 
+        head = method == "HEAD"
+
         # Root + explicit index → serve the (config-injected) index.html.
         if path in ("/", "/index.html"):
-            await _serve_index(scope, send)
+            await _serve_index(scope, send, head=head)
             return
 
         # Try to serve a real file from the web root.
         fs_path = _safe_join(root, path)
         if fs_path and os.path.isfile(fs_path):
             try:
-                with open(fs_path, "rb") as f:
-                    body = f.read()
+                # Off-load the (potentially large) read so a big bundle can't
+                # block the event loop shared with gRPC-Web streaming.
+                body = await asyncio.to_thread(_read_file, fs_path)
             except OSError:
                 logger.exception("failed to read static file %s", fs_path)
-                await _send_bytes(send, 500, b"internal error\n", "text/plain; charset=utf-8")
+                await _send_bytes(
+                    send, 500, b"internal error\n", "text/plain; charset=utf-8", head=head
+                )
                 return
-            await _send_bytes(send, 200, body, _content_type(fs_path))
+            # Vite content-hashes everything under /assets/, so it is safe to
+            # cache immutably; other real files (favicon, etc.) stay uncached.
+            extra = None
+            if path.startswith("/assets/"):
+                extra = [(b"cache-control", b"public, max-age=31536000, immutable")]
+            await _send_bytes(
+                send, 200, body, _content_type(fs_path), extra_headers=extra, head=head
+            )
             return
 
-        # SPA fallback: any unknown non-API path serves index.html so the
-        # client-side hash router can take over (e.g. /#/session/<id>).
-        await _serve_index(scope, send)
+        # A request for a concrete asset that doesn't exist → 404, not the SPA
+        # fallback (returning index.html for a missing .js/.svg only produces
+        # MIME errors). Extension-less paths are navigation/hash routes.
+        if _looks_like_file(path):
+            await _send_bytes(
+                send, 404, b"not found\n", "text/plain; charset=utf-8", head=head
+            )
+            return
+
+        # SPA fallback: any unknown non-API, non-file path serves index.html so
+        # the client-side hash router can take over (e.g. /#/session/<id>).
+        await _serve_index(scope, send, head=head)
 
     return app
+
+
+def _read_file(path: str) -> bytes:
+    with open(path, "rb") as f:
+        return f.read()
