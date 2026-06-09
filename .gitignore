@@ -36,6 +36,9 @@ tests/reference_agents/presentation_agent/output/
 
 # Python build artifacts
 client/build/
+# Console SPA staged into the server wheel by `make console` (built output;
+# the canonical source lives in frontend/, see server/pyproject.toml).
+server/harmonograf_server/_console/
 
 # Demo output tarballs
 waffle.tar.gz

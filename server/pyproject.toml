@@ -30,6 +30,16 @@ harmonograf-server = "harmonograf_server.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["harmonograf_server"]
+# Ship the built console SPA inside the wheel so `pip/uv install
+# harmonograf-server` carries the UI with no separate frontend build on the
+# consumer's side. The bundle is staged into harmonograf_server/_console/ by
+# `make console` (frontend pnpm build → copy into the package) before
+# packaging; static_site.py locates it at runtime via importlib.resources.
+# `artifacts` overrides the repo .gitignore so the staged, uncommitted bundle
+# is collected. It is permissive: when _console/ is absent (a plain dev
+# checkout / editable install) the wheel simply omits it and the server falls
+# back to ../frontend/dist or serves gRPC-Web + health only.
+artifacts = ["harmonograf_server/_console/**"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
