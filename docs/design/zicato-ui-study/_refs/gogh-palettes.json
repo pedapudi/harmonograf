@@ -1,0 +1,217 @@
+{
+  "_meta": {
+    "purpose": "16 zicato themes × full terminal ANSI palette, sourced from the Gogh terminal colour schemes each zicato theme derives from. Keyed by zicato theme id (the [data-theme] value). Consumed by _tokens.css to wire the categorical encoding (span KIND → ANSI slot) so a theme swap re-skins the whole categorical palette, ANSI and all.",
+    "source": "https://raw.githubusercontent.com/Gogh-Co/Gogh/master/themes/<Name>.yml",
+    "ansi_slots": "ANSI normal black/red/green/yellow/blue/magenta/cyan/white = color_01..08; bright variants = color_09..16.",
+    "self_check": "Each `bg` was checked against zicato --v2-paper (DESIGN-LANGUAGE.md §2.2). Matches noted true; the two nudged 'original'-lineage themes (monokai, solarized-dark/light) carry a `bg_note`.",
+    "keys": "black,red,green,yellow,blue,magenta,cyan,white,brightBlack,brightRed,brightGreen,brightYellow,brightBlue,brightMagenta,brightCyan,brightWhite"
+  },
+
+  "monokai": {
+    "gogh_file": "Monokai (classic) — NOT Monokai Soda. zicato's monokai is 'original' lineage; its --v2-* roles encode the classic Monokai signal hues. Soda's bg/greens differ, so the classic Monokai terminal palette is used here to stay consistent with zicato's good/bad/accent.",
+    "bg": "#1e1f1c",
+    "bg_note": "zicato --v2-paper #1e1f1c (original). Closest Gogh file 'Monokai Soda' is #1A1A1A; not an exact match — expected for an original-lineage theme.",
+    "fg": "#f8f8f2",
+    "ansi": {
+      "black": "#272822", "red": "#f92672", "green": "#a6e22e", "yellow": "#e6db74",
+      "blue": "#66d9ef", "magenta": "#ae81ff", "cyan": "#a1efe4", "white": "#f8f8f2",
+      "brightBlack": "#75715e", "brightRed": "#f92672", "brightGreen": "#a6e22e", "brightYellow": "#e6db74",
+      "brightBlue": "#66d9ef", "brightMagenta": "#ae81ff", "brightCyan": "#a1efe4", "brightWhite": "#f9f8f5"
+    }
+  },
+
+  "solarized-dark": {
+    "gogh_file": "Solarized Dark.yml",
+    "bg": "#04222B",
+    "bg_note": "zicato --v2-paper #04222B (original/nudged). Gogh 'Solarized Dark' background is #002B36 — zicato darkened it. ANSI below is verbatim Gogh.",
+    "fg": "#839496",
+    "ansi": {
+      "black": "#073642", "red": "#DC322F", "green": "#859900", "yellow": "#B58900",
+      "blue": "#268BD2", "magenta": "#D33682", "cyan": "#2AA198", "white": "#EEE8D5",
+      "brightBlack": "#657B83", "brightRed": "#CB4B16", "brightGreen": "#586E75", "brightYellow": "#657B83",
+      "brightBlue": "#6c71c4", "brightMagenta": "#D33682", "brightCyan": "#2AA198", "brightWhite": "#FDF6E3"
+    }
+  },
+
+  "solarized-light": {
+    "gogh_file": "Solarized Light.yml",
+    "bg": "#FDF6E3",
+    "bg_note": "zicato --v2-paper #FDF6E3 == Gogh background ✓.",
+    "fg": "#657B83",
+    "ansi": {
+      "black": "#EEE8D5", "red": "#DC322F", "green": "#859900", "yellow": "#B58900",
+      "blue": "#268BD2", "magenta": "#D33682", "cyan": "#2AA198", "white": "#073642",
+      "brightBlack": "#93A1A1", "brightRed": "#CB4B16", "brightGreen": "#586E75", "brightYellow": "#839496",
+      "brightBlue": "#6C71C4", "brightMagenta": "#D33682", "brightCyan": "#2AA198", "brightWhite": "#002B36"
+    }
+  },
+
+  "google-light": {
+    "gogh_file": "Google Light.yml",
+    "bg": "#FFFFFF",
+    "bg_note": "zicato --v2-paper #FFFFFF == Gogh background ✓.",
+    "fg": "#373B41",
+    "ansi": {
+      "black": "#1D1F21", "red": "#CC342B", "green": "#198844", "yellow": "#FBA922",
+      "blue": "#3971ED", "magenta": "#A36AC7", "cyan": "#3971ED", "white": "#C5C8C6",
+      "brightBlack": "#969896", "brightRed": "#CC342B", "brightGreen": "#198844", "brightYellow": "#FBA922",
+      "brightBlue": "#3971ED", "brightMagenta": "#A36AC7", "brightCyan": "#3971ED", "brightWhite": "#FFFFFF"
+    }
+  },
+
+  "google-dark": {
+    "gogh_file": "Google Dark.yml",
+    "bg": "#202124",
+    "bg_note": "zicato --v2-paper #202124 == Gogh background ✓. Gogh cyan #24C1E0 == zicato google-dark --v2-accent ✓.",
+    "fg": "#E8EAED",
+    "ansi": {
+      "black": "#202124", "red": "#EA4335", "green": "#34A853", "yellow": "#FBBC04",
+      "blue": "#4285F4", "magenta": "#A142F4", "cyan": "#24C1E0", "white": "#E8EAED",
+      "brightBlack": "#5F6368", "brightRed": "#EA4335", "brightGreen": "#34A853", "brightYellow": "#FBBC05",
+      "brightBlue": "#4285F4", "brightMagenta": "#A142F4", "brightCyan": "#24C1E0", "brightWhite": "#FFFFFF"
+    }
+  },
+
+  "lunaria-light": {
+    "gogh_file": "Lunaria Light.yml",
+    "bg": "#EBE4E1",
+    "bg_note": "zicato --v2-paper #EBE4E1 == Gogh background ✓. Gogh cyan #3778A9 == zicato lunaria-light --v2-accent ✓.",
+    "fg": "#484646",
+    "ansi": {
+      "black": "#3E3C3D", "red": "#783C1F", "green": "#497D46", "yellow": "#8F750B",
+      "blue": "#3F3566", "magenta": "#793F62", "cyan": "#3778A9", "white": "#D5CFCC",
+      "brightBlack": "#484646", "brightRed": "#B06240", "brightGreen": "#7BC175", "brightYellow": "#DCB735",
+      "brightBlue": "#5C4F89", "brightMagenta": "#B56895", "brightCyan": "#64BAFF", "brightWhite": "#EBE4E1"
+    }
+  },
+
+  "lunaria-eclipse": {
+    "gogh_file": "Lunaria Eclipse.yml",
+    "bg": "#323F46",
+    "bg_note": "zicato --v2-paper #323F46 == Gogh background ✓.",
+    "fg": "#C9CDD7",
+    "ansi": {
+      "black": "#323F46", "red": "#83615B", "green": "#7F9781", "yellow": "#A69875",
+      "blue": "#53516F", "magenta": "#856880", "cyan": "#7D96B2", "white": "#C9CDD7",
+      "brightBlack": "#3D4950", "brightRed": "#BA9088", "brightGreen": "#BEDBC1", "brightYellow": "#F1DFB4",
+      "brightBlue": "#767495", "brightMagenta": "#BE9CB8", "brightCyan": "#BCDBFF", "brightWhite": "#DFE2ED"
+    }
+  },
+
+  "belafonte-day": {
+    "gogh_file": "Belafonte Day.yml",
+    "bg": "#D5CCBA",
+    "bg_note": "zicato --v2-paper #D5CCBA == Gogh background ✓. Gogh blue #426A79 == zicato belafonte-day --v2-accent ✓ (palette's cyan is a low-contrast neutral, so zicato keys accent off blue).",
+    "fg": "#45373C",
+    "ansi": {
+      "black": "#20111B", "red": "#BE100E", "green": "#858162", "yellow": "#EAA549",
+      "blue": "#426A79", "magenta": "#97522C", "cyan": "#989A9C", "white": "#968C83",
+      "brightBlack": "#5E5252", "brightRed": "#BE100E", "brightGreen": "#858162", "brightYellow": "#EAA549",
+      "brightBlue": "#426A79", "brightMagenta": "#97522C", "brightCyan": "#989A9C", "brightWhite": "#D5CCBA"
+    }
+  },
+
+  "belafonte-night": {
+    "gogh_file": "Belafonte Night.yml",
+    "bg": "#20111B",
+    "bg_note": "zicato --v2-paper #20111B == Gogh background ✓. Same ANSI ramp as Belafonte Day (the pair shares hues; only ground/ink flip).",
+    "fg": "#968C83",
+    "ansi": {
+      "black": "#20111B", "red": "#BE100E", "green": "#858162", "yellow": "#EAA549",
+      "blue": "#426A79", "magenta": "#97522C", "cyan": "#989A9C", "white": "#968C83",
+      "brightBlack": "#5E5252", "brightRed": "#BE100E", "brightGreen": "#858162", "brightYellow": "#EAA549",
+      "brightBlue": "#426A79", "brightMagenta": "#97522C", "brightCyan": "#989A9C", "brightWhite": "#D5CCBA"
+    }
+  },
+
+  "paper": {
+    "gogh_file": "Paper.yml",
+    "bg": "#f2eede",
+    "bg_note": "zicato --v2-paper #F2EEDE == Gogh background ✓. Gogh green #216609 / red #cc3e28 / blue #1e6fcc == zicato paper good/bad/accent ✓.",
+    "fg": "#000000",
+    "ansi": {
+      "black": "#000000", "red": "#cc3e28", "green": "#216609", "yellow": "#b58900",
+      "blue": "#1e6fcc", "magenta": "#5c21a5", "cyan": "#158c86", "white": "#aaaaaa",
+      "brightBlack": "#555555", "brightRed": "#cc3e28", "brightGreen": "#216609", "brightYellow": "#b58900",
+      "brightBlue": "#1e6fcc", "brightMagenta": "#5c21a5", "brightCyan": "#158c86", "brightWhite": "#aaaaaa"
+    }
+  },
+
+  "zenburn": {
+    "gogh_file": "Zenburn.yml",
+    "bg": "#3a3a3a",
+    "bg_note": "zicato --v2-paper #3A3A3A == Gogh background ✓. Note Zenburn's 'green' slot (color_03 #efef87) is a yellow; the soft sage #93b3a3 is its cyan. zicato keys good off the sage (#8FB28F-ish), so categorical green here is intentionally muted.",
+    "fg": "#dcdccc",
+    "ansi": {
+      "black": "#333333", "red": "#cc9393", "green": "#7f9f7f", "yellow": "#efef87",
+      "blue": "#c3bf97", "magenta": "#bca3a3", "cyan": "#93b3a3", "white": "#f0efd0",
+      "brightBlack": "#757575", "brightRed": "#dfaf87", "brightGreen": "#9fc59f", "brightYellow": "#ffff87",
+      "brightBlue": "#d7d7af", "brightMagenta": "#d7afaf", "brightCyan": "#93bea3", "brightWhite": "#dcdccc"
+    }
+  },
+
+  "selenized-black": {
+    "gogh_file": "Selenized Black.yml",
+    "bg": "#181818",
+    "bg_note": "zicato --v2-paper #181818 == Gogh background ✓. Gogh bright-cyan #56d8c9 == zicato selenized-black --v2-accent ✓.",
+    "fg": "#b9b9b9",
+    "ansi": {
+      "black": "#252525", "red": "#ed4a46", "green": "#70b433", "yellow": "#dbb32d",
+      "blue": "#368aeb", "magenta": "#eb6eb7", "cyan": "#3fc5b7", "white": "#777777",
+      "brightBlack": "#3b3b3b", "brightRed": "#ff5e56", "brightGreen": "#83c746", "brightYellow": "#efc541",
+      "brightBlue": "#4f9cfe", "brightMagenta": "#ff81ca", "brightCyan": "#56d8c9", "brightWhite": "#dedede"
+    }
+  },
+
+  "relaxed": {
+    "gogh_file": "Relaxed.yml",
+    "bg": "#353A44",
+    "bg_note": "zicato --v2-paper #353A44 == Gogh background ✓. Gogh bright-blue #7EAAC7 == zicato relaxed --v2-accent ✓.",
+    "fg": "#D9D9D9",
+    "ansi": {
+      "black": "#151515", "red": "#BC5653", "green": "#909D63", "yellow": "#EBC17A",
+      "blue": "#6A8799", "magenta": "#B06698", "cyan": "#7EAAC7", "white": "#D9D9D9",
+      "brightBlack": "#636363", "brightRed": "#BC5653", "brightGreen": "#A0AC77", "brightYellow": "#EBC17A",
+      "brightBlue": "#7EAAC7", "brightMagenta": "#B06698", "brightCyan": "#ACBBD0", "brightWhite": "#F7F7F7"
+    }
+  },
+
+  "espresso": {
+    "gogh_file": "Espresso.yml",
+    "bg": "#323232",
+    "bg_note": "zicato --v2-paper #323232 == Gogh background ✓. Gogh blue #6C99BB == zicato espresso --v2-accent ✓.",
+    "fg": "#FFFFFF",
+    "ansi": {
+      "black": "#353535", "red": "#D25252", "green": "#A5C261", "yellow": "#FFC66D",
+      "blue": "#6C99BB", "magenta": "#D197D9", "cyan": "#BED6FF", "white": "#EEEEEC",
+      "brightBlack": "#535353", "brightRed": "#F00C0C", "brightGreen": "#C2E075", "brightYellow": "#E1E48B",
+      "brightBlue": "#8AB7D9", "brightMagenta": "#EFB5F7", "brightCyan": "#DCF4FF", "brightWhite": "#FFFFFF"
+    }
+  },
+
+  "dracula": {
+    "gogh_file": "Dracula.yml",
+    "bg": "#282A36",
+    "bg_note": "zicato --v2-paper #282A36 == Gogh background ✓. Gogh bright-green #50FA7B / bright-red #FF5555 / bright-blue(purple) #BD93F9 == zicato dracula good/bad/accent ✓.",
+    "fg": "#F8F8F2",
+    "ansi": {
+      "black": "#262626", "red": "#E64747", "green": "#42E66C", "yellow": "#E4F34A",
+      "blue": "#9B6BDF", "magenta": "#E356A7", "cyan": "#75D7EC", "white": "#F8F8F2",
+      "brightBlack": "#7A7A7A", "brightRed": "#FF5555", "brightGreen": "#50FA7B", "brightYellow": "#F1FA8C",
+      "brightBlue": "#BD93F9", "brightMagenta": "#FF79C6", "brightCyan": "#8BE9FD", "brightWhite": "#F9F9FB"
+    }
+  },
+
+  "ubuntu": {
+    "gogh_file": "Clone Of Ubuntu.yml",
+    "bg": "#300A24",
+    "bg_note": "zicato --v2-paper #300A24 == Gogh background ✓. Gogh bright-green #8AE234 / red #CC0000 / bright-cyan #34E2E2 == zicato ubuntu good/bad/accent ✓.",
+    "fg": "#EEEEEC",
+    "ansi": {
+      "black": "#2E3436", "red": "#CC0000", "green": "#4E9A06", "yellow": "#C4A000",
+      "blue": "#3465A4", "magenta": "#75507B", "cyan": "#06989A", "white": "#D3D7CF",
+      "brightBlack": "#555753", "brightRed": "#EF2929", "brightGreen": "#8AE234", "brightYellow": "#FCE94F",
+      "brightBlue": "#729FCF", "brightMagenta": "#AD7FA8", "brightCyan": "#34E2E2", "brightWhite": "#EEEEEC"
+    }
+  }
+}
