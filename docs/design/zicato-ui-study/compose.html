@@ -11,20 +11,15 @@
 <link rel="stylesheet" href="_study.css">
 <style>
   body { padding: 0; overflow: hidden; }
-  header.study { position: static; }
-  .prop-switch { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
-  .prop-switch button { font: inherit; font-size: 11px; color: var(--ink-soft); background: transparent;
-    border: none; border-right: 1px solid var(--rule); padding: 5px 12px; cursor: pointer; }
-  .prop-switch button:last-child { border-right: none; }
-  .prop-switch button[aria-pressed="true"] { color: var(--paper); background: var(--accent); }
+  /* keep the header positioned: it loses the base rule's z-index as static, and
+     the .app paints after it — the open theme dropdown must clear the app */
+  header.study { position: relative; z-index: 60; }
   .prop-note { font-size: 10.5px; color: var(--ink-faint); }
 
   .app { height: calc(100vh - 59px); display: flex; flex-direction: column; min-height: 0; position: relative; }
-  .app-body { flex: 1; display: grid; min-height: 0; }
-  .app-body.p-observatory { grid-template-columns: 60px minmax(0,1fr) auto; }
-  .app-body.p-score { grid-template-columns: minmax(0,1fr) 210px; grid-template-rows: 96px minmax(0,1fr); }
-  .app-body.p-score .minimap { grid-column: 1 / -1; border-bottom: 1px solid var(--rule); padding: 4px 14px; }
-  .app-body.p-mission { grid-template-columns: 252px minmax(0,1fr); }
+  /* rail (observatory) · main · inspector — sessions live ONLY in the ⌘K picker */
+  .app-body { flex: 1; display: grid; min-height: 0;
+    grid-template-columns: 84px minmax(0,1fr) auto; }
   .app-main { overflow: auto; padding: 14px 18px; min-width: 0; }
   .app-main h3 { font-size: 10.5px; text-transform: uppercase; letter-spacing: .12em; color: var(--ink-faint);
     margin: 16px 0 8px; font-weight: 600; }
@@ -35,31 +30,17 @@
   .hg-drawer-host { width: 0; overflow: hidden; transition: width .16s ease; }
   .hg-drawer-host.open { width: 320px; }
   .hg-drawer-host .hg-drawer { width: 320px; }
-  /* the inspector as a floating overlay — used by proposals B & C so the
-     span-payload is reachable everywhere without disturbing their layout */
-  .hg-drawer-float { position: absolute; top: 64px; right: 14px; width: 320px; z-index: 30;
-    background: var(--panel); border: 1px solid var(--rule); border-radius: var(--r-card);
-    box-shadow: 0 0 0 1px var(--rule-soft); max-height: calc(100vh - 150px); overflow: auto; }
-  .hg-drawer-float .hg-drawer { width: 320px; }
   .hg-drawer-close { background: transparent; border: none; color: var(--ink-faint); cursor: pointer;
     font: inherit; font-size: 14px; padding: 2px 6px; border-radius: 4px; }
   .hg-drawer-close:hover { color: var(--ink); background: var(--rule-soft); }
 
-  .margin-col { border-left: 1px solid var(--rule); background: var(--panel); overflow-y: auto; padding: 12px; }
-  .margin-col h4 { font-size: 9.5px; text-transform: uppercase; letter-spacing: .12em; color: var(--ink-faint); margin: 12px 0 6px; }
-  .margin-col h4:first-child { margin-top: 0; }
   .margin-item { font-size: 10.5px; color: var(--ink-soft); margin: 4px 0; }
 
-  .fleet { border-right: 1px solid var(--rule); background: var(--panel); overflow-y: auto; padding: 10px; }
-  .fleet h4 { font-size: 9.5px; text-transform: uppercase; letter-spacing: .12em; color: var(--ink-faint); margin: 4px 4px 8px; }
-  .fleet-item { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; font: inherit;
-    background: transparent; border: 1px solid transparent; border-radius: var(--r-card); padding: 7px 8px;
-    cursor: pointer; color: var(--ink-soft); margin-bottom: 4px; }
-  .fleet-item:hover { border-color: var(--rule); }
-  .fleet-item[aria-selected="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
-  .fleet-item svg { flex: none; }
-  .fleet-name { font-size: 11.5px; color: var(--ink); display: block; }
-  .fleet-sub { font-size: 9.5px; color: var(--ink-faint); display: block; margin-top: 1px; }
+  /* chord interactivity: hover/click an agent to PROJECT its conversations */
+  .topo-chord g[data-agent] { cursor: pointer; }
+  .topo-chord [data-ribbon], .topo-chord [data-ahead], .topo-chord [data-agent] { transition: opacity .15s ease; }
+  .tch-count { fill: var(--ink); font-size: 9px; font-variant-numeric: tabular-nums; pointer-events: none;
+    paint-order: stroke; stroke: var(--paper); stroke-width: 3px; opacity: 0; transition: opacity .15s ease; }
 
   .sess-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
   .sess-title { font-size: 15px; font-weight: 700; }
@@ -85,6 +66,19 @@
   .gm-seam { stroke: var(--rule); stroke-width: 1; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
   .gm-spine { stroke: var(--accent); stroke-width: 2.2; vector-effect: non-scaling-stroke; }
   .gantt-click .hg-gantt-bar, .gantt-click .sq-act { cursor: pointer; }
+
+  /* the plan reel drives the DAG: each version stop is a button */
+  .plan-reel .reel-stop[data-ver] { cursor: pointer; }
+  .plan-reel .reel-stop[data-ver]:hover .reel-hit,
+  .plan-reel .reel-stop[data-ver]:focus-visible .reel-hit { fill: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .plan-reel .reel-stop[data-ver]:focus { outline: none; }
+  .plan-reel .reel-stop[data-ver]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 50%; }
+  #dag-host, .reel-host { display: block; }
+
+  /* the coordinated time-track stack: seismograph over the time-aligned ladder.
+     They share padL/padR/width, so a reading at t lines up vertically. */
+  .track-stack { display: block; }
+  .track-stack .track-sub { font-size: 9.5px; color: var(--ink-faint); margin: 2px 0 0; padding-left: 76px; }
 </style>
 </head>
 <body>
@@ -92,9 +86,8 @@
 <header class="study">
   <span class="brand-row"><span data-brand-mark="22"></span><span data-brand-wordmark></span></span>
   <h1>the composed console</h1>
-  <span class="prop-note" id="prop-note"></span>
+  <span class="prop-note">the gantt stands alone · the instruments coalesce plans (DAG + reel), sequence, topology &amp; drift · sessions live in the ⌘K picker</span>
   <span class="spacer"></span>
-  <span class="prop-switch" id="prop-switch" role="group" aria-label="UI proposal"></span>
   <span class="theme-pick-label">theme</span>
   <span data-theme-picker></span>
 </header>
@@ -208,8 +201,12 @@ const PRIMARY = {
   heart: (()=>{ const r=lcg(7), e=[]; for(let i=0;i<30;i++){ const t=2+i*2.5+r();
     e.push([t, (i===12||i===13)?'warn':(i===15?'crit':'ok')]); } return e; })(),
   plan: {
-    nodes: { 'design-api':{x:0,y:0,st:'done'}, 'impl-core':{x:1,y:0,st:'done'}, 'wire-cli':{x:2,y:-1,st:'running'},
-             'run-suite':{x:2,y:1,st:'done'}, 'polish-ux':{x:3,y:0,st:'pending'}, 'write-docs':{x:1,y:2,st:'ghost'} },
+    // tid bridges each DAG node to its strata task-id (T1…T7) so the reel can
+    // drive the DAG: the live DAG below == version v3's task set {T1,T2,T4,T6,T7}
+    // plus write-docs (T3) carried as the dropped-at-replan ghost.
+    nodes: { 'design-api':{x:0,y:0,st:'done',tid:'T1'}, 'impl-core':{x:1,y:0,st:'done',tid:'T2'},
+             'wire-cli':{x:2,y:-1,st:'running',tid:'T6'}, 'run-suite':{x:2,y:1,st:'done',tid:'T4'},
+             'polish-ux':{x:3,y:0,st:'pending',tid:'T7'}, 'write-docs':{x:1,y:2,st:'ghost',tid:'T3'} },
     edges: [ ['design-api','impl-core',1],['impl-core','wire-cli',1],['impl-core','run-suite',0],
              ['wire-cli','polish-ux',1],['run-suite','polish-ux',0],['design-api','write-docs','ghost'] ],
     strata: [ {v:'v3 · live', has:['T1','T2','T4','T6','T7'], added:['T7'], live:true},
@@ -343,7 +340,10 @@ function seqDiagramSVG(s, o){ o=o||{};
   g+=`<line class="hg-gantt-now" x1="${padL-4}" y1="${ny}" x2="${W-12}" y2="${ny}"/><text class="hg-gantt-now-label" x="${padL}" y="${ny-5}">now ${s.now}s</text>`;
   g+=`</svg>`; return g;
 }
-/* ----- the directional transfer chord (communication topology) ----- */
+/* ----- the directional transfer chord (communication topology) -----
+   Scaling discipline: ribbon width grows with √count and CAPS, so a chatty
+   pair can never flood the figure; hover an agent to PROJECT its conversations
+   (everything else fades), click to pin, click empty space to clear. ----- */
 function topoChordSVG(s, W){ W=W||320;
   const agents=['user','planner','coder','tester','reviewer'].filter(a=>s.agents.includes(a)||a==='user');
   const idx=a=>agents.indexOf(a);
@@ -360,41 +360,106 @@ function topoChordSVG(s, W){ W=W||320;
     :`var(--hg-agent-${['planner','coder','tester','reviewer'].indexOf(a)+1})`;
   const outN=agents.map(()=>0), inN=agents.map(()=>0); flows.forEach(([a,b,c])=>{outN[a]+=c;inN[b]+=c;});
   const outUsed=agents.map(()=>0), inUsed=agents.map(()=>0);
-  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="directional transfer chord — who initiates and who receives · ${s.id}">`;
+  let g=`<svg class="fig topo-chord" viewBox="0 0 ${W} ${H}" role="img" aria-label="directional transfer chord — who initiates and who receives · ${s.id}">`;
   agents.forEach((a,i)=>{ const th=ang(i), oA=th+SECTOR/2,oB=th+0.05,iA=th-0.05,iB=th-SECTOR/2;
     const arc=(thA,thB,attrs)=>{ const [xA,yA]=onArc(thA,R),[xB,yB]=onArc(thB,R);
-      return `<path d="M${xA.toFixed(1)},${yA.toFixed(1)} A${R},${R} 0 0 ${thA>thB?1:0} ${xB.toFixed(1)},${yB.toFixed(1)}" fill="none" ${attrs}/>`; };
+      return `<path data-agent="${a}" d="M${xA.toFixed(1)},${yA.toFixed(1)} A${R},${R} 0 0 ${thA>thB?1:0} ${xB.toFixed(1)},${yB.toFixed(1)}" fill="none" ${attrs}/>`; };
     if(outN[i]) g+=arc(oA,oB,`stroke="${aColor(a)}" stroke-width="5" stroke-linecap="round" opacity=".9"`);
     if(inN[i])  g+=arc(iA,iB,`stroke="${aColor(a)}" stroke-width="5" stroke-linecap="round" opacity=".9" stroke-dasharray="1.5 2.4"`);
   });
+  let cLabels='';
   flows.forEach(([a,b,c],fi)=>{ const ths=ang(a),thd=ang(b);
     const sF=(outUsed[a]+c/2)/Math.max(outN[a],1); outUsed[a]+=c;
     const dF=(inUsed[b]+c/2)/Math.max(inN[b],1);  inUsed[b]+=c;
     const sTh=ths+0.07+(SECTOR/2-0.07)*sF, dTh=thd-0.07-(SECTOR/2-0.07)*dF;
-    const wS=1.6,wT=Math.max(5,c*2.6), [sx,sy]=onArc(sTh,R-4),[dx,dy]=onArc(dTh,R-9);
+    // √count with a hard cap: heavy traffic thickens slowly and can never flood
+    const wS=1.6, wT=Math.min(15, 4+Math.sqrt(c)*3.4), [sx,sy]=onArc(sTh,R-4),[dx,dy]=onArc(dTh,R-9);
     const tS=[Math.sin(sTh),Math.cos(sTh)],tD=[Math.sin(dTh),Math.cos(dTh)];
     const s1=[sx+tS[0]*wS/2,sy+tS[1]*wS/2],s2=[sx-tS[0]*wS/2,sy-tS[1]*wS/2];
     const t1=[dx+tD[0]*wT/2,dy+tD[1]*wT/2],t2=[dx-tD[0]*wT/2,dy-tD[1]*wT/2];
     const mid=[(sx+dx)/2+(cx-(sx+dx)/2)*0.62,(sy+dy)/2+((cyA-34)-(sy+dy)/2)*0.5], gid=`tch${s.id}${fi}`;
+    const FT=`data-f="${agents[a]}" data-t="${agents[b]}"`;
     g+=`<defs><linearGradient id="${gid}" x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${dx.toFixed(1)}" y2="${dy.toFixed(1)}" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="${aColor(a)}" stop-opacity=".32"/><stop offset="1" stop-color="${aColor(b)}" stop-opacity=".95"/></linearGradient></defs>`;
-    g+=`<path fill="url(#${gid})" stroke="none" d="M${s1[0].toFixed(1)},${s1[1].toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${t1[0].toFixed(1)},${t1[1].toFixed(1)} L${t2[0].toFixed(1)},${t2[1].toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${s2[0].toFixed(1)},${s2[1].toFixed(1)} Z"><title>${agents[a]} → ${agents[b]} · ${c} (${agents[a]} initiates)</title></path>`;
+      <stop offset="0" stop-color="${aColor(agents[a])}" stop-opacity=".32"/><stop offset="1" stop-color="${aColor(agents[b])}" stop-opacity=".95"/></linearGradient></defs>`;
+    g+=`<path data-ribbon="1" ${FT} fill="url(#${gid})" stroke="none" d="M${s1[0].toFixed(1)},${s1[1].toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${t1[0].toFixed(1)},${t1[1].toFixed(1)} L${t2[0].toFixed(1)},${t2[1].toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${s2[0].toFixed(1)},${s2[1].toFixed(1)} Z"><title>${agents[a]} → ${agents[b]} · ${c} (${agents[a]} initiates)</title></path>`;
     const outward=[Math.cos(dTh),-Math.sin(dTh)], tip=onArc(dTh,R-1), base=[tip[0]-outward[0]*8,tip[1]-outward[1]*8];
-    g+=`<path d="M${(base[0]+tD[0]*4).toFixed(1)},${(base[1]+tD[1]*4).toFixed(1)} L${tip[0].toFixed(1)},${tip[1].toFixed(1)} L${(base[0]-tD[0]*4).toFixed(1)},${(base[1]-tD[1]*4).toFixed(1)} Z" fill="${aColor(b)}"/>`;
+    g+=`<path data-ahead="1" ${FT} d="M${(base[0]+tD[0]*4).toFixed(1)},${(base[1]+tD[1]*4).toFixed(1)} L${tip[0].toFixed(1)},${tip[1].toFixed(1)} L${(base[0]-tD[0]*4).toFixed(1)},${(base[1]-tD[1]*4).toFixed(1)} Z" fill="${aColor(agents[b])}"/>`;
+    cLabels+=`<text class="tch-count" data-count="1" ${FT} x="${mid[0].toFixed(1)}" y="${(mid[1]+3).toFixed(1)}" text-anchor="middle">${c}×</text>`;
   });
   agents.forEach((a,i)=>{ const th=ang(i),[x,y]=onArc(th,R);
-    g+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${aColor(a)}"/>`;
     const [lx,ly]=onArc(th,R+14), anc= lx<cx-10?'end':(lx>cx+10?'start':'middle');
-    g+=`<text class="sq-lbl" x="${lx.toFixed(1)}" y="${(ly+(ly<36?-2:4)).toFixed(1)}" text-anchor="${anc}" fill="var(--ink)">${a}</text>`; });
-  g+=`</svg>`; return g;
+    g+=`<g data-agent="${a}" tabindex="0" role="button" aria-label="project ${a}'s conversations">
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="12" fill="transparent" stroke="none"/>
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${aColor(a)}"/>
+      <text class="sq-lbl" x="${lx.toFixed(1)}" y="${(ly+(ly<36?-2:4)).toFixed(1)}" text-anchor="${anc}" fill="var(--ink)">${a}</text></g>`; });
+  g+=cLabels+`</svg>`; return g;
 }
-function seismoSVG(s, lanes, W){
-  W=W||940; const rowH=54, padL=W<400?40:76, padR=14, H=lanes.length*rowH+24, X=t=>padL+(W-padL-padR)*t/s.T, TOL=8;
-  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="drift seismograph — ${s.id}">`;
+/* hover an agent → project (dim everything not involving it); click → pin */
+function wireChord(scope){
+  scope.querySelectorAll('svg.topo-chord').forEach(svg=>{
+    let pinned=null;
+    const apply=f=>{
+      svg.querySelectorAll('[data-ribbon],[data-ahead]').forEach(p=>{
+        p.style.opacity = (!f || p.dataset.f===f || p.dataset.t===f) ? '' : .05; });
+      svg.querySelectorAll('[data-count]').forEach(tx=>{
+        tx.style.opacity = (f && (tx.dataset.f===f || tx.dataset.t===f)) ? 1 : ''; });
+      svg.querySelectorAll('[data-agent]').forEach(n=>{
+        n.style.opacity = (!f || n.dataset.agent===f) ? '' : .3; });
+    };
+    svg.querySelectorAll('g[data-agent]').forEach(h=>{
+      h.addEventListener('mouseenter',()=>{ if(!pinned) apply(h.dataset.agent); });
+      h.addEventListener('mouseleave',()=>{ if(!pinned) apply(null); });
+      h.addEventListener('click',e=>{ e.stopPropagation();
+        pinned = pinned===h.dataset.agent ? null : h.dataset.agent; apply(pinned); });
+      h.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); h.click(); } });
+    });
+    svg.addEventListener('click',()=>{ if(pinned){ pinned=null; apply(null); } });
+    const want=new URLSearchParams(location.search).get('chord');
+    if(want && svg.querySelector(`g[data-agent="${want}"]`)){ pinned=want; apply(want); }
+  });
+}
+/* Shared time-track geometry — the seismograph, the heartbeat overlay, and the
+   intervention ladder ALL derive padL/padR/X from this, so a reading at time t
+   sits at the same x in every panel of the stack. */
+function trackGeom(s, W){ const padL=W<400?40:76, padR=14;
+  return { padL, padR, X:t=>padL+(W-padL-padR)*t/s.T }; }
+function timeAxisSVG(s, W, H){ const {padL,padR,X}=trackGeom(s,W); let g='';
   for(let i=0;i<=4;i++){ const gx=X(s.T*i/4);
-    g+=`<line class="hg-gantt-grid" x1="${gx}" y1="4" x2="${gx}" y2="${H-18}"/><text class="gm-axis" x="${gx-7}" y="${H-5}">${Math.round(s.T*i/4)}s</text>`; }
+    g+=`<line class="hg-gantt-grid" x1="${gx}" y1="2" x2="${gx}" y2="${H}"/>`; }
+  return g;
+}
+/* ONE combined drift+judge instrument: the seismograph traces as before, with
+   the judge-firing HEARTBEAT folded in as a strip along the same time axis —
+   ok ticks in the judge (goldfive) KIND hue, warnings/criticals carried by the
+   STATUS treatment (caution / bad). One axis, two readings. */
+/* wire the reel: clicking/keying a version sets state.planVer and repaints ONLY
+   the plan block (DAG + reel marks) — no console-wide re-render. */
+function wireReel(scope){
+  scope.querySelectorAll('.reel-stop[data-ver]').forEach(stop=>{
+    const pick=()=>{ const vi=+stop.dataset.ver; if(vi===state.planVer) return; state.planVer=vi; repaintPlan(); };
+    stop.addEventListener('click', pick);
+    stop.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); pick(); } });
+  });
+}
+function seismoSVG(s, lanes, W, opts){ opts=opts||{};
+  W=W||940; const {padL,padR,X}=trackGeom(s,W), TOL=8;
+  const heart=opts.heart!==false, heartH=heart?30:0, rowH=54;
+  const top=heartH, H=top+lanes.length*rowH+(opts.axis===false?6:24);
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="drift seismograph + judge heartbeat — ${s.id}">`;
+  for(let i=0;i<=4;i++){ const gx=X(s.T*i/4);
+    g+=`<line class="hg-gantt-grid" x1="${gx}" y1="4" x2="${gx}" y2="${H-(opts.axis===false?6:18)}"/>`;
+    if(opts.axis!==false) g+=`<text class="gm-axis" x="${gx-7}" y="${H-5}">${Math.round(s.T*i/4)}s</text>`; }
+  // judge heartbeat strip — KIND hue baseline, STATUS treatment on warn/crit
+  if(heart){ const hy=heartH-10;
+    g+=`<text class="gm-label" x="6" y="${hy+4}" fill="var(--hg-agent-goldfive)">judges</text>`;
+    g+=`<line class="gm-onplan" x1="${X(0)}" y1="${hy}" x2="${X(s.T)}" y2="${hy}"/>`;
+    s.heart.forEach(([t,k])=>{ if(t>s.T) return; const x=X(t);
+      if(k==='ok')   g+=`<circle cx="${x}" cy="${hy}" r="1.7" fill="var(--hg-agent-goldfive)" opacity=".8"><title>judge fired · on-task @ ${t.toFixed(0)}s</title></circle>`;
+      if(k==='warn') g+=`<line x1="${x}" y1="${hy-6}" x2="${x}" y2="${hy+6}" stroke="var(--caution)" stroke-width="1.4" vector-effect="non-scaling-stroke"/><text x="${x-3.5}" y="${hy+3}" font-size="8.5" fill="var(--caution)">▲</text>`;
+      if(k==='crit') g+=`<line x1="${x}" y1="${hy-7}" x2="${x}" y2="${hy+7}" stroke="var(--bad)" stroke-width="1.6" vector-effect="non-scaling-stroke"/><text x="${x-3.5}" y="${hy+3.5}" font-size="9.5" fill="var(--bad)" font-weight="700">✕</text>`; });
+    g+=`<line class="gm-seam" x1="${X(0)}" y1="${heartH-1}" x2="${X(s.T)}" y2="${heartH-1}" opacity=".5"/>`; }
   lanes.forEach((a,li)=>{ const keys=s.judges[a]; if(!keys) return;
-    const base=10+li*rowH+rowH-16, rnd=lcg(40+li), yOf=v=>base-v*1.9;
+    const base=top+10+li*rowH+rowH-16, rnd=lcg(40+li), yOf=v=>base-v*1.9;
     g+=`<text class="gm-label" x="6" y="${base-12}">${a}</text>`;
     g+=`<rect class="gm-tol" x="${X(0)}" y="${yOf(TOL)}" width="${X(s.T)-X(0)}" height="${yOf(0)-yOf(TOL)}"/>`;
     g+=`<line class="gm-onplan" x1="${X(0)}" y1="${base}" x2="${X(s.T)}" y2="${base}"/>`;
@@ -409,87 +474,122 @@ function seismoSVG(s, lanes, W){
       g+=`<line class="gm-tick" x1="${tx}" y1="${base-rowH+22}" x2="${tx}" y2="${base+3}"><title>intervention · ${lbl}</title></line>`;
       g+=`<text class="gm-tick-label" x="${tx+3}" y="${base-rowH+27}">${lbl.split(' ')[0]}</text>`; }); });
   const nx=X(Math.min(s.now,s.T));
-  g+=`<line class="hg-gantt-now" x1="${nx}" y1="4" x2="${nx}" y2="${H-18}"/>`;
+  g+=`<line class="hg-gantt-now" x1="${nx}" y1="4" x2="${nx}" y2="${H-(opts.axis===false?6:18)}"/>`;
   g+=`</svg>`; return g;
 }
+/* heartbeat as its own small figure is still available (e.g. the inspector),
+   but the console folds it into the seismograph above. */
 function heartSVG(s, W){ W=W||940; const H=40, padL=W<400?40:76, X=t=>padL+(W-padL-14)*t/s.T;
   let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="judge heartbeat — ${s.id}">`;
-  g+=`<text class="gm-label" x="6" y="22">judges</text>`;
+  g+=`<text class="gm-label" x="6" y="22" fill="var(--hg-agent-goldfive)">judges</text>`;
   g+=`<line class="gm-onplan" x1="${X(0)}" y1="26" x2="${X(s.T)}" y2="26"/>`;
   s.heart.forEach(([t,k])=>{ if(t>s.T) return; const x=X(t);
-    if(k==='ok') g+=`<circle cx="${x}" cy="18" r="1.5" fill="var(--hg-gf-judge-on-task)" opacity=".75"/>`;
+    if(k==='ok') g+=`<circle cx="${x}" cy="18" r="1.5" fill="var(--hg-agent-goldfive)" opacity=".8"/>`;
     if(k==='warn') g+=`<text x="${x-3.5}" y="22" font-size="9" fill="var(--caution)">▲</text>`;
     if(k==='crit') g+=`<text x="${x-3.5}" y="22" font-size="10" fill="var(--bad)" font-weight="700">✕</text>`; });
   g+=`</svg>`; return g;
 }
-function ladderSVG(dots, W){ W=W||440; const H=128, padL=66, X=t=>padL+(W-padL-12)*t/96;
-  const RUNGS=['nudge','refine','replan','escalate'], rungY=i=>100-i*26;
-  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="intervention ladder">`;
+/* The intervention ladder, time-scale-LOCKED to the seismograph: pass the same
+   session + width and it derives an identical x-domain (padL/padR/X via
+   trackGeom over s.T), so a rung-dot at time t sits directly beneath the drift
+   reading at t. The legacy fixed-width call (no session) still works. */
+function ladderSVG(dots, W, s){ W=W||440; const H=124;
+  const geo = s ? trackGeom(s, W) : { padL:66, X:t=>66+(W-66-12)*t/96 };
+  const padL=geo.padL, X=geo.X;
+  const RUNGS=['nudge','refine','replan','escalate'], rungY=i=>96-i*25;
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="intervention ladder${s?' (time-aligned to the seismograph)':''}">`;
+  if(s){ for(let i=0;i<=4;i++){ const gx=X(s.T*i/4);
+    g+=`<line class="hg-gantt-grid" x1="${gx}" y1="2" x2="${gx}" y2="${rungY(3)-6}" opacity=".5"/>`; } }
   RUNGS.forEach((r,i)=>{ const y=rungY(i);
-    g+=`<line x1="${padL}" y1="${y}" x2="${W-12}" y2="${y}" stroke="var(--rule)" stroke-width="1" vector-effect="non-scaling-stroke"/><text class="gm-faint" x="8" y="${y+3}">${r}</text>`; });
+    g+=`<line x1="${padL}" y1="${y}" x2="${W-(s?geo.padR:12)}" y2="${y}" stroke="var(--rule)" stroke-width="1" vector-effect="non-scaling-stroke"/><text class="gm-faint" x="8" y="${y+3}">${r}</text>`; });
   if(dots.length>1) g+=`<path d="${dots.map((d,i)=>(i?'L':'M')+X(d[0]).toFixed(1)+','+rungY(d[1]).toFixed(1)).join(' ')}" fill="none" stroke="var(--ink-faint)" stroke-width="0.8" stroke-dasharray="2 3" opacity=".7" vector-effect="non-scaling-stroke"/>`;
   dots.forEach(d=>{ g+=`<circle cx="${X(d[0])}" cy="${rungY(d[1])}" r="3.2" fill="${d[1]===3?'var(--bad)':'var(--ink-soft)'}"><title>${RUNGS[d[1]]} @ ${d[0]}s</title></circle>`; });
   if(!dots.length) g+=`<text class="gm-faint" x="${padL+10}" y="${rungY(0)-8}" font-style="italic">no interventions — never left the ground</text>`;
+  if(s){ for(let i=0;i<=4;i++){ const gx=X(s.T*i/4);
+    g+=`<text class="gm-axis" x="${gx-7}" y="${H-4}">${Math.round(s.T*i/4)}s</text>`; } }
   g+=`</svg>`; return g;
 }
-function dagSVG(p, W){ W=W||940; const H=216, BW=118, BH=24;
+/* The DAG can render either the LIVE plan (no version arg) or a specific reel
+   version's plan: pass {strata, vi} and each node is reframed by that version's
+   task set — `added` tasks get the accent "new" treatment, tasks dropped since
+   the previous (older) revision are ghosted/dashed exactly like the live ghost. */
+function dagSVG(p, W, sel){ W=W||940; const H=216, BW=118, BH=24;
   const LX=[80,300,520,740], LY=v=>92+v*44;
-  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="plan dependency DAG">`;
+  // per-node role under the selected version: present / added / dropped / absent
+  let role=null;
+  if(sel){ const cur=p.strata[sel.vi], prev=p.strata[sel.vi+1];
+    role=id=>{ const tid=p.nodes[id].tid;
+      if(!tid) return cur.has.length?'absent':'present';
+      if(cur.has.includes(tid)) return cur.added.includes(tid)?'added':'present';
+      if(prev && prev.has.includes(tid)) return 'dropped';   // present last revision, gone now
+      return 'absent'; }; }
+  const ghosted=id=>{ if(!sel) return p.nodes[id].st==='ghost'; const r=role(id); return r==='dropped'||r==='absent'; };
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="plan dependency DAG${sel?' · '+p.strata[sel.vi].v:''}">`;
   p.edges.forEach(([a,b,crit])=>{ const A=p.nodes[a], B=p.nodes[b];
     const x0=LX[A.x]+BW/2, y0=LY(A.y), x1=LX[B.x]-BW/2, y1=LY(B.y), c=(x0+x1)/2;
-    const stroke = crit===1?'var(--accent)':'var(--ink-faint)';
-    const extra = crit==='ghost'?` stroke-dasharray="3 4" opacity=".45"`:crit===1?` stroke-width="2"`:` stroke-width="1" opacity=".6"`;
-    g+=`<path d="M${x0},${y0} C ${c},${y0} ${c},${y1} ${x1},${y1}" fill="none" stroke="${stroke}"${extra} vector-effect="non-scaling-stroke"><title>${a} → ${b}${crit===1?' · critical path':''}</title></path>`; });
-  Object.entries(p.nodes).forEach(([id,n])=>{ const x=LX[n.x], y=LY(n.y), ghost=n.st==='ghost';
-    const stroke = n.st==='done'?'var(--good)':n.st==='running'?'var(--accent)':ghost?'var(--rule)':'var(--ink-faint)';
-    const glyph = n.st==='done'?['✓','var(--good)']:n.st==='running'?['●','var(--accent)']:ghost?['✕','var(--bad)']:['○','var(--ink-faint)'];
-    g+=`<rect x="${x-BW/2}" y="${y-BH/2}" width="${BW}" height="${BH}" rx="4" fill="var(--panel)" stroke="${stroke}" stroke-width="${n.st==='running'?2:1.2}"${ghost?` stroke-dasharray="4 3" opacity=".55"`:''} vector-effect="non-scaling-stroke"><title>${id} · ${ghost?'dropped at replan v2':n.st}</title></rect>`;
+    const eGhost = ghosted(a)||ghosted(b)||crit==='ghost';
+    const stroke = eGhost?'var(--ink-faint)':crit===1?'var(--accent)':'var(--ink-faint)';
+    const extra = eGhost?` stroke-dasharray="3 4" opacity=".45"`:crit===1?` stroke-width="2"`:` stroke-width="1" opacity=".6"`;
+    g+=`<path d="M${x0},${y0} C ${c},${y0} ${c},${y1} ${x1},${y1}" fill="none" stroke="${stroke}"${extra} vector-effect="non-scaling-stroke"><title>${a} → ${b}${crit===1&&!eGhost?' · critical path':''}</title></path>`; });
+  Object.entries(p.nodes).forEach(([id,n])=>{ const x=LX[n.x], y=LY(n.y);
+    const r = sel?role(id):null, ghost=ghosted(id), added=r==='added';
+    const stroke = ghost?'var(--rule)':added?'var(--accent)':n.st==='done'?'var(--good)':n.st==='running'?'var(--accent)':'var(--ink-faint)';
+    const glyph = ghost?(r==='dropped'||(!sel&&n.st==='ghost')?['✕','var(--bad)']:['·','var(--ink-faint)'])
+      :added?['○','var(--accent)']:n.st==='done'?['✓','var(--good)']:n.st==='running'?['●','var(--accent)']:['○','var(--ink-faint)'];
+    const sw = (n.st==='running'&&!ghost)||added?2:1.2;
+    const tip = ghost?(r==='dropped'?`dropped at ${p.strata[sel.vi].v} (was in ${p.strata[sel.vi+1].v})`:!sel?'dropped at replan v2':'not in this revision')
+      :added?`added in ${p.strata[sel.vi].v}`:n.st;
+    g+=`<rect x="${x-BW/2}" y="${y-BH/2}" width="${BW}" height="${BH}" rx="4" fill="var(--panel)" stroke="${stroke}" stroke-width="${sw}"${ghost?` stroke-dasharray="4 3" opacity=".55"`:''} vector-effect="non-scaling-stroke"><title>${id}${n.tid?' · '+n.tid:''} · ${tip}</title></rect>`;
     g+=`<text x="${x-BW/2+9}" y="${y+3.5}" font-size="10" fill="${ghost?'var(--ink-faint)':'var(--ink-soft)'}">${id}</text>`;
     g+=`<text x="${x+BW/2-15}" y="${y+4}" font-size="9.5" fill="${glyph[1]}">${glyph[0]}</text>`; });
-  g+=`<text class="gm-faint" x="10" y="${H-8}">the accent spine = the critical path · ghost = dropped at replan</text></svg>`; return g;
+  const cap = sel ? `${p.strata[sel.vi].v} · ○ accent = added at this revision · dashed = dropped since the prior revision`
+    : 'the accent spine = the critical path · ghost = dropped at replan';
+  g+=`<text class="gm-faint" x="10" y="${H-8}">${cap}</text></svg>`; return g;
 }
-function strataSVG(p, W){ W=W||940; const rowH=44, tasks={T1:0,T2:1,T3:2,T4:3,T5:4,T6:5,T7:6};
-  const tx=i=>92+i*116, BW=88, BH=13, H=p.strata.length*rowH+26;
-  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="plan strata">`;
-  Object.entries(tasks).forEach(([t,i])=>{ g+=`<text class="gm-faint" x="${tx(i)+BW/2-8}" y="11">${t}</text>`; });
-  p.strata.forEach((st,si)=>{ const y0=18+si*rowH, cy=y0+rowH/2;
-    g+=`<text class="gm-label" x="8" y="${cy+3}"${st.live?' fill="var(--accent)"':''}>${st.v}</text>`;
-    if(st.live) g+=`<line class="gm-spine" x1="76" y1="${y0+4}" x2="76" y2="${y0+rowH-8}"/>`;
-    st.has.forEach(t=>{ const x=tx(tasks[t]); const op = st.live?.8:(.45-si*.08);
-      g+=`<rect x="${x}" y="${cy-BH/2}" width="${BW}" height="${BH}" rx="3" fill="var(--ink-soft)" fill-opacity="${op.toFixed(2)}"><title>${t} in ${st.v}</title></rect>`;
-      if(st.added.includes(t)) g+=`<text x="${x-10}" y="${cy+3.5}" font-size="9" fill="var(--accent)">○</text>`; });
-    if(si>0){ const newer=p.strata[si-1];
-      st.has.filter(t=>!newer.has.includes(t)).forEach(t=>{ g+=`<text x="${tx(tasks[t])+BW+4}" y="${cy+3.5}" font-size="9" fill="var(--bad)">✕</text>`; }); }
-    if(st.seam){ const sy=y0-2; g+=`<line class="gm-seam" x1="76" y1="${sy}" x2="${W-180}" y2="${sy}"/><text class="gm-tick-label" x="${W-172}" y="${sy+3}">${st.seam}</text>`; } });
-  g+=`</svg>`; return g;
-}
-function reelSVG(p, W){ W=W||940; const H=86, xs=[0.12,0.36,0.6,0.84].map(f=>Math.round(W*f));
-  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="plan reel">`;
-  g+=`<line class="gm-spine" x1="${xs[0]}" y1="44" x2="${xs[3]}" y2="44"/>`;
+/* The plan reel is the version timeline (v0…v3) with its replan-trigger seams.
+   It reads oldest→newest left to right, while p.strata is stored newest-first —
+   so version index `i` here maps to strata index `(strata.length-1)-i`. Each
+   stop is a button (data-ver=strata index) that drives the DAG; `selVi` marks
+   which strata version is active. */
+function reelSVG(p, W, selVi){ W=W||940; const H=92, xs=[0.12,0.36,0.6,0.84].map(f=>Math.round(W*f));
+  const n=p.strata.length;  // strata is newest-first; the reel reads oldest→newest
+  let g=`<svg class="fig plan-reel" viewBox="0 0 ${W} ${H}" role="img" aria-label="plan reel — click a version to drive the DAG">`;
+  g+=`<line class="gm-spine" x1="${xs[0]}" y1="50" x2="${xs[3]}" y2="50"/>`;
   const trig=['','scope-creep','goal-drift','tool-misuse'];
-  xs.forEach((x,i)=>{ if(i>0) g+=`<text class="gm-tick-label" x="${(xs[i-1]+x)/2-26}" y="26">↯ ${trig[i]}</text>`;
-    g+=`<circle cx="${x}" cy="44" r="${i===3?5.5:4}" fill="${i===3?'var(--accent)':'var(--panel)'}" stroke="${i===3?'var(--accent)':'var(--ink-soft)'}" stroke-width="1.5"/>`;
-    g+=`<text class="gm-label" x="${x-8}" y="63">v${i}</text><text class="gm-axis" x="${x-24}" y="77">${p.rem[i]} tasks left</text>`;
-    if(i>0) g+=`<text x="${(xs[i-1]+x)/2-10}" y="40" font-size="9" fill="var(--good)">−${p.rem[i-1]-p.rem[i]}</text>`; });
+  xs.forEach((x,i)=>{
+    // stops 1..3 are real strata versions (newest at the rightmost); stop 0 is the v0 origin
+    const sIdx = i===0 ? null : (n-1)-(i-1);  // i=1→v1=strata[n-1]; i=3→v3=strata[0]
+    const active = sIdx!=null && sIdx===selVi, latest=i===xs.length-1;
+    if(i>0) g+=`<text class="gm-tick-label" x="${(xs[i-1]+x)/2-26}" y="30">↯ ${trig[i]}</text>`;
+    const dotFill = active?'var(--accent)':latest?'var(--accent)':'var(--panel)';
+    const dotStroke = active||latest?'var(--accent)':'var(--ink-soft)';
+    g+=`<g class="reel-stop" ${sIdx!=null?`data-ver="${sIdx}" tabindex="0" role="button" aria-pressed="${active}" aria-label="show plan ${p.strata[sIdx].v}"`:''}>`;
+    if(active) g+=`<circle cx="${x}" cy="50" r="10" fill="none" stroke="var(--accent)" stroke-width="1.4" opacity=".9"/>`;
+    g+=`<circle class="reel-hit" cx="${x}" cy="50" r="14" fill="transparent"/>`;
+    g+=`<circle cx="${x}" cy="50" r="${latest||active?5.5:4}" fill="${dotFill}" stroke="${dotStroke}" stroke-width="1.5"/>`;
+    g+=`<text class="gm-label" x="${x-8}" y="71"${active?' fill="var(--accent)" font-weight="600"':''}>v${i}</text>`;
+    g+=`<text class="gm-axis" x="${x-24}" y="85">${p.rem[i]} tasks left</text></g>`;
+    if(i>0) g+=`<text x="${(xs[i-1]+x)/2-10}" y="46" font-size="9" fill="var(--good)">−${p.rem[i-1]-p.rem[i]}</text>`; });
   g+=`</svg>`; return g;
 }
 
-/* ===== app state + shell ===== */
-const PROPOSALS = { observatory: 'A · observatory', score: 'B · score', mission: 'C · mission control' };
-const PROP_NOTES = {
-  observatory: 'one session, one hero view — the rail switches gantt / sequence / drift / plans; click a span for the inspector',
-  score: 'sequence-first — the sequence diagram is the view, the gantt is a minimap, drift + topology + plans ride the margin',
-  mission: 'fleet-first — fingerprints are the navigation; each session gets the full compact instrument set',
-};
+/* ===== app state + shell =====
+   Sessions are navigated ONLY through the ⌘K picker (fingerprint rows) — no
+   sidebar. The rail keeps the GANTT as its own hero view; every other reading
+   — plans (DAG + reel, leading), sequence, topology, drift, interventions —
+   coalesces into one scrolling INSTRUMENTS view. */
 const state = {
-  proposal: 'observatory', view: 'gantt', sessionId: 'checkout-refactor',
+  view: 'gantt', sessionId: 'checkout-refactor',
   drawerSpan: null, drawerOpen: true, live: true, elapsed: 80, picker: false,
+  planVer: 0,   // selected reel version as a strata index (0 = newest/live); drives the DAG
 };
 (function initState(){ const P=new URLSearchParams(location.search);
-  const pr=P.get('proposal'); if(pr && PROPOSALS[pr]) state.proposal=pr;
-  const v=P.get('view'); if(v && ['gantt','sequence','drift','plans'].includes(v)) state.view=v;
-  // deep-link a span's inspector (reachable from every proposal)
-  const sp=P.get('span'); if(sp){ state.drawerSpan=sp; state.drawerOpen=true; if(state.proposal==='observatory') state.view='sequence'; } })();
+  const v=P.get('view'); if(v && ['gantt','instruments'].includes(v)) state.view=v;
+  const s=P.get('session'); if(s && SESSIONS[s]) state.sessionId=s;
+  // deep-link a span's inspector
+  const sp=P.get('span'); if(sp){ state.drawerSpan=sp; state.drawerOpen=true; }
+  // deep-link a reel version (strata index) to drive the DAG
+  const pv=P.get('ver'); if(pv!=null && SESSIONS[state.sessionId].plan.strata[+pv]) state.planVer=+pv; })();
 const S = () => SESSIONS[state.sessionId];
 
 function statusPill(s){ return s.status==='live' ? `<span class="dn-pill live">● live</span>`
@@ -525,7 +625,7 @@ function transportHTML(){
     <span class="hg-transport-spacer"></span>
     <span class="prop-note">zoom: fit · scrubbing disabled in the mock</span></div>`;
 }
-function drawerHTML(float){ const s=S(); const sp = s.spans.find(x=>x.id===state.drawerSpan);
+function drawerHTML(){ const s=S(); const sp = s.spans.find(x=>x.id===state.drawerSpan);
   let body;
   if(sp){ body = `
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
@@ -553,7 +653,6 @@ function drawerHTML(float){ const s=S(); const sp = s.spans.find(x=>x.id===state
     <div class="hg-drawer-header"><span class="hg-drawer-title">${sp?sp.label:'session'}</span>
       <button class="hg-drawer-close" id="drawer-close" title="close">×</button></div>
     <div class="hg-drawer-body">${body}</div></div>`;
-  if(float){ if(!state.drawerSpan) return ''; return `<div class="hg-drawer-float">${inner}</div>`; }
   return `<div class="hg-drawer-host ${state.drawerOpen?'open':''}">${inner}</div>`;
 }
 function pickerHTML(){ if(!state.picker) return '';
@@ -562,94 +661,72 @@ function pickerHTML(){ if(!state.picker) return '';
     <div class="hg-picker-list"><div class="hg-picker-section">sessions</div>
     ${Object.values(SESSIONS).map(s=>`<button class="hg-picker-row" data-sess="${s.id}" aria-selected="${s.id===state.sessionId}">
       ${fpSVG(s,30)}<span><span class="hg-picker-row-title">${s.id}</span><br><span class="hg-picker-row-sub">${s.goal}</span></span>
-      <span class="hg-picker-row-meta">${s.status}</span></button>`).join('')}</div></div></div>`;
+      <span class="hg-picker-row-meta">${s.status}</span></button>`).join('')}
+    <div class="hg-picker-section" style="padding-bottom:10px;text-transform:none;letter-spacing:0">
+      fingerprint: x = plan progress · y = drift, damped — tight = harmonic, scribble = drifting,
+      outward spiral = diverging; the dot is status, earned</div></div></div></div>`;
 }
 
-/* ----- proposal A: the observatory ----- */
-function mainObservatory(){ const s=S();
-  if(state.view==='gantt') return `<h3>execution — gantt</h3><div class="gantt-click">${ganttSVG(s,{selected:state.drawerSpan})}</div>
-    <h3>judge heartbeat</h3>${heartSVG(s)}`;
-  if(state.view==='sequence') return `<h3>sequence — who said what to whom, when</h3>
-    <div class="panes-2"><div class="gantt-click"><h3 style="margin-top:0">time-ordered</h3>${seqDiagramSVG(s)}</div>
-      <div><h3 style="margin-top:0">topology — who initiates, who receives</h3>${topoChordSVG(s,300)}</div></div>`;
-  if(state.view==='drift') return `<h3>drift seismograph</h3>${seismoSVG(s,['coder','reviewer','planner'])}
-    <div class="panes-2"><div><h3>intervention ladder</h3>${ladderSVG(s.ladder,460)}</div>
-    <div><h3>judge heartbeat</h3>${heartSVG(s,460)}</div></div>`;
-  return `<h3>plan DAG — interdependence (the critical path is the spine)</h3>${dagSVG(s.plan)}
-    <h3>plan strata — revisions as sediment</h3>${strataSVG(s.plan)}
-    <h3>plan reel — remaining work across revisions</h3>${reelSVG(s.plan)}`;
+/* ----- the plan block: the reel sits DIRECTLY ABOVE the DAG, sharing the same
+   horizontal alignment, and each reel version drives the DAG below it. The DAG
+   lives in its own host so a reel click re-renders ONLY the DAG (digest-gated —
+   no full re-render, no flash). ----- */
+function planBlockHTML(s){ const sel=state.planVer, ver=s.plan.strata[sel];
+  return `<h3>plan reel — pick a revision to drive the DAG below</h3>
+    <div class="reel-host">${reelSVG(s.plan, 940, sel)}</div>
+    <h3>plan DAG — ${ver.v}'s plan · interdependence (the critical path is the spine)</h3>
+    <div id="dag-host">${dagSVG(s.plan, 940, {vi:sel})}</div>`;
+}
+/* re-render ONLY the DAG host + the reel's active marks — local UI state, no
+   structural repaint of the rest of the console. */
+function repaintPlan(){ const s=S(), host=document.getElementById('dag-host');
+  if(!host) return; host.innerHTML=dagSVG(s.plan, 940, {vi:state.planVer});
+  const h3=host.previousElementSibling; if(h3&&h3.tagName==='H3')
+    h3.textContent=`plan DAG — ${s.plan.strata[state.planVer].v}'s plan · interdependence (the critical path is the spine)`;
+  const reel=document.querySelector('.reel-host'); if(reel){ reel.innerHTML=reelSVG(s.plan,940,state.planVer); wireReel(reel); }
+}
+/* ----- the two rail views ----- */
+function mainHybrid(){ const s=S();
+  if(state.view==='gantt')
+    // the gantt stands alone: the one hero reading, full size, nothing competing
+    return `<h3>execution — gantt</h3><div class="gantt-click">${ganttSVG(s,{selected:state.drawerSpan})}</div>
+      <h3>judge heartbeat</h3>${heartSVG(s)}`;
+  // the instruments: everything that is NOT the gantt, coalesced into one
+  // mission-control scroll — THE PLAN LEADS (reel → DAG), then conversation,
+  // topology, and ONE coordinated time-track stack: drift+judge seismograph
+  // over the time-aligned intervention ladder.
+  return `<div class="sess-head">${fpSVG(s,58)}<div><div class="sess-title">${s.id}</div>
+      <div style="font-size:11px;color:var(--ink-faint)">${s.goal}</div></div>
+      <span style="flex:1"></span><span class="sess-stats">${statusPill(s)}
+      <span class="dn-pill flat tnum">${s.spans.length} spans</span><span class="dn-pill flat tnum">${s.now}s</span></span></div>
+    ${planBlockHTML(s)}
+    <div class="panes-2"><div class="gantt-click"><h3>sequence — who said what to whom, when</h3>${seqDiagramSVG(s,{W:520,H:380})}</div>
+      <div><h3>topology — who initiates, who receives</h3>${topoChordSVG(s,300)}
+        <p class="prop-note" style="margin:6px 2px 0;line-height:1.5">hover an agent to <b>project</b> its
+        conversations (click to pin · click away to clear) · ribbon width grows with √count and caps, so heavy
+        traffic can never flood the figure</p></div></div>
+    <h3>drift seismograph + judge heartbeat — one instrument, one time axis</h3>
+    <div class="track-stack">${seismoSVG(s,['coder','reviewer','planner'],940,{axis:false})}
+      <div class="track-sub">interventions, time-aligned beneath the drift above ↓</div>
+      ${ladderSVG(s.ladder,940,s)}</div>`;
 }
 function railHTML(){
-  const items=[['gantt','▤'],['sequence','♒'],['drift','〰'],['plans','⧉']];
+  const items=[['gantt','▤'],['instruments','⧉']];
   return `<nav class="hg-rail">${items.map(([v,ic])=>
     `<button class="hg-rail-item" data-view="${v}" aria-selected="${state.view===v}"><span class="hg-rail-icon">${ic}</span><span>${v}</span></button>`).join('')}</nav>`;
 }
-function appObservatory(){
-  return topbarHTML()+stripHTML()+`<div class="app-body p-observatory">${railHTML()}
-    <main class="app-main">${mainObservatory()}</main>${drawerHTML()}</div>`+transportHTML();
-}
-/* ----- proposal B: the score (sequence-first) -----
-   The corrected sequence diagram IS the view; the gantt is a minimap; drift,
-   topology, plans, and interventions ride the margin so every piece of session
-   information the other proposals surface is reachable here too. */
-function appScore(){ const s=S();
-  return topbarHTML()+`<div class="app-body p-score">
-    <div class="minimap">${ganttSVG(s,{mini:true})}</div>
-    <main class="app-main gantt-click"><h3>the sequence diagram — who said what to whom, when</h3>${seqDiagramSVG(s,{W:760,H:430})}
-      <h3>plan DAG — interdependence</h3>${dagSVG(s.plan)}
-      <h3>plan strata — revisions as sediment</h3>${strataSVG(s.plan)}</main>
-    <aside class="margin-col"><h4>session</h4>
-      <div style="text-align:center">${fpSVG(s,84)}</div>
-      <div style="text-align:center;margin:4px 0 8px">${statusPill(s)}</div>
-      <h4>topology — who initiates</h4>${topoChordSVG(s,186)}
-      <h4>drift margin — coder</h4>${seismoSVG(s,['coder'],186)}
-      <h4>interventions</h4>
-      ${(s.ticks.coder||[]).map(([t,l])=>`<div class="margin-item">◆ ${l} <span class="tnum" style="color:var(--ink-faint)">@${t}s</span></div>`).join('')||'<div class="margin-item" style="font-style:italic">none</div>'}
-      <h4>escalation ladder</h4>${ladderSVG(s.ladder,186)}
-      <h4>remaining work</h4>${reelSVG(s.plan,186)}
-      <h4>heartbeat</h4>${heartSVG(s,186)}
-      <p class="prop-note" style="margin-top:8px">click any span → inspector</p></aside>
-  </div>`+drawerHTML(true)+transportHTML();
-}
-/* ----- proposal C: mission control ----- */
-function appMission(){ const s=S();
-  return topbarHTML()+`<div class="app-body p-mission">
-    <aside class="fleet"><h4>fleet · ${Object.keys(SESSIONS).length} sessions</h4>
-      ${Object.values(SESSIONS).map(x=>`<button class="fleet-item" data-sess="${x.id}" aria-selected="${x.id===state.sessionId}">
-        ${fpSVG(x,44)}<span style="min-width:0"><span class="fleet-name">${x.id}</span><span class="fleet-sub">${x.status} · ${x.spans.length} spans</span></span></button>`).join('')}
-      <h4 style="margin-top:14px">why fingerprints</h4>
-      <div class="margin-item" style="font-size:9.5px">x = plan progress · y = drift, damped. tight = harmonic; scribble = drifting; outward spiral = diverging. the dot is status, earned.</div></aside>
-    <main class="app-main">
-      <div class="sess-head">${fpSVG(s,58)}<div><div class="sess-title">${s.id}</div>
-        <div style="font-size:11px;color:var(--ink-faint)">${s.goal}</div></div>
-        <span style="flex:1"></span><span class="sess-stats">${statusPill(s)}
-        <span class="dn-pill flat tnum">${s.spans.length} spans</span><span class="dn-pill flat tnum">${s.now}s</span></span></div>
-      <h3>execution</h3><div class="gantt-click">${ganttSVG(s,{compact:true,selected:state.drawerSpan})}</div>
-      <div class="panes-2"><div class="gantt-click"><h3>sequence — who said what to whom</h3>${seqDiagramSVG(s,{W:520,H:360})}</div>
-        <div><h3>topology — who initiates</h3>${topoChordSVG(s,300)}</div></div>
-      <h3>drift</h3>${seismoSVG(s,['coder'])}
-      <h3>judge heartbeat</h3>${heartSVG(s)}
-      <div class="panes-2"><div><h3>intervention ladder</h3>${ladderSVG(s.ladder,460)}</div>
-        <div><h3>plan reel</h3>${reelSVG(s.plan,460)}</div></div>
-      <h3>plan DAG — interdependence</h3>${dagSVG(s.plan)}
-      <h3>plan strata — revisions as sediment</h3>${strataSVG(s.plan)}
-    </main></div>`+drawerHTML(true)+transportHTML();
+function appHybrid(){
+  return topbarHTML()+stripHTML()+`<div class="app-body">${railHTML()}
+    <main class="app-main">${mainHybrid()}</main>${drawerHTML()}</div>`+transportHTML();
 }
 
 /* ----- render + wire ----- */
 function render(){
   const app=document.getElementById('app');
-  app.innerHTML = (state.proposal==='observatory'?appObservatory():state.proposal==='score'?appScore():appMission()) + pickerHTML();
-  document.getElementById('prop-note').textContent = PROP_NOTES[state.proposal];
-  const sw=document.getElementById('prop-switch');
-  sw.innerHTML = Object.entries(PROPOSALS).map(([id,lbl])=>
-    `<button data-prop="${id}" aria-pressed="${state.proposal===id}">${lbl}</button>`).join('');
-  sw.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ state.proposal=b.dataset.prop; state.drawerSpan=null; state.drawerOpen = b.dataset.prop==='observatory'; render(); }));
+  app.innerHTML = appHybrid() + pickerHTML();
   mountBrand();
   app.querySelectorAll('.hg-rail-item').forEach(b=>b.addEventListener('click',()=>{ state.view=b.dataset.view; render(); }));
   app.querySelectorAll('[data-span]').forEach(el=>el.addEventListener('click',()=>{
-    // the inspector payload is reachable in every proposal: A docks it in the
-    // rail drawer, B & C float it as an overlay.
     state.drawerSpan=el.dataset.span; state.drawerOpen=true; render(); }));
   const dc=app.querySelector('#drawer-close'); if(dc) dc.addEventListener('click',()=>{
     if(state.drawerSpan){ state.drawerSpan=null; } else { state.drawerOpen=false; } render(); });
@@ -658,10 +735,10 @@ function render(){
   const pb=app.querySelector('#picker-backdrop'); if(pb){
     pb.addEventListener('click',e=>{ if(e.target===pb){ state.picker=false; render(); } });
     pb.querySelectorAll('[data-sess]').forEach(b=>b.addEventListener('click',()=>{
-      state.sessionId=b.dataset.sess; state.picker=false; state.drawerSpan=null; state.elapsed=S().now; render(); }));
+      state.sessionId=b.dataset.sess; state.picker=false; state.drawerSpan=null; state.planVer=0; state.elapsed=S().now; render(); }));
     const pi=app.querySelector('#picker-input'); if(pi) pi.focus(); }
-  app.querySelectorAll('.fleet-item').forEach(b=>b.addEventListener('click',()=>{
-    state.sessionId=b.dataset.sess; state.drawerSpan=null; state.elapsed=S().now; render(); }));
+  wireChord(app);
+  const rh=app.querySelector('.reel-host'); if(rh) wireReel(rh);
 }
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){ if(state.picker){ state.picker=false; render(); } else if(state.drawerSpan){ state.drawerSpan=null; render(); } }

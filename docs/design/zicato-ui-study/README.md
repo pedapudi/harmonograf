@@ -23,10 +23,18 @@ figures.html     OrchestrationTimeline · TaskStages · LiveActivity · Interven
 grammar.html     fourteen new figures: seismograph · ladder · sankey · strata ·
                  plan DAG · delegation score · chord · fingerprint · …
 brand.html       harmonograf's own mark — the Lissajous α, wordmark, lockups
-compose.html     THE COMPOSED CONSOLE — interactive, three whole-UI proposals:
-                 A·observatory (rail-switched views + inspector), B·score
-                 (sequence-first + minimap + drift margin), C·mission control
-                 (fingerprint fleet). Clickable spans, ⌘K session switch.
+compose.html     THE COMPOSED CONSOLE — interactive. The gantt as its own hero
+                 view + one coalesced "instruments" view leading with the plan:
+                 the plan REEL sits above the plan DAG and DRIVES it — click a
+                 revision and the DAG redraws that version's task set (added in
+                 accent, dropped-since-prior ghosted/dashed). Then sequence ·
+                 projectable topology chord · and ONE coordinated time-track
+                 stack: the drift seismograph with the judge heartbeat folded in
+                 (one time axis) over the time-aligned intervention ladder.
+                 Sessions ONLY via the ⌘K fingerprint picker (no sidebar).
+                 Clickable spans → inspector. ?ver= deep-links a reel revision.
+                 (The earlier A/B/C whole-UI proposals + fleet sidebar live in
+                 git history.)
 
 _tokens.css      16 themes: zicato --v2 roles + --ansi-* + the --hg-* categorical
 _study.css       shared page chrome + the .hg-* zicato-language component CSS
