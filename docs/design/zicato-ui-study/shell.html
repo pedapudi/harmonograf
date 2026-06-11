@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="monokai">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>harmonograf × zicato — shell (chrome) study</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_tokens.css">
+<link rel="stylesheet" href="_study.css">
+<style>
+  /* ---- BEFORE-state MD3 replica. The ONLY hardcoded hex on this page; these
+       are harmonograf's OWN current MD3 dark values (from frontend/src/index.css
+       + theme/themes.ts dark), reproduced so the "before" reads true. They are
+       NOT study tokens and are scoped to .md3 so they can never leak. ---- */
+  .md3 {
+    --m-surface:#10131a; --m-surf-c:#1c1f26; --m-surf-ch:#262931; --m-surf-chh:#31333c;
+    --m-on:#e2e2e9; --m-on-var:#c3c6cf; --m-outline:#8d9199; --m-outline-v:#43474e;
+    --m-primary:#a8c8ff; --m-primary-c:#00468a; --m-on-primary-c:#d6e3ff;
+    --m-secondary-c:#005227; --m-on-secondary-c:#9bf8bb; --m-error:#ffb4ab;
+    --m-tertiary:#e8c84c;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--m-surface); color: var(--m-on); font-size: 14px;
+    border-radius: 4px; overflow: hidden;
+  }
+  .md3 .b-appbar { display:flex; align-items:center; gap:8px; padding:0 12px; height:48px;
+    background:var(--m-surf-c); border-bottom:1px solid var(--m-outline-v); }
+  .md3 .b-appbar .b-title { font-weight:600; }
+  .md3 .b-session { background:var(--m-surf-ch); border:1px solid var(--m-outline-v);
+    padding:4px 12px; border-radius:4px; font-size:13px; }
+  .md3 .b-icon { background:transparent; border:none; padding:6px 8px; border-radius:4px; color:inherit; font-size:17px; cursor:pointer; }
+  .md3 .b-spacer { flex:1; }
+  .md3 .b-strip { display:flex; align-items:center; gap:10px; padding:4px 14px; min-height:26px;
+    background:var(--m-surf-c); border-bottom:1px solid var(--m-outline-v); font-size:12px; }
+  .md3 .b-strip-label { opacity:.55; text-transform:uppercase; font-size:10px; letter-spacing:.06em; }
+  .md3 .b-strip-agent { background:var(--m-surf-ch); color:var(--m-on-var); padding:1px 8px;
+    border-radius:999px; font-size:11px; font-family:ui-monospace,monospace; }
+  .md3 .b-chip { padding:1px 8px; border-radius:999px; font-size:10px; font-weight:600;
+    text-transform:uppercase; letter-spacing:.04em; }
+  .md3 .b-chip-run { background:rgba(120,220,150,.18); color:#78dc96; animation:b-pulse 1.8s ease-in-out infinite; }
+  @keyframes b-pulse { 0%,100%{opacity:1;} 50%{opacity:.55;} }
+  .md3 .b-rail { display:flex; flex-direction:column; gap:4px; padding:12px 8px; width:72px;
+    background:var(--m-surf-c); border-right:1px solid var(--m-outline-v); }
+  .md3 .b-rail-item { display:flex; flex-direction:column; align-items:center; gap:2px; padding:8px 4px;
+    border:none; background:transparent; border-radius:8px; color:var(--m-on-var); font-size:11px; cursor:pointer; }
+  .md3 .b-rail-item.sel { background:var(--m-secondary-c); color:var(--m-on-secondary-c); }
+  .md3 .b-rail-icon { font-size:20px; }
+  .md3 .b-transport { display:flex; align-items:center; gap:8px; padding:0 12px; height:44px;
+    background:var(--m-surf-c); border-top:1px solid var(--m-outline-v); }
+  .md3 .b-tbtn { background:var(--m-surf-ch); border:1px solid var(--m-outline-v); padding:4px 10px;
+    border-radius:4px; color:inherit; font-size:12px; cursor:pointer; }
+  .md3 .b-live { display:flex; align-items:center; gap:5px; font-family:ui-monospace,monospace;
+    font-size:11px; font-weight:700; letter-spacing:.06em; color:var(--m-primary); }
+  .md3 .b-live-dot { width:7px; height:7px; border-radius:999px; background:var(--m-primary);
+    box-shadow:0 0 6px var(--m-primary); animation:b-live 1.6s ease-in-out infinite; }
+  @keyframes b-live { 0%,100%{opacity:1;} 50%{opacity:.35;} }
+  .md3 .b-clock { font-family:ui-monospace,monospace; font-size:12px; opacity:.8; }
+  .md3 .b-tspacer { flex:1; }
+  .md3 .b-return { background:#3a3000; border:1px solid var(--m-tertiary); color:var(--m-tertiary);
+    font-weight:600; font-size:11px; padding:3px 9px; border-radius:4px; cursor:pointer; }
+  .md3 .b-drawer { width:320px; background:var(--m-surf-c); border-left:1px solid var(--m-outline-v); }
+  .md3 .b-drawer-head { padding:12px 16px; border-bottom:1px solid var(--m-outline-v); display:flex; gap:8px; align-items:center; }
+  .md3 .b-drawer-title { font-weight:600; flex:1; }
+  .md3 .b-drawer-tabs { display:flex; gap:4px; padding:0 8px; border-bottom:1px solid var(--m-outline-v); }
+  .md3 .b-drawer-tabs button { background:transparent; border:none; border-bottom:2px solid transparent;
+    padding:10px 12px; color:var(--m-on-var); font-size:12px; cursor:pointer; }
+  .md3 .b-drawer-tabs button.sel { color:var(--m-primary); border-bottom-color:var(--m-primary); }
+  .md3 .b-drawer-body { padding:12px 16px; font-size:12px; }
+  .md3 .b-attrs { display:grid; grid-template-columns:max-content 1fr; gap:4px 12px; }
+  .md3 .b-attrs dt { color:var(--m-on-var); }
+  .md3 .b-attrs dd { margin:0; font-family:ui-monospace,monospace; }
+  .md3 .b-code { display:block; background:var(--m-surf-chh); padding:8px 10px; border-radius:4px;
+    font-family:ui-monospace,monospace; font-size:11px; white-space:pre-wrap; margin-top:8px; }
+
+  /* a compact frame used for the assembled / after shells */
+  .shell-shot { border:1px solid var(--rule); border-radius:var(--r-panel); overflow:hidden; }
+  .after-shell { display:grid; grid-template-columns:62px 1fr 300px; grid-template-rows:auto auto 200px auto;
+    grid-template-areas: "top top top" "strip strip strip" "rail main drawer" "rail transport drawer";
+    background:var(--paper); min-height:0; }
+  .after-shell .hg-topbar { grid-area:top; }
+  .after-shell .hg-strip { grid-area:strip; }
+  .after-shell .hg-rail { grid-area:rail; }
+  .after-shell .as-main { grid-area:main; padding:14px 18px; min-width:0; overflow:hidden; }
+  .after-shell .hg-transport { grid-area:transport; }
+  .after-shell .hg-drawer { grid-area:drawer; }
+  .as-main-fig { margin-top:8px; }
+  .micro { font-size:10.5px; color:var(--ink-faint); }
+</style>
+</head>
+<body>
+<header class="study">
+  <span class="brand-row"><span data-brand-mark="22"></span><span data-brand-wordmark></span></span>
+  <h1>shell — chrome restyled in the zicato design language</h1>
+  <span class="spacer"></span>
+  <span class="legend-inline">accent reserved · <b>now / live / selected</b> only</span>
+  <span class="theme-pick-label">theme</span>
+  <span data-theme-picker></span>
+</header>
+
+<main class="study">
+  <p class="lede" style="margin-top:22px">
+    harmonograf's chrome today is <b>Material Design 3</b>: <code>--md-sys-color-*</code> tokens, a system-ui sans,
+    elevation containers with drop shadows, a blue primary, and several <code>animation:…infinite</code> pulses.
+    This study redraws every chrome surface in <b>zicato's language</b> — one calm <code>--paper</code> ground with a
+    single <code>--panel</code> lift, hairline <code>--rule</code> separators instead of elevation, an all-mono voice,
+    and <code>--accent</code> <b>reserved</b> for now / live / selected. Switch the theme above: the whole shell
+    re-skins across all 16 Console palettes with no re-render.
+  </p>
+
+  <!-- ===== assembled AFTER shell ===== -->
+  <section class="study" data-surface>
+    <h2>The assembled console — after</h2>
+    <p class="rationale">
+      AppBar → <b>topbar</b> (the harmonograf brand — the Lissajous-α mark, dot at its tail, beside the plain-letter wordmark — breadcrumbs,
+      typeface switch, scale pill, status / RUN pill) · NavRail · CurrentTaskStrip · TransportBar (LIVE pill + clock)
+      · inspector Drawer (tabs · attrs · code). One ground, one lift, hairlines, mono, accent reserved.
+    </p>
+    <div class="shell-shot">
+      <div class="after-shell">
+        <header class="hg-topbar">
+          <span class="hg-brand"><span data-brand-mark="22"></span><span data-brand-wordmark></span></span>
+          <nav class="hg-crumbs"><a class="hg-crumb" href="#">sessions</a><span class="hg-crumb-sep">›</span><span class="hg-crumb-current">checkout-refactor</span></nav>
+          <span class="hg-topbar-spacer"></span>
+          <span class="hg-typeswitch"><button aria-pressed="true">mono</button><button>serif</button><button>display</button></span>
+          <span class="hg-scale-pill">⊟ <span class="tnum">100%</span> ⟲</span>
+          <span class="hg-status is-connected is-running">
+            <span class="hg-status-dot"></span><span>live</span>
+            <span class="hg-run-badge"><span class="hg-run-pulse" aria-hidden="true"></span><span class="hg-run-label">running</span><span>· <span class="tnum">3</span> agents</span></span>
+          </span>
+        </header>
+        <div class="hg-strip">
+          <span class="hg-strip-label">task</span>
+          <span class="hg-strip-title">Refactor the checkout flow to use the new pricing service</span>
+          <span class="dn-pill accent">running</span>
+          <span class="hg-strip-agent">planner</span>
+          <span class="micro">· tool: <code>read_file</code></span>
+        </div>
+        <nav class="hg-rail">
+          <button class="hg-rail-item" aria-selected="true"><span class="hg-rail-icon">▤</span><span>gantt</span></button>
+          <button class="hg-rail-item"><span class="hg-rail-icon">◷</span><span>activity</span></button>
+          <button class="hg-rail-item"><span class="hg-rail-icon">✎</span><span>notes</span></button>
+          <button class="hg-rail-item"><span class="hg-rail-icon">⚙</span><span>settings</span></button>
+        </nav>
+        <div class="as-main">
+          <div class="micro">execution gantt</div>
+          <div class="as-main-fig" id="mini-gantt"></div>
+        </div>
+        <aside class="hg-drawer">
+          <div class="hg-drawer-header"><span class="hg-drawer-title">tool_call · read_file</span><span class="dn-pill accent">running</span></div>
+          <div class="hg-drawer-tabs"><button aria-selected="true">attrs</button><button>payload</button><button>links</button></div>
+          <div class="hg-drawer-body">
+            <dl class="hg-attrs">
+              <dt>agent</dt><dd>planner</dd>
+              <dt>kind</dt><dd>TOOL_CALL</dd>
+              <dt>started</dt><dd class="tnum">00:00:12.480</dd>
+              <dt>path</dt><dd>src/pricing/service.ts</dd>
+            </dl>
+            <code class="hg-drawer-code"><span class="hg-j-punct">{</span> <span class="hg-j-key">"lines"</span><span class="hg-j-punct">:</span> <span class="hg-j-num">420</span><span class="hg-j-punct">,</span> <span class="hg-j-key">"ok"</span><span class="hg-j-punct">:</span> <span class="hg-j-bool">true</span> <span class="hg-j-punct">}</span></code>
+          </div>
+        </aside>
+        <div class="hg-transport">
+          <div class="hg-transport-group">
+            <button class="hg-transport-btn">⏮</button>
+            <button class="hg-transport-btn">◀</button>
+            <button class="hg-transport-btn">▶</button>
+            <button class="hg-transport-btn">⏭</button>
+          </div>
+          <span class="hg-transport-divider"></span>
+          <span class="hg-live-badge"><span class="hg-live-dot"></span>LIVE</span>
+          <span class="hg-clock tnum">00:00:14.320</span>
+          <span class="hg-transport-spacer"></span>
+          <span class="micro">zoom</span>
+          <button class="hg-transport-btn">−</button><button class="hg-transport-btn">+</button>
+        </div>
+      </div>
+    </div>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--accent)"></span> accent — now / live / selected</span>
+      <span><span class="sw" style="background:var(--good)"></span> good — connected</span>
+      <span><span class="sw" style="background:var(--rule)"></span> rule — hairline separators (no elevation)</span>
+      <span><span class="sw" style="background:var(--panel)"></span> panel — the one lift</span>
+    </div>
+  </section>
+
+  <!-- ===== topbar before/after ===== -->
+  <section class="study" data-surface>
+    <h2>AppBar → topbar</h2>
+    <p class="rationale">
+      The MD3 AppBar is a flat container with a sans title and a surface-tinted session button. The console topbar
+      leads with the <b>harmonograf lockup</b> — the mirrored-Lissajous α mark beside plain-letter <code>harmonograf</code> (one alpha per lockup; see <a href="brand.html">the brand study</a>),
+      then mono breadcrumbs, the typeface switch and scale pill, and a status pill whose <b>RUN badge pulses the one
+      accent</b> — the chrome's only keyframe (gated under <code>prefers-reduced-motion</code>).
+    </p>
+    <div class="ba-grid">
+      <div class="ba-cell">
+        <p class="ba-tag">before · MD3</p>
+        <div class="ba-frame before"><div class="md3"><div class="b-appbar">
+          <button class="b-icon">☰</button><span class="b-title">harmonograf</span>
+          <button class="b-session">checkout-refactor ▾</button><span class="b-spacer"></span>
+          <button class="b-icon">◷</button><button class="b-icon">⚙</button><button class="b-icon">◑</button>
+        </div></div></div>
+      </div>
+      <div class="ba-cell">
+        <p class="ba-tag after">after · zicato</p>
+        <div class="ba-frame"><div style="background:var(--paper)"><header class="hg-topbar">
+          <span class="hg-brand"><span data-brand-mark="22"></span><span data-brand-wordmark></span></span>
+          <nav class="hg-crumbs"><a class="hg-crumb" href="#">sessions</a><span class="hg-crumb-sep">›</span><span class="hg-crumb-current">checkout-refactor</span></nav>
+          <span class="hg-topbar-spacer"></span>
+          <span class="hg-typeswitch"><button aria-pressed="true">mono</button><button>serif</button></span>
+          <span class="hg-status is-connected is-running"><span class="hg-status-dot"></span><span>live</span>
+            <span class="hg-run-badge"><span class="hg-run-pulse" aria-hidden="true"></span><span class="hg-run-label">running</span></span></span>
+        </header></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== rail + strip before/after ===== -->
+  <section class="study" data-surface>
+    <h2>NavRail &amp; CurrentTaskStrip</h2>
+    <p class="rationale">
+      MD3 marks the selected rail item with a <code>secondary-container</code> fill (green pill) and animates the
+      running task chip with an <code>infinite</code> opacity pulse. In-language: the selected item is a quiet
+      <code>color-mix(--accent 14%, --panel)</code> tint with accent text; the strip's running state is a mono
+      <b>outline-first accent pill</b> — <b>not red</b> (an in-flight task is neutral, never a failure).
+    </p>
+    <div class="ba-grid">
+      <div class="ba-cell">
+        <p class="ba-tag">before · MD3</p>
+        <div class="ba-frame before"><div class="md3" style="display:flex">
+          <nav class="b-rail">
+            <button class="b-rail-item sel"><span class="b-rail-icon">▤</span><span>gantt</span></button>
+            <button class="b-rail-item"><span class="b-rail-icon">◷</span><span>activity</span></button>
+            <button class="b-rail-item"><span class="b-rail-icon">⚙</span><span>settings</span></button>
+          </nav>
+          <div style="flex:1"><div class="b-strip">
+            <span class="b-strip-label">task</span><span style="flex:0 1 auto;overflow:hidden;text-overflow:ellipsis">Refactor checkout flow</span>
+            <span class="b-chip b-chip-run">running</span><span class="b-strip-agent">planner</span>
+          </div></div>
+        </div></div>
+      </div>
+      <div class="ba-cell">
+        <p class="ba-tag after">after · zicato</p>
+        <div class="ba-frame"><div style="display:flex;background:var(--paper)">
+          <nav class="hg-rail">
+            <button class="hg-rail-item" aria-selected="true"><span class="hg-rail-icon">▤</span><span>gantt</span></button>
+            <button class="hg-rail-item"><span class="hg-rail-icon">◷</span><span>activity</span></button>
+            <button class="hg-rail-item"><span class="hg-rail-icon">⚙</span><span>settings</span></button>
+          </nav>
+          <div style="flex:1"><div class="hg-strip">
+            <span class="hg-strip-label">task</span><span class="hg-strip-title">Refactor checkout flow</span>
+            <span class="dn-pill accent">running</span><span class="hg-strip-agent">planner</span>
+          </div></div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== transport before/after ===== -->
+  <section class="study" data-surface>
+    <h2>TransportBar</h2>
+    <p class="rationale">
+      Transport controls become mono outline-first buttons (fill the accent only on hover). The LIVE badge keeps a
+      single pulsing dot — re-pointed from the MD3 blue primary to <code>--accent</code> — and the clock uses
+      <code>tabular-nums</code> so digits never jitter. The "return to live" affordance, an MD3 amber container, maps
+      to a <code>--caution</code> outline.
+    </p>
+    <div class="ba-grid">
+      <div class="ba-cell">
+        <p class="ba-tag">before · MD3</p>
+        <div class="ba-frame before"><div class="md3"><div class="b-transport">
+          <button class="b-tbtn">⏮</button><button class="b-tbtn">▶</button><button class="b-tbtn">⏭</button>
+          <span class="b-live"><span class="b-live-dot"></span>LIVE</span><span class="b-clock">00:00:14.32</span>
+          <span class="b-tspacer"></span><button class="b-return">⟲ return to live</button>
+        </div></div></div>
+      </div>
+      <div class="ba-cell">
+        <p class="ba-tag after">after · zicato</p>
+        <div class="ba-frame"><div style="background:var(--paper)"><div class="hg-transport">
+          <button class="hg-transport-btn">⏮</button><button class="hg-transport-btn">▶</button><button class="hg-transport-btn">⏭</button>
+          <span class="hg-transport-divider"></span>
+          <span class="hg-live-badge"><span class="hg-live-dot"></span>LIVE</span><span class="hg-clock tnum">00:00:14.320</span>
+          <span class="hg-transport-spacer"></span><button class="hg-transport-btn" style="border-color:var(--caution);color:var(--caution)">⟲ return to live</button>
+        </div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== drawer before/after ===== -->
+  <section class="study" data-surface>
+    <h2>Inspector Drawer</h2>
+    <p class="rationale">
+      The drawer keeps its tabbed shape but loses the elevated <code>surface-container-highest</code> code block in
+      favor of a hairline-framed <code>--panel-2</code> pre. Tabs underline in <code>--accent</code> when active; the
+      JSON tint reads from tokens (<code>--good</code> strings, <code>--caution</code> numbers, <code>--bad</code>
+      booleans, <code>--accent</code> keys) so it re-skins with the theme instead of shipping fixed syntax colors.
+    </p>
+    <div class="ba-grid">
+      <div class="ba-cell">
+        <p class="ba-tag">before · MD3</p>
+        <div class="ba-frame before"><div class="md3"><div class="b-drawer" style="width:auto">
+          <div class="b-drawer-head"><span class="b-drawer-title">tool_call · read_file</span></div>
+          <div class="b-drawer-tabs"><button class="sel">attrs</button><button>payload</button><button>links</button></div>
+          <div class="b-drawer-body">
+            <dl class="b-attrs"><dt>agent</dt><dd>planner</dd><dt>kind</dt><dd>TOOL_CALL</dd><dt>path</dt><dd>service.ts</dd></dl>
+            <code class="b-code">{ "lines": 420, "ok": true }</code>
+          </div>
+        </div></div></div>
+      </div>
+      <div class="ba-cell">
+        <p class="ba-tag after">after · zicato</p>
+        <div class="ba-frame"><div style="background:var(--paper)"><aside class="hg-drawer" style="height:auto">
+          <div class="hg-drawer-header"><span class="hg-drawer-title">tool_call · read_file</span><span class="dn-pill accent">running</span></div>
+          <div class="hg-drawer-tabs"><button aria-selected="true">attrs</button><button>payload</button><button>links</button></div>
+          <div class="hg-drawer-body">
+            <dl class="hg-attrs"><dt>agent</dt><dd>planner</dd><dt>kind</dt><dd>TOOL_CALL</dd><dt>path</dt><dd>service.ts</dd></dl>
+            <code class="hg-drawer-code"><span class="hg-j-punct">{</span> <span class="hg-j-key">"lines"</span><span class="hg-j-punct">:</span> <span class="hg-j-num">420</span><span class="hg-j-punct">,</span> <span class="hg-j-key">"ok"</span><span class="hg-j-punct">:</span> <span class="hg-j-bool">true</span> <span class="hg-j-punct">}</span></code>
+          </div>
+        </aside></div></div>
+      </div>
+    </div>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--accent)"></span> keys · active tab</span>
+      <span><span class="sw" style="background:var(--good)"></span> strings</span>
+      <span><span class="sw" style="background:var(--caution)"></span> numbers</span>
+      <span><span class="sw" style="background:var(--bad)"></span> booleans</span>
+    </div>
+  </section>
+</main>
+
+<footer class="study">
+  harmonograf UI study · <b>shell</b> · standalone, theme-switchable across 16 Console palettes · token-only colour
+  (the only hex is the scoped <code>.md3</code> before-replica) · verify in <code>paper</code> + <code>monokai</code>.
+</footer>
+
+<!-- shared chrome (theme picker + brand mark) -->
+<script>
+window.THEME_IDS = ['monokai','solarized-dark','solarized-light','google-light','google-dark',
+  'lunaria-light','lunaria-eclipse','belafonte-day','belafonte-night','paper','zenburn',
+  'selenized-black','relaxed','espresso','dracula','ubuntu'];
+const THEME_SWATCHES = {
+  'monokai':['#1e1f1c','#272822','#f8f8f2','#a6e22e','#f92672','#66d9ef'],
+  'solarized-dark':['#04222B','#0A2D38','#93A1A1','#8BB80E','#E0483C','#2AA198'],
+  'solarized-light':['#FDF6E3','#FBF1D6','#586E75','#6B9B0B','#DC322F','#268BD2'],
+  'google-light':['#FFFFFF','#F4F4F4','#474A4E','#34A853','#EA4335','#1B9CB8'],
+  'google-dark':['#202124','#2C2D30','#FFFFFF','#34A853','#EA4335','#24C1E0'],
+  'lunaria-light':['#EBE4E1','#E2DCD9','#363434','#497D46','#783C1F','#3778A9'],
+  'lunaria-eclipse':['#323F46','#3B484F','#DFE2ED','#BEDBC1','#BA9088','#C8429F'],
+  'belafonte-day':['#D5CCBA','#CCC3B2','#34292D','#6E6A4E','#BE100E','#426A79'],
+  'belafonte-night':['#20111B','#271821','#D5CCBA','#A6A07A','#D6403E','#6F8E97'],
+  'paper':['#F2EEDE','#E6E2D3','#1A1A1A','#216609','#CC3E28','#1E6FCC'],
+  'zenburn':['#3A3A3A','#424241','#DCDCCC','#8FB28F','#CC9393','#8CD0D3'],
+  'selenized-black':['#181818','#202020','#DEDEDE','#83C746','#FF5E56','#56D8C9'],
+  'relaxed':['#353A44','#3D424B','#F7F7F7','#A0AC77','#BC5653','#7EAAC7'],
+  'espresso':['#323232','#3A3A3A','#FFFFFF','#A5C261','#D25252','#6C99BB'],
+  'dracula':['#282A36','#343746','#F8F8F2','#50FA7B','#FF5555','#BD93F9'],
+  'ubuntu':['#300A24','#3D1530','#EEEEEC','#8AE234','#CC0000','#34E2E2'],
+};
+const THEME_LABELS = {'monokai':'Monokai','solarized-dark':'Solarized Dark','solarized-light':'Solarized Light',
+  'google-light':'Google Light','google-dark':'Google Dark','lunaria-light':'Lunaria Light','lunaria-eclipse':'Lunaria Eclipse',
+  'belafonte-day':'Belafonte Day','belafonte-night':'Belafonte Night','paper':'Paper','zenburn':'Zenburn',
+  'selenized-black':'Selenized Black','relaxed':'Relaxed','espresso':'Espresso','dracula':'Dracula','ubuntu':'Ubuntu'};
+const THEME_KEY = 'hgraf-study-theme';
+function swatchStrip(id, sm){ const t = THEME_SWATCHES[id] || [];
+  return `<span class="dt-swatch-strip${sm?' dt-swatch-strip-sm':''}">`+t.map(c=>`<span class="dt-swatch" style="background:${c}"></span>`).join('')+`</span>`; }
+function currentTheme(){ return document.documentElement.getAttribute('data-theme') || 'monokai'; }
+function applyTheme(id){ document.documentElement.setAttribute('data-theme', id);
+  try { localStorage.setItem(THEME_KEY, id); } catch(e){}
+  document.querySelectorAll('[data-theme-picker]').forEach(buildPicker); }
+function buildPicker(host){ const cur = currentTheme();
+  host.innerHTML = `<div class="dt-cd"><button class="dt-cd-trigger" aria-haspopup="listbox" aria-expanded="false">${swatchStrip(cur,true)}<span class="dt-cd-name">${THEME_LABELS[cur]}</span><span class="dt-cd-caret" aria-hidden="true">▾</span></button><div class="dt-cd-list" role="listbox" aria-label="theme">${window.THEME_IDS.map(id=>`<div class="dt-cd-option" role="option" data-id="${id}" aria-selected="${id===cur}">${swatchStrip(id)}<span class="dt-cd-name">${THEME_LABELS[id]}</span></div>`).join('')}</div></div>`;
+  const cd = host.querySelector('.dt-cd'), trig = host.querySelector('.dt-cd-trigger');
+  trig.addEventListener('click', e=>{ e.stopPropagation(); const open = cd.classList.toggle('dt-cd-open'); trig.setAttribute('aria-expanded', open); });
+  host.querySelectorAll('.dt-cd-option').forEach(o=> o.addEventListener('click', ()=>{ applyTheme(o.dataset.id); cd.classList.remove('dt-cd-open'); })); }
+document.addEventListener('click', ()=> document.querySelectorAll('.dt-cd-open').forEach(c=>c.classList.remove('dt-cd-open')));
+(function initTheme(){ let saved=null; try { saved=localStorage.getItem(THEME_KEY); } catch(e){}
+  const P=new URLSearchParams(location.search), fromUrl=P.get('theme');
+  const id=(fromUrl&&window.THEME_IDS.includes(fromUrl))?fromUrl:(saved&&window.THEME_IDS.includes(saved))?saved:'monokai';
+  document.documentElement.setAttribute('data-theme', id); })();
+/* harmonograf brand — the Option-D alpha: one period of the 2:3 Lissajous,
+   MIRRORED about the vertical axis (x = cx − A·cos2t, y = cy + B·sin3t) so the
+   knot reads as a lowercase α — still a Lissajous, loop left, tails right.
+   Stroke currentColor; the one dot rides the lower-right tail tip: the pen at
+   rest. ONE ALPHA PER LOCKUP: beside this mark the wordmark is PLAIN LETTERS
+   (the glyph already carries the α and the dot); only a STANDALONE wordmark
+   spells the "a" of graf with the drawn α. */
+function hgAlphaPath(cx, cy, A, B){ const pts=[];
+  for(let i=0;i<=240;i++){ const t=2*Math.PI*i/240;
+    pts.push((cx - A*Math.cos(2*t)).toFixed(2)+','+(cy + B*Math.sin(3*t)).toFixed(2)); }
+  return 'M'+pts.join(' L')+' Z'; }
+function hgBrandMarkSVG(h){ return `<svg class="hg-brand-mark" style="height:${h||24}px" viewBox="0 0 48 48" role="img" aria-label="harmonograf" focusable="false"><path d="${hgAlphaPath(24,24,19,15)}" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="43" cy="39" r="3.2" fill="var(--hgraf-brand, #5EA3EC)"/></svg>`; }
+function hgWordmarkSVG(){ const T='harmonograf', X0=1, ADV=9.6, BASE=15; const W=X0*2+T.length*ADV;
+  return `<svg class="hg-brand-name" viewBox="0 0 ${W} 18" role="img" aria-label="harmonograf" focusable="false"><text x="${X0}" y="${BASE}" font-family="var(--brand-mono)" font-size="15" font-weight="700" textLength="${T.length*ADV}" lengthAdjust="spacing" fill="currentColor" xml:space="preserve">${T}</text></svg>`; }
+function mountBrand(){ document.querySelectorAll('[data-brand-mark]').forEach(n=>{ n.innerHTML=hgBrandMarkSVG(+n.dataset.brandMark||24); });
+  document.querySelectorAll('[data-brand-wordmark]').forEach(n=>{ n.innerHTML=hgWordmarkSVG(); }); }
+window.addEventListener('DOMContentLoaded', ()=>{ document.querySelectorAll('[data-theme-picker]').forEach(buildPicker); mountBrand(); mountMiniGantt(); });
+
+/* a tiny line-art gantt for the assembled-shell main pane (in-language preview) */
+function mountMiniGantt(){
+  const host = document.getElementById('mini-gantt'); if(!host) return;
+  const W=560, H=120, padL=66, padR=10, top=8, rowH=22;
+  const lanes=[
+    {label:'planner', bars:[['invocation',0,.95]]},
+    {label:'coder',   bars:[['llm-call',.12,.34],['tool-call',.36,.52],['llm-call',.55,.78,'running']]},
+    {label:'reviewer',bars:[['transfer',.52,.58],['agent-message',.60,.74]]},
+    {label:'goldfive', bars:[['custom',.30,.42]]},
+  ];
+  const x=f=>padL+f*(W-padL-padR);
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="execution gantt preview">`;
+  for(let i=0;i<=4;i++){ const gx=padL+i/4*(W-padL-padR);
+    g+=`<line class="hg-gantt-grid" x1="${gx}" y1="${top}" x2="${gx}" y2="${top+lanes.length*rowH}"/>`; }
+  lanes.forEach((ln,i)=>{ const cy=top+i*rowH+rowH/2;
+    g+=`<text class="hg-gantt-lane-label" x="6" y="${cy+3}">${ln.label}</text>`;
+    ln.bars.forEach(b=>{ const [kind,a,bb,st]=b; const w=Math.max(4,x(bb)-x(a));
+      const cls='hg-gantt-bar is-'+kind+(st==='running'?' is-running':'');
+      g+=`<rect class="${cls}" x="${x(a)}" y="${cy-6}" width="${w}" height="12" rx="3" fill="var(--hg-kind-${kind})"/>`; }); });
+  const nx=x(.78);
+  g+=`<line class="hg-gantt-now" x1="${nx}" y1="${top-2}" x2="${nx}" y2="${top+lanes.length*rowH+2}"/>`;
+  g+=`<circle class="hg-gantt-now-cap" cx="${nx}" cy="${top-2}" r="2.5"/>`;
+  g+=`</svg>`;
+  host.innerHTML=g;
+}
+</script>
+<script>window.__EMBED_CFG__ = { optSel: '[data-surface]', bareHide: ['h2', '.rationale', '.legend', '.ba-tag'] };</script>
+<script src="_embed.js"></script>
+</body>
+</html>

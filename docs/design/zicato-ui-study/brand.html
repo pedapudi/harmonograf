@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="monokai">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>harmonograf — brand &amp; logo study</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_tokens.css">
+<link rel="stylesheet" href="_study.css">
+<style>
+  /* ---- brand-accent CANDIDATES (the one place hex is allowed: this IS a
+       token proposal, mirroring zicato's fixed #2FA46A/#3FB87A pair).
+       Dark-ground defaults; light-ground overrides below. ---- */
+  :root { --hgraf-green: #3FB87A; --hgraf-blue: #5EA3EC; --hgraf-brand: var(--hgraf-blue); }
+  html[data-theme="solarized-light"], html[data-theme="google-light"],
+  html[data-theme="lunaria-light"], html[data-theme="belafonte-day"],
+  html[data-theme="paper"] { --hgraf-green: #2FA46A; --hgraf-blue: #2F7FD0; }
+
+  .mark-row { display: grid; grid-template-columns: 210px 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 760px) { .mark-row { grid-template-columns: 1fr; } }
+  .mark-hero { border: 1px solid var(--rule); border-radius: var(--r-panel); background: var(--paper);
+    display: flex; align-items: center; justify-content: center; padding: 22px; min-height: 190px; }
+  .mark-hero svg { width: 150px; height: 150px; overflow: visible; }
+  .size-ladder { display: flex; align-items: flex-end; gap: 26px; margin: 10px 0 4px; flex-wrap: wrap; }
+  .size-cell { text-align: center; color: var(--ink-faint); font-size: 9.5px; }
+  .size-cell svg { display: block; margin: 0 auto 5px; overflow: visible; }
+  .size-cell.on-panel svg { background: var(--panel); border-radius: 4px; }
+  .construction { font-size: 10.5px; color: var(--ink-faint); margin-top: 10px; max-width: 80ch; line-height: 1.6; }
+  .construction code { font-size: 10px; }
+  .wm-stage { display: flex; flex-direction: column; gap: 18px; padding: 22px;
+    border: 1px solid var(--rule); border-radius: var(--r-panel); background: var(--paper); }
+  .wm-stage svg { display: block; overflow: visible; }
+  .wm-cap { font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint); margin-top: -10px; }
+  .lockup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .lockup-grid { grid-template-columns: 1fr; } }
+  .lockup { border: 1px solid var(--rule); border-radius: var(--r-panel); background: var(--paper);
+    padding: 26px 22px; display: flex; align-items: center; justify-content: center; gap: 14px; min-height: 110px; }
+  .lockup.stacked { flex-direction: column; gap: 10px; }
+  .accent-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .accent-grid { grid-template-columns: 1fr; } }
+  .accent-cell { border: 1px solid var(--rule); border-radius: var(--r-panel); background: var(--paper);
+    padding: 20px; text-align: center; }
+  .accent-cell .sw-row { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px;
+    font-size: 10px; color: var(--ink-faint); }
+  .accent-cell .sw { width: 14px; height: 14px; border-radius: 50%; display: inline-block; border: 1px solid var(--rule); }
+  .triad { display: flex; gap: 22px; flex-wrap: wrap; margin: 12px 0; font-size: 11px; color: var(--ink-soft); }
+  .triad span { display: inline-flex; align-items: center; gap: 7px; }
+  .triad .sw { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  .dodont { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; font-size: 12px; color: var(--ink-soft); }
+  @media (max-width: 760px) { .dodont { grid-template-columns: 1fr; } }
+  .dodont h3 { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; margin: 0 0 8px; }
+  .dodont .do h3 { color: var(--good); } .dodont .dont h3 { color: var(--bad); }
+  .dodont ul { margin: 0; padding-left: 18px; } .dodont li { margin-bottom: 6px; line-height: 1.55; }
+  .drawbtn { font: inherit; font-size: 11px; color: var(--ink-soft); background: transparent;
+    border: 1px solid var(--accent); border-radius: var(--r-card); padding: 4px 12px; cursor: pointer; }
+  .drawbtn:hover { background: var(--accent); color: var(--paper); }
+  .drawbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .namesake { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 14px 0 4px; }
+  @media (max-width: 760px) { .namesake { grid-template-columns: 1fr; } }
+  .namesake .nm { border: 1px solid var(--rule); border-radius: var(--r-panel); background: var(--panel);
+    padding: 14px 16px; font-size: 12px; color: var(--ink-soft); line-height: 1.6; }
+  .namesake .nm b { color: var(--ink); }
+  .namesake .nm .yr { color: var(--accent); font-weight: 700; }
+</style>
+</head>
+<body>
+
+<header class="study">
+  <div class="brand-row"><h1>harmonograf — brand &amp; logo study</h1></div>
+  <span class="legend-inline">line-art marks for the <b>standalone</b> console — not the zicato-embedded chrome</span>
+  <div class="spacer"></div>
+  <span class="theme-pick-label">theme</span>
+  <span data-theme-picker></span>
+</header>
+
+<main class="study">
+
+<section class="study">
+  <h2>The double namesake</h2>
+  <p class="lede">
+    The name is two instruments at once, and both peaked in the same decade. The brand should own that:
+    <b>the plan and the trace</b>.
+  </p>
+  <div class="namesake">
+    <div class="nm">
+      <b>Karol Adamiecki's harmonogram</b> (also <i>harmonograf</i>), <span class="yr">1896</span> —
+      the original interdependent-process schedule chart, invented <b>14 years before Gantt</b> published his.
+      Adamiecki's "law of harmony": matched tool speeds, coordinated timetables, real teamwork —
+      a multi-agent coordination thesis, a century early. <b>This is the Gantt's true name.</b>
+    </div>
+    <div class="nm">
+      <b>The Victorian harmonograph</b> (Blackburn, Tisley), <span class="yr">1870s–90s</span> —
+      coupled, damped pendulums driving a pen: <code>x(t) = A·sin(ft+p)·e^(−dt)</code> per axis.
+      Two oscillators in harmony trace a tight Lissajous figure; detuned, they precess and wander.
+      <b>Exactly what a multi-agent run does around its plan.</b>
+    </div>
+  </div>
+  <p class="lede">
+    Brand rules inherited from the ecosystem language: a <b>single line-art stroke in
+    <code>currentColor</code></b> (round caps, never recolored), <b>exactly one accent dot</b>, marks that are
+    <b>data, not decoration</b> — every curve below is generated live by the damped-oscillator equations, with the
+    parameters documented. Tufte's rule applied to identity: the logo is the instrument's own output.
+  </p>
+</section>
+
+<section class="study" data-opt>
+  <h2>Option A — “the trace” <button class="drawbtn" id="draw-a" style="float:right">▸ draw it</button></h2>
+  <div class="surface">
+    <div class="surface-head"><span class="surface-num">A</span><span class="surface-name">damped Lissajous, 3:2</span>
+      <span class="surface-tech">pure harmonograph — the pen left running</span></div>
+    <div class="mark-row">
+      <div class="mark-hero" id="hero-a"></div>
+      <div>
+        <p class="rationale">
+          The instrument's own drawing: a <b>3:2 chord</b> with a hair of detune (3 : 2.04) so the figure
+          <b>precesses</b> — it never quite repeats, like a real run. Damping pulls each pass inward; the
+          <b>accent dot is the pen's current position</b> — “now” — the same dot that rides the console's
+          time cursor. Distinctive at lockup size; at 16&nbsp;px the inner passes muddy (see ladder), so it
+          pairs with a simplified favicon cut (Option D), exactly as zicato's spiral pairs with its <code>z</code> favicon.
+        </p>
+        <div class="size-ladder" id="ladder-a"></div>
+        <div class="construction" id="con-a"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>Option B — “the harmonogram”</h2>
+  <div class="surface">
+    <div class="surface-head"><span class="surface-num">B</span><span class="surface-name">three bars and a now-rule</span>
+      <span class="surface-tech">pure Adamiecki — the schedule as emblem</span></div>
+    <div class="mark-row">
+      <div class="mark-hero" id="hero-b"></div>
+      <div>
+        <p class="rationale">
+          Adamiecki's chart reduced to its irreducible marks: three staggered <b>stroke-only bars</b>
+          (<code>rx:3</code>, the console's own bar radius) crossed by a vertical <b>now-rule</b>; the accent dot
+          sits where the rule meets the active bar. It is the product's hero view at glyph scale — and the only
+          option that stays fully legible at 16&nbsp;px. Risk: generic (three bars say “Gantt”, not “harmonograf”)
+          — it carries the chart lineage but drops the oscillation story.
+        </p>
+        <div class="size-ladder" id="ladder-b"></div>
+        <div class="construction">construction: bars (6,9)→28 · (14,20.5)→40 · (6,32)→23, h 7, <code>rx 3</code>,
+          stroke <code>currentColor</code> 2.0; now-rule x 31; dot r 2.6 at (31, 24).</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>Option C — “trace over plan” <span style="float:right;font-size:9.5px;letter-spacing:.12em;color:var(--accent)">RECOMMENDED · LOCKUP</span></h2>
+  <div class="surface">
+    <div class="surface-head"><span class="surface-num">C</span><span class="surface-name">the fusion — a drift trace threading the bars</span>
+      <span class="surface-tech">Adamiecki × Blackburn = the product</span></div>
+    <div class="mark-row">
+      <div class="mark-hero" id="hero-c"></div>
+      <div>
+        <p class="rationale">
+          Both namesakes in one figure: quiet harmonogram bars (<b>the plan</b>) with a damped oscillation
+          threading through the lanes (<b>the execution</b>), settling toward the center as the run converges —
+          drift decaying to harmony, which is the entire product promise. The dot is the pen <i>now</i>.
+          zicato's mark is a 1-D damped string; this is its 2-D sibling — unmistakably family, unmistakably
+          not the same instrument. Wide aspect (3:2) makes it a natural <b>lockup partner</b> for the wordmark;
+          for square favicon duty it hands off to D.
+        </p>
+        <div class="size-ladder" id="ladder-c"></div>
+        <div class="construction" id="con-c"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>Option D — “the alpha” <span style="float:right;font-size:9.5px;letter-spacing:.12em;color:var(--accent)">RECOMMENDED · FAVICON</span></h2>
+  <div class="surface">
+    <div class="surface-head"><span class="surface-num">D</span><span class="surface-name">closed 2:3 Lissajous, mirrored — a lowercase α</span>
+      <span class="surface-tech">one period, undamped, flipped about the vertical axis</span></div>
+    <div class="mark-row">
+      <div class="mark-hero" id="hero-d"></div>
+      <div>
+        <p class="rationale">
+          One clean period of the 2:3 figure, <b>mirrored about the vertical axis — and the knot becomes a
+          lowercase&nbsp;α</b>: loop on the left, tails flicking out to the right. The harmonograph's signature
+          shape <i>is</i> a letterform, and it's the letter the wordmark borrows (the “a” of <i>graf</i>).
+          <b>Crossing strokes, zero clutter</b>: it survives 16&nbsp;px and reads at a glance in a browser tab.
+          The dot rides the lower-right tail tip — the pen at rest after the final flick. This is the favicon /
+          avatar / app-icon cut <i>and</i> the chrome mark; A or C carry the large lockups.
+        </p>
+        <div class="size-ladder" id="ladder-d"></div>
+        <div class="construction">construction: <code>x = −19·cos 2t, y = 15·sin 3t</code> (the mirror is the flip),
+          t ∈ [0, 2π], closed; stroke <code>currentColor</code>, optical weights 1.7 / 2.6 / 3.4 by size;
+          dot r 2.4 at the lower-right tail (cx+19, cy+15).</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>The wordmark</h2>
+  <div class="surface">
+    <p class="rationale">
+      Set in the fixed <b>brand mono</b> (JetBrains Mono 700 — pinned, independent of any console typeface choice,
+      zicato's rule). The distinctive move — the analogue of zicato's dotless-ı: when the wordmark stands
+      <b>alone</b>, the <b>“a” of <i>graf</i> is the instrument's drawing</b> — the same Lissajous α as the mark,
+      at x-height, dot on its lower-right tail. <b>One alpha per lockup:</b> beside the α mark the wordmark is
+      <b>plain letters</b> — the glyph already carries the α and the dot, and doubling them is too much.
+      <code>hgraf</code> is the sanctioned short form (already used by the repo's skill names), same rule.
+    </p>
+    <div class="wm-stage">
+      <div id="wm-full"></div><div class="wm-cap">standalone — no mark present, so the drawn “a” carries the α</div>
+      <div id="wm-plain"></div><div class="wm-cap">beside the mark — plain letters; the glyph already carries the α + dot</div>
+      <div id="wm-short"></div><div class="wm-cap">short form, standalone — tab titles, CLI banners</div>
+    </div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>Lockups</h2>
+  <div class="lockup-grid">
+    <div class="lockup" id="lock-h"></div>
+    <div class="lockup stacked" id="lock-s"></div>
+  </div>
+  <p class="rationale" style="margin-top:12px">
+    Horizontal: Option C + the plain-letter wordmark — the console topbar lockup (this study's own chrome now uses
+    the α mark + plain <code>harmonograf</code> in place of the borrowed <code>zıcato</code> brand). Stacked:
+    Option D over plain letters — README hero, social card. <b>One alpha per lockup</b>: the mark carries the α and
+    the dot, so the letters stay plain; only a markless wordmark spells graf with the α. Clear space: one bar-height
+    (7 units) on all sides; minimum mark size 14&nbsp;px, below which use D only.
+  </p>
+</section>
+
+<section class="study" data-opt>
+  <h2>The accent question — which dot?</h2>
+  <p class="lede">
+    The ecosystem triad: <span class="triad"><span><span class="sw" style="background:#D4A445"></span>goldfive — gold (the judge)</span>
+    <span><span class="sw" style="background:var(--hgraf-green)"></span>zicato — green (the plucked note)</span>
+    <span><span class="sw" style="background:var(--hgraf-blue)"></span><b>harmonograf — “now” blue (the live cursor)</b></span></span>
+    zicato's own brand doc reserves the green dot for zicato. harmonograf's identity is the <b>live view</b> —
+    its dot should be the color its console already spends on <i>now</i>: the cursor, the running stroke, the selected span.
+  </p>
+  <div class="accent-grid">
+    <div class="accent-cell" style="--hgraf-brand: var(--hgraf-green)">
+      <div id="acc-green"></div>
+      <div class="sw-row"><span class="sw" style="background:var(--hgraf-green)"></span>family green — <code>#2FA46A / #3FB87A</code> · maximum ecosystem unity, but borrows zicato's signature</div>
+    </div>
+    <div class="accent-cell">
+      <div id="acc-blue"></div>
+      <div class="sw-row"><span class="sw" style="background:var(--hgraf-blue)"></span><b>now blue — <code>#2F7FD0 / #5EA3EC</code> · own identity; the dot literally means “now” (recommended)</b></div>
+    </div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>Usage — do / don't</h2>
+  <div class="surface">
+    <div class="dodont">
+      <div class="do"><h3>Do</h3><ul>
+        <li>Stroke every mark with <code>currentColor</code> — it flips dark/light with the ground for free.</li>
+        <li>Exactly <b>one</b> accent dot per lockup (<code>--hgraf-brand</code>); it always means the pen / now.</li>
+        <li><b>One alpha per lockup.</b> Mark present → plain-letter wordmark; wordmark standalone → the drawn “a” of graf.</li>
+        <li>Pin the wordmark to the brand mono; optical stroke weights by size (heavier small, lighter large).</li>
+        <li>Favicon = Option D (or B); lockup = C; the full trace A only at ≥ 96 px.</li>
+        <li>Animate only as a single <b>draw-on</b> (the pen drawing the figure once), gated behind <code>prefers-reduced-motion</code>.</li>
+      </ul></div>
+      <div class="dont"><h3>Don't</h3><ul>
+        <li>Recolor the stroke, gradient it, or add a second accent.</li>
+        <li>Pair the α mark with the α wordmark — two alphas is too much.</li>
+        <li>Loop any animation — the instrument draws once and rests (no <code>animation:…infinite</code>).</li>
+        <li>Ship the damped trace at 16 px (it muddies — that's what D is for).</li>
+        <li>Use the green dot on harmonograf surfaces — green is zicato's signature.</li>
+        <li>Outline, shadow, or fill the marks — line art only, data-ink only.</li>
+      </ul></div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="study">
+  harmonograf brand study · marks generated live from the damped-oscillator equations (parameters in each construction note) ·
+  strokes <code>currentColor</code> · the one accent dot = <code>--hgraf-brand</code> · part of the
+  <a href="index.html">zicato-language UI study</a>
+</footer>
+
+<script>
+/* ===== theme picker (study-standard) ===== */
+window.THEME_IDS = ['monokai','solarized-dark','solarized-light','google-light','google-dark',
+  'lunaria-light','lunaria-eclipse','belafonte-day','belafonte-night','paper','zenburn',
+  'selenized-black','relaxed','espresso','dracula','ubuntu'];
+const THEME_SWATCHES = {
+  'monokai':['#1e1f1c','#272822','#f8f8f2','#a6e22e','#f92672','#66d9ef'],
+  'solarized-dark':['#04222B','#0A2D38','#93A1A1','#8BB80E','#E0483C','#2AA198'],
+  'solarized-light':['#FDF6E3','#FBF1D6','#586E75','#6B9B0B','#DC322F','#268BD2'],
+  'google-light':['#FFFFFF','#F4F4F4','#474A4E','#34A853','#EA4335','#1B9CB8'],
+  'google-dark':['#202124','#2C2D30','#FFFFFF','#34A853','#EA4335','#24C1E0'],
+  'lunaria-light':['#EBE4E1','#E2DCD9','#363434','#497D46','#783C1F','#3778A9'],
+  'lunaria-eclipse':['#323F46','#3B484F','#DFE2ED','#BEDBC1','#BA9088','#C8429F'],
+  'belafonte-day':['#D5CCBA','#CCC3B2','#34292D','#6E6A4E','#BE100E','#426A79'],
+  'belafonte-night':['#20111B','#271821','#D5CCBA','#A6A07A','#D6403E','#6F8E97'],
+  'paper':['#F2EEDE','#E6E2D3','#1A1A1A','#216609','#CC3E28','#1E6FCC'],
+  'zenburn':['#3A3A3A','#424241','#DCDCCC','#8FB28F','#CC9393','#8CD0D3'],
+  'selenized-black':['#181818','#202020','#DEDEDE','#83C746','#FF5E56','#56D8C9'],
+  'relaxed':['#353A44','#3D424B','#F7F7F7','#A0AC77','#BC5653','#7EAAC7'],
+  'espresso':['#323232','#3A3A3A','#FFFFFF','#A5C261','#D25252','#6C99BB'],
+  'dracula':['#282A36','#343746','#F8F8F2','#50FA7B','#FF5555','#BD93F9'],
+  'ubuntu':['#300A24','#3D1530','#EEEEEC','#8AE234','#CC0000','#34E2E2'],
+};
+const THEME_LABELS = {'monokai':'Monokai','solarized-dark':'Solarized Dark','solarized-light':'Solarized Light',
+  'google-light':'Google Light','google-dark':'Google Dark','lunaria-light':'Lunaria Light','lunaria-eclipse':'Lunaria Eclipse',
+  'belafonte-day':'Belafonte Day','belafonte-night':'Belafonte Night','paper':'Paper','zenburn':'Zenburn',
+  'selenized-black':'Selenized Black','relaxed':'Relaxed','espresso':'Espresso','dracula':'Dracula','ubuntu':'Ubuntu'};
+const THEME_KEY = 'hgraf-study-theme';
+function swatchStrip(id, sm){ const t = THEME_SWATCHES[id] || [];
+  return `<span class="dt-swatch-strip${sm?' dt-swatch-strip-sm':''}">`+t.map(c=>`<span class="dt-swatch" style="background:${c}"></span>`).join('')+`</span>`; }
+function currentTheme(){ return document.documentElement.getAttribute('data-theme') || 'monokai'; }
+function applyTheme(id){ document.documentElement.setAttribute('data-theme', id);
+  try { localStorage.setItem(THEME_KEY, id); } catch(e){}
+  document.querySelectorAll('[data-theme-picker]').forEach(buildPicker); }
+function buildPicker(host){ const cur = currentTheme();
+  host.innerHTML = `<div class="dt-cd"><button class="dt-cd-trigger" aria-haspopup="listbox" aria-expanded="false">${swatchStrip(cur,true)}<span class="dt-cd-name">${THEME_LABELS[cur]}</span><span class="dt-cd-caret" aria-hidden="true">▾</span></button><div class="dt-cd-list" role="listbox" aria-label="theme">${window.THEME_IDS.map(id=>`<div class="dt-cd-option" role="option" data-id="${id}" aria-selected="${id===cur}">${swatchStrip(id)}<span class="dt-cd-name">${THEME_LABELS[id]}</span></div>`).join('')}</div></div>`;
+  const cd = host.querySelector('.dt-cd'), trig = host.querySelector('.dt-cd-trigger');
+  trig.addEventListener('click', e=>{ e.stopPropagation(); const open = cd.classList.toggle('dt-cd-open'); trig.setAttribute('aria-expanded', open); });
+  host.querySelectorAll('.dt-cd-option').forEach(o=> o.addEventListener('click', ()=>{ applyTheme(o.dataset.id); cd.classList.remove('dt-cd-open'); })); }
+document.addEventListener('click', ()=> document.querySelectorAll('.dt-cd-open').forEach(c=>c.classList.remove('dt-cd-open')));
+(function initTheme(){ let saved=null; try { saved=localStorage.getItem(THEME_KEY); } catch(e){}
+  const P=new URLSearchParams(location.search), fromUrl=P.get('theme');
+  const id=(fromUrl&&window.THEME_IDS.includes(fromUrl))?fromUrl:(saved&&window.THEME_IDS.includes(saved))?saved:'monokai';
+  document.documentElement.setAttribute('data-theme', id); })();
+
+/* ===== the instrument: damped Lissajous path generators ===== */
+function lissPath(o){ // {fx,fy,px,py,dx,dy,T,n,A,B,cx,cy, Amod}
+  const pts=[]; const Amod = o.Amod || (()=>1);
+  for(let i=0;i<=o.n;i++){ const t=o.T*i/o.n, m=Amod(t,o.T);
+    const x=o.cx + o.A*m*Math.exp(-(o.dx||0)*t)*Math.sin(o.fx*t+(o.px||0));
+    const y=o.cy + o.B*m*Math.exp(-(o.dy||0)*t)*Math.sin(o.fy*t+(o.py||0));
+    pts.push([x,y]); }
+  return { d: 'M'+pts.map(p=>p[0].toFixed(2)+','+p[1].toFixed(2)).join(' L'), end: pts[pts.length-1] };
+}
+function knotPath(cx,cy,A,B){ const pts=[]; // mirrored about the vertical axis → reads as a lowercase α
+  for(let i=0;i<=240;i++){ const t=2*Math.PI*i/240;
+    pts.push([cx-A*Math.cos(2*t), cy+B*Math.sin(3*t)]); }
+  return 'M'+pts.map(p=>p[0].toFixed(2)+','+p[1].toFixed(2)).join(' L')+' Z';
+}
+
+/* ---- the four marks: each (sizePx, strokeW) → svg string ---- */
+const TRACE = lissPath({fx:3, fy:2.04, px:Math.PI/2, py:0, dx:.032, dy:.032, T:24, n:1100, A:20, B:20, cx:24, cy:24});
+function markA(s, sw, cls){ return `<svg class="${cls||''}" width="${s}" height="${s}" viewBox="0 0 48 48" role="img" aria-label="harmonograf mark — damped Lissajous">
+  <path class="trace-path" d="${TRACE.d}" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="${TRACE.end[0].toFixed(2)}" cy="${TRACE.end[1].toFixed(2)}" r="${Math.max(2.1, sw*1.25)}" fill="var(--hgraf-brand)"/></svg>`; }
+
+function markB(s, sw){ return `<svg width="${s}" height="${s}" viewBox="0 0 48 48" role="img" aria-label="harmonograf mark — harmonogram bars">
+  <g fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="6" y="9"    width="22" height="7" rx="3"/>
+    <rect x="14" y="20.5" width="26" height="7" rx="3"/>
+    <rect x="6" y="32"   width="17" height="7" rx="3"/>
+    <line x1="31" y1="5" x2="31" y2="43"/>
+  </g><circle cx="31" cy="24" r="${Math.max(2.2, sw*1.3)}" fill="var(--hgraf-brand)"/></svg>`; }
+
+const OVER = lissPath({fx:0, fy:.62, px:0, py:.9, dx:0, dy:.052, T:30, n:700, A:0, B:17, cx:0, cy:24});
+const OVER_PTS = (function(){ // re-parametrize x linearly across the box
+  const pts=[]; for(let i=0;i<=700;i++){ const t=30*i/700;
+    pts.push([(5 + 62*i/700), 24 + 17*Math.exp(-.052*t)*Math.sin(.62*t+.9)]); }
+  return { d:'M'+pts.map(p=>p[0].toFixed(2)+','+p[1].toFixed(2)).join(' L'), end:pts[pts.length-1] }; })();
+function markC(w, sw, cls){ const h=Math.round(w*48/72);
+  return `<svg class="${cls||''}" width="${w}" height="${h}" viewBox="0 0 72 48" role="img" aria-label="harmonograf mark — trace over plan">
+  <g fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" opacity=".5">
+    <rect x="7" y="8"    width="30" height="7" rx="3"/>
+    <rect x="17" y="20.5" width="34" height="7" rx="3"/>
+    <rect x="11" y="33"  width="24" height="7" rx="3"/>
+  </g>
+  <path class="trace-path" d="${OVER_PTS.d}" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="${OVER_PTS.end[0].toFixed(2)}" cy="${OVER_PTS.end[1].toFixed(2)}" r="${Math.max(2.1, sw*1.25)}" fill="var(--hgraf-brand)"/></svg>`; }
+
+const KNOT_D = knotPath(24,24,19,15);
+function markD(s, sw){ return `<svg width="${s}" height="${s}" viewBox="0 0 48 48" role="img" aria-label="harmonograf mark — Lissajous alpha">
+  <path d="${KNOT_D}" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="43" cy="39" r="${Math.max(2.2, sw*1.3)}" fill="var(--hgraf-brand)"/></svg>`; }
+
+/* ---- wordmark ---- */
+function wmKnot(cx, cy, r, sw, dotR){ // mini α at x-height; dot at the lower-right tail — the pen at rest
+  const d = knotPath(cx, cy, r, r*0.78);
+  return `<path d="${d}" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round"/>
+    <circle cx="${(cx+r).toFixed(2)}" cy="${(cy+r*0.78).toFixed(2)}" r="${dotR}" fill="var(--hgraf-brand)"/>`; }
+function wordmark(kind, h){ // kind: full | plain | short
+  const FS=22, ADV=FS*0.6+0.9, X0=2, BASE=26, H=h||34;
+  if(kind==='short'){ const T='hgraf', W=X0*2+T.length*ADV;
+    const scx=X0+(3+0.5)*ADV, scy=BASE-6.4; // the a of hgraf, drawn
+    return `<svg height="${H}" viewBox="0 0 ${W} 34" role="img" aria-label="hgraf">
+      <text x="${X0}" y="${BASE}" font-family="var(--brand-mono)" font-size="${FS}" font-weight="700" textLength="${(T.length*ADV).toFixed(1)}" lengthAdjust="spacing" fill="currentColor" xml:space="preserve">hgr f</text>
+      ${wmKnot(scx, scy, 6.0, 1.7, 1.9)}</svg>`; }
+  const T='harmonograf', W=X0*2+T.length*ADV;
+  if(kind==='plain'){ return `<svg height="${H}" viewBox="0 0 ${W} 34" role="img" aria-label="harmonograf">
+      <text x="${X0}" y="${BASE}" font-family="var(--brand-mono)" font-size="${FS}" font-weight="700" textLength="${(T.length*ADV).toFixed(1)}" lengthAdjust="spacing" fill="currentColor" xml:space="preserve">${T}</text></svg>`; }
+  // full: the a of graf (index 9) is drawn by the instrument
+  const Tgap='harmonogr f'; const cx=X0+(9+0.5)*ADV, cy=BASE-6.4;
+  return `<svg height="${H}" viewBox="0 0 ${W} 34" role="img" aria-label="harmonograf">
+    <text x="${X0}" y="${BASE}" font-family="var(--brand-mono)" font-size="${FS}" font-weight="700" textLength="${(T.length*ADV).toFixed(1)}" lengthAdjust="spacing" fill="currentColor" xml:space="preserve">${Tgap}</text>
+    ${wmKnot(cx, cy, 6.0, 1.7, 1.9)}</svg>`; }
+
+/* ---- mount everything ---- */
+function ladder(markFn, widths, isWide){ // optical stroke weights by size
+  const sw = {l:1.7, m:2.6, s:3.4};
+  return `
+    <div class="size-cell">${markFn(widths[0], sw.l)}<br>${widths[0]}px · lockup</div>
+    <div class="size-cell">${markFn(widths[1], sw.m)}<br>${widths[1]}px · chrome</div>
+    <div class="size-cell on-panel">${markFn(widths[2], sw.s)}<br>${widths[2]}px · favicon</div>`;
+}
+window.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('[data-theme-picker]').forEach(buildPicker);
+  document.getElementById('hero-a').innerHTML = markA(150, 1.45, 'drawable');
+  document.getElementById('ladder-a').innerHTML = ladder((s,w)=>markA(s,w), [72,28,16]);
+  document.getElementById('con-a').textContent =
+    'construction: x = 20·e^(−0.032t)·sin(3t+π/2), y = 20·e^(−0.032t)·sin(2.04t), t ∈ [0,24] · 1100 samples · dot at the final pen position · optical stroke 1.45 / 2.6 / 3.4 by size.';
+  document.getElementById('hero-b').innerHTML = markB(150, 2.0);
+  document.getElementById('ladder-b').innerHTML = ladder((s,w)=>markB(s,w), [72,28,16]);
+  document.getElementById('hero-c').innerHTML = markC(190, 1.6, 'drawable');
+  document.getElementById('ladder-c').innerHTML = ladder((s,w)=>markC(s,w), [96,40,24], true);
+  document.getElementById('con-c').textContent =
+    'construction: three plan bars at half-ink (opacity .5); trace x = linear time, y = 24 + 17·e^(−0.052t)·sin(0.62t+0.9) — the drift settling into the middle lane. Wide 3:2 frame; favicon duty hands off to D.';
+  document.getElementById('hero-d').innerHTML = markD(150, 1.7);
+  document.getElementById('ladder-d').innerHTML = ladder((s,w)=>markD(s,w), [72,28,16]);
+  document.getElementById('wm-full').innerHTML = wordmark('full');
+  document.getElementById('wm-plain').innerHTML = wordmark('plain');
+  document.getElementById('wm-short').innerHTML = wordmark('short');
+  document.getElementById('lock-h').innerHTML = markC(54, 2.2) + wordmark('plain', 28);
+  document.getElementById('lock-s').innerHTML = markD(64, 2.0) + wordmark('plain', 24);
+  document.getElementById('acc-green').innerHTML = markC(140, 1.6);
+  document.getElementById('acc-blue').innerHTML  = markC(140, 1.6);
+
+  /* draw-on demo: the pen draws the figure once (reduced-motion → instant) */
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function drawOn(host){ host.querySelectorAll('.trace-path').forEach(p=>{
+    const L = p.getTotalLength();
+    if (reduce) return;
+    p.style.transition='none'; p.style.strokeDasharray=L; p.style.strokeDashoffset=L;
+    requestAnimationFrame(()=>{ p.style.transition='stroke-dashoffset 2.8s cubic-bezier(.3,.6,.4,1)'; p.style.strokeDashoffset=0; }); }); }
+  document.getElementById('draw-a').addEventListener('click', ()=>{ drawOn(document.getElementById('hero-a')); drawOn(document.getElementById('hero-c')); });
+});
+</script>
+<script>window.__EMBED_CFG__ = { optSel: '[data-opt]', bareHide: ['h2', '.rationale', '.construction', '.wm-cap'] };</script>
+<script src="_embed.js"></script>
+</body>
+</html>

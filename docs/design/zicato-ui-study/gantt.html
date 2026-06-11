@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="monokai">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>harmonograf × zicato — Gantt (the hero) study</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_tokens.css">
+<link rel="stylesheet" href="_study.css">
+<style>
+  .gantt-frame { border:1px solid var(--rule); border-radius:var(--r-panel); background:var(--paper); padding:10px 12px 6px; }
+  .gantt-canvas-wrap { position:relative; width:100%; }
+  canvas.gantt-canvas { display:block; width:100%; height:auto; }
+  .opt-toggle { display:inline-flex; border:1px solid var(--rule); border-radius:7px; overflow:hidden; margin:2px 0 14px; }
+  .opt-toggle button { font:inherit; font-size:11.5px; color:var(--ink-soft); background:transparent;
+    border:none; border-right:1px solid var(--rule); padding:6px 13px; cursor:pointer; }
+  .opt-toggle button:last-child { border-right:none; }
+  .opt-toggle button[aria-pressed="true"] { color:var(--paper); background:var(--accent); font-weight:700; }
+  .kindlegend { display:flex; gap:14px 18px; flex-wrap:wrap; font-size:10.5px; color:var(--ink-faint); margin:10px 0 2px; }
+  .kindlegend span { display:inline-flex; align-items:center; gap:6px; }
+  .kindlegend .sw { width:14px; height:10px; border-radius:2px; display:inline-block; opacity:.55; }
+  .statuslegend { display:flex; gap:14px 18px; flex-wrap:wrap; font-size:10.5px; color:var(--ink-faint); margin:6px 0 2px; }
+  .statuslegend span { display:inline-flex; align-items:center; gap:6px; }
+  .statuslegend .mk { width:16px; height:12px; border-radius:2px; display:inline-flex; align-items:center; justify-content:center; }
+</style>
+</head>
+<body>
+<header class="study">
+  <span class="brand-row"><span data-brand-mark="22"></span><span data-brand-wordmark></span></span>
+  <h1>gantt — the execution timeline (the hero)</h1>
+  <span class="spacer"></span>
+  <span class="legend-inline"><b>KIND</b> = hue · <b>STATUS</b> = treatment</span>
+  <span class="theme-pick-label">theme</span>
+  <span data-theme-picker></span>
+</header>
+
+<main class="study">
+  <p class="lede" style="margin-top:22px">
+    The execution Gantt is harmonograf's instrument. It preserves the elegant <b>2-axis encoding</b>:
+    <b>KIND&nbsp;=&nbsp;hue</b> (9 span kinds, each a terminal ANSI slot from the active theme) and
+    <b>STATUS&nbsp;=&nbsp;treatment</b> (running → the one <code>--accent</code> + breathing; failed → <code>--bad</code>
+    + an <code>✕</code>; pending → faint; cancelled → hatch; planned → dashed). Status is the <b>only</b> place
+    good/bad/accent appear, so a span is never red for its identity — only when it failed. Below, the same realistic
+    multi-agent trace is drawn two ways.
+  </p>
+
+  <!-- ===== the two options ===== -->
+  <section class="study" data-surface>
+    <h2>Option A — fit-to-width SVG line-art <span style="color:var(--accent)">(recommended)</span></h2>
+    <p class="rationale">
+      A pure <code>viewBox</code> SVG at <code>width:100%</code>: hairline gridlines (<code>--rule-soft</code>, 0.6w),
+      <code>rx:3</code> bars at reduced fill-opacity lifting to 1 on hover, the agent gutter + lifelines, a context-window
+      band (<code>--caution</code> tint) along the coordinator, <code>TRANSFER</code> hand-off edges, the <b>accent
+      "now" cursor</b>, the <code>✕</code> on a failed span, the <code>◷</code> on an awaiting-human span, a dashed
+      <code>PLANNED</code> ghost ahead of now, and the goldfive lane in its <code>--hg-gf-*</code> call-category hues
+      (judge → <code>--good</code>, refine → magenta). Token-only: a theme swap re-skins every mark with no re-render.
+      Hover any bar.
+    </p>
+    <div class="gantt-frame"><div id="svg-gantt"></div></div>
+    <div class="kindlegend" id="kind-legend"></div>
+    <div class="statuslegend" id="status-legend"></div>
+  </section>
+
+  <section class="study" data-surface>
+    <h2>Option B — keep the canvas, restyle via tokens</h2>
+    <p class="rationale">
+      harmonograf's production Gantt is a 3-layer <code>&lt;canvas&gt;</code> (background · blocks · overlay) where
+      "React never drives the render loop" — already half the zicato digest-gating discipline. This option keeps that
+      renderer and only changes its inputs: every <code>fillStyle</code> reads a resolved <code>--hg-kind-*</code> /
+      <code>--hg-gf-*</code> / <code>--v2-*</code> token (via <code>getComputedStyle</code>) at draw time, so a theme
+      switch re-colors on the next frame. Same trace, same encoding as Option A — every kind hue, status treatment,
+      transfer edge and planned ghost — rendered to a real canvas here to prove the re-skin.
+    </p>
+    <div class="gantt-frame gantt-canvas-wrap"><canvas class="gantt-canvas" id="canvas-gantt" width="1120" height="320"></canvas></div>
+    <p class="rationale" style="margin-top:10px">
+      <b>Trade-off.</b> Canvas keeps harmonograf's existing hit-testing, dirty-rect batching and 60fps live cursor, but
+      marks aren't in the DOM (no per-bar <code>:focus-visible</code>, no CSS hover — those are hand-rolled). The SVG
+      option is fit-to-width and accessible by construction (every bar is <code>role="img"</code>-able, focusable,
+      hoverable) but redraws the whole figure on a structural change. For the hero surface the <b>SVG line-art</b> is the
+      recommendation; the canvas stays the right call for very long, deeply-zoomed live runs.
+    </p>
+  </section>
+
+  <!-- ===== the encoding reference ===== -->
+  <section class="study" data-surface>
+    <h2>The encoding, in full</h2>
+    <p class="rationale">Both renderers read the same map. KIND picks the hue (ANSI slot); STATUS applies the treatment.</p>
+    <div style="overflow-x:auto">
+      <table class="dn-board-table" style="max-width:760px">
+        <thead><tr><th>span kind</th><th>ANSI slot</th><th>swatch</th></tr></thead>
+        <tbody id="encoding-rows"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer class="study">
+  harmonograf UI study · <b>gantt</b> (the hero) · realistic mock multi-agent trace · token-only colour · fit-to-width ·
+  verify in <code>paper</code> + <code>monokai</code>.
+</footer>
+
+<div class="hg-hovercard" id="hovercard" role="tooltip"></div>
+
+<!-- shared chrome (theme picker + brand mark) -->
+<script>
+window.THEME_IDS = ['monokai','solarized-dark','solarized-light','google-light','google-dark',
+  'lunaria-light','lunaria-eclipse','belafonte-day','belafonte-night','paper','zenburn',
+  'selenized-black','relaxed','espresso','dracula','ubuntu'];
+const THEME_SWATCHES = {
+  'monokai':['#1e1f1c','#272822','#f8f8f2','#a6e22e','#f92672','#66d9ef'],
+  'solarized-dark':['#04222B','#0A2D38','#93A1A1','#8BB80E','#E0483C','#2AA198'],
+  'solarized-light':['#FDF6E3','#FBF1D6','#586E75','#6B9B0B','#DC322F','#268BD2'],
+  'google-light':['#FFFFFF','#F4F4F4','#474A4E','#34A853','#EA4335','#1B9CB8'],
+  'google-dark':['#202124','#2C2D30','#FFFFFF','#34A853','#EA4335','#24C1E0'],
+  'lunaria-light':['#EBE4E1','#E2DCD9','#363434','#497D46','#783C1F','#3778A9'],
+  'lunaria-eclipse':['#323F46','#3B484F','#DFE2ED','#BEDBC1','#BA9088','#C8429F'],
+  'belafonte-day':['#D5CCBA','#CCC3B2','#34292D','#6E6A4E','#BE100E','#426A79'],
+  'belafonte-night':['#20111B','#271821','#D5CCBA','#A6A07A','#D6403E','#6F8E97'],
+  'paper':['#F2EEDE','#E6E2D3','#1A1A1A','#216609','#CC3E28','#1E6FCC'],
+  'zenburn':['#3A3A3A','#424241','#DCDCCC','#8FB28F','#CC9393','#8CD0D3'],
+  'selenized-black':['#181818','#202020','#DEDEDE','#83C746','#FF5E56','#56D8C9'],
+  'relaxed':['#353A44','#3D424B','#F7F7F7','#A0AC77','#BC5653','#7EAAC7'],
+  'espresso':['#323232','#3A3A3A','#FFFFFF','#A5C261','#D25252','#6C99BB'],
+  'dracula':['#282A36','#343746','#F8F8F2','#50FA7B','#FF5555','#BD93F9'],
+  'ubuntu':['#300A24','#3D1530','#EEEEEC','#8AE234','#CC0000','#34E2E2'],
+};
+const THEME_LABELS = {'monokai':'Monokai','solarized-dark':'Solarized Dark','solarized-light':'Solarized Light',
+  'google-light':'Google Light','google-dark':'Google Dark','lunaria-light':'Lunaria Light','lunaria-eclipse':'Lunaria Eclipse',
+  'belafonte-day':'Belafonte Day','belafonte-night':'Belafonte Night','paper':'Paper','zenburn':'Zenburn',
+  'selenized-black':'Selenized Black','relaxed':'Relaxed','espresso':'Espresso','dracula':'Dracula','ubuntu':'Ubuntu'};
+const THEME_KEY = 'hgraf-study-theme';
+let themeListeners = [];
+function onThemeChange(fn){ themeListeners.push(fn); }
+function swatchStrip(id, sm){ const t = THEME_SWATCHES[id] || [];
+  return `<span class="dt-swatch-strip${sm?' dt-swatch-strip-sm':''}">`+t.map(c=>`<span class="dt-swatch" style="background:${c}"></span>`).join('')+`</span>`; }
+function currentTheme(){ return document.documentElement.getAttribute('data-theme') || 'monokai'; }
+function applyTheme(id){ document.documentElement.setAttribute('data-theme', id);
+  try { localStorage.setItem(THEME_KEY, id); } catch(e){}
+  document.querySelectorAll('[data-theme-picker]').forEach(buildPicker);
+  themeListeners.forEach(fn=>{ try{fn();}catch(e){} }); }
+function buildPicker(host){ const cur = currentTheme();
+  host.innerHTML = `<div class="dt-cd"><button class="dt-cd-trigger" aria-haspopup="listbox" aria-expanded="false">${swatchStrip(cur,true)}<span class="dt-cd-name">${THEME_LABELS[cur]}</span><span class="dt-cd-caret" aria-hidden="true">▾</span></button><div class="dt-cd-list" role="listbox" aria-label="theme">${window.THEME_IDS.map(id=>`<div class="dt-cd-option" role="option" data-id="${id}" aria-selected="${id===cur}">${swatchStrip(id)}<span class="dt-cd-name">${THEME_LABELS[id]}</span></div>`).join('')}</div></div>`;
+  const cd = host.querySelector('.dt-cd'), trig = host.querySelector('.dt-cd-trigger');
+  trig.addEventListener('click', e=>{ e.stopPropagation(); const open = cd.classList.toggle('dt-cd-open'); trig.setAttribute('aria-expanded', open); });
+  host.querySelectorAll('.dt-cd-option').forEach(o=> o.addEventListener('click', ()=>{ applyTheme(o.dataset.id); cd.classList.remove('dt-cd-open'); })); }
+document.addEventListener('click', ()=> document.querySelectorAll('.dt-cd-open').forEach(c=>c.classList.remove('dt-cd-open')));
+(function initTheme(){ let saved=null; try { saved=localStorage.getItem(THEME_KEY); } catch(e){}
+  const P=new URLSearchParams(location.search), fromUrl=P.get('theme');
+  const id=(fromUrl&&window.THEME_IDS.includes(fromUrl))?fromUrl:(saved&&window.THEME_IDS.includes(saved))?saved:'monokai';
+  document.documentElement.setAttribute('data-theme', id); })();
+/* harmonograf brand — the Option-D alpha: one period of the 2:3 Lissajous,
+   MIRRORED about the vertical axis (x = cx − A·cos2t, y = cy + B·sin3t) so the
+   knot reads as a lowercase α — still a Lissajous, loop left, tails right.
+   Stroke currentColor; the one dot rides the lower-right tail tip: the pen at
+   rest. ONE ALPHA PER LOCKUP: beside this mark the wordmark is PLAIN LETTERS
+   (the glyph already carries the α and the dot); only a STANDALONE wordmark
+   spells the "a" of graf with the drawn α. */
+function hgAlphaPath(cx, cy, A, B){ const pts=[];
+  for(let i=0;i<=240;i++){ const t=2*Math.PI*i/240;
+    pts.push((cx - A*Math.cos(2*t)).toFixed(2)+','+(cy + B*Math.sin(3*t)).toFixed(2)); }
+  return 'M'+pts.join(' L')+' Z'; }
+function hgBrandMarkSVG(h){ return `<svg class="hg-brand-mark" style="height:${h||24}px" viewBox="0 0 48 48" role="img" aria-label="harmonograf" focusable="false"><path d="${hgAlphaPath(24,24,19,15)}" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="43" cy="39" r="3.2" fill="var(--hgraf-brand, #5EA3EC)"/></svg>`; }
+function hgWordmarkSVG(){ const T='harmonograf', X0=1, ADV=9.6, BASE=15; const W=X0*2+T.length*ADV;
+  return `<svg class="hg-brand-name" viewBox="0 0 ${W} 18" role="img" aria-label="harmonograf" focusable="false"><text x="${X0}" y="${BASE}" font-family="var(--brand-mono)" font-size="15" font-weight="700" textLength="${T.length*ADV}" lengthAdjust="spacing" fill="currentColor" xml:space="preserve">${T}</text></svg>`; }
+function mountBrand(){ document.querySelectorAll('[data-brand-mark]').forEach(n=>{ n.innerHTML=hgBrandMarkSVG(+n.dataset.brandMark||24); });
+  document.querySelectorAll('[data-brand-wordmark]').forEach(n=>{ n.innerHTML=hgWordmarkSVG(); }); }
+</script>
+
+<!-- the Gantt: trace + both renderers -->
+<script>
+/* =====================================================================
+   MOCK MULTI-AGENT TRACE — a realistic harmonograf run.
+   Time is a 0..1 fraction of the visible window (wall-clock 0–18.4s).
+   Lanes are agents; the coordinator carries a context-window band.
+   NOW sits at t=0.80; one span is RUNNING (the live edge), one FAILED,
+   one PLANNED ghost sits ahead of now, one CANCELLED, one AWAITING_HUMAN.
+   ===================================================================== */
+const NOW = 0.80;
+const LANES = [
+  { id:'user',      label:'user',       ramp:'user' },
+  { id:'planner',   label:'planner',    ramp:1, ctx:true },
+  { id:'coder-a',   label:'coder-a',    ramp:3 },
+  { id:'coder-b',   label:'coder-b',    ramp:4 },
+  { id:'reviewer',  label:'reviewer',   ramp:5 },
+  { id:'goldfive',  label:'goldfive',   ramp:'goldfive' },
+];
+// each span: lane, kind, t0, t1, status. (status default COMPLETED)
+const SPANS = [
+  { lane:'user',     kind:'user-message',  t0:0.00, t1:0.05, status:'COMPLETED', name:'task: refactor checkout' },
+  { lane:'planner',  kind:'invocation',    t0:0.02, t1:0.99, status:'RUNNING',   name:'planner invocation' },
+  { lane:'planner',  kind:'llm-call',      t0:0.05, t1:0.16, status:'COMPLETED', name:'plan_generate' },
+  { lane:'planner',  kind:'transfer',      t0:0.16, t1:0.185,status:'COMPLETED', name:'→ coder-a', edgeTo:'coder-a', edgeAt:0.19 },
+  { lane:'planner',  kind:'transfer',      t0:0.40, t1:0.425,status:'COMPLETED', name:'→ coder-b', edgeTo:'coder-b', edgeAt:0.43 },
+  { lane:'planner',  kind:'llm-call',      t0:0.66, t1:0.80, status:'RUNNING',   name:'synthesize results' },
+  { lane:'planner',  kind:'wait-for-human',t0:0.86, t1:0.95, status:'AWAITING_HUMAN', name:'approve merge?' },
+  { lane:'coder-a',  kind:'invocation',    t0:0.19, t1:0.62, status:'COMPLETED', name:'coder-a invocation' },
+  { lane:'coder-a',  kind:'llm-call',      t0:0.20, t1:0.30, status:'COMPLETED', name:'draft pricing client' },
+  { lane:'coder-a',  kind:'tool-call',     t0:0.31, t1:0.40, status:'COMPLETED', name:'read_file service.ts' },
+  { lane:'coder-a',  kind:'tool-call',     t0:0.41, t1:0.52, status:'COMPLETED', name:'write_file service.ts' },
+  { lane:'coder-a',  kind:'agent-message', t0:0.53, t1:0.61, status:'COMPLETED', name:'report → planner' },
+  { lane:'coder-b',  kind:'invocation',    t0:0.43, t1:0.78, status:'COMPLETED', name:'coder-b invocation' },
+  { lane:'coder-b',  kind:'llm-call',      t0:0.44, t1:0.55, status:'COMPLETED', name:'update tests' },
+  { lane:'coder-b',  kind:'tool-call',     t0:0.56, t1:0.66, status:'FAILED',    name:'run_tests (3 failed)' },
+  { lane:'coder-b',  kind:'tool-call',     t0:0.67, t1:0.72, status:'CANCELLED', name:'retry_tests (superseded)' },
+  { lane:'coder-b',  kind:'agent-message', t0:0.73, t1:0.78, status:'COMPLETED', name:'report → planner' },
+  { lane:'reviewer', kind:'invocation',    t0:0.62, t1:0.80, status:'RUNNING',   name:'reviewer invocation' },
+  { lane:'reviewer', kind:'llm-call',      t0:0.63, t1:0.80, status:'RUNNING',   name:'review diff' },
+  { lane:'reviewer', kind:'tool-call',     t0:0.83, t1:0.88, status:'PENDING',   name:'lint (queued)' },
+  { lane:'goldfive', kind:'custom',        t0:0.30, t1:0.40, status:'COMPLETED', name:'judge_reasoning', gf:'judge' },
+  { lane:'goldfive', kind:'custom',        t0:0.58, t1:0.66, status:'COMPLETED', name:'refine_steer', gf:'refine' },
+];
+const PLANNED = [ // ghost spans ahead of NOW (speculative, not yet scheduled)
+  { lane:'reviewer', t0:0.90, t1:0.97, name:'format' },
+  { lane:'planner',  t0:0.95, t1:0.99, name:'merge' },
+];
+const KIND_LABELS = {
+  'invocation':'INVOCATION','llm-call':'LLM_CALL','tool-call':'TOOL_CALL','user-message':'USER_MESSAGE',
+  'agent-message':'AGENT_MESSAGE','transfer':'TRANSFER','wait-for-human':'WAIT_FOR_HUMAN','planned':'PLANNED','custom':'CUSTOM',
+};
+const KIND_SLOT = {
+  'invocation':'bright-black','llm-call':'blue','tool-call':'cyan','user-message':'green',
+  'agent-message':'bright-green','transfer':'yellow','wait-for-human':'magenta','planned':'bright-black','custom':'white',
+};
+const STATUS_NOTE = {
+  COMPLETED:'completed', RUNNING:'running (now) · accent + breathe', FAILED:'failed · ✕',
+  PENDING:'pending · faint', CANCELLED:'cancelled · hatch', AWAITING_HUMAN:'awaiting human · ◷',
+};
+
+/* ---------- shared geometry ---------- */
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || '#888';
+function laneAgentVar(ramp){ return ramp==='user'?'--hg-agent-user':ramp==='goldfive'?'--hg-agent-goldfive':`--hg-agent-${ramp}`; }
+// goldfive call category → its --hg-gf-* hue (STYLE-GUIDE §2). A span on the
+// goldfive lane carries a `gf` class; its bar takes the category hue, not the
+// generic CUSTOM neutral — this is the goldfive categorical layer.
+const GF_VAR = { judge:'--hg-gf-judge-on-task', refine:'--hg-gf-refine', plan:'--hg-gf-plan', reflective:'--hg-gf-reflective' };
+// The base hue token for a span: goldfive category if present, else kind hue.
+function spanHueVar(s){ return s.gf ? (GF_VAR[s.gf]||`--hg-kind-${s.kind}`) : `--hg-kind-${s.kind}`; }
+const WALL = 18.4; // seconds across the window
+const fmtT = f => (f*WALL).toFixed(1)+'s';
+// escape strings interpolated into data-tip / aria-label so an embedded quote
+// can't close the attribute early (parity with figures.html; latent here since
+// the mock strings carry no quotes, but robust against future trace data).
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+/* ===================================================================
+   OPTION A — the SVG line-art renderer (the hero).
+   =================================================================== */
+function renderSvgGantt(){
+  const host = document.getElementById('svg-gantt'); if(!host) return;
+  const W=1120, padL=92, padR=18, top=30, rowH=34, padB=34;
+  const laneCount = LANES.length;
+  const H = top + laneCount*rowH + padB;
+  const x = f => padL + f*(W-padL-padR);
+  const laneY = i => top + i*rowH;
+  const laneIdx = id => LANES.findIndex(l=>l.id===id);
+  let g = `<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="multi-agent execution timeline">`;
+  // defs: a diagonal hatch for CANCELLED, theme-derived
+  g += `<defs><pattern id="hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="5" stroke="var(--ink-faint)" stroke-width="1"/></pattern></defs>`;
+  // agent gutter
+  g += `<rect class="hg-gantt-gutter" x="0" y="${top-4}" width="${padL-6}" height="${laneCount*rowH+8}"/>`;
+  // time axis ticks + hairline gridlines
+  for(let i=0;i<=8;i++){ const f=i/8, gx=x(f);
+    g += `<line class="hg-gantt-grid" x1="${gx}" y1="${top-4}" x2="${gx}" y2="${top+laneCount*rowH}"/>`;
+    g += `<text class="hg-gantt-axis" x="${gx}" y="${top-9}" text-anchor="middle" style="font-variant-numeric:tabular-nums">${fmtT(f)}</text>`; }
+  // lifelines + lane labels + agent identity tick
+  LANES.forEach((ln,i)=>{ const cy=laneY(i)+rowH/2;
+    g += `<line class="hg-gantt-lane-sep" x1="0" y1="${laneY(i)}" x2="${W-padR}" y2="${laneY(i)}"/>`;
+    g += `<rect x="6" y="${cy-7}" width="3" height="14" rx="1.5" fill="var(${laneAgentVar(ln.ramp)})"/>`;
+    g += `<text class="hg-gantt-lane-label" x="14" y="${cy+3}">${ln.label}</text>`; });
+  g += `<line class="hg-gantt-lane-sep" x1="0" y1="${laneY(laneCount)}" x2="${W-padR}" y2="${laneY(laneCount)}"/>`;
+  // context-window band along the coordinator lane (rises as context fills)
+  const pl = laneIdx('planner'); if(pl>=0){ const cy=laneY(pl);
+    let pts=[]; for(let k=0;k<=20;k++){ const f=k/20; const ratio=Math.min(1, 0.18+f*0.7); const yy=cy+rowH-ratio*(rowH-6);
+      pts.push(`${x(f).toFixed(1)},${yy.toFixed(1)}`); }
+    g += `<polyline class="hg-gantt-ctxband-line" points="${pts.join(' ')}"/>`;
+    g += `<polygon class="hg-gantt-ctxband" points="${x(0)},${cy+rowH} ${pts.join(' ')} ${x(1)},${cy+rowH}"/>`; }
+  // transfer edges (slanted hand-off lines)
+  SPANS.filter(s=>s.edgeTo).forEach(s=>{ const fi=laneIdx(s.lane), ti=laneIdx(s.edgeTo);
+    if(fi<0||ti<0) return; const x1=x(s.t1), y1=laneY(fi)+rowH/2, x2=x(s.edgeAt), y2=laneY(ti)+rowH/2;
+    g += `<path class="hg-gantt-edge is-transfer" d="M${x1},${y1} C${x1+18},${y1} ${x2-18},${y2} ${x2},${y2}"/>`; });
+  // planned ghosts
+  PLANNED.forEach(p=>{ const li=laneIdx(p.lane); if(li<0) return; const cy=laneY(li)+rowH/2;
+    const w=Math.max(5,x(p.t1)-x(p.t0));
+    g += `<rect class="hg-gantt-bar is-planned" x="${x(p.t0)}" y="${cy-7}" width="${w}" height="14" rx="3"
+            tabindex="0" role="img" data-tip="${esc(p.name)} · PLANNED" aria-label="${esc(p.name)} planned"/>`; });
+  // spans
+  SPANS.forEach(s=>{ const li=laneIdx(s.lane); if(li<0) return; const cy=laneY(li)+rowH/2;
+    const isInv = s.kind==='invocation';
+    const h = isInv ? 20 : 14; const y = cy - h/2;
+    const w = Math.max(4, x(s.t1)-x(s.t0));
+    let cls='hg-gantt-bar is-'+s.kind;
+    if(s.status==='RUNNING') cls+=' is-running hg-breathe';
+    if(s.status==='FAILED') cls+=' is-failed';
+    if(s.status==='PENDING') cls+=' is-pending';
+    if(s.status==='CANCELLED') cls+=' is-cancelled';
+    const fill = s.status==='FAILED' ? 'var(--bad)'
+               : s.status==='AWAITING_HUMAN' ? 'var(--bad-soft)'
+               : `var(${spanHueVar(s)})`;
+    const gfTip = s.gf ? ` · gf:${s.gf}` : '';
+    const tip = `${s.name} · ${KIND_LABELS[s.kind]}${gfTip} · ${fmtT(s.t1-s.t0)} · ${STATUS_NOTE[s.status]||s.status}`;
+    g += `<rect class="${cls}" x="${x(s.t0)}" y="${y}" width="${w}" height="${h}" rx="3" fill="${fill}"
+            tabindex="0" role="img" data-tip="${esc(tip)}" aria-label="${esc(tip)}"/>`;
+    // CANCELLED hatch overlay
+    if(s.status==='CANCELLED')
+      g += `<rect x="${x(s.t0)}" y="${y}" width="${w}" height="${h}" rx="3" fill="url(#hatch)" pointer-events="none" opacity="0.5"/>`;
+    // AWAITING_HUMAN stroke + glyph
+    if(s.status==='AWAITING_HUMAN'){
+      g += `<rect x="${x(s.t0)}" y="${y}" width="${w}" height="${h}" rx="3" fill="none" stroke="var(--bad)" stroke-width="1.4" vector-effect="non-scaling-stroke" pointer-events="none"/>`;
+      g += `<text class="hg-gantt-glyph-wait" x="${x(s.t0)+w-9}" y="${cy+3.2}" pointer-events="none">◷</text>`; }
+    // FAILED ✕ glyph
+    if(s.status==='FAILED')
+      g += `<text class="hg-gantt-glyph-fail" x="${x(s.t1)-8}" y="${cy+3.2}" pointer-events="none">✕</text>`;
+  });
+  // the NOW cursor (the one accent) + cap
+  const nx=x(NOW);
+  g += `<line class="hg-gantt-now" x1="${nx}" y1="${top-6}" x2="${nx}" y2="${top+laneCount*rowH+4}"/>`;
+  g += `<circle class="hg-gantt-now-cap" cx="${nx}" cy="${top-6}" r="3"/>`;
+  // now label: accent, to tie it to the cursor. Uses the dedicated
+  // .hg-gantt-now-label class (its own --accent fill, so no axis-major override).
+  g += `<text class="hg-gantt-now-label" x="${nx}" y="${top+laneCount*rowH+18}" text-anchor="middle" font-weight="500">now ${fmtT(NOW)}</text>`;
+  g += `</svg>`;
+  host.innerHTML = g;
+  wireHovercards(host);
+}
+
+/* ---------- hovercard wiring (the singleton card) ---------- */
+function wireHovercards(host){
+  const hc = document.getElementById('hovercard');
+  host.querySelectorAll('[data-tip]').forEach(el=>{
+    el.addEventListener('mousemove', e=>{
+      hc.innerHTML = `<div class="hg-hc-row">${el.getAttribute('data-tip')}</div>`;
+      hc.classList.add('on');
+      const pad=12; let lx=e.clientX+pad, ly=e.clientY+pad;
+      const r=hc.getBoundingClientRect();
+      if(lx+r.width>innerWidth) lx=e.clientX-r.width-pad;
+      if(ly+r.height>innerHeight) ly=e.clientY-r.height-pad;
+      hc.style.left=lx+'px'; hc.style.top=ly+'px';
+    });
+    el.addEventListener('mouseleave', ()=> hc.classList.remove('on'));
+    el.addEventListener('focus', ()=>{ hc.innerHTML=`<div class="hg-hc-row">${el.getAttribute('data-tip')}</div>`;
+      const r=el.getBoundingClientRect(); hc.classList.add('on'); hc.style.left=r.left+'px'; hc.style.top=(r.bottom+6)+'px'; });
+    el.addEventListener('blur', ()=> hc.classList.remove('on'));
+  });
+}
+
+/* ===================================================================
+   OPTION B — the canvas renderer (token-driven re-skin).
+   Mirrors harmonograf's 3-layer canvas: it reads --hg-kind-* / --v2-*
+   via getComputedStyle at draw time, so a theme swap re-colours on the
+   next frame. Drawn once here (a live run would rAF the overlay layer).
+   =================================================================== */
+function renderCanvasGantt(){
+  const cv = document.getElementById('canvas-gantt'); if(!cv) return;
+  const dpr = Math.min(2, window.devicePixelRatio||1);
+  const cssW = cv.clientWidth || 1120, cssH = 320;
+  cv.width = cssW*dpr; cv.height = cssH*dpr;
+  cv.style.height = cssH+'px';
+  const ctx = cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,cssW,cssH);
+  const padL=92, padR=18, top=28, rowH=42, padB=30;
+  const x = f => padL + f*(cssW-padL-padR);
+  const laneY = i => top + i*rowH;
+  const laneIdx = id => LANES.findIndex(l=>l.id===id);
+  const V = n => cssVar(n);
+  // gutter
+  ctx.fillStyle = V('--panel-2'); ctx.fillRect(0, top-4, padL-6, LANES.length*rowH+8);
+  // gridlines + axis
+  ctx.font = '9.5px ui-monospace, monospace'; ctx.textAlign='center';
+  for(let i=0;i<=8;i++){ const gx=x(i/8);
+    ctx.strokeStyle=V('--rule-soft'); ctx.lineWidth=0.6; ctx.beginPath(); ctx.moveTo(gx,top-4); ctx.lineTo(gx,top+LANES.length*rowH); ctx.stroke();
+    ctx.fillStyle=V('--ink-faint'); ctx.fillText((i/8*WALL).toFixed(1)+'s', gx, top-9); }
+  // lanes + labels + agent tick
+  ctx.textAlign='left';
+  LANES.forEach((ln,i)=>{ const cy=laneY(i)+rowH/2;
+    ctx.strokeStyle=V('--rule-soft'); ctx.lineWidth=0.6; ctx.beginPath(); ctx.moveTo(0,laneY(i)); ctx.lineTo(cssW-padR,laneY(i)); ctx.stroke();
+    ctx.fillStyle=V(laneAgentVar(ln.ramp)); ctx.fillRect(6, cy-7, 3, 14);
+    ctx.fillStyle=V('--ink-soft'); ctx.font='10px ui-monospace, monospace'; ctx.fillText(ln.label, 14, cy+3); });
+  // context band along planner
+  const pl=laneIdx('planner'); if(pl>=0){ const cy=laneY(pl);
+    ctx.beginPath(); ctx.moveTo(x(0), cy+rowH);
+    for(let k=0;k<=20;k++){ const f=k/20, ratio=Math.min(1,0.18+f*0.7); ctx.lineTo(x(f), cy+rowH-ratio*(rowH-6)); }
+    ctx.lineTo(x(1), cy+rowH); ctx.closePath();
+    ctx.fillStyle = mix(V('--caution'), 0.14); ctx.fill(); }
+  // transfer hand-off edges (slanted, dashed, in the TRANSFER hue) — same as SVG
+  ctx.save(); ctx.setLineDash([3,2]); ctx.strokeStyle=V('--hg-kind-transfer'); ctx.lineWidth=1; ctx.globalAlpha=0.7;
+  SPANS.filter(s=>s.edgeTo).forEach(s=>{ const fi=laneIdx(s.lane), ti=laneIdx(s.edgeTo); if(fi<0||ti<0) return;
+    const x1=x(s.t1), y1=laneY(fi)+rowH/2, x2=x(s.edgeAt), y2=laneY(ti)+rowH/2;
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.bezierCurveTo(x1+18,y1,x2-18,y2,x2,y2); ctx.stroke(); });
+  ctx.restore();
+  // planned ghosts (dashed --ink-faint on --rule-soft) ahead of now — same as SVG
+  PLANNED.forEach(p=>{ const li=laneIdx(p.lane); if(li<0) return; const cy=laneY(li)+rowH/2;
+    const w=Math.max(5,x(p.t1)-x(p.t0)), y=cy-8;
+    ctx.globalAlpha=0.5; ctx.fillStyle=V('--rule-soft'); roundRect(ctx,x(p.t0),y,w,16,3); ctx.fill(); ctx.globalAlpha=1;
+    ctx.save(); ctx.setLineDash([4,3]); ctx.strokeStyle=V('--ink-faint'); ctx.lineWidth=1; roundRect(ctx,x(p.t0),y,w,16,3); ctx.stroke(); ctx.restore(); });
+  // spans
+  SPANS.forEach(s=>{ const li=laneIdx(s.lane); if(li<0) return; const cy=laneY(li)+rowH/2;
+    const isInv=s.kind==='invocation'; const h=isInv?22:16; const y=cy-h/2;
+    const w=Math.max(3, x(s.t1)-x(s.t0));
+    let fill = s.status==='FAILED' ? V('--bad')
+             : s.status==='AWAITING_HUMAN' ? V('--bad-soft') : V(spanHueVar(s));
+    let alpha = 0.55; if(isInv) alpha=0.30; if(s.status==='PENDING') alpha=0.32; if(s.status==='CANCELLED') alpha=0.28;
+    if(s.status==='AWAITING_HUMAN') alpha=1;
+    roundRect(ctx, x(s.t0), y, w, h, 3);
+    ctx.globalAlpha = alpha; ctx.fillStyle = fill; ctx.fill(); ctx.globalAlpha = 1;
+    if(s.status==='RUNNING'){ ctx.strokeStyle=V('--accent'); ctx.lineWidth=2; roundRect(ctx,x(s.t0),y,w,h,3); ctx.stroke(); }
+    if(s.status==='AWAITING_HUMAN'){ ctx.strokeStyle=V('--bad'); ctx.lineWidth=1.4; roundRect(ctx,x(s.t0),y,w,h,3); ctx.stroke();
+      ctx.fillStyle=V('--caution'); ctx.font='10px ui-monospace,monospace'; ctx.textAlign='right'; ctx.fillText('◷', x(s.t1)-3, cy+3.2); ctx.textAlign='left'; }
+    if(s.status==='FAILED'){ ctx.fillStyle=V('--bad'); ctx.font='10px ui-monospace,monospace'; ctx.textAlign='right'; ctx.fillText('✕', x(s.t1)-3, cy+3); ctx.textAlign='left'; }
+    if(s.status==='CANCELLED'){ hatchRect(ctx, x(s.t0), y, w, h, V('--ink-faint')); }
+  });
+  // now cursor (the one accent)
+  const nx=x(NOW);
+  ctx.strokeStyle=V('--accent'); ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(nx,top-6); ctx.lineTo(nx,top+LANES.length*rowH+4); ctx.stroke();
+  ctx.fillStyle=V('--accent'); ctx.beginPath(); ctx.arc(nx,top-6,3,0,7); ctx.fill();
+  ctx.textAlign='center'; ctx.font='9.5px ui-monospace,monospace'; ctx.fillText('now '+(NOW*WALL).toFixed(1)+'s', nx, top+LANES.length*rowH+18);
+}
+function roundRect(ctx,x,y,w,h,r){ r=Math.min(r,h/2,w/2); ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+function hatchRect(ctx,x,y,w,h,color){ ctx.save(); roundRect(ctx,x,y,w,h,3); ctx.clip();
+  ctx.strokeStyle=color; ctx.lineWidth=1; for(let i=-h;i<w;i+=5){ ctx.beginPath(); ctx.moveTo(x+i,y+h); ctx.lineTo(x+i+h,y); ctx.stroke(); } ctx.restore(); }
+function mix(hex, a){ // hex → rgba with alpha (for canvas fills that need transparency)
+  hex=hex.replace('#',''); if(hex.length===3) hex=hex.split('').map(c=>c+c).join('');
+  const n=parseInt(hex,16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; }
+
+/* ---------- legends + encoding table ---------- */
+function buildLegends(){
+  const kl=document.getElementById('kind-legend');
+  if(kl) kl.innerHTML = Object.keys(KIND_SLOT).filter(k=>k!=='planned')
+    .map(k=>`<span><span class="sw" style="background:var(--hg-kind-${k})"></span>${KIND_LABELS[k]}</span>`).join('')
+    + `<span><span class="sw" style="background:var(--hg-gf-refine)"></span>goldfive (gf category)</span>`
+    + `<span><span class="sw" style="background:var(--rule-soft);border:1px dashed var(--ink-faint);opacity:1"></span>PLANNED (dashed)</span>`;
+  const sl=document.getElementById('status-legend');
+  if(sl) sl.innerHTML = [
+    ['running','<span class="mk" style="border:2px solid var(--accent)"></span>','RUNNING · accent + breathe (now)'],
+    ['failed','<span class="mk" style="background:var(--bad);color:var(--paper)">✕</span>','FAILED · bad + ✕'],
+    ['await','<span class="mk" style="background:var(--bad-soft);border:1.4px solid var(--bad);color:var(--caution)">◷</span>','AWAITING_HUMAN'],
+    ['pending','<span class="mk" style="background:var(--hg-kind-tool-call);opacity:.32"></span>','PENDING · faint'],
+    ['cancelled','<span class="mk" style="background:var(--ink-faint);opacity:.4"></span>','CANCELLED · hatch'],
+    ['now','<span class="mk" style="background:var(--accent)"></span>','NOW cursor (the one accent)'],
+  ].map(([k,mk,lab])=>`<span>${mk}${lab}</span>`).join('');
+  const er=document.getElementById('encoding-rows');
+  if(er) er.innerHTML = Object.keys(KIND_SLOT)
+    .map(k=>`<tr><td>${KIND_LABELS[k]}</td><td>${KIND_SLOT[k]}</td>
+      <td><span style="display:inline-block;width:40px;height:13px;border-radius:2px;background:var(--hg-kind-${k});opacity:.7"></span></td></tr>`).join('');
+}
+
+function renderAll(){ renderSvgGantt(); renderCanvasGantt(); buildLegends(); }
+onThemeChange(renderAll);
+window.addEventListener('resize', ()=>{ renderCanvasGantt(); });
+window.addEventListener('DOMContentLoaded', ()=>{
+  document.querySelectorAll('[data-theme-picker]').forEach(buildPicker);
+  mountBrand();
+  renderAll();
+});
+</script>
+<script>window.__EMBED_CFG__ = { optSel: '[data-surface]', bareHide: ['h2', '.rationale'] };</script>
+<script src="_embed.js"></script>
+</body>
+</html>

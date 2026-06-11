@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="monokai">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>harmonograf × zicato — figures (components) study</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_tokens.css">
+<link rel="stylesheet" href="_study.css">
+<style>
+  .fig-frame { border:1px solid var(--rule); border-radius:var(--r-panel); background:var(--paper); padding:12px 14px; }
+  .two-col { display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
+  @media (max-width:880px){ .two-col { grid-template-columns:1fr; } }
+  .stage-rail { display:flex; align-items:center; gap:0; margin:6px 0; }
+  .stage { display:flex; flex-direction:column; align-items:center; gap:5px; flex:1; min-width:0; position:relative; }
+  .stage-dot { width:14px; height:14px; border-radius:50%; border:2px solid var(--rule); background:var(--panel); z-index:1; }
+  .stage.done .stage-dot { background:var(--good); border-color:var(--good); }
+  .stage.now .stage-dot { background:var(--accent); border-color:var(--accent); }
+  .stage.now .stage-dot { animation:hg-now-pulse 1.6s ease-out infinite; }
+  .stage.failed .stage-dot { background:var(--bad); border-color:var(--bad); }
+  .stage.pending .stage-dot { background:var(--panel); border-color:var(--rule); }
+  .stage-label { font-size:10px; color:var(--ink-soft); white-space:nowrap; }
+  .stage.now .stage-label { color:var(--accent); }
+  .stage-line { position:absolute; top:6px; left:50%; right:-50%; height:2px; background:var(--rule); z-index:0; }
+  .stage.done .stage-line { background:var(--good); }
+  .stage:last-child .stage-line { display:none; }
+  .rev-badge { display:inline-flex; align-items:center; gap:5px; font-size:10px; color:var(--ink-faint);
+    border:1px solid var(--rule); border-radius:var(--r-pill); padding:1px 8px; }
+  .rev-badge b { color:var(--caution); }
+  .interv-row { display:grid; grid-template-columns:88px 1fr auto; gap:10px; align-items:center;
+    padding:8px 4px; border-bottom:1px solid var(--rule-soft); cursor:default; }
+  .interv-row:last-child { border-bottom:none; }
+  .interv-time { font-size:11px; color:var(--ink-faint); font-variant-numeric:tabular-nums; }
+  .interv-body { min-width:0; }
+  .interv-title { font-size:12.5px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .interv-sub { font-size:10.5px; color:var(--ink-faint); }
+  .live-dot-sm { width:7px; height:7px; border-radius:50%; background:var(--accent); display:inline-block;
+    animation:hg-now-pulse 1.6s ease-out infinite; }
+  .kbd { font-size:10px; color:var(--ink-faint); border:1px solid var(--rule); border-radius:4px; padding:1px 5px; }
+  .picker-static { position:static; background:transparent; padding:0; display:block; }
+  .picker-static .hg-picker { box-shadow:none; max-height:none; }
+  /* a narrow viewport scrolls the table inside its frame, never the page (zicato §6.4) */
+  .dn-table-scroll { overflow-x:auto; }
+  .dn-table-scroll .dn-board-table { min-width:560px; }
+</style>
+</head>
+<body>
+<header class="study">
+  <span class="brand-row"><span data-brand-mark="22"></span><span data-brand-wordmark></span></span>
+  <h1>figures — the component catalogue</h1>
+  <span class="spacer"></span>
+  <span class="legend-inline">mono · outline-first · <b>tabular-nums</b></span>
+  <span class="theme-pick-label">theme</span>
+  <span data-theme-picker></span>
+</header>
+
+<main class="study">
+  <p class="lede" style="margin-top:22px">
+    The supporting surfaces, each redrawn in-language: pills are <b>mono, outline-first</b> (filling the accent only on
+    hover); numerics use <code>tabular-nums</code>; tables follow the zicato <code>.dn-board-table</code> idiom;
+    hover-for-detail uses the singleton hovercard. An in-flight item is neutral <code>--accent</code>, <b>never red</b>.
+  </p>
+
+  <!-- ===== OrchestrationTimeline + TaskStages ===== -->
+  <section class="study" data-surface>
+    <h2>OrchestrationTimeline &amp; TaskStages</h2>
+    <p class="rationale">
+      The run lifecycle as a line-art phase rail (the <code>reignGantt</code> idiom): completed phases read
+      <code>--good</code>, the current phase is the one <code>--accent</code> (breathing), a failed phase
+      <code>--bad</code>, planned phases faint. The plan's revision count rides as a mono <code>--caution</code> badge.
+    </p>
+    <div class="two-col">
+      <div>
+        <p class="ba-tag">orchestration timeline</p>
+        <div class="fig-frame">
+          <div class="stage-rail" id="orch-rail"></div>
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--ink-faint);margin-top:4px" class="tnum">
+            <span>00:00.0</span><span>elapsed 00:14.7</span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p class="ba-tag">task stages · plan v3</p>
+        <div class="fig-frame">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <span class="dn-pill accent">in progress</span>
+            <span class="rev-badge">plan revisions <b>×3</b></span>
+            <span style="margin-left:auto;font-size:10.5px;color:var(--ink-faint)">mode: <span class="dn-pill flat">parallel</span></span>
+          </div>
+          <div class="stage-rail" id="stage-rail"></div>
+          <p style="font-size:10.5px;color:var(--ink-faint);margin:10px 0 0">
+            revision <b style="color:var(--caution)">v3</b> steered by <span style="color:var(--hg-gf-refine)">refine_steer</span>
+            after a judge flagged scope drift.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== LiveActivity ===== -->
+  <section class="study" data-surface>
+    <h2>LiveActivity — the active-items board</h2>
+    <p class="rationale">
+      The live table in the zicato <code>.dn-board-table</code> idiom: hairline cells, an uppercase header on
+      <code>--rule-soft</code>, numeric columns right-aligned with <code>tabular-nums</code>, the live row tinted
+      <code>color-mix(--accent 8%)</code>. Kind reads its categorical hue; status is a mono outline-first pill.
+    </p>
+    <div class="fig-frame" style="padding:0;overflow:hidden">
+      <!-- contained scroll: a narrow viewport scrolls THIS, never the page (zicato §6.4) -->
+      <div class="dn-table-scroll">
+        <table class="dn-board-table">
+          <thead><tr>
+            <th style="width:64px">when</th><th>agent</th><th>kind</th><th>detail</th>
+            <th class="num" style="width:78px">elapsed</th><th style="width:120px">status</th>
+          </tr></thead>
+          <tbody id="live-rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Interventions ===== -->
+  <section class="study" data-surface>
+    <h2>Interventions — goldfive steering</h2>
+    <p class="rationale">
+      goldfive's steers and judge verdicts. Judge severity maps to roles (<code>--good</code> on-task,
+      <code>--caution</code> warning, <code>--bad</code> critical); <code>refine</code> reads magenta, <code>plan</code>
+      cyan, <code>reflective</code> grey — all from the theme ANSI. Each row opens its detail in the hovercard. The
+      categorical hues here are <b>identity</b>, never status, so red appears only for a critical verdict.
+    </p>
+    <div class="fig-frame">
+      <div id="interv-list"></div>
+    </div>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--hg-gf-judge-on-task)"></span> judge · on-task</span>
+      <span><span class="sw" style="background:var(--hg-gf-judge-warning)"></span> judge · warning</span>
+      <span><span class="sw" style="background:var(--hg-gf-judge-critical)"></span> judge · critical</span>
+      <span><span class="sw" style="background:var(--hg-gf-refine)"></span> refine</span>
+      <span><span class="sw" style="background:var(--hg-gf-plan)"></span> plan</span>
+      <span><span class="sw" style="background:var(--hg-gf-reflective)"></span> reflective</span>
+    </div>
+  </section>
+
+  <!-- ===== SessionPicker ===== -->
+  <section class="study" data-surface>
+    <h2>SessionPicker (⌘K)</h2>
+    <p class="rationale">
+      The command palette, in-language: a <code>--panel</code> card with hairline rows, mono titles, an attention count
+      as a quiet <code>--bad</code> pill (only when a session is genuinely awaiting a human), and the selected row on
+      <code>--rule-soft</code>. The accent rings the search field on focus. Shown inline here (live it floats over a
+      blurred backdrop).
+    </p>
+    <div class="fig-frame">
+      <div class="hg-picker-backdrop picker-static">
+        <div class="hg-picker">
+          <div class="hg-picker-search">
+            <span style="color:var(--ink-faint)">⌕</span>
+            <input value="checkout" aria-label="search sessions" />
+            <span class="kbd">esc</span>
+          </div>
+          <div class="hg-picker-list" id="picker-list"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="study">
+  harmonograf UI study · <b>figures</b> · component catalogue · mono outline-first pills · tabular-nums · token-only colour
+  · verify in <code>paper</code> + <code>monokai</code>.
+</footer>
+
+<div class="hg-hovercard" id="hovercard" role="tooltip"></div>
+
+<!-- shared chrome -->
+<script>
+window.THEME_IDS = ['monokai','solarized-dark','solarized-light','google-light','google-dark',
+  'lunaria-light','lunaria-eclipse','belafonte-day','belafonte-night','paper','zenburn',
+  'selenized-black','relaxed','espresso','dracula','ubuntu'];
+const THEME_SWATCHES = {
+  'monokai':['#1e1f1c','#272822','#f8f8f2','#a6e22e','#f92672','#66d9ef'],
+  'solarized-dark':['#04222B','#0A2D38','#93A1A1','#8BB80E','#E0483C','#2AA198'],
+  'solarized-light':['#FDF6E3','#FBF1D6','#586E75','#6B9B0B','#DC322F','#268BD2'],
+  'google-light':['#FFFFFF','#F4F4F4','#474A4E','#34A853','#EA4335','#1B9CB8'],
+  'google-dark':['#202124','#2C2D30','#FFFFFF','#34A853','#EA4335','#24C1E0'],
+  'lunaria-light':['#EBE4E1','#E2DCD9','#363434','#497D46','#783C1F','#3778A9'],
+  'lunaria-eclipse':['#323F46','#3B484F','#DFE2ED','#BEDBC1','#BA9088','#C8429F'],
+  'belafonte-day':['#D5CCBA','#CCC3B2','#34292D','#6E6A4E','#BE100E','#426A79'],
+  'belafonte-night':['#20111B','#271821','#D5CCBA','#A6A07A','#D6403E','#6F8E97'],
+  'paper':['#F2EEDE','#E6E2D3','#1A1A1A','#216609','#CC3E28','#1E6FCC'],
+  'zenburn':['#3A3A3A','#424241','#DCDCCC','#8FB28F','#CC9393','#8CD0D3'],
+  'selenized-black':['#181818','#202020','#DEDEDE','#83C746','#FF5E56','#56D8C9'],
+  'relaxed':['#353A44','#3D424B','#F7F7F7','#A0AC77','#BC5653','#7EAAC7'],
+  'espresso':['#323232','#3A3A3A','#FFFFFF','#A5C261','#D25252','#6C99BB'],
+  'dracula':['#282A36','#343746','#F8F8F2','#50FA7B','#FF5555','#BD93F9'],
+  'ubuntu':['#300A24','#3D1530','#EEEEEC','#8AE234','#CC0000','#34E2E2'],
+};
+const THEME_LABELS = {'monokai':'Monokai','solarized-dark':'Solarized Dark','solarized-light':'Solarized Light',
+  'google-light':'Google Light','google-dark':'Google Dark','lunaria-light':'Lunaria Light','lunaria-eclipse':'Lunaria Eclipse',
+  'belafonte-day':'Belafonte Day','belafonte-night':'Belafonte Night','paper':'Paper','zenburn':'Zenburn',
+  'selenized-black':'Selenized Black','relaxed':'Relaxed','espresso':'Espresso','dracula':'Dracula','ubuntu':'Ubuntu'};
+const THEME_KEY = 'hgraf-study-theme';
+let themeListeners = []; function onThemeChange(fn){ themeListeners.push(fn); }
+function swatchStrip(id, sm){ const t = THEME_SWATCHES[id] || [];
+  return `<span class="dt-swatch-strip${sm?' dt-swatch-strip-sm':''}">`+t.map(c=>`<span class="dt-swatch" style="background:${c}"></span>`).join('')+`</span>`; }
+function currentTheme(){ return document.documentElement.getAttribute('data-theme') || 'monokai'; }
+function applyTheme(id){ document.documentElement.setAttribute('data-theme', id);
+  try { localStorage.setItem(THEME_KEY, id); } catch(e){}
+  document.querySelectorAll('[data-theme-picker]').forEach(buildPicker);
+  themeListeners.forEach(fn=>{ try{fn();}catch(e){} }); }
+function buildPicker(host){ const cur = currentTheme();
+  host.innerHTML = `<div class="dt-cd"><button class="dt-cd-trigger" aria-haspopup="listbox" aria-expanded="false">${swatchStrip(cur,true)}<span class="dt-cd-name">${THEME_LABELS[cur]}</span><span class="dt-cd-caret" aria-hidden="true">▾</span></button><div class="dt-cd-list" role="listbox" aria-label="theme">${window.THEME_IDS.map(id=>`<div class="dt-cd-option" role="option" data-id="${id}" aria-selected="${id===cur}">${swatchStrip(id)}<span class="dt-cd-name">${THEME_LABELS[id]}</span></div>`).join('')}</div></div>`;
+  const cd = host.querySelector('.dt-cd'), trig = host.querySelector('.dt-cd-trigger');
+  trig.addEventListener('click', e=>{ e.stopPropagation(); const open = cd.classList.toggle('dt-cd-open'); trig.setAttribute('aria-expanded', open); });
+  host.querySelectorAll('.dt-cd-option').forEach(o=> o.addEventListener('click', ()=>{ applyTheme(o.dataset.id); cd.classList.remove('dt-cd-open'); })); }
+document.addEventListener('click', ()=> document.querySelectorAll('.dt-cd-open').forEach(c=>c.classList.remove('dt-cd-open')));
+(function initTheme(){ let saved=null; try { saved=localStorage.getItem(THEME_KEY); } catch(e){}
+  const P=new URLSearchParams(location.search), fromUrl=P.get('theme');
+  const id=(fromUrl&&window.THEME_IDS.includes(fromUrl))?fromUrl:(saved&&window.THEME_IDS.includes(saved))?saved:'monokai';
+  document.documentElement.setAttribute('data-theme', id); })();
+/* harmonograf brand — the Option-D alpha: one period of the 2:3 Lissajous,
+   MIRRORED about the vertical axis (x = cx − A·cos2t, y = cy + B·sin3t) so the
+   knot reads as a lowercase α — still a Lissajous, loop left, tails right.
+   Stroke currentColor; the one dot rides the lower-right tail tip: the pen at
+   rest. ONE ALPHA PER LOCKUP: beside this mark the wordmark is PLAIN LETTERS
+   (the glyph already carries the α and the dot); only a STANDALONE wordmark
+   spells the "a" of graf with the drawn α. */
+function hgAlphaPath(cx, cy, A, B){ const pts=[];
+  for(let i=0;i<=240;i++){ const t=2*Math.PI*i/240;
+    pts.push((cx - A*Math.cos(2*t)).toFixed(2)+','+(cy + B*Math.sin(3*t)).toFixed(2)); }
+  return 'M'+pts.join(' L')+' Z'; }
+function hgBrandMarkSVG(h){ return `<svg class="hg-brand-mark" style="height:${h||24}px" viewBox="0 0 48 48" role="img" aria-label="harmonograf" focusable="false"><path d="${hgAlphaPath(24,24,19,15)}" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="43" cy="39" r="3.2" fill="var(--hgraf-brand, #5EA3EC)"/></svg>`; }
+function hgWordmarkSVG(){ const T='harmonograf', X0=1, ADV=9.6, BASE=15; const W=X0*2+T.length*ADV;
+  return `<svg class="hg-brand-name" viewBox="0 0 ${W} 18" role="img" aria-label="harmonograf" focusable="false"><text x="${X0}" y="${BASE}" font-family="var(--brand-mono)" font-size="15" font-weight="700" textLength="${T.length*ADV}" lengthAdjust="spacing" fill="currentColor" xml:space="preserve">${T}</text></svg>`; }
+function mountBrand(){ document.querySelectorAll('[data-brand-mark]').forEach(n=>{ n.innerHTML=hgBrandMarkSVG(+n.dataset.brandMark||24); });
+  document.querySelectorAll('[data-brand-wordmark]').forEach(n=>{ n.innerHTML=hgWordmarkSVG(); }); }
+</script>
+
+<!-- the figures -->
+<script>
+const ORCH_PHASES = [
+  {label:'derive goal', state:'done'}, {label:'plan', state:'done'},
+  {label:'delegate', state:'done'}, {label:'execute', state:'now'},
+  {label:'review', state:'pending'}, {label:'merge', state:'pending'},
+];
+const STAGE_PHASES = [
+  {label:'scaffold', state:'done'}, {label:'pricing client', state:'done'},
+  {label:'tests', state:'failed'}, {label:'retry', state:'now'},
+  {label:'review', state:'pending'},
+];
+const LIVE = [
+  {t:'+14.7', agent:'reviewer', kind:'llm-call',   detail:'review diff', el:'2.1s', status:'running'},
+  {t:'+14.2', agent:'planner',  kind:'wait-for-human', detail:'approve merge?', el:'0.5s', status:'awaiting'},
+  {t:'+12.0', agent:'coder-b',  kind:'tool-call',  detail:'run_tests (3 failed)', el:'1.8s', status:'failed'},
+  {t:'+9.7',  agent:'coder-a',  kind:'agent-message', detail:'report → planner', el:'1.5s', status:'completed'},
+  {t:'+5.5',  agent:'goldfive', kind:'custom',     detail:'judge_reasoning', el:'1.8s', status:'completed'},
+];
+const INTERV = [
+  {t:'00:11.2', cat:'refine',  title:'refine_steer → planner', sub:'narrowed scope after drift flag', sev:null,
+    tip:'goldfive refine · target: planner · "Constrain the diff to the pricing module; tests for the rest are out of scope this turn."'},
+  {t:'00:08.4', cat:'judge',   title:'judge_goal_drift', sub:'severity: warning · off-task 0.34', sev:'warning',
+    tip:'judge · goal-drift · severity warning · on_task=false (0.34) · "Sub-agent began editing unrelated auth code."'},
+  {t:'00:05.5', cat:'judge',   title:'judge_reasoning', sub:'on-task · score 0.91', sev:'on-task',
+    tip:'judge · reasoning · on_task=true (0.91) · "Plan decomposition is sound and matches the brief."'},
+  {t:'00:03.1', cat:'plan',    title:'plan_generate v2', sub:'4 steps · parallel', sev:null,
+    tip:'goldfive plan · plan_generate · produced 4 steps, parallel mode, 2 delegated to coder agents.'},
+  {t:'00:12.6', cat:'judge',   title:'judge_output', sub:'severity: critical · schema break', sev:'critical',
+    tip:'judge · output · severity CRITICAL · "Returned malformed JSON; schema validation failed on field `price_cents`."'},
+  {t:'00:13.4', cat:'reflective', title:'reflective_check', sub:'neutral · continue', sev:null,
+    tip:'goldfive reflective · reflective_check · no action; run is proceeding within budget.'},
+];
+const SESSIONS = [
+  {title:'checkout-refactor', sub:'planner · 6 agents · running', meta:'live', attn:0, live:true},
+  {title:'checkout-pricing-migration', sub:'coordinator · 3 agents · awaiting human', meta:'2m', attn:1},
+  {title:'checkout-tax-rules', sub:'solo · completed', meta:'1h', attn:0},
+  {title:'checkout-tests-flake', sub:'coder · failed', meta:'3h', attn:0},
+];
+const KIND_LABELS = {'invocation':'INVOCATION','llm-call':'LLM_CALL','tool-call':'TOOL_CALL','user-message':'USER_MESSAGE',
+  'agent-message':'AGENT_MESSAGE','transfer':'TRANSFER','wait-for-human':'WAIT_FOR_HUMAN','custom':'CUSTOM'};
+
+function statusPill(s){
+  if(s==='running') return '<span class="dn-pill accent">running</span>';
+  if(s==='awaiting') return '<span class="dn-pill bad">awaiting human</span>';
+  if(s==='failed') return '<span class="dn-pill bad">failed</span>';
+  if(s==='completed') return '<span class="dn-pill good">done</span>';
+  return '<span class="dn-pill flat">'+s+'</span>';
+}
+function gfColorVar(cat, sev){
+  if(cat==='judge'){ return sev==='on-task'?'--hg-gf-judge-on-task':sev==='warning'?'--hg-gf-judge-warning':sev==='critical'?'--hg-gf-judge-critical':'--hg-gf-judge-neutral'; }
+  return cat==='refine'?'--hg-gf-refine':cat==='plan'?'--hg-gf-plan':'--hg-gf-reflective';
+}
+
+function buildOrch(){
+  const host=document.getElementById('orch-rail'); if(host)
+    host.innerHTML = ORCH_PHASES.map(p=>`<div class="stage ${p.state}"><span class="stage-line"></span><span class="stage-dot"></span><span class="stage-label">${p.label}</span></div>`).join('');
+  const sh=document.getElementById('stage-rail'); if(sh)
+    sh.innerHTML = STAGE_PHASES.map(p=>`<div class="stage ${p.state}"><span class="stage-line"></span><span class="stage-dot"></span><span class="stage-label">${p.label}</span></div>`).join('');
+}
+function buildLive(){
+  const host=document.getElementById('live-rows'); if(!host) return;
+  host.innerHTML = LIVE.map(r=>`<tr class="${r.status==='running'?'is-live':''}">
+    <td class="tnum" style="color:var(--ink-faint)">${r.t}</td>
+    <td>${r.agent}</td>
+    <td><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--hg-kind-${r.kind});opacity:.7;vertical-align:middle;margin-right:6px"></span>${KIND_LABELS[r.kind]}</td>
+    <td>${r.detail}</td>
+    <td class="num tnum">${r.el}</td>
+    <td>${r.status==='running'?'<span class="live-dot-sm"></span> ':''}${statusPill(r.status)}</td>
+  </tr>`).join('');
+}
+// escape for safe interpolation into a double-quoted HTML attribute — the tips carry
+// embedded quotes/backticks that would otherwise truncate data-tip and drop the detail.
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function buildInterv(){
+  const host=document.getElementById('interv-list'); if(!host) return;
+  const sorted=[...INTERV].sort((a,b)=>b.t.localeCompare(a.t));
+  host.innerHTML = sorted.map((r,i)=>{
+    const cv=gfColorVar(r.cat,r.sev);
+    // severity → semantic role; the non-severity categories (refine/plan/reflective) carry
+    // identity via the coloured dot, so the pill stays a neutral outline — --accent is reserved.
+    const pillCls = r.sev==='critical'?'bad':r.sev==='warning'?'caution':r.sev==='on-task'?'good':'flat';
+    return `<div class="interv-row" data-tip="${esc(r.tip)}" tabindex="0" role="button" aria-label="${esc(r.title)}">
+      <span class="interv-time tnum">${r.t}</span>
+      <div class="interv-body">
+        <div class="interv-title"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(${cv});margin-right:7px;vertical-align:middle"></span>${r.title}</div>
+        <div class="interv-sub">${r.sub}</div>
+      </div>
+      <span class="dn-pill ${pillCls}">${r.cat}${r.sev?' · '+r.sev:''}</span>
+    </div>`;
+  }).join('');
+  wireHovercards(host);
+}
+function buildPickerList(){
+  const host=document.getElementById('picker-list'); if(!host) return;
+  host.innerHTML = `<div class="hg-picker-section">sessions</div>` + SESSIONS.map((s,i)=>`
+    <button class="hg-picker-row" aria-selected="${i===0}">
+      <span style="color:var(--ink-faint)">${s.live?'<span class="live-dot-sm"></span>':'▸'}</span>
+      <span style="flex:1;min-width:0"><span class="hg-picker-row-title" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.title}</span><span class="hg-picker-row-sub" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.sub}</span></span>
+      ${s.attn?`<span class="dn-pill bad" style="padding:1px 7px">${s.attn} ◷</span>`:''}
+      <span class="hg-picker-row-meta tnum">${s.meta}</span>
+    </button>`).join('');
+}
+function wireHovercards(host){
+  const hc=document.getElementById('hovercard');
+  host.querySelectorAll('[data-tip]').forEach(el=>{
+    const show=(cx,cy)=>{ hc.innerHTML=`<div class="hg-hc-row">${el.getAttribute('data-tip')}</div>`; hc.classList.add('on');
+      const pad=12; let lx=cx+pad, ly=cy+pad; const r=hc.getBoundingClientRect();
+      if(lx+r.width>innerWidth) lx=cx-r.width-pad; if(ly+r.height>innerHeight) ly=cy-r.height-pad;
+      hc.style.left=lx+'px'; hc.style.top=ly+'px'; };
+    el.addEventListener('mousemove', e=>show(e.clientX,e.clientY));
+    el.addEventListener('mouseleave', ()=>hc.classList.remove('on'));
+    el.addEventListener('focus', ()=>{ const r=el.getBoundingClientRect(); show(r.left, r.bottom-10); });
+    el.addEventListener('blur', ()=>hc.classList.remove('on'));
+  });
+}
+function renderAll(){ buildOrch(); buildLive(); buildInterv(); buildPickerList(); }
+onThemeChange(renderAll);
+window.addEventListener('DOMContentLoaded', ()=>{
+  document.querySelectorAll('[data-theme-picker]').forEach(buildPicker);
+  mountBrand(); renderAll();
+});
+</script>
+<script>window.__EMBED_CFG__ = { optSel: '[data-surface]', bareHide: ['h2', '.rationale', '.legend', '.ba-tag'] };</script>
+<script src="_embed.js"></script>
+</body>
+</html>

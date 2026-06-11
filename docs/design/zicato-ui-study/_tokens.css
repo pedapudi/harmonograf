@@ -1,0 +1,686 @@
+/* =====================================================================
+   _tokens.css — the 16-theme colour contract for the harmonograf
+   zicato-language UI study. GENERATED — see /tmp/gen_tokens.py in the
+   build notes (STYLE-GUIDE.md). The ONLY place raw hex appears.
+
+   Each html[data-theme="<id>"] block carries three layers:
+
+   1. zicato --v2-* ROLE CONTRACT (paper/panel/ink/.../accent/flat),
+      ported 1:1 from console4.css via single-matchup.html, plus the
+      study-local short aliases (--paper/--panel/--ink/...) the pages read.
+      Meaning is FIXED across all 16 themes (DESIGN-LANGUAGE.md §2.1):
+      good/bad earned by direction; --accent is the ONE structural emphasis.
+
+   2. the terminal ANSI palette (--ansi-*), wired from _refs/gogh-palettes.json
+      — the Gogh scheme each zicato theme derives from. 16 slots:
+      normal black/red/green/yellow/blue/magenta/cyan/white + bright variants.
+
+   3. the harmonograf CATEGORICAL encoding, ALL derived from (1)+(2):
+      · span KIND hue  → --hg-kind-*   (KIND = hue axis, BRIEF §2.1)
+      · goldfive class → --hg-gf-*
+      · agent identity → --hg-agent-1..8 (+ user / goldfive synthetic actors):
+        an ORDINAL ramp, each lane an ANSI slot color-mixed toward --ink-faint
+        so lanes stay distinguishable without competing with kind hues or accent.
+
+   STATUS (running/failed/pending/...) is NOT here — it is a treatment applied
+   over the kind hue (accent+breathe / bad+glyph / dashed / hatch), so good/bad/
+   accent appear ONLY for status, never for identity. See STYLE-GUIDE.md.
+
+   Default theme: monokai (set on <html data-theme> by each page).
+   ===================================================================== */
+
+html[data-theme="monokai"] {
+  --v2-paper:#1e1f1c; --v2-panel:#272822; --v2-panel-2:#23241f;
+  --v2-ink:#f8f8f2; --v2-ink-soft:#c9cabf; --v2-ink-faint:#8f908a;
+  --v2-rule:#3a3b34; --v2-rule-soft:#2f302a;
+  --v2-good:#a6e22e; --v2-good-soft:#2c361a; --v2-bad:#f92672; --v2-caution:#e6db74;
+  --v2-accent:#66d9ef; --v2-flat:#75715e;
+  --paper:var(--v2-paper); --panel:var(--v2-panel); --panel-2:var(--v2-panel-2);
+  --ink:var(--v2-ink); --ink-soft:var(--v2-ink-soft); --ink-faint:var(--v2-ink-faint);
+  --rule:var(--v2-rule); --rule-soft:var(--v2-rule-soft);
+  --good:var(--v2-good); --good-soft:var(--v2-good-soft); --bad:var(--v2-bad); --caution:var(--v2-caution);
+  --accent:var(--v2-accent); --flat:var(--v2-flat); --zicato-accent:var(--v2-accent);
+  --bad-soft:color-mix(in srgb, var(--v2-bad) 22%, var(--v2-panel));
+  --ansi-black:#272822; --ansi-red:#f92672; --ansi-green:#a6e22e; --ansi-yellow:#e6db74;
+  --ansi-blue:#66d9ef; --ansi-magenta:#ae81ff; --ansi-cyan:#a1efe4; --ansi-white:#f8f8f2;
+  --ansi-bright-black:#75715e; --ansi-bright-red:#f92672; --ansi-bright-green:#a6e22e; --ansi-bright-yellow:#e6db74;
+  --ansi-bright-blue:#66d9ef; --ansi-bright-magenta:#ae81ff; --ansi-bright-cyan:#a1efe4; --ansi-bright-white:#f9f8f5;
+  --hg-kind-invocation:var(--ansi-bright-black);
+  --hg-kind-llm-call:var(--ansi-blue);
+  --hg-kind-tool-call:var(--ansi-cyan);
+  --hg-kind-user-message:var(--ansi-green);
+  --hg-kind-agent-message:var(--ansi-bright-green);
+  --hg-kind-transfer:var(--ansi-yellow);
+  --hg-kind-wait-for-human:var(--ansi-magenta);
+  --hg-kind-planned:var(--ansi-bright-black);
+  --hg-kind-custom:var(--ansi-white);
+  --hg-gf-judge-on-task:var(--v2-good); --hg-gf-judge-warning:var(--v2-caution); --hg-gf-judge-critical:var(--v2-bad); --hg-gf-judge-neutral:var(--v2-flat);
+  --hg-gf-refine:var(--ansi-magenta);
+  --hg-gf-plan:var(--ansi-cyan);
+  --hg-gf-reflective:var(--ansi-bright-black);
+  --hg-agent-1:color-mix(in oklab, var(--ansi-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-2:color-mix(in oklab, var(--ansi-cyan) 62%, var(--v2-ink-faint));
+  --hg-agent-3:color-mix(in oklab, var(--ansi-green) 62%, var(--v2-ink-faint));
+  --hg-agent-4:color-mix(in oklab, var(--ansi-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-5:color-mix(in oklab, var(--ansi-magenta) 62%, var(--v2-ink-faint));
+  --hg-agent-6:color-mix(in oklab, var(--ansi-bright-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-7:color-mix(in oklab, var(--ansi-bright-green) 62%, var(--v2-ink-faint));
+  --hg-agent-8:color-mix(in oklab, var(--ansi-bright-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-user:color-mix(in oklab, var(--v2-caution) 55%, var(--v2-ink-faint));
+  --hg-agent-goldfive:color-mix(in oklab, var(--v2-accent) 55%, var(--v2-ink-faint));
+}
+
+html[data-theme="solarized-dark"] {
+  --v2-paper:#04222B; --v2-panel:#0A2D38; --v2-panel-2:#0A2730;
+  --v2-ink:#93A1A1; --v2-ink-soft:#839496; --v2-ink-faint:#5E7079;
+  --v2-rule:#0E3540; --v2-rule-soft:#0B2E39;
+  --v2-good:#8BB80E; --v2-good-soft:#1C3320; --v2-bad:#E0483C; --v2-caution:#C4920A;
+  --v2-accent:#2AA198; --v2-flat:#46606B;
+  --paper:var(--v2-paper); --panel:var(--v2-panel); --panel-2:var(--v2-panel-2);
+  --ink:var(--v2-ink); --ink-soft:var(--v2-ink-soft); --ink-faint:var(--v2-ink-faint);
+  --rule:var(--v2-rule); --rule-soft:var(--v2-rule-soft);
+  --good:var(--v2-good); --good-soft:var(--v2-good-soft); --bad:var(--v2-bad); --caution:var(--v2-caution);
+  --accent:var(--v2-accent); --flat:var(--v2-flat); --zicato-accent:var(--v2-accent);
+  --bad-soft:color-mix(in srgb, var(--v2-bad) 22%, var(--v2-panel));
+  --ansi-black:#073642; --ansi-red:#DC322F; --ansi-green:#859900; --ansi-yellow:#B58900;
+  --ansi-blue:#268BD2; --ansi-magenta:#D33682; --ansi-cyan:#2AA198; --ansi-white:#EEE8D5;
+  --ansi-bright-black:#657B83; --ansi-bright-red:#CB4B16; --ansi-bright-green:#586E75; --ansi-bright-yellow:#657B83;
+  --ansi-bright-blue:#6c71c4; --ansi-bright-magenta:#D33682; --ansi-bright-cyan:#2AA198; --ansi-bright-white:#FDF6E3;
+  --hg-kind-invocation:var(--ansi-bright-black);
+  --hg-kind-llm-call:var(--ansi-blue);
+  --hg-kind-tool-call:var(--ansi-cyan);
+  --hg-kind-user-message:var(--ansi-green);
+  --hg-kind-agent-message:var(--ansi-bright-green);
+  --hg-kind-transfer:var(--ansi-yellow);
+  --hg-kind-wait-for-human:var(--ansi-magenta);
+  --hg-kind-planned:var(--ansi-bright-black);
+  --hg-kind-custom:var(--ansi-white);
+  --hg-gf-judge-on-task:var(--v2-good); --hg-gf-judge-warning:var(--v2-caution); --hg-gf-judge-critical:var(--v2-bad); --hg-gf-judge-neutral:var(--v2-flat);
+  --hg-gf-refine:var(--ansi-magenta);
+  --hg-gf-plan:var(--ansi-cyan);
+  --hg-gf-reflective:var(--ansi-bright-black);
+  --hg-agent-1:color-mix(in oklab, var(--ansi-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-2:color-mix(in oklab, var(--ansi-cyan) 62%, var(--v2-ink-faint));
+  --hg-agent-3:color-mix(in oklab, var(--ansi-green) 62%, var(--v2-ink-faint));
+  --hg-agent-4:color-mix(in oklab, var(--ansi-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-5:color-mix(in oklab, var(--ansi-magenta) 62%, var(--v2-ink-faint));
+  --hg-agent-6:color-mix(in oklab, var(--ansi-bright-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-7:color-mix(in oklab, var(--ansi-bright-green) 62%, var(--v2-ink-faint));
+  --hg-agent-8:color-mix(in oklab, var(--ansi-bright-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-user:color-mix(in oklab, var(--v2-caution) 55%, var(--v2-ink-faint));
+  --hg-agent-goldfive:color-mix(in oklab, var(--v2-accent) 55%, var(--v2-ink-faint));
+}
+
+html[data-theme="solarized-light"] {
+  --v2-paper:#FDF6E3; --v2-panel:#FBF1D6; --v2-panel-2:#F2E9CE;
+  --v2-ink:#586E75; --v2-ink-soft:#657B83; --v2-ink-faint:#93A1A1;
+  --v2-rule:#E7DCBE; --v2-rule-soft:#F0E7CC;
+  --v2-good:#6B9B0B; --v2-good-soft:#E3ECCB; --v2-bad:#DC322F; --v2-caution:#B58900;
+  --v2-accent:#268BD2; --v2-flat:#93A1A1;
+  --paper:var(--v2-paper); --panel:var(--v2-panel); --panel-2:var(--v2-panel-2);
+  --ink:var(--v2-ink); --ink-soft:var(--v2-ink-soft); --ink-faint:var(--v2-ink-faint);
+  --rule:var(--v2-rule); --rule-soft:var(--v2-rule-soft);
+  --good:var(--v2-good); --good-soft:var(--v2-good-soft); --bad:var(--v2-bad); --caution:var(--v2-caution);
+  --accent:var(--v2-accent); --flat:var(--v2-flat); --zicato-accent:var(--v2-accent);
+  --bad-soft:color-mix(in srgb, var(--v2-bad) 22%, var(--v2-panel));
+  --ansi-black:#EEE8D5; --ansi-red:#DC322F; --ansi-green:#859900; --ansi-yellow:#B58900;
+  --ansi-blue:#268BD2; --ansi-magenta:#D33682; --ansi-cyan:#2AA198; --ansi-white:#073642;
+  --ansi-bright-black:#93A1A1; --ansi-bright-red:#CB4B16; --ansi-bright-green:#586E75; --ansi-bright-yellow:#839496;
+  --ansi-bright-blue:#6C71C4; --ansi-bright-magenta:#D33682; --ansi-bright-cyan:#2AA198; --ansi-bright-white:#002B36;
+  --hg-kind-invocation:var(--ansi-bright-black);
+  --hg-kind-llm-call:var(--ansi-blue);
+  --hg-kind-tool-call:var(--ansi-cyan);
+  --hg-kind-user-message:var(--ansi-green);
+  --hg-kind-agent-message:var(--ansi-bright-green);
+  --hg-kind-transfer:var(--ansi-yellow);
+  --hg-kind-wait-for-human:var(--ansi-magenta);
+  --hg-kind-planned:var(--ansi-bright-black);
+  --hg-kind-custom:var(--ansi-white);
+  --hg-gf-judge-on-task:var(--v2-good); --hg-gf-judge-warning:var(--v2-caution); --hg-gf-judge-critical:var(--v2-bad); --hg-gf-judge-neutral:var(--v2-flat);
+  --hg-gf-refine:var(--ansi-magenta);
+  --hg-gf-plan:var(--ansi-cyan);
+  --hg-gf-reflective:var(--ansi-bright-black);
+  --hg-agent-1:color-mix(in oklab, var(--ansi-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-2:color-mix(in oklab, var(--ansi-cyan) 62%, var(--v2-ink-faint));
+  --hg-agent-3:color-mix(in oklab, var(--ansi-green) 62%, var(--v2-ink-faint));
+  --hg-agent-4:color-mix(in oklab, var(--ansi-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-5:color-mix(in oklab, var(--ansi-magenta) 62%, var(--v2-ink-faint));
+  --hg-agent-6:color-mix(in oklab, var(--ansi-bright-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-7:color-mix(in oklab, var(--ansi-bright-green) 62%, var(--v2-ink-faint));
+  --hg-agent-8:color-mix(in oklab, var(--ansi-bright-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-user:color-mix(in oklab, var(--v2-caution) 55%, var(--v2-ink-faint));
+  --hg-agent-goldfive:color-mix(in oklab, var(--v2-accent) 55%, var(--v2-ink-faint));
+}
+
+html[data-theme="google-light"] {
+  --v2-paper:#FFFFFF; --v2-panel:#F4F4F4; --v2-panel-2:#F8F8F8;
+  --v2-ink:#474A4E; --v2-ink-soft:#5F6368; --v2-ink-faint:#9FA1A4;
+  --v2-rule:#E2E3E4; --v2-rule-soft:#F1F1F1;
+  --v2-good:#34A853; --v2-good-soft:#D2ECD9; --v2-bad:#EA4335; --v2-caution:#C99700;
+  --v2-accent:#1B9CB8; --v2-flat:#9AA0A6;
+  --paper:var(--v2-paper); --panel:var(--v2-panel); --panel-2:var(--v2-panel-2);
+  --ink:var(--v2-ink); --ink-soft:var(--v2-ink-soft); --ink-faint:var(--v2-ink-faint);
+  --rule:var(--v2-rule); --rule-soft:var(--v2-rule-soft);
+  --good:var(--v2-good); --good-soft:var(--v2-good-soft); --bad:var(--v2-bad); --caution:var(--v2-caution);
+  --accent:var(--v2-accent); --flat:var(--v2-flat); --zicato-accent:var(--v2-accent);
+  --bad-soft:color-mix(in srgb, var(--v2-bad) 22%, var(--v2-panel));
+  --ansi-black:#1D1F21; --ansi-red:#CC342B; --ansi-green:#198844; --ansi-yellow:#FBA922;
+  --ansi-blue:#3971ED; --ansi-magenta:#A36AC7; --ansi-cyan:#3971ED; --ansi-white:#C5C8C6;
+  --ansi-bright-black:#969896; --ansi-bright-red:#CC342B; --ansi-bright-green:#198844; --ansi-bright-yellow:#FBA922;
+  --ansi-bright-blue:#3971ED; --ansi-bright-magenta:#A36AC7; --ansi-bright-cyan:#3971ED; --ansi-bright-white:#FFFFFF;
+  --hg-kind-invocation:var(--ansi-bright-black);
+  --hg-kind-llm-call:var(--ansi-blue);
+  --hg-kind-tool-call:var(--ansi-cyan);
+  --hg-kind-user-message:var(--ansi-green);
+  --hg-kind-agent-message:var(--ansi-bright-green);
+  --hg-kind-transfer:var(--ansi-yellow);
+  --hg-kind-wait-for-human:var(--ansi-magenta);
+  --hg-kind-planned:var(--ansi-bright-black);
+  --hg-kind-custom:var(--ansi-white);
+  --hg-gf-judge-on-task:var(--v2-good); --hg-gf-judge-warning:var(--v2-caution); --hg-gf-judge-critical:var(--v2-bad); --hg-gf-judge-neutral:var(--v2-flat);
+  --hg-gf-refine:var(--ansi-magenta);
+  --hg-gf-plan:var(--ansi-cyan);
+  --hg-gf-reflective:var(--ansi-bright-black);
+  --hg-agent-1:color-mix(in oklab, var(--ansi-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-2:color-mix(in oklab, var(--ansi-cyan) 62%, var(--v2-ink-faint));
+  --hg-agent-3:color-mix(in oklab, var(--ansi-green) 62%, var(--v2-ink-faint));
+  --hg-agent-4:color-mix(in oklab, var(--ansi-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-5:color-mix(in oklab, var(--ansi-magenta) 62%, var(--v2-ink-faint));
+  --hg-agent-6:color-mix(in oklab, var(--ansi-bright-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-7:color-mix(in oklab, var(--ansi-bright-green) 62%, var(--v2-ink-faint));
+  --hg-agent-8:color-mix(in oklab, var(--ansi-bright-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-user:color-mix(in oklab, var(--v2-caution) 55%, var(--v2-ink-faint));
+  --hg-agent-goldfive:color-mix(in oklab, var(--v2-accent) 55%, var(--v2-ink-faint));
+}
+
+html[data-theme="google-dark"] {
+  --v2-paper:#202124; --v2-panel:#2C2D30; --v2-panel-2:#28292C;
+  --v2-ink:#FFFFFF; --v2-ink-soft:#E8EAED; --v2-ink-faint:#989A9D;
+  --v2-rule:#444548; --v2-rule-soft:#323336;
+  --v2-good:#34A853; --v2-good-soft:#243F2E; --v2-bad:#EA4335; --v2-caution:#FBBC05;
+  --v2-accent:#24C1E0; --v2-flat:#5F6368;
+  --paper:var(--v2-paper); --panel:var(--v2-panel); --panel-2:var(--v2-panel-2);
+  --ink:var(--v2-ink); --ink-soft:var(--v2-ink-soft); --ink-faint:var(--v2-ink-faint);
+  --rule:var(--v2-rule); --rule-soft:var(--v2-rule-soft);
+  --good:var(--v2-good); --good-soft:var(--v2-good-soft); --bad:var(--v2-bad); --caution:var(--v2-caution);
+  --accent:var(--v2-accent); --flat:var(--v2-flat); --zicato-accent:var(--v2-accent);
+  --bad-soft:color-mix(in srgb, var(--v2-bad) 22%, var(--v2-panel));
+  --ansi-black:#202124; --ansi-red:#EA4335; --ansi-green:#34A853; --ansi-yellow:#FBBC04;
+  --ansi-blue:#4285F4; --ansi-magenta:#A142F4; --ansi-cyan:#24C1E0; --ansi-white:#E8EAED;
+  --ansi-bright-black:#5F6368; --ansi-bright-red:#EA4335; --ansi-bright-green:#34A853; --ansi-bright-yellow:#FBBC05;
+  --ansi-bright-blue:#4285F4; --ansi-bright-magenta:#A142F4; --ansi-bright-cyan:#24C1E0; --ansi-bright-white:#FFFFFF;
+  --hg-kind-invocation:var(--ansi-bright-black);
+  --hg-kind-llm-call:var(--ansi-blue);
+  --hg-kind-tool-call:var(--ansi-cyan);
+  --hg-kind-user-message:var(--ansi-green);
+  --hg-kind-agent-message:var(--ansi-bright-green);
+  --hg-kind-transfer:var(--ansi-yellow);
+  --hg-kind-wait-for-human:var(--ansi-magenta);
+  --hg-kind-planned:var(--ansi-bright-black);
+  --hg-kind-custom:var(--ansi-white);
+  --hg-gf-judge-on-task:var(--v2-good); --hg-gf-judge-warning:var(--v2-caution); --hg-gf-judge-critical:var(--v2-bad); --hg-gf-judge-neutral:var(--v2-flat);
+  --hg-gf-refine:var(--ansi-magenta);
+  --hg-gf-plan:var(--ansi-cyan);
+  --hg-gf-reflective:var(--ansi-bright-black);
+  --hg-agent-1:color-mix(in oklab, var(--ansi-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-2:color-mix(in oklab, var(--ansi-cyan) 62%, var(--v2-ink-faint));
+  --hg-agent-3:color-mix(in oklab, var(--ansi-green) 62%, var(--v2-ink-faint));
+  --hg-agent-4:color-mix(in oklab, var(--ansi-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-5:color-mix(in oklab, var(--ansi-magenta) 62%, var(--v2-ink-faint));
+  --hg-agent-6:color-mix(in oklab, var(--ansi-bright-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-7:color-mix(in oklab, var(--ansi-bright-green) 62%, var(--v2-ink-faint));
+  --hg-agent-8:color-mix(in oklab, var(--ansi-bright-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-user:color-mix(in oklab, var(--v2-caution) 55%, var(--v2-ink-faint));
+  --hg-agent-goldfive:color-mix(in oklab, var(--v2-accent) 55%, var(--v2-ink-faint));
+}
+
+html[data-theme="lunaria-light"] {
+  --v2-paper:#EBE4E1; --v2-panel:#E2DCD9; --v2-panel-2:#E6DFDC;
+  --v2-ink:#363434; --v2-ink-soft:#484646; --v2-ink-faint:#898584;
+  --v2-rule:#CEC8C5; --v2-rule-soft:#DCD6D3;
+  --v2-good:#497D46; --v2-good-soft:#C7CDBF; --v2-bad:#783C1F; --v2-caution:#8F750B;
+  --v2-accent:#3778A9; --v2-flat:#898584;
+  --paper:var(--v2-paper); --panel:var(--v2-panel); --panel-2:var(--v2-panel-2);
+  --ink:var(--v2-ink); --ink-soft:var(--v2-ink-soft); --ink-faint:var(--v2-ink-faint);
+  --rule:var(--v2-rule); --rule-soft:var(--v2-rule-soft);
+  --good:var(--v2-good); --good-soft:var(--v2-good-soft); --bad:var(--v2-bad); --caution:var(--v2-caution);
+  --accent:var(--v2-accent); --flat:var(--v2-flat); --zicato-accent:var(--v2-accent);
+  --bad-soft:color-mix(in srgb, var(--v2-bad) 22%, var(--v2-panel));
+  --ansi-black:#3E3C3D; --ansi-red:#783C1F; --ansi-green:#497D46; --ansi-yellow:#8F750B;
+  --ansi-blue:#3F3566; --ansi-magenta:#793F62; --ansi-cyan:#3778A9; --ansi-white:#D5CFCC;
+  --ansi-bright-black:#484646; --ansi-bright-red:#B06240; --ansi-bright-green:#7BC175; --ansi-bright-yellow:#DCB735;
+  --ansi-bright-blue:#5C4F89; --ansi-bright-magenta:#B56895; --ansi-bright-cyan:#64BAFF; --ansi-bright-white:#EBE4E1;
+  --hg-kind-invocation:var(--ansi-bright-black);
+  --hg-kind-llm-call:var(--ansi-blue);
+  --hg-kind-tool-call:var(--ansi-cyan);
+  --hg-kind-user-message:var(--ansi-green);
+  --hg-kind-agent-message:var(--ansi-bright-green);
+  --hg-kind-transfer:var(--ansi-yellow);
+  --hg-kind-wait-for-human:var(--ansi-magenta);
+  --hg-kind-planned:var(--ansi-bright-black);
+  --hg-kind-custom:var(--ansi-white);
+  --hg-gf-judge-on-task:var(--v2-good); --hg-gf-judge-warning:var(--v2-caution); --hg-gf-judge-critical:var(--v2-bad); --hg-gf-judge-neutral:var(--v2-flat);
+  --hg-gf-refine:var(--ansi-magenta);
+  --hg-gf-plan:var(--ansi-cyan);
+  --hg-gf-reflective:var(--ansi-bright-black);
+  --hg-agent-1:color-mix(in oklab, var(--ansi-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-2:color-mix(in oklab, var(--ansi-cyan) 62%, var(--v2-ink-faint));
+  --hg-agent-3:color-mix(in oklab, var(--ansi-green) 62%, var(--v2-ink-faint));
+  --hg-agent-4:color-mix(in oklab, var(--ansi-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-5:color-mix(in oklab, var(--ansi-magenta) 62%, var(--v2-ink-faint));
+  --hg-agent-6:color-mix(in oklab, var(--ansi-bright-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-7:color-mix(in oklab, var(--ansi-bright-green) 62%, var(--v2-ink-faint));
+  --hg-agent-8:color-mix(in oklab, var(--ansi-bright-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-user:color-mix(in oklab, var(--v2-caution) 55%, var(--v2-ink-faint));
+  --hg-agent-goldfive:color-mix(in oklab, var(--v2-accent) 55%, var(--v2-ink-faint));
+}
+
+html[data-theme="lunaria-eclipse"] {
+  --v2-paper:#323F46; --v2-panel:#3B484F; --v2-panel-2:#38454C;
+  --v2-ink:#DFE2ED; --v2-ink-soft:#C9CDD7; --v2-ink-faint:#8D949D;
+  --v2-rule:#4D5960; --v2-rule-soft:#404C53;
+  --v2-good:#BEDBC1; --v2-good-soft:#516161; --v2-bad:#BA9088; --v2-caution:#F1DFB4;
+  --v2-accent:#C8429F; --v2-flat:#6B767D;
+  --paper:var(--v2-paper); --panel:var(--v2-panel); --panel-2:var(--v2-panel-2);
+  --ink:var(--v2-ink); --ink-soft:var(--v2-ink-soft); --ink-faint:var(--v2-ink-faint);
+  --rule:var(--v2-rule); --rule-soft:var(--v2-rule-soft);
+  --good:var(--v2-good); --good-soft:var(--v2-good-soft); --bad:var(--v2-bad); --caution:var(--v2-caution);
+  --accent:var(--v2-accent); --flat:var(--v2-flat); --zicato-accent:var(--v2-accent);
+  --bad-soft:color-mix(in srgb, var(--v2-bad) 22%, var(--v2-panel));
+  --ansi-black:#323F46; --ansi-red:#83615B; --ansi-green:#7F9781; --ansi-yellow:#A69875;
+  --ansi-blue:#53516F; --ansi-magenta:#856880; --ansi-cyan:#7D96B2; --ansi-white:#C9CDD7;
+  --ansi-bright-black:#3D4950; --ansi-bright-red:#BA9088; --ansi-bright-green:#BEDBC1; --ansi-bright-yellow:#F1DFB4;
+  --ansi-bright-blue:#767495; --ansi-bright-magenta:#BE9CB8; --ansi-bright-cyan:#BCDBFF; --ansi-bright-white:#DFE2ED;
+  --hg-kind-invocation:var(--ansi-bright-black);
+  --hg-kind-llm-call:var(--ansi-blue);
+  --hg-kind-tool-call:var(--ansi-cyan);
+  --hg-kind-user-message:var(--ansi-green);
+  --hg-kind-agent-message:var(--ansi-bright-green);
+  --hg-kind-transfer:var(--ansi-yellow);
+  --hg-kind-wait-for-human:var(--ansi-magenta);
+  --hg-kind-planned:var(--ansi-bright-black);
+  --hg-kind-custom:var(--ansi-white);
+  --hg-gf-judge-on-task:var(--v2-good); --hg-gf-judge-warning:var(--v2-caution); --hg-gf-judge-critical:var(--v2-bad); --hg-gf-judge-neutral:var(--v2-flat);
+  --hg-gf-refine:var(--ansi-magenta);
+  --hg-gf-plan:var(--ansi-cyan);
+  --hg-gf-reflective:var(--ansi-bright-black);
+  --hg-agent-1:color-mix(in oklab, var(--ansi-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-2:color-mix(in oklab, var(--ansi-cyan) 62%, var(--v2-ink-faint));
+  --hg-agent-3:color-mix(in oklab, var(--ansi-green) 62%, var(--v2-ink-faint));
+  --hg-agent-4:color-mix(in oklab, var(--ansi-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-5:color-mix(in oklab, var(--ansi-magenta) 62%, var(--v2-ink-faint));
+  --hg-agent-6:color-mix(in oklab, var(--ansi-bright-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-7:color-mix(in oklab, var(--ansi-bright-green) 62%, var(--v2-ink-faint));
+  --hg-agent-8:color-mix(in oklab, var(--ansi-bright-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-user:color-mix(in oklab, var(--v2-caution) 55%, var(--v2-ink-faint));
+  --hg-agent-goldfive:color-mix(in oklab, var(--v2-accent) 55%, var(--v2-ink-faint));
+}
+
+html[data-theme="belafonte-day"] {
+  --v2-paper:#D5CCBA; --v2-panel:#CCC3B2; --v2-panel-2:#D0C6B5;
+  --v2-ink:#34292D; --v2-ink-soft:#45373C; --v2-ink-faint:#7F736E;
+  --v2-rule:#BBB1A3; --v2-rule-soft:#C8BFAF;
+  --v2-good:#6E6A4E; --v2-good-soft:#C3BCA7; --v2-bad:#BE100E; --v2-caution:#B57A1E;
+  --v2-accent:#426A79; --v2-flat:#5E5252;
+  --paper:var(--v2-paper); --panel:var(--v2-panel); --panel-2:var(--v2-panel-2);
+  --ink:var(--v2-ink); --ink-soft:var(--v2-ink-soft); --ink-faint:var(--v2-ink-faint);
+  --rule:var(--v2-rule); --rule-soft:var(--v2-rule-soft);
+  --good:var(--v2-good); --good-soft:var(--v2-good-soft); --bad:var(--v2-bad); --caution:var(--v2-caution);
+  --accent:var(--v2-accent); --flat:var(--v2-flat); --zicato-accent:var(--v2-accent);
+  --bad-soft:color-mix(in srgb, var(--v2-bad) 22%, var(--v2-panel));
+  --ansi-black:#20111B; --ansi-red:#BE100E; --ansi-green:#858162; --ansi-yellow:#EAA549;
+  --ansi-blue:#426A79; --ansi-magenta:#97522C; --ansi-cyan:#989A9C; --ansi-white:#968C83;
+  --ansi-bright-black:#5E5252; --ansi-bright-red:#BE100E; --ansi-bright-green:#858162; --ansi-bright-yellow:#EAA549;
+  --ansi-bright-blue:#426A79; --ansi-bright-magenta:#97522C; --ansi-bright-cyan:#989A9C; --ansi-bright-white:#D5CCBA;
+  --hg-kind-invocation:var(--ansi-bright-black);
+  --hg-kind-llm-call:var(--ansi-blue);
+  --hg-kind-tool-call:var(--ansi-cyan);
+  --hg-kind-user-message:var(--ansi-green);
+  --hg-kind-agent-message:var(--ansi-bright-green);
+  --hg-kind-transfer:var(--ansi-yellow);
+  --hg-kind-wait-for-human:var(--ansi-magenta);
+  --hg-kind-planned:var(--ansi-bright-black);
+  --hg-kind-custom:var(--ansi-white);
+  --hg-gf-judge-on-task:var(--v2-good); --hg-gf-judge-warning:var(--v2-caution); --hg-gf-judge-critical:var(--v2-bad); --hg-gf-judge-neutral:var(--v2-flat);
+  --hg-gf-refine:var(--ansi-magenta);
+  --hg-gf-plan:var(--ansi-cyan);
+  --hg-gf-reflective:var(--ansi-bright-black);
+  --hg-agent-1:color-mix(in oklab, var(--ansi-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-2:color-mix(in oklab, var(--ansi-cyan) 62%, var(--v2-ink-faint));
+  --hg-agent-3:color-mix(in oklab, var(--ansi-green) 62%, var(--v2-ink-faint));
+  --hg-agent-4:color-mix(in oklab, var(--ansi-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-5:color-mix(in oklab, var(--ansi-magenta) 62%, var(--v2-ink-faint));
+  --hg-agent-6:color-mix(in oklab, var(--ansi-bright-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-7:color-mix(in oklab, var(--ansi-bright-green) 62%, var(--v2-ink-faint));
+  --hg-agent-8:color-mix(in oklab, var(--ansi-bright-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-user:color-mix(in oklab, var(--v2-caution) 55%, var(--v2-ink-faint));
+  --hg-agent-goldfive:color-mix(in oklab, var(--v2-accent) 55%, var(--v2-ink-faint));
+}
+
+html[data-theme="belafonte-night"] {
+  --v2-paper:#20111B; --v2-panel:#271821; --v2-panel-2:#25161F;
+  --v2-ink:#D5CCBA; --v2-ink-soft:#968C83; --v2-ink-faint:#675B59;
+  --v2-rule:#35272E; --v2-rule-soft:#2B1C24;
+  --v2-good:#A6A07A; --v2-good-soft:#362A2B; --v2-bad:#D6403E; --v2-caution:#EAA549;
+  --v2-accent:#6F8E97; --v2-flat:#5E5252;
+  --paper:var(--v2-paper); --panel:var(--v2-panel); --panel-2:var(--v2-panel-2);
+  --ink:var(--v2-ink); --ink-soft:var(--v2-ink-soft); --ink-faint:var(--v2-ink-faint);
+  --rule:var(--v2-rule); --rule-soft:var(--v2-rule-soft);
+  --good:var(--v2-good); --good-soft:var(--v2-good-soft); --bad:var(--v2-bad); --caution:var(--v2-caution);
+  --accent:var(--v2-accent); --flat:var(--v2-flat); --zicato-accent:var(--v2-accent);
+  --bad-soft:color-mix(in srgb, var(--v2-bad) 22%, var(--v2-panel));
+  --ansi-black:#20111B; --ansi-red:#BE100E; --ansi-green:#858162; --ansi-yellow:#EAA549;
+  --ansi-blue:#426A79; --ansi-magenta:#97522C; --ansi-cyan:#989A9C; --ansi-white:#968C83;
+  --ansi-bright-black:#5E5252; --ansi-bright-red:#BE100E; --ansi-bright-green:#858162; --ansi-bright-yellow:#EAA549;
+  --ansi-bright-blue:#426A79; --ansi-bright-magenta:#97522C; --ansi-bright-cyan:#989A9C; --ansi-bright-white:#D5CCBA;
+  --hg-kind-invocation:var(--ansi-bright-black);
+  --hg-kind-llm-call:var(--ansi-blue);
+  --hg-kind-tool-call:var(--ansi-cyan);
+  --hg-kind-user-message:var(--ansi-green);
+  --hg-kind-agent-message:var(--ansi-bright-green);
+  --hg-kind-transfer:var(--ansi-yellow);
+  --hg-kind-wait-for-human:var(--ansi-magenta);
+  --hg-kind-planned:var(--ansi-bright-black);
+  --hg-kind-custom:var(--ansi-white);
+  --hg-gf-judge-on-task:var(--v2-good); --hg-gf-judge-warning:var(--v2-caution); --hg-gf-judge-critical:var(--v2-bad); --hg-gf-judge-neutral:var(--v2-flat);
+  --hg-gf-refine:var(--ansi-magenta);
+  --hg-gf-plan:var(--ansi-cyan);
+  --hg-gf-reflective:var(--ansi-bright-black);
+  --hg-agent-1:color-mix(in oklab, var(--ansi-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-2:color-mix(in oklab, var(--ansi-cyan) 62%, var(--v2-ink-faint));
+  --hg-agent-3:color-mix(in oklab, var(--ansi-green) 62%, var(--v2-ink-faint));
+  --hg-agent-4:color-mix(in oklab, var(--ansi-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-5:color-mix(in oklab, var(--ansi-magenta) 62%, var(--v2-ink-faint));
+  --hg-agent-6:color-mix(in oklab, var(--ansi-bright-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-7:color-mix(in oklab, var(--ansi-bright-green) 62%, var(--v2-ink-faint));
+  --hg-agent-8:color-mix(in oklab, var(--ansi-bright-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-user:color-mix(in oklab, var(--v2-caution) 55%, var(--v2-ink-faint));
+  --hg-agent-goldfive:color-mix(in oklab, var(--v2-accent) 55%, var(--v2-ink-faint));
+}
+
+html[data-theme="paper"] {
+  --v2-paper:#F2EEDE; --v2-panel:#E6E2D3; --v2-panel-2:#E8E4D5;
+  --v2-ink:#1A1A1A; --v2-ink-soft:#33312B; --v2-ink-faint:#85837A;
+  --v2-rule:#C6C3B6; --v2-rule-soft:#DCD9CA;
+  --v2-good:#216609; --v2-good-soft:#CCD6B8; --v2-bad:#CC3E28; --v2-caution:#B58900;
+  --v2-accent:#1E6FCC; --v2-flat:#6E6A5E;
+  --paper:var(--v2-paper); --panel:var(--v2-panel); --panel-2:var(--v2-panel-2);
+  --ink:var(--v2-ink); --ink-soft:var(--v2-ink-soft); --ink-faint:var(--v2-ink-faint);
+  --rule:var(--v2-rule); --rule-soft:var(--v2-rule-soft);
+  --good:var(--v2-good); --good-soft:var(--v2-good-soft); --bad:var(--v2-bad); --caution:var(--v2-caution);
+  --accent:var(--v2-accent); --flat:var(--v2-flat); --zicato-accent:var(--v2-accent);
+  --bad-soft:color-mix(in srgb, var(--v2-bad) 22%, var(--v2-panel));
+  --ansi-black:#000000; --ansi-red:#cc3e28; --ansi-green:#216609; --ansi-yellow:#b58900;
+  --ansi-blue:#1e6fcc; --ansi-magenta:#5c21a5; --ansi-cyan:#158c86; --ansi-white:#aaaaaa;
+  --ansi-bright-black:#555555; --ansi-bright-red:#cc3e28; --ansi-bright-green:#216609; --ansi-bright-yellow:#b58900;
+  --ansi-bright-blue:#1e6fcc; --ansi-bright-magenta:#5c21a5; --ansi-bright-cyan:#158c86; --ansi-bright-white:#aaaaaa;
+  --hg-kind-invocation:var(--ansi-bright-black);
+  --hg-kind-llm-call:var(--ansi-blue);
+  --hg-kind-tool-call:var(--ansi-cyan);
+  --hg-kind-user-message:var(--ansi-green);
+  --hg-kind-agent-message:var(--ansi-bright-green);
+  --hg-kind-transfer:var(--ansi-yellow);
+  --hg-kind-wait-for-human:var(--ansi-magenta);
+  --hg-kind-planned:var(--ansi-bright-black);
+  --hg-kind-custom:var(--ansi-white);
+  --hg-gf-judge-on-task:var(--v2-good); --hg-gf-judge-warning:var(--v2-caution); --hg-gf-judge-critical:var(--v2-bad); --hg-gf-judge-neutral:var(--v2-flat);
+  --hg-gf-refine:var(--ansi-magenta);
+  --hg-gf-plan:var(--ansi-cyan);
+  --hg-gf-reflective:var(--ansi-bright-black);
+  --hg-agent-1:color-mix(in oklab, var(--ansi-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-2:color-mix(in oklab, var(--ansi-cyan) 62%, var(--v2-ink-faint));
+  --hg-agent-3:color-mix(in oklab, var(--ansi-green) 62%, var(--v2-ink-faint));
+  --hg-agent-4:color-mix(in oklab, var(--ansi-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-5:color-mix(in oklab, var(--ansi-magenta) 62%, var(--v2-ink-faint));
+  --hg-agent-6:color-mix(in oklab, var(--ansi-bright-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-7:color-mix(in oklab, var(--ansi-bright-green) 62%, var(--v2-ink-faint));
+  --hg-agent-8:color-mix(in oklab, var(--ansi-bright-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-user:color-mix(in oklab, var(--v2-caution) 55%, var(--v2-ink-faint));
+  --hg-agent-goldfive:color-mix(in oklab, var(--v2-accent) 55%, var(--v2-ink-faint));
+}
+
+html[data-theme="zenburn"] {
+  --v2-paper:#3A3A3A; --v2-panel:#424241; --v2-panel-2:#404040;
+  --v2-ink:#DCDCCC; --v2-ink-soft:#C5C5B8; --v2-ink-faint:#83837C;
+  --v2-rule:#575754; --v2-rule-soft:#494947;
+  --v2-good:#8FB28F; --v2-good-soft:#2E3A2E; --v2-bad:#CC9393; --v2-caution:#FFD7A7;
+  --v2-accent:#8CD0D3; --v2-flat:#757575;
+  --paper:var(--v2-paper); --panel:var(--v2-panel); --panel-2:var(--v2-panel-2);
+  --ink:var(--v2-ink); --ink-soft:var(--v2-ink-soft); --ink-faint:var(--v2-ink-faint);
+  --rule:var(--v2-rule); --rule-soft:var(--v2-rule-soft);
+  --good:var(--v2-good); --good-soft:var(--v2-good-soft); --bad:var(--v2-bad); --caution:var(--v2-caution);
+  --accent:var(--v2-accent); --flat:var(--v2-flat); --zicato-accent:var(--v2-accent);
+  --bad-soft:color-mix(in srgb, var(--v2-bad) 22%, var(--v2-panel));
+  --ansi-black:#333333; --ansi-red:#cc9393; --ansi-green:#7f9f7f; --ansi-yellow:#efef87;
+  --ansi-blue:#c3bf97; --ansi-magenta:#bca3a3; --ansi-cyan:#93b3a3; --ansi-white:#f0efd0;
+  --ansi-bright-black:#757575; --ansi-bright-red:#dfaf87; --ansi-bright-green:#9fc59f; --ansi-bright-yellow:#ffff87;
+  --ansi-bright-blue:#d7d7af; --ansi-bright-magenta:#d7afaf; --ansi-bright-cyan:#93bea3; --ansi-bright-white:#dcdccc;
+  --hg-kind-invocation:var(--ansi-bright-black);
+  --hg-kind-llm-call:var(--ansi-blue);
+  --hg-kind-tool-call:var(--ansi-cyan);
+  --hg-kind-user-message:var(--ansi-green);
+  --hg-kind-agent-message:var(--ansi-bright-green);
+  --hg-kind-transfer:var(--ansi-yellow);
+  --hg-kind-wait-for-human:var(--ansi-magenta);
+  --hg-kind-planned:var(--ansi-bright-black);
+  --hg-kind-custom:var(--ansi-white);
+  --hg-gf-judge-on-task:var(--v2-good); --hg-gf-judge-warning:var(--v2-caution); --hg-gf-judge-critical:var(--v2-bad); --hg-gf-judge-neutral:var(--v2-flat);
+  --hg-gf-refine:var(--ansi-magenta);
+  --hg-gf-plan:var(--ansi-cyan);
+  --hg-gf-reflective:var(--ansi-bright-black);
+  --hg-agent-1:color-mix(in oklab, var(--ansi-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-2:color-mix(in oklab, var(--ansi-cyan) 62%, var(--v2-ink-faint));
+  --hg-agent-3:color-mix(in oklab, var(--ansi-green) 62%, var(--v2-ink-faint));
+  --hg-agent-4:color-mix(in oklab, var(--ansi-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-5:color-mix(in oklab, var(--ansi-magenta) 62%, var(--v2-ink-faint));
+  --hg-agent-6:color-mix(in oklab, var(--ansi-bright-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-7:color-mix(in oklab, var(--ansi-bright-green) 62%, var(--v2-ink-faint));
+  --hg-agent-8:color-mix(in oklab, var(--ansi-bright-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-user:color-mix(in oklab, var(--v2-caution) 55%, var(--v2-ink-faint));
+  --hg-agent-goldfive:color-mix(in oklab, var(--v2-accent) 55%, var(--v2-ink-faint));
+}
+
+html[data-theme="selenized-black"] {
+  --v2-paper:#181818; --v2-panel:#202020; --v2-panel-2:#1E1E1E;
+  --v2-ink:#DEDEDE; --v2-ink-soft:#B9B9B9; --v2-ink-faint:#606060;
+  --v2-rule:#353535; --v2-rule-soft:#262626;
+  --v2-good:#83C746; --v2-good-soft:#243218; --v2-bad:#FF5E56; --v2-caution:#EFC541;
+  --v2-accent:#56D8C9; --v2-flat:#3B3B3B;
+  --paper:var(--v2-paper); --panel:var(--v2-panel); --panel-2:var(--v2-panel-2);
+  --ink:var(--v2-ink); --ink-soft:var(--v2-ink-soft); --ink-faint:var(--v2-ink-faint);
+  --rule:var(--v2-rule); --rule-soft:var(--v2-rule-soft);
+  --good:var(--v2-good); --good-soft:var(--v2-good-soft); --bad:var(--v2-bad); --caution:var(--v2-caution);
+  --accent:var(--v2-accent); --flat:var(--v2-flat); --zicato-accent:var(--v2-accent);
+  --bad-soft:color-mix(in srgb, var(--v2-bad) 22%, var(--v2-panel));
+  --ansi-black:#252525; --ansi-red:#ed4a46; --ansi-green:#70b433; --ansi-yellow:#dbb32d;
+  --ansi-blue:#368aeb; --ansi-magenta:#eb6eb7; --ansi-cyan:#3fc5b7; --ansi-white:#777777;
+  --ansi-bright-black:#3b3b3b; --ansi-bright-red:#ff5e56; --ansi-bright-green:#83c746; --ansi-bright-yellow:#efc541;
+  --ansi-bright-blue:#4f9cfe; --ansi-bright-magenta:#ff81ca; --ansi-bright-cyan:#56d8c9; --ansi-bright-white:#dedede;
+  --hg-kind-invocation:var(--ansi-bright-black);
+  --hg-kind-llm-call:var(--ansi-blue);
+  --hg-kind-tool-call:var(--ansi-cyan);
+  --hg-kind-user-message:var(--ansi-green);
+  --hg-kind-agent-message:var(--ansi-bright-green);
+  --hg-kind-transfer:var(--ansi-yellow);
+  --hg-kind-wait-for-human:var(--ansi-magenta);
+  --hg-kind-planned:var(--ansi-bright-black);
+  --hg-kind-custom:var(--ansi-white);
+  --hg-gf-judge-on-task:var(--v2-good); --hg-gf-judge-warning:var(--v2-caution); --hg-gf-judge-critical:var(--v2-bad); --hg-gf-judge-neutral:var(--v2-flat);
+  --hg-gf-refine:var(--ansi-magenta);
+  --hg-gf-plan:var(--ansi-cyan);
+  --hg-gf-reflective:var(--ansi-bright-black);
+  --hg-agent-1:color-mix(in oklab, var(--ansi-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-2:color-mix(in oklab, var(--ansi-cyan) 62%, var(--v2-ink-faint));
+  --hg-agent-3:color-mix(in oklab, var(--ansi-green) 62%, var(--v2-ink-faint));
+  --hg-agent-4:color-mix(in oklab, var(--ansi-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-5:color-mix(in oklab, var(--ansi-magenta) 62%, var(--v2-ink-faint));
+  --hg-agent-6:color-mix(in oklab, var(--ansi-bright-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-7:color-mix(in oklab, var(--ansi-bright-green) 62%, var(--v2-ink-faint));
+  --hg-agent-8:color-mix(in oklab, var(--ansi-bright-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-user:color-mix(in oklab, var(--v2-caution) 55%, var(--v2-ink-faint));
+  --hg-agent-goldfive:color-mix(in oklab, var(--v2-accent) 55%, var(--v2-ink-faint));
+}
+
+html[data-theme="relaxed"] {
+  --v2-paper:#353A44; --v2-panel:#3D424B; --v2-panel-2:#3C404A;
+  --v2-ink:#F7F7F7; --v2-ink-soft:#D9D9D9; --v2-ink-faint:#7F8287;
+  --v2-rule:#53575F; --v2-rule-soft:#444851;
+  --v2-good:#A0AC77; --v2-good-soft:#353D2E; --v2-bad:#BC5653; --v2-caution:#EBC17A;
+  --v2-accent:#7EAAC7; --v2-flat:#636363;
+  --paper:var(--v2-paper); --panel:var(--v2-panel); --panel-2:var(--v2-panel-2);
+  --ink:var(--v2-ink); --ink-soft:var(--v2-ink-soft); --ink-faint:var(--v2-ink-faint);
+  --rule:var(--v2-rule); --rule-soft:var(--v2-rule-soft);
+  --good:var(--v2-good); --good-soft:var(--v2-good-soft); --bad:var(--v2-bad); --caution:var(--v2-caution);
+  --accent:var(--v2-accent); --flat:var(--v2-flat); --zicato-accent:var(--v2-accent);
+  --bad-soft:color-mix(in srgb, var(--v2-bad) 22%, var(--v2-panel));
+  --ansi-black:#151515; --ansi-red:#BC5653; --ansi-green:#909D63; --ansi-yellow:#EBC17A;
+  --ansi-blue:#6A8799; --ansi-magenta:#B06698; --ansi-cyan:#7EAAC7; --ansi-white:#D9D9D9;
+  --ansi-bright-black:#636363; --ansi-bright-red:#BC5653; --ansi-bright-green:#A0AC77; --ansi-bright-yellow:#EBC17A;
+  --ansi-bright-blue:#7EAAC7; --ansi-bright-magenta:#B06698; --ansi-bright-cyan:#ACBBD0; --ansi-bright-white:#F7F7F7;
+  --hg-kind-invocation:var(--ansi-bright-black);
+  --hg-kind-llm-call:var(--ansi-blue);
+  --hg-kind-tool-call:var(--ansi-cyan);
+  --hg-kind-user-message:var(--ansi-green);
+  --hg-kind-agent-message:var(--ansi-bright-green);
+  --hg-kind-transfer:var(--ansi-yellow);
+  --hg-kind-wait-for-human:var(--ansi-magenta);
+  --hg-kind-planned:var(--ansi-bright-black);
+  --hg-kind-custom:var(--ansi-white);
+  --hg-gf-judge-on-task:var(--v2-good); --hg-gf-judge-warning:var(--v2-caution); --hg-gf-judge-critical:var(--v2-bad); --hg-gf-judge-neutral:var(--v2-flat);
+  --hg-gf-refine:var(--ansi-magenta);
+  --hg-gf-plan:var(--ansi-cyan);
+  --hg-gf-reflective:var(--ansi-bright-black);
+  --hg-agent-1:color-mix(in oklab, var(--ansi-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-2:color-mix(in oklab, var(--ansi-cyan) 62%, var(--v2-ink-faint));
+  --hg-agent-3:color-mix(in oklab, var(--ansi-green) 62%, var(--v2-ink-faint));
+  --hg-agent-4:color-mix(in oklab, var(--ansi-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-5:color-mix(in oklab, var(--ansi-magenta) 62%, var(--v2-ink-faint));
+  --hg-agent-6:color-mix(in oklab, var(--ansi-bright-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-7:color-mix(in oklab, var(--ansi-bright-green) 62%, var(--v2-ink-faint));
+  --hg-agent-8:color-mix(in oklab, var(--ansi-bright-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-user:color-mix(in oklab, var(--v2-caution) 55%, var(--v2-ink-faint));
+  --hg-agent-goldfive:color-mix(in oklab, var(--v2-accent) 55%, var(--v2-ink-faint));
+}
+
+html[data-theme="espresso"] {
+  --v2-paper:#323232; --v2-panel:#3A3A3A; --v2-panel-2:#383838;
+  --v2-ink:#FFFFFF; --v2-ink-soft:#D9D9D9; --v2-ink-faint:#8A8A8A;
+  --v2-rule:#4C4C4C; --v2-rule-soft:#3E3E3E;
+  --v2-good:#A5C261; --v2-good-soft:#353D24; --v2-bad:#D25252; --v2-caution:#FFC66D;
+  --v2-accent:#6C99BB; --v2-flat:#6E6E6E;
+  --paper:var(--v2-paper); --panel:var(--v2-panel); --panel-2:var(--v2-panel-2);
+  --ink:var(--v2-ink); --ink-soft:var(--v2-ink-soft); --ink-faint:var(--v2-ink-faint);
+  --rule:var(--v2-rule); --rule-soft:var(--v2-rule-soft);
+  --good:var(--v2-good); --good-soft:var(--v2-good-soft); --bad:var(--v2-bad); --caution:var(--v2-caution);
+  --accent:var(--v2-accent); --flat:var(--v2-flat); --zicato-accent:var(--v2-accent);
+  --bad-soft:color-mix(in srgb, var(--v2-bad) 22%, var(--v2-panel));
+  --ansi-black:#353535; --ansi-red:#D25252; --ansi-green:#A5C261; --ansi-yellow:#FFC66D;
+  --ansi-blue:#6C99BB; --ansi-magenta:#D197D9; --ansi-cyan:#BED6FF; --ansi-white:#EEEEEC;
+  --ansi-bright-black:#535353; --ansi-bright-red:#F00C0C; --ansi-bright-green:#C2E075; --ansi-bright-yellow:#E1E48B;
+  --ansi-bright-blue:#8AB7D9; --ansi-bright-magenta:#EFB5F7; --ansi-bright-cyan:#DCF4FF; --ansi-bright-white:#FFFFFF;
+  --hg-kind-invocation:var(--ansi-bright-black);
+  --hg-kind-llm-call:var(--ansi-blue);
+  --hg-kind-tool-call:var(--ansi-cyan);
+  --hg-kind-user-message:var(--ansi-green);
+  --hg-kind-agent-message:var(--ansi-bright-green);
+  --hg-kind-transfer:var(--ansi-yellow);
+  --hg-kind-wait-for-human:var(--ansi-magenta);
+  --hg-kind-planned:var(--ansi-bright-black);
+  --hg-kind-custom:var(--ansi-white);
+  --hg-gf-judge-on-task:var(--v2-good); --hg-gf-judge-warning:var(--v2-caution); --hg-gf-judge-critical:var(--v2-bad); --hg-gf-judge-neutral:var(--v2-flat);
+  --hg-gf-refine:var(--ansi-magenta);
+  --hg-gf-plan:var(--ansi-cyan);
+  --hg-gf-reflective:var(--ansi-bright-black);
+  --hg-agent-1:color-mix(in oklab, var(--ansi-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-2:color-mix(in oklab, var(--ansi-cyan) 62%, var(--v2-ink-faint));
+  --hg-agent-3:color-mix(in oklab, var(--ansi-green) 62%, var(--v2-ink-faint));
+  --hg-agent-4:color-mix(in oklab, var(--ansi-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-5:color-mix(in oklab, var(--ansi-magenta) 62%, var(--v2-ink-faint));
+  --hg-agent-6:color-mix(in oklab, var(--ansi-bright-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-7:color-mix(in oklab, var(--ansi-bright-green) 62%, var(--v2-ink-faint));
+  --hg-agent-8:color-mix(in oklab, var(--ansi-bright-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-user:color-mix(in oklab, var(--v2-caution) 55%, var(--v2-ink-faint));
+  --hg-agent-goldfive:color-mix(in oklab, var(--v2-accent) 55%, var(--v2-ink-faint));
+}
+
+html[data-theme="dracula"] {
+  --v2-paper:#282A36; --v2-panel:#343746; --v2-panel-2:#2E303D;
+  --v2-ink:#F8F8F2; --v2-ink-soft:#D4D4CF; --v2-ink-faint:#6272A4;
+  --v2-rule:#44475A; --v2-rule-soft:#353848;
+  --v2-good:#50FA7B; --v2-good-soft:#213A2A; --v2-bad:#FF5555; --v2-caution:#F1FA8C;
+  --v2-accent:#BD93F9; --v2-flat:#6272A4;
+  --paper:var(--v2-paper); --panel:var(--v2-panel); --panel-2:var(--v2-panel-2);
+  --ink:var(--v2-ink); --ink-soft:var(--v2-ink-soft); --ink-faint:var(--v2-ink-faint);
+  --rule:var(--v2-rule); --rule-soft:var(--v2-rule-soft);
+  --good:var(--v2-good); --good-soft:var(--v2-good-soft); --bad:var(--v2-bad); --caution:var(--v2-caution);
+  --accent:var(--v2-accent); --flat:var(--v2-flat); --zicato-accent:var(--v2-accent);
+  --bad-soft:color-mix(in srgb, var(--v2-bad) 22%, var(--v2-panel));
+  --ansi-black:#262626; --ansi-red:#E64747; --ansi-green:#42E66C; --ansi-yellow:#E4F34A;
+  --ansi-blue:#9B6BDF; --ansi-magenta:#E356A7; --ansi-cyan:#75D7EC; --ansi-white:#F8F8F2;
+  --ansi-bright-black:#7A7A7A; --ansi-bright-red:#FF5555; --ansi-bright-green:#50FA7B; --ansi-bright-yellow:#F1FA8C;
+  --ansi-bright-blue:#BD93F9; --ansi-bright-magenta:#FF79C6; --ansi-bright-cyan:#8BE9FD; --ansi-bright-white:#F9F9FB;
+  --hg-kind-invocation:var(--ansi-bright-black);
+  --hg-kind-llm-call:var(--ansi-blue);
+  --hg-kind-tool-call:var(--ansi-cyan);
+  --hg-kind-user-message:var(--ansi-green);
+  --hg-kind-agent-message:var(--ansi-bright-green);
+  --hg-kind-transfer:var(--ansi-yellow);
+  --hg-kind-wait-for-human:var(--ansi-magenta);
+  --hg-kind-planned:var(--ansi-bright-black);
+  --hg-kind-custom:var(--ansi-white);
+  --hg-gf-judge-on-task:var(--v2-good); --hg-gf-judge-warning:var(--v2-caution); --hg-gf-judge-critical:var(--v2-bad); --hg-gf-judge-neutral:var(--v2-flat);
+  --hg-gf-refine:var(--ansi-magenta);
+  --hg-gf-plan:var(--ansi-cyan);
+  --hg-gf-reflective:var(--ansi-bright-black);
+  --hg-agent-1:color-mix(in oklab, var(--ansi-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-2:color-mix(in oklab, var(--ansi-cyan) 62%, var(--v2-ink-faint));
+  --hg-agent-3:color-mix(in oklab, var(--ansi-green) 62%, var(--v2-ink-faint));
+  --hg-agent-4:color-mix(in oklab, var(--ansi-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-5:color-mix(in oklab, var(--ansi-magenta) 62%, var(--v2-ink-faint));
+  --hg-agent-6:color-mix(in oklab, var(--ansi-bright-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-7:color-mix(in oklab, var(--ansi-bright-green) 62%, var(--v2-ink-faint));
+  --hg-agent-8:color-mix(in oklab, var(--ansi-bright-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-user:color-mix(in oklab, var(--v2-caution) 55%, var(--v2-ink-faint));
+  --hg-agent-goldfive:color-mix(in oklab, var(--v2-accent) 55%, var(--v2-ink-faint));
+}
+
+html[data-theme="ubuntu"] {
+  --v2-paper:#300A24; --v2-panel:#3D1530; --v2-panel-2:#371129;
+  --v2-ink:#EEEEEC; --v2-ink-soft:#CBC3C9; --v2-ink-faint:#8A7383;
+  --v2-rule:#4B2640; --v2-rule-soft:#3E1A32;
+  --v2-good:#8AE234; --v2-good-soft:#2E3320; --v2-bad:#CC0000; --v2-caution:#FCE94F;
+  --v2-accent:#34E2E2; --v2-flat:#847683;
+  --paper:var(--v2-paper); --panel:var(--v2-panel); --panel-2:var(--v2-panel-2);
+  --ink:var(--v2-ink); --ink-soft:var(--v2-ink-soft); --ink-faint:var(--v2-ink-faint);
+  --rule:var(--v2-rule); --rule-soft:var(--v2-rule-soft);
+  --good:var(--v2-good); --good-soft:var(--v2-good-soft); --bad:var(--v2-bad); --caution:var(--v2-caution);
+  --accent:var(--v2-accent); --flat:var(--v2-flat); --zicato-accent:var(--v2-accent);
+  --bad-soft:color-mix(in srgb, var(--v2-bad) 22%, var(--v2-panel));
+  --ansi-black:#2E3436; --ansi-red:#CC0000; --ansi-green:#4E9A06; --ansi-yellow:#C4A000;
+  --ansi-blue:#3465A4; --ansi-magenta:#75507B; --ansi-cyan:#06989A; --ansi-white:#D3D7CF;
+  --ansi-bright-black:#555753; --ansi-bright-red:#EF2929; --ansi-bright-green:#8AE234; --ansi-bright-yellow:#FCE94F;
+  --ansi-bright-blue:#729FCF; --ansi-bright-magenta:#AD7FA8; --ansi-bright-cyan:#34E2E2; --ansi-bright-white:#EEEEEC;
+  --hg-kind-invocation:var(--ansi-bright-black);
+  --hg-kind-llm-call:var(--ansi-blue);
+  --hg-kind-tool-call:var(--ansi-cyan);
+  --hg-kind-user-message:var(--ansi-green);
+  --hg-kind-agent-message:var(--ansi-bright-green);
+  --hg-kind-transfer:var(--ansi-yellow);
+  --hg-kind-wait-for-human:var(--ansi-magenta);
+  --hg-kind-planned:var(--ansi-bright-black);
+  --hg-kind-custom:var(--ansi-white);
+  --hg-gf-judge-on-task:var(--v2-good); --hg-gf-judge-warning:var(--v2-caution); --hg-gf-judge-critical:var(--v2-bad); --hg-gf-judge-neutral:var(--v2-flat);
+  --hg-gf-refine:var(--ansi-magenta);
+  --hg-gf-plan:var(--ansi-cyan);
+  --hg-gf-reflective:var(--ansi-bright-black);
+  --hg-agent-1:color-mix(in oklab, var(--ansi-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-2:color-mix(in oklab, var(--ansi-cyan) 62%, var(--v2-ink-faint));
+  --hg-agent-3:color-mix(in oklab, var(--ansi-green) 62%, var(--v2-ink-faint));
+  --hg-agent-4:color-mix(in oklab, var(--ansi-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-5:color-mix(in oklab, var(--ansi-magenta) 62%, var(--v2-ink-faint));
+  --hg-agent-6:color-mix(in oklab, var(--ansi-bright-blue) 62%, var(--v2-ink-faint));
+  --hg-agent-7:color-mix(in oklab, var(--ansi-bright-green) 62%, var(--v2-ink-faint));
+  --hg-agent-8:color-mix(in oklab, var(--ansi-bright-yellow) 62%, var(--v2-ink-faint));
+  --hg-agent-user:color-mix(in oklab, var(--v2-caution) 55%, var(--v2-ink-faint));
+  --hg-agent-goldfive:color-mix(in oklab, var(--v2-accent) 55%, var(--v2-ink-faint));
+}
