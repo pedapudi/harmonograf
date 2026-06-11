@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="monokai">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>harmonograf — the figure grammar (new marks)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_tokens.css">
+<link rel="stylesheet" href="_study.css">
+<style>
+  /* grammar-page marks — token-only */
+  .gm-onplan { stroke: var(--ink-faint); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+  .gm-tol { fill: var(--good); fill-opacity: .07; }
+  .gm-trace { stroke: var(--ink); stroke-width: 1.3; fill: none; vector-effect: non-scaling-stroke; }
+  .gm-trace-soft { stroke: var(--ink-soft); stroke-width: 1.1; fill: none; vector-effect: non-scaling-stroke; }
+  .gm-excursion { fill: var(--bad); fill-opacity: .14; }
+  .gm-tick { stroke: var(--caution); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .gm-tick-label { fill: var(--caution); font-size: 8.5px; }
+  .gm-label { fill: var(--ink-soft); font-size: 10px; }
+  .gm-faint { fill: var(--ink-faint); font-size: 9px; }
+  .gm-axis { fill: var(--ink-faint); font-size: 9px; font-variant-numeric: tabular-nums; }
+  .gm-good { fill: var(--good); } .gm-bad { fill: var(--bad); } .gm-flat { fill: var(--flat, var(--ink-faint)); }
+  .gm-accent { fill: var(--accent); }
+  .gm-ln-good { stroke: var(--good); } .gm-ln-bad { stroke: var(--bad); } .gm-ln-flat { stroke: var(--flat, var(--ink-faint)); }
+  .gm-spine { stroke: var(--accent); stroke-width: 2.2; vector-effect: non-scaling-stroke; }
+  .gm-node { fill: var(--panel); stroke: var(--rule); }
+  .gm-ribbon { fill: var(--ink); fill-opacity: .14; transition: fill-opacity .12s; }
+  .gm-ribbon:hover { fill-opacity: .38; }
+  .gm-seam { stroke: var(--rule); stroke-width: 1; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+  .gm-band { fill-opacity: .5; }
+  .gm-gate { fill: none; stroke: var(--ink-soft); stroke-width: 1.4; }
+  .fp-row { display: flex; gap: 26px; flex-wrap: wrap; align-items: flex-start; }
+  .fp-cell { text-align: center; font-size: 10px; color: var(--ink-soft); }
+  .fp-cell svg { display: block; margin: 0 auto 6px; border: 1px solid var(--rule); border-radius: var(--r-panel); background: var(--paper); }
+  .fp-pill { display: inline-block; font-size: 9px; padding: 1px 7px; border: 1px solid var(--rule); border-radius: var(--r-pill); color: var(--ink-faint); margin-top: 3px; }
+  .fp-pill.live { color: var(--accent); border-color: var(--accent); }
+  .fp-pill.done { color: var(--good); border-color: var(--good); }
+  .fp-pill.fail { color: var(--bad); border-color: var(--bad); }
+  .sm-row { display: flex; gap: 14px; flex-wrap: wrap; }
+  .sm-cell { text-align: center; font-size: 9px; color: var(--ink-faint); }
+  .sm-cell svg { display: block; border: 1px solid var(--rule-soft); border-radius: var(--r-panel); background: var(--paper); margin-bottom: 4px; }
+  .figwrap { border: 1px solid var(--rule); border-radius: var(--r-panel); background: var(--paper); padding: 12px 14px; }
+</style>
+</head>
+<body>
+
+<header class="study">
+  <div class="brand-row"><h1>harmonograf — the figure grammar</h1></div>
+  <span class="legend-inline">thirteen new marks · drift &amp; correction · plans · sequence · steering · all token-only, all fit-to-width</span>
+  <div class="spacer"></div>
+  <span class="theme-pick-label">theme</span>
+  <span data-theme-picker></span>
+</header>
+
+<main class="study">
+
+<section class="study">
+  <h2>Premise</h2>
+  <p class="lede">
+    zicato's figure language is built on <b>oscillation around a reference rule</b> — good below, bad above,
+    one accent spine. harmonograf's domain — drift and correction — <i>is</i> oscillation around a reference.
+    These prototypes extend the grammar with harmonograf's nouns: the plan-rule replaces the champion-rule, the
+    intervention replaces the gate, and the run's own trace becomes the brand. Conventions inherited whole:
+    hairline gridlines, <code>rx:3</code> bars, status earns color / identity never does, <code>--accent</code>
+    only for now &amp; selection, every figure <code>width:100%</code> + <code>viewBox</code>.
+  </p>
+</section>
+
+<section class="study" data-opt>
+  <h2>01 · the harmonograph fingerprint — a session identicon that is data</h2>
+  <div class="surface">
+    <p class="rationale">
+      Each session gets a glyph drawn by the instrument itself: <b>x driven by plan progress, y by execution
+      drift</b>, damped. Aligned runs trace tight decaying figures; detuned runs precess; a corrected run visibly
+      <b>tightens</b> mid-figure where the intervention landed; a failing run spirals outward. The dot is the pen —
+      and its color is <i>status, earned</i>: accent while live, good when done, bad when failed. For session
+      pickers, fleet cards, tab titles — an identicon operators learn to read.
+    </p>
+    <div class="fp-row" id="fig-fp"></div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>02 · the drift seismograph — the headline figure</h2>
+  <div class="surface">
+    <p class="rationale">
+      Per agent: a dashed <b>on-plan rule</b>, a <b>tolerance band</b> hugging it (good-soft), and the goldfive
+      judge series as a thin ink trace. The trace stays neutral until it <b>escapes the band</b> — the excursion
+      area fills bad-soft, severity is <i>distance, not color</i>. Interventions are caution ticks; watch the trace
+      decay back after each one. Answers the operator's only question — “is it wandering, did my correction take?” —
+      with zero labels.
+    </p>
+    <div class="figwrap" id="fig-seismo"></div>
+    <div class="legend">
+      <span><span class="ln" style="border-color:var(--ink)"></span>judge drift series</span>
+      <span><span class="sw" style="background:var(--good);opacity:.25"></span>tolerance band</span>
+      <span><span class="sw" style="background:var(--bad);opacity:.3"></span>excursion</span>
+      <span><span class="ln" style="border-color:var(--caution)"></span>intervention tick</span>
+      <span><span class="ln" style="border-color:var(--accent)"></span>now</span>
+    </div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>03 · the judge heartbeat strip — word-sized verdicts</h2>
+  <div class="surface">
+    <p class="rationale">
+      A <code>genDots</code>-style strip under a lane: one glyph per judge call — <code>·</code> on-task,
+      <code>▲</code> warning, <code>✕</code> critical — in the goldfive category hue at quiet opacity. The EKG of
+      the run; trellis it across sessions for the fleet view.
+    </p>
+    <div class="figwrap" id="fig-heart"></div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>04 · the intervention ladder — escalation made literal</h2>
+  <div class="surface">
+    <p class="rationale">
+      goldfive's escalation ladder drawn as a ladder: rungs in ascending severity, the session's interventions as
+      dots placed on their rung over time, a faint step-path connecting them. <b>A healthy run lives on the bottom
+      rung; a run climbing the ladder is visibly escalating.</b> The escalate-rung dot is bad — earned, terminal.
+    </p>
+    <div class="ba-grid">
+      <div class="ba-cell"><p class="ba-tag">healthy session — stays low</p><div class="ba-frame" id="fig-lad-a"></div></div>
+      <div class="ba-cell"><p class="ba-tag after">escalating session — climbs</p><div class="ba-frame" id="fig-lad-b"></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>05 · correction slopegraphs — did the steering work?</h2>
+  <div class="surface">
+    <p class="rationale">
+      At every intervention, a two-point slope: <b>drift before → drift after</b>. Down-slope good, up-slope bad,
+      flat flat — zicato's <code>pairedSlopegraph</code> verbatim, new noun. A row of these in the Interventions
+      panel is an efficacy record of the operator and of goldfive's own refinements.
+    </p>
+    <div class="sm-row" id="fig-slopes"></div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>06 · the drift sankey — what causes what</h2>
+  <div class="surface">
+    <p class="rationale">
+      <b>drift kind → intervention → outcome</b>, ribbon width ∝ count. The figure that says “tool-misuse resolves
+      with a nudge, goal-drift recurs even after replans” — the exact shape zicato's meta-loop wants as input.
+      Outcome nodes earn good / bad; everything upstream stays neutral ink.
+    </p>
+    <div class="figwrap" id="fig-sankey"></div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>07 · plan strata — revisions as sediment</h2>
+  <div class="surface">
+    <p class="rationale">
+      Plans are geology: newest on top. Each revision is a stratum; tasks keep their column, so <b>persistence reads
+      as vertical alignment</b>. A dropped task ends with <code>✕</code> at the seam; an added one enters with
+      <code>○</code>. Each dashed seam is annotated with the drift kind that forced the replan — the <i>why</i> is
+      on the figure. The live stratum carries the accent spine.
+    </p>
+    <div class="figwrap" id="fig-strata"></div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>08 · the replan slopegraph — one seam, magnified</h2>
+  <div class="surface">
+    <p class="rationale">
+      Plan v2 → v3: kept tasks run flat, reordered tasks cross, dropped tasks terminate (<code>✕</code>), added
+      tasks enter (<code>○</code>, accent-dashed). Crossing density <i>is</i> plan churn — ten seconds tells you
+      whether the replan was a tweak or an upheaval.
+    </p>
+    <div class="figwrap" id="fig-replan"></div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>09 · the plan reel — the spine across revisions</h2>
+  <div class="surface">
+    <p class="rationale">
+      zicato's <code>roundTimeline</code> spine, one node per plan revision, annotated with <b>remaining work</b> —
+      a loss-floor that should descend. Seam triggers ride above in caution; a revision that <i>added</i> work would
+      step up and read as bad, earned by direction.
+    </p>
+    <div class="figwrap" id="fig-reel"></div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>10 · the delegation score — fork, run beneath, rejoin</h2>
+  <div class="surface">
+    <p class="rationale">
+      Not a UML sequence diagram — a score. A delegation <b>branches off the parent lane, runs beneath it, and
+      rejoins</b> with its verdict glyph at the merge; band thickness ∝ tokens spent, so an expensive delegation is
+      visibly heavy. Peer transfers are dashed hand-off arcs in TRANSFER yellow. elimFlow's convergence idiom,
+      inverted into fork-and-return.
+    </p>
+    <div class="figwrap" id="fig-score"></div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>11 · the transfer chord — who talks to whom, <i>and in which direction</i></h2>
+  <div class="surface">
+    <p class="rationale">
+      Agents on an arc, transfer counts as chords, width ∝ frequency, quiet agent-ramp hues. A plain chord hides the
+      one thing the operator most needs — <b>who initiates vs. who receives</b> — so this one is <b>directional three
+      ways at once</b>: (1) each agent's sector is split into an <b>outbound half</b> (solid, source side) and an
+      <b>inbound half</b> (hollow tick, target side); (2) every ribbon is an <b>asymmetric teardrop</b> — pinched at
+      the source, broad at the target — so the chord visibly <i>flows</i> toward whom it reaches; (3) it carries the
+      <b>source→target hue</b> and ends in a small arrowhead on the target arc. A coordinator-and-spokes system fans
+      <i>out</i> from one sector; <b>if it looks like a web, something's off</b>. The session-summary topology check.
+    </p>
+    <div class="figwrap" id="fig-chord"></div>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--hg-agent-1);opacity:.8"></span>outbound (source) half</span>
+      <span><span class="sw" style="background:var(--panel);border:1px solid var(--rule)"></span>inbound (target) half</span>
+      <span>pinched ▸ source · broad ▸ target · ▸ arrowhead at the receiver</span>
+    </div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>12 · conductor's marks — steering in the margin</h2>
+  <div class="surface">
+    <p class="rationale">
+      Operator actions live in the <b>margin</b>, like a conductor's pencil on the score: a magenta <code>◷</code>
+      where the run paused for a human, an accent tick where a steering message landed, an approval <b>gate</b> on
+      the lane (○ deciding → ✓ continues). The discipline: <b>operator presence annotates the work, never recolors
+      it</b> — identity doesn't earn color, even human identity.
+    </p>
+    <div class="figwrap" id="fig-steer"></div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>13 · the context tide — breathing room</h2>
+  <div class="surface">
+    <p class="rationale">
+      Context-window occupancy as a tide under the lane, rising toward the dashed ceiling; the surface mixes toward
+      caution as it nears the limit. A <b>compaction is a relief seam</b> — the tide visibly drops and the run
+      breathes again.
+    </p>
+    <div class="figwrap" id="fig-tide"></div>
+  </div>
+</section>
+
+<section class="study" data-opt>
+  <h2>14 · the plan DAG — interdependent processes, Adamiecki's own subject</h2>
+  <div class="surface">
+    <p class="rationale">
+      The harmonogram's whole point in 1896 was <b>interdependence</b> — so the plan's dependency graph is a
+      first-class figure, not a footnote. Tasks are quiet nodes layered by depth; dependencies are hairline edges;
+      <b>the critical path is the one accent spine</b> — zicato's champion-spine idiom pointed at scheduling.
+      Status is earned per node (✓ done, ● running on the spine, ○ pending); a task <b>dropped at a replan stays
+      as a dashed ghost</b> with its severed edge — the DAG remembers the seam. Pairs with 07 strata (same tasks,
+      time-axis vs dependency-axis).
+    </p>
+    <div class="figwrap" id="fig-dag"></div>
+    <div class="legend">
+      <span><span class="ln" style="border-color:var(--accent)"></span>critical path</span>
+      <span><span class="ln" style="border-color:var(--ink-faint)"></span>dependency</span>
+      <span style="color:var(--good)">✓ done</span><span style="color:var(--accent)">● running</span>
+      <span style="color:var(--ink-faint)">○ pending</span><span style="color:var(--bad)">✕ dropped at replan (ghost)</span>
+    </div>
+  </div>
+</section>
+
+<section class="study">
+  <h2>Which of these earn promotion</h2>
+  <p class="lede">
+    Build order, if these graduate to the console: <b>02 seismograph</b> (the product thesis in one mark) →
+    <b>07 strata + 08 replan slope + 14 plan DAG</b> (the data already sits in <code>planHistoryStore</code>) →
+    <b>10 delegation score</b> (the Gantt already draws transfer edges; this is its summary form) →
+    <b>01 fingerprint</b> (the dessert — session picker, fleet cards, and the brand made data).
+    03/05 ride inside existing panels; 06/11 are session-summary surfaces; 04/12/13 are overlays on figures
+    that already exist.
+  </p>
+</section>
+
+</main>
+
+<footer class="study">
+  harmonograf figure-grammar study · every mark token-only &amp; fit-to-width · status earns color, identity never does ·
+  part of the <a href="index.html">zicato-language UI study</a> · companion: <a href="brand.html">brand &amp; logo study</a>
+</footer>
+
+<script>
+/* ===== theme picker (study-standard) ===== */
+window.THEME_IDS = ['monokai','solarized-dark','solarized-light','google-light','google-dark',
+  'lunaria-light','lunaria-eclipse','belafonte-day','belafonte-night','paper','zenburn',
+  'selenized-black','relaxed','espresso','dracula','ubuntu'];
+const THEME_SWATCHES = {
+  'monokai':['#1e1f1c','#272822','#f8f8f2','#a6e22e','#f92672','#66d9ef'],
+  'solarized-dark':['#04222B','#0A2D38','#93A1A1','#8BB80E','#E0483C','#2AA198'],
+  'solarized-light':['#FDF6E3','#FBF1D6','#586E75','#6B9B0B','#DC322F','#268BD2'],
+  'google-light':['#FFFFFF','#F4F4F4','#474A4E','#34A853','#EA4335','#1B9CB8'],
+  'google-dark':['#202124','#2C2D30','#FFFFFF','#34A853','#EA4335','#24C1E0'],
+  'lunaria-light':['#EBE4E1','#E2DCD9','#363434','#497D46','#783C1F','#3778A9'],
+  'lunaria-eclipse':['#323F46','#3B484F','#DFE2ED','#BEDBC1','#BA9088','#C8429F'],
+  'belafonte-day':['#D5CCBA','#CCC3B2','#34292D','#6E6A4E','#BE100E','#426A79'],
+  'belafonte-night':['#20111B','#271821','#D5CCBA','#A6A07A','#D6403E','#6F8E97'],
+  'paper':['#F2EEDE','#E6E2D3','#1A1A1A','#216609','#CC3E28','#1E6FCC'],
+  'zenburn':['#3A3A3A','#424241','#DCDCCC','#8FB28F','#CC9393','#8CD0D3'],
+  'selenized-black':['#181818','#202020','#DEDEDE','#83C746','#FF5E56','#56D8C9'],
+  'relaxed':['#353A44','#3D424B','#F7F7F7','#A0AC77','#BC5653','#7EAAC7'],
+  'espresso':['#323232','#3A3A3A','#FFFFFF','#A5C261','#D25252','#6C99BB'],
+  'dracula':['#282A36','#343746','#F8F8F2','#50FA7B','#FF5555','#BD93F9'],
+  'ubuntu':['#300A24','#3D1530','#EEEEEC','#8AE234','#CC0000','#34E2E2'],
+};
+const THEME_LABELS = {'monokai':'Monokai','solarized-dark':'Solarized Dark','solarized-light':'Solarized Light',
+  'google-light':'Google Light','google-dark':'Google Dark','lunaria-light':'Lunaria Light','lunaria-eclipse':'Lunaria Eclipse',
+  'belafonte-day':'Belafonte Day','belafonte-night':'Belafonte Night','paper':'Paper','zenburn':'Zenburn',
+  'selenized-black':'Selenized Black','relaxed':'Relaxed','espresso':'Espresso','dracula':'Dracula','ubuntu':'Ubuntu'};
+const THEME_KEY = 'hgraf-study-theme';
+function swatchStrip(id, sm){ const t = THEME_SWATCHES[id] || [];
+  return `<span class="dt-swatch-strip${sm?' dt-swatch-strip-sm':''}">`+t.map(c=>`<span class="dt-swatch" style="background:${c}"></span>`).join('')+`</span>`; }
+function currentTheme(){ return document.documentElement.getAttribute('data-theme') || 'monokai'; }
+function applyTheme(id){ document.documentElement.setAttribute('data-theme', id);
+  try { localStorage.setItem(THEME_KEY, id); } catch(e){}
+  document.querySelectorAll('[data-theme-picker]').forEach(buildPicker); }
+function buildPicker(host){ const cur = currentTheme();
+  host.innerHTML = `<div class="dt-cd"><button class="dt-cd-trigger" aria-haspopup="listbox" aria-expanded="false">${swatchStrip(cur,true)}<span class="dt-cd-name">${THEME_LABELS[cur]}</span><span class="dt-cd-caret" aria-hidden="true">▾</span></button><div class="dt-cd-list" role="listbox" aria-label="theme">${window.THEME_IDS.map(id=>`<div class="dt-cd-option" role="option" data-id="${id}" aria-selected="${id===cur}">${swatchStrip(id)}<span class="dt-cd-name">${THEME_LABELS[id]}</span></div>`).join('')}</div></div>`;
+  const cd = host.querySelector('.dt-cd'), trig = host.querySelector('.dt-cd-trigger');
+  trig.addEventListener('click', e=>{ e.stopPropagation(); const open = cd.classList.toggle('dt-cd-open'); trig.setAttribute('aria-expanded', open); });
+  host.querySelectorAll('.dt-cd-option').forEach(o=> o.addEventListener('click', ()=>{ applyTheme(o.dataset.id); cd.classList.remove('dt-cd-open'); })); }
+document.addEventListener('click', ()=> document.querySelectorAll('.dt-cd-open').forEach(c=>c.classList.remove('dt-cd-open')));
+(function initTheme(){ let saved=null; try { saved=localStorage.getItem(THEME_KEY); } catch(e){}
+  const P=new URLSearchParams(location.search), fromUrl=P.get('theme');
+  const id=(fromUrl&&window.THEME_IDS.includes(fromUrl))?fromUrl:(saved&&window.THEME_IDS.includes(saved))?saved:'monokai';
+  document.documentElement.setAttribute('data-theme', id); })();
+
+/* ===== shared helpers ===== */
+function lcg(seed){ let s=seed>>>0; return ()=>((s=(s*1664525+1013904223)>>>0)/4294967296); }
+function P(pts){ return 'M'+pts.map(p=>p[0].toFixed(2)+','+p[1].toFixed(2)).join(' L'); }
+function lerpKeys(keys, t){ // keys: [[t,v],...] sorted
+  if(t<=keys[0][0]) return keys[0][1];
+  for(let i=1;i<keys.length;i++){ if(t<=keys[i][0]){ const [t0,v0]=keys[i-1], [t1,v1]=keys[i];
+    return v0+(v1-v0)*(t-t0)/(t1-t0); } }
+  return keys[keys.length-1][1];
+}
+const KIND = k => `var(--hg-kind-${k})`;
+
+/* ===== 01 fingerprints ===== */
+function fingerprint(o){ const n=o.n||900, T=o.T||30, pts=[];
+  const Amod = o.Amod || (()=>1);
+  for(let i=0;i<=n;i++){ const t=T*i/n, m=Amod(t,T);
+    pts.push([32 + 24*m*Math.exp(-(o.d||0)*t)*Math.sin(o.fx*t+(o.px||0)),
+              32 + 24*m*Math.exp(-(o.d||0)*t)*Math.sin(o.fy*t)]); }
+  const end=pts[pts.length-1];
+  return `<svg width="96" height="96" viewBox="0 0 64 64" role="img" aria-label="session fingerprint — ${o.label}">
+    <path d="${P(pts)}" fill="none" stroke="currentColor" stroke-width="0.9" opacity=".75"/>
+    <circle cx="${end[0].toFixed(1)}" cy="${end[1].toFixed(1)}" r="2.2" fill="var(--${o.dot})"/></svg>`;
+}
+function mountFP(){
+  const cells = [
+    { svg: fingerprint({fx:1.0, fy:1.0, px:Math.PI/2, d:.02, label:'aligned', dot:'good'}), name:'aligned', sub:'1:1, in phase', pill:'done', ptxt:'✓ done' },
+    { svg: fingerprint({fx:3.0, fy:2.02, px:Math.PI/2, d:.025, label:'harmonic', dot:'good'}), name:'harmonic', sub:'3:2 chord', pill:'done', ptxt:'✓ done' },
+    { svg: fingerprint({fx:2.41, fy:1.53, px:.6, d:.011, T:42, label:'drifty', dot:'accent'}), name:'drifty', sub:'detuned, precessing', pill:'live', ptxt:'● live' },
+    { svg: fingerprint({fx:3.0, fy:2.03, px:Math.PI/2, d:.013, label:'corrected', dot:'accent',
+        Amod:(t)=> t<13 ? 1 : (t<16 ? 1-(t-13)/3*.55 : .45)}), name:'corrected', sub:'tightens at the intervention', pill:'live', ptxt:'● live' },
+    { svg: fingerprint({fx:2.6, fy:1.7, px:.3, d:-.012, T:26, label:'diverging', dot:'bad',
+        Amod:(t,T)=> .3 + .55*t/T }), name:'diverging', sub:'amplitude growing', pill:'fail', ptxt:'✕ failed' },
+  ];
+  document.getElementById('fig-fp').innerHTML = cells.map(c =>
+    `<div class="fp-cell">${c.svg}${c.name}<br><span style="color:var(--ink-faint);font-size:9px">${c.sub}</span><br><span class="fp-pill ${c.pill}">${c.ptxt}</span></div>`).join('');
+}
+
+/* ===== 02 seismograph ===== */
+function mountSeismo(){
+  const W=880, rowH=58, padL=78, padR=16, lanes=[
+    { id:'coder', keys:[[0,1],[6,2],[10,3],[13,11],[15,14],[17,6],[22,3],[26,2],[30,4],[33,12],[35,15],[38,7],[44,3],[50,2]],
+      ticks:[[15,'refine'],[35,'nudge']] },
+    { id:'reviewer', keys:[[0,1],[10,2],[20,3],[26,9],[29,10],[31,4],[40,2],[50,1.5]], ticks:[[29,'nudge']] },
+    { id:'planner', keys:[[0,.5],[12,1.5],[25,1],[38,2],[50,1]], ticks:[] },
+  ];
+  const H = lanes.length*rowH + 26, X=t=>padL+(W-padL-padR)*t/50, TOL=8;
+  let g = `<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="drift seismograph — per-agent judge drift around the on-plan rule">`;
+  for(let i=0;i<=5;i++){ const gx=X(i*10);
+    g+=`<line class="hg-gantt-grid" x1="${gx}" y1="6" x2="${gx}" y2="${H-18}"/><text class="gm-axis" x="${gx-6}" y="${H-6}">${i*10}s</text>`; }
+  lanes.forEach((ln,li)=>{
+    const base = 14 + li*rowH + rowH - 18, rnd = lcg(40+li), yOf = v => base - v*2.5;
+    g+=`<text class="gm-label" x="8" y="${base-14}">${ln.id}</text>`;
+    g+=`<rect class="gm-tol" x="${X(0)}" y="${yOf(TOL)}" width="${X(50)-X(0)}" height="${yOf(0)-yOf(TOL)}"/>`;
+    g+=`<line class="gm-onplan" x1="${X(0)}" y1="${base}" x2="${X(50)}" y2="${base}"/>`;
+    const pts=[]; for(let i=0;i<=300;i++){ const t=50*i/300;
+      const v = Math.max(0, lerpKeys(ln.keys,t) + Math.sin(t*2.3+li)*0.5 + (rnd()-0.5)*0.9);
+      pts.push([X(t), yOf(v), v, t]); }
+    // excursion fills above tolerance
+    let seg=null; const segs=[];
+    pts.forEach(p=>{ if(p[2]>TOL){ if(!seg) seg=[]; seg.push(p); } else if(seg){ segs.push(seg); seg=null; } });
+    if(seg) segs.push(seg);
+    segs.forEach(s=>{ const poly=s.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')
+        +' '+s[s.length-1][0].toFixed(1)+','+yOf(TOL).toFixed(1)+' '+s[0][0].toFixed(1)+','+yOf(TOL).toFixed(1);
+      g+=`<polygon class="gm-excursion" points="${poly}"/>`; });
+    g+=`<path class="gm-trace" d="${P(pts)}"/>`;
+    ln.ticks.forEach(([t,kind])=>{ const tx=X(t);
+      g+=`<line class="gm-tick" x1="${tx}" y1="${base-rowH+24}" x2="${tx}" y2="${base+4}"><title>intervention · ${kind} @ ${t}s</title></line>`;
+      g+=`<text class="gm-tick-label" x="${tx+3}" y="${base-rowH+30}">${kind}</text>`; });
+  });
+  const nx=X(50);
+  g+=`<line class="hg-gantt-now" x1="${nx}" y1="6" x2="${nx}" y2="${H-18}"/><circle class="hg-gantt-now-cap" cx="${nx}" cy="6" r="2.5"/>`;
+  g+=`</svg>`;
+  document.getElementById('fig-seismo').innerHTML=g;
+}
+
+/* ===== 03 heartbeat strip ===== */
+function mountHeart(){
+  const W=880, H=64, padL=78, X=t=>padL+(W-padL-16)*t/50, rnd=lcg(7);
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="judge heartbeat strip">`;
+  g+=`<text class="gm-label" x="8" y="30">coder</text>`;
+  g+=`<line class="gm-onplan" x1="${X(0)}" y1="40" x2="${X(50)}" y2="40"/>`;
+  const events=[]; for(let i=0;i<38;i++){ const t=1+i*1.28+rnd()*0.5;
+    let k='ok'; if(i===8||i===9||i===21||i===22||i===23) k='warn'; if(i===27) k='crit';
+    events.push([t,k]); }
+  events.forEach(([t,k])=>{ const x=X(t);
+    if(k==='ok')   g+=`<circle cx="${x}" cy="26" r="1.6" fill="var(--hg-gf-judge-on-task)" opacity=".75"><title>on-task</title></circle>`;
+    if(k==='warn') g+=`<text x="${x-3.5}" y="30" font-size="9" fill="var(--caution)"><title>warning</title>▲</text>`;
+    if(k==='crit') g+=`<text x="${x-3.5}" y="30" font-size="10" fill="var(--bad)" font-weight="700"><title>critical</title>✕</text>`; });
+  for(let i=0;i<=5;i++){ g+=`<text class="gm-axis" x="${X(i*10)-6}" y="${H-8}">${i*10}s</text>`; }
+  g+=`</svg>`;
+  document.getElementById('fig-heart').innerHTML=g;
+}
+
+/* ===== 04 intervention ladder ===== */
+function ladderFig(dots, label){
+  const W=430, H=150, padL=72, X=t=>padL+(W-padL-14)*t/50;
+  const RUNGS=['nudge','refine','replan','escalate'], rungY=i=>118-i*30;
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="intervention ladder — ${label}">`;
+  RUNGS.forEach((r,i)=>{ const y=rungY(i);
+    g+=`<line x1="${padL}" y1="${y}" x2="${W-14}" y2="${y}" stroke="var(--rule)" stroke-width="1"/>`;
+    g+=`<text class="gm-faint" x="8" y="${y+3}">${r}</text>`; });
+  if(dots.length>1){ const step=dots.map((d,i)=>(i?'L':'M')+X(d[0]).toFixed(1)+','+rungY(d[1]).toFixed(1)).join(' ');
+    g+=`<path d="${step}" fill="none" stroke="var(--ink-faint)" stroke-width="0.8" stroke-dasharray="2 3" opacity=".7"/>`; }
+  dots.forEach(d=>{ const y=rungY(d[1]), cls = d[1]===3?'var(--bad)':'var(--ink-soft)';
+    g+=`<circle cx="${X(d[0])}" cy="${y}" r="3.4" fill="${cls}"><title>${RUNGS[d[1]]} @ ${d[0]}s</title></circle>`; });
+  g+=`</svg>`; return g;
+}
+function mountLadders(){
+  document.getElementById('fig-lad-a').innerHTML = ladderFig([[8,0],[19,0],[31,0],[42,1]], 'healthy');
+  document.getElementById('fig-lad-b').innerHTML = ladderFig([[6,0],[12,0],[18,1],[26,1],[33,2],[44,3]], 'escalating');
+}
+
+/* ===== 05 correction slopegraphs ===== */
+function mountSlopes(){
+  const cases=[ ['nudge',12,4], ['refine',14,3], ['nudge',9,8], ['replan',16,5], ['nudge',6,9], ['refine',11,11] ];
+  document.getElementById('fig-slopes').innerHTML = cases.map(([k,b,a])=>{
+    const W=96,H=78, y=v=>64-v*3.2, dir = a<b-1 ? 'good' : (a>b+1 ? 'bad' : 'flat');
+    return `<div class="sm-cell"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="correction: ${k}, drift ${b} to ${a}">
+      <line x1="26" y1="10" x2="26" y2="66" stroke="var(--rule-soft)"/><line x1="70" y1="10" x2="70" y2="66" stroke="var(--rule-soft)"/>
+      <line class="gm-ln-${dir}" x1="26" y1="${y(b)}" x2="70" y2="${y(a)}" stroke-width="1.6"/>
+      <circle cx="26" cy="${y(b)}" r="2.4" fill="var(--ink-soft)"/><circle class="gm-${dir}" cx="70" cy="${y(a)}" r="2.6"/>
+      <text class="gm-axis" x="20" y="${y(b)-5}">${b}</text><text class="gm-axis" x="65" y="${y(a)-5}">${a}</text>
+      <text class="gm-faint" x="22" y="${H-2}">before · after</text></svg>${k}</div>`; }).join('');
+}
+
+/* ===== 06 drift sankey ===== */
+function mountSankey(){
+  const W=880, H=240, SC=4.4, NW=8;
+  const kinds=[['goal-drift',9],['tool-misuse',7],['loop',5],['scope-creep',4]];
+  const ints=[['nudge',12],['refine',8],['replan',5]];
+  const outs=[['resolved',18,'good'],['recurred',7,'bad']];
+  const f1={ 'goal-drift':[['nudge',4],['refine',3],['replan',2]], 'tool-misuse':[['nudge',5],['refine',2]],
+             'loop':[['nudge',2],['refine',2],['replan',1]], 'scope-creep':[['nudge',1],['refine',1],['replan',2]] };
+  const f2={ 'nudge':[['resolved',9],['recurred',3]], 'refine':[['resolved',6],['recurred',2]], 'replan':[['resolved',3],['recurred',2]] };
+  function layout(col, x){ let y=18; const m={};
+    col.forEach(([id,n])=>{ m[id]={x, y, h:n*SC, used:0}; y+=n*SC+14; }); return m; }
+  const A=layout(kinds,90), B=layout(ints,430), C=layout(outs,760);
+  function ribbon(a,b,n){ const h=n*SC, x0=a.x+NW, y0=a.y+a.used, x1=b.x, y1=b.y+b.used; a.used+=h; b.used+=h;
+    const c=(x0+x1)/2;
+    return `<path class="gm-ribbon" d="M${x0},${y0} C${c},${y0} ${c},${y1} ${x1},${y1} L${x1},${y1+h} C${c},${y1+h} ${c},${y0+h} ${x0},${y0+h} Z"><title>${n} runs</title></path>`; }
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="drift sankey: kind to intervention to outcome">`;
+  kinds.forEach(([id])=>{ f1[id].forEach(([to,n])=>{ g+=ribbon(A[id], B[to], n); }); });
+  // reset usage on B for outgoing side
+  Object.values(B).forEach(b=>b.usedOut=0);
+  ints.forEach(([id])=>{ f2[id].forEach(([to,n])=>{ const b=B[id], c=C[to], h=n*SC;
+    const x0=b.x+NW, y0=b.y+b.usedOut, x1=c.x, y1=c.y+c.used; b.usedOut+=h; c.used+=h; const cm=(x0+x1)/2;
+    g+=`<path class="gm-ribbon" d="M${x0},${y0} C${cm},${y0} ${cm},${y1} ${x1},${y1} L${x1},${y1+h} C${cm},${y1+h} ${cm},${y0+h} ${x0},${y0+h} Z"><title>${n} runs</title></path>`; }); });
+  function nodes(m, col, side, colorBy){ col.forEach(c=>{ const id=c[0], nd=m[id];
+    const fill = colorBy && c[2] ? `var(--${c[2]})` : 'var(--ink-soft)';
+    g+=`<rect x="${nd.x}" y="${nd.y}" width="${NW}" height="${nd.h}" rx="2" fill="${fill}" fill-opacity=".8"/>`;
+    const tx = side==='l' ? nd.x-6 : nd.x+NW+6, anchor = side==='l' ? 'end' : 'start';
+    g+=`<text class="gm-label" x="${tx}" y="${nd.y+nd.h/2+3}" text-anchor="${anchor}">${id} <tspan class="gm-faint tnum">${c[1]}</tspan></text>`; }); }
+  nodes(A,kinds,'l'); nodes(B,ints,'r'); nodes(C,outs,'r',true);
+  g+=`<text class="gm-faint" x="90" y="${H-6}">drift kind</text><text class="gm-faint" x="430" y="${H-6}">intervention</text><text class="gm-faint" x="700" y="${H-6}">outcome</text></svg>`;
+  document.getElementById('fig-sankey').innerHTML=g;
+}
+
+/* ===== 07 plan strata ===== */
+function mountStrata(){
+  const W=880, rowH=52, tasks={T1:0,T2:1,T3:2,T4:3,T5:4,T6:5,T7:6};
+  const tx=i=>96+i*110, BW=84, BH=15;
+  const strata=[ // newest first (top)
+    { v:'v3 · live', has:['T1','T2','T4','T6','T7'], added:['T7'], live:true },
+    { v:'v2', has:['T1','T2','T4','T5','T6'], added:['T6'], seam:'replan · goal-drift' },
+    { v:'v1', has:['T1','T2','T3','T4','T5'], added:[], seam:'replan · scope-creep' },
+  ];
+  const H=strata.length*rowH+30;
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="plan strata — three revisions as sediment">`;
+  // column ghosts
+  Object.entries(tasks).forEach(([t,i])=>{ g+=`<text class="gm-faint" x="${tx(i)+BW/2-8}" y="12">${t}</text>`; });
+  strata.forEach((s,si)=>{ const y0=22+si*rowH, cy=y0+rowH/2;
+    g+=`<text class="gm-label" x="8" y="${cy+4}" ${s.live?'fill="var(--accent)"':''}>${s.v}</text>`;
+    if(s.live) g+=`<line class="gm-spine" x1="78" y1="${y0+4}" x2="78" y2="${y0+rowH-8}"/>`;
+    s.has.forEach(t=>{ const x=tx(tasks[t]);
+      const op = s.live ? .8 : (.45 - si*.08);
+      g+=`<rect x="${x}" y="${cy-BH/2}" width="${BW}" height="${BH}" rx="3" fill="var(--ink-soft)" fill-opacity="${op.toFixed(2)}"><title>${t} in ${s.v}</title></rect>`;
+      if(s.added.includes(t)) g+=`<text x="${x-11}" y="${cy+4}" font-size="10" fill="var(--accent)">○</text>`; });
+    // dropped: in this stratum but not in the one above (newer)
+    if(si>0){ const newer=strata[si-1];
+      s.has.filter(t=>!newer.has.includes(t)).forEach(t=>{ const x=tx(tasks[t]);
+        g+=`<text x="${x+BW+4}" y="${cy+4}" font-size="10" fill="var(--bad)">✕</text>`; }); }
+    if(s.seam){ const sy=y0-3;
+      g+=`<line class="gm-seam" x1="78" y1="${sy}" x2="${W-180}" y2="${sy}"/>`;
+      g+=`<text class="gm-tick-label" x="${W-172}" y="${sy+3}">${s.seam}</text>`; }
+  });
+  g+=`</svg>`;
+  document.getElementById('fig-strata').innerHTML=g;
+}
+
+/* ===== 08 replan slopegraph ===== */
+function mountReplan(){
+  const W=540, H=210, xL=140, xR=400;
+  const v2=['design-api','impl-core','wire-cli','write-docs','add-tests'];
+  const v3=['impl-core','design-api','wire-cli','add-tests','polish-ux'];
+  const yAt=i=>34+i*36;
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="replan slopegraph v2 to v3">`;
+  g+=`<text class="gm-faint" x="${xL-14}" y="14" text-anchor="end">plan v2</text><text class="gm-faint" x="${xR+14}" y="14">plan v3 · live</text>`;
+  v2.forEach((t,i)=>{ const y=yAt(i), j=v3.indexOf(t);
+    g+=`<text class="gm-label" x="${xL-14}" y="${y+3}" text-anchor="end">${t}</text>`;
+    if(j<0){ // dropped
+      g+=`<line class="gm-ln-bad" x1="${xL}" y1="${y}" x2="${(xL+xR)/2-26}" y2="${y}" stroke-width="1.4" opacity=".8"/>`;
+      g+=`<text x="${(xL+xR)/2-20}" y="${y+3.5}" font-size="10" fill="var(--bad)">✕ dropped</text>`; return; }
+    const y2=yAt(j), cls = j===i ? 'gm-ln-flat' : '';
+    g+=`<line class="${cls}" x1="${xL}" y1="${y}" x2="${xR}" y2="${y2}" stroke="${j===i?'var(--flat, var(--ink-faint))':'var(--ink-soft)'}" stroke-width="1.4"/>`; });
+  v3.forEach((t,j)=>{ const y=yAt(j);
+    g+=`<text class="gm-label" x="${xR+14}" y="${y+3}">${t}</text>`;
+    if(!v2.includes(t)){
+      g+=`<line x1="${(xL+xR)/2+34}" y1="${y}" x2="${xR}" y2="${y}" stroke="var(--accent)" stroke-width="1.4" stroke-dasharray="4 3"/>`;
+      g+=`<text x="${(xL+xR)/2-2}" y="${y+3.5}" font-size="10" fill="var(--accent)">○ new</text>`; } });
+  g+=`</svg>`;
+  document.getElementById('fig-replan').innerHTML=g;
+}
+
+/* ===== 09 plan reel ===== */
+function mountReel(){
+  const W=880, H=104, xs=[120,340,560,780], rem=[12,9,5,2],
+    trig=['', 'scope-creep', 'goal-drift', 'tool-misuse'];
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="plan reel — remaining work across revisions">`;
+  g+=`<line class="gm-spine" x1="${xs[0]}" y1="56" x2="${xs[3]}" y2="56"/>`;
+  xs.forEach((x,i)=>{
+    if(i>0){ g+=`<text class="gm-tick-label" x="${(xs[i-1]+x)/2-26}" y="34">↯ ${trig[i]}</text>`; }
+    g+=`<circle cx="${x}" cy="56" r="${i===3?6:4.5}" fill="${i===3?'var(--accent)':'var(--panel)'}" stroke="${i===3?'var(--accent)':'var(--ink-soft)'}" stroke-width="1.5"/>`;
+    g+=`<text class="gm-label" x="${x-10}" y="${78}">v${i}</text>`;
+    g+=`<text class="gm-axis" x="${x-22}" y="${94}">${rem[i]} tasks left</text>`;
+    if(i>0){ const drop=rem[i-1]-rem[i];
+      g+=`<text class="gm-good" x="${(xs[i-1]+x)/2-12}" y="${50}" font-size="9.5">−${drop}</text>`; } });
+  g+=`</svg>`;
+  document.getElementById('fig-reel').innerHTML=g;
+}
+
+/* ===== 10 delegation score ===== */
+function mountScore(){
+  const W=880, H=210, padL=96, X=t=>padL+(W-padL-20)*t;
+  const yP=44, yC=96, yT=158;
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="delegation score — fork, run beneath, rejoin">`;
+  [['planner',yP],['coder',yC],['coder ▸ tests',yT]].forEach(([n,y])=>{
+    g+=`<text class="gm-label" x="8" y="${y+4}" ${n.includes('▸')?'opacity=".7"':''}>${n}</text>`;
+    g+=`<line class="hg-gantt-lane-sep" x1="${padL}" y1="${y}" x2="${W-20}" y2="${y}" opacity=".4"/>`; });
+  // planner + coder activity
+  g+=`<rect x="${X(.02)}" y="${yP-6}" width="${X(.2)-X(.02)}" height="12" rx="3" fill="${KIND('llm-call')}" fill-opacity=".55"><title>planner · llm_call</title></rect>`;
+  g+=`<rect x="${X(.26)}" y="${yC-6}" width="${X(.42)-X(.26)}" height="12" rx="3" fill="${KIND('llm-call')}" fill-opacity=".55"><title>coder · llm_call</title></rect>`;
+  g+=`<rect x="${X(.80)}" y="${yC-6}" width="${X(.95)-X(.80)}" height="12" rx="3" fill="${KIND('llm-call')}" fill-opacity=".55" stroke="var(--accent)" stroke-width="2"><title>coder · llm_call · running</title></rect>`;
+  // transfer arc planner→coder
+  g+=`<path class="hg-gantt-edge is-transfer" d="M${X(.21)},${yP+8} C ${X(.23)},${yP+30} ${X(.23)},${yC-28} ${X(.25)},${yC-8}"><title>transfer planner → coder</title></path>`;
+  g+=`<text x="${X(.215)}" y="${(yP+yC)/2+2}" font-size="9" fill="${KIND('transfer')}">⇄</text>`;
+  // delegation: fork at .42, child band .44→.74 (heavy: 38k tokens), rejoin at .76
+  const bh=18; // band height ∝ tokens
+  g+=`<path d="M${X(.42)},${yC+6} C ${X(.43)},${yC+34} ${X(.43)},${yT-26} ${X(.44)},${yT-bh/2}" fill="none" stroke="var(--ink-faint)" stroke-width="1.1"/>`;
+  g+=`<rect x="${X(.44)}" y="${yT-bh/2}" width="${X(.74)-X(.44)}" height="${bh}" rx="3" fill="${KIND('tool-call')}" fill-opacity=".5"><title>delegated: run test suite · 38k tokens</title></rect>`;
+  g+=`<path d="M${X(.74)},${yT-bh/2} C ${X(.75)},${yT-30} ${X(.75)},${yC+30} ${X(.76)},${yC+7}" fill="none" stroke="var(--ink-faint)" stroke-width="1.1"/>`;
+  g+=`<text x="${X(.762)}" y="${yC+24}" font-size="11" fill="var(--good)">✓</text>`;
+  g+=`<text class="gm-faint" x="${X(.46)}" y="${yT+22}">38k tok · band height ∝ cost</text>`;
+  // a pending (planned) delegation — dashed ghost
+  g+=`<rect x="${X(.84)}" y="${yT-6}" width="${X(.97)-X(.84)}" height="12" rx="3" class="hg-gantt-bar is-planned"><title>planned: lint pass</title></rect>`;
+  const nx=X(.95);
+  g+=`<line class="hg-gantt-now" x1="${nx}" y1="14" x2="${nx}" y2="${H-26}"/><circle class="hg-gantt-now-cap" cx="${nx}" cy="14" r="2.5"/>`;
+  g+=`</svg>`;
+  document.getElementById('fig-score').innerHTML=g;
+}
+
+/* ===== 11 transfer chord — DIRECTIONAL =====
+   Agents sit on a semicircle. Direction is encoded three redundant ways:
+   (1) each agent's arc sector splits into an OUTBOUND half (solid, source
+   colour) and an INBOUND half (hollow); (2) each ribbon is an ASYMMETRIC
+   teardrop — pinched at the source, broad at the target — so it visibly
+   flows toward the receiver; (3) a source→target hue plus a small arrowhead
+   landing on the target arc. */
+function chordSVG(o){
+  const W=o.W||560, H=o.H||230, cx=W/2, cyA=o.cyA||(H-26), R=o.R||(W*0.30);
+  const agents=o.agents, flows=o.flows; // flows: [srcIdx, dstIdx, count]
+  const n=agents.length, SECTOR=Math.PI/(n)*0.74; // angular half-width of each sector
+  // angle of agent i along the upper semicircle (left→right)
+  const ang=i=> Math.PI - Math.PI*i/(n-1);
+  const onArc=(th,r)=>[cx+r*Math.cos(th), cyA-r*Math.sin(th)];
+  const aColor=i=> `var(--hg-agent-${i+1})`;
+  // tally outbound / inbound load per agent so we can pack endpoints along the sector
+  const outN=agents.map(()=>0), inN=agents.map(()=>0);
+  flows.forEach(([a,b,c])=>{ outN[a]+=c; inN[b]+=c; });
+  const outUsed=agents.map(()=>0), inUsed=agents.map(()=>0);
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="directional transfer chord — who initiates and who receives">`;
+  // arc sectors: outbound half (leading edge, solid) + inbound half (trailing edge, hollow)
+  agents.forEach((a,i)=>{ const th=ang(i);
+    // outbound occupies [th, th-SECTOR/?]; we render two short concentric arc strokes.
+    const oA=th+SECTOR/2, oB=th+0.04, iA=th-0.04, iB=th-SECTOR/2;
+    const arcStroke=(thA,thB,r,attrs)=>{ const [xA,yA]=onArc(thA,r), [xB,yB]=onArc(thB,r);
+      const large=0; const sweep= thA>thB?1:0;
+      return `<path d="M${xA.toFixed(1)},${yA.toFixed(1)} A${r},${r} 0 ${large} ${sweep} ${xB.toFixed(1)},${yB.toFixed(1)}" fill="none" ${attrs}/>`; };
+    if(outN[i]) g+=arcStroke(oA,oB,R, `stroke="${aColor(i)}" stroke-width="5" stroke-linecap="round" opacity=".9"`);
+    if(inN[i])  g+=arcStroke(iA,iB,R, `stroke="${aColor(i)}" stroke-width="5" stroke-linecap="round" opacity=".9" stroke-dasharray="1.5 2.4"`);
+  });
+  // ribbons: asymmetric teardrop, src→dst hue gradient, arrowhead on the target
+  flows.forEach(([a,b,c],fi)=>{ const ths=ang(a), thd=ang(b);
+    // source endpoint packed in OUTBOUND half; target endpoint packed in INBOUND half
+    const sFrac=(outUsed[a]+c/2)/Math.max(outN[a],1); outUsed[a]+=c;
+    const dFrac=(inUsed[b]+c/2)/Math.max(inN[b],1);  inUsed[b]+=c;
+    const sTh=ths+0.06+ (SECTOR/2-0.06)*sFrac;       // along the outbound half
+    const dTh=thd-0.06- (SECTOR/2-0.06)*dFrac;       // along the inbound half
+    const wS=1.6, wT=Math.max(5, c*1.9);             // pinched at source, broad at target
+    const [sx,sy]=onArc(sTh,R-4), [dx,dy]=onArc(dTh,R-9); // target inset so the arrowhead sits on the arc
+    // tangent at each end spreads the ribbon edges along the arc
+    const tS=[Math.sin(sTh),Math.cos(sTh)], tD=[Math.sin(dTh),Math.cos(dTh)];
+    const s1=[sx+tS[0]*wS/2, sy+tS[1]*wS/2], s2=[sx-tS[0]*wS/2, sy-tS[1]*wS/2];
+    const t1=[dx+tD[0]*wT/2, dy+tD[1]*wT/2], t2=[dx-tD[0]*wT/2, dy-tD[1]*wT/2];
+    // a single shared control point near the centre so the teardrop body bends inward
+    const mid=[(sx+dx)/2 + (cx-(sx+dx)/2)*0.62, (sy+dy)/2 + ((cyA-34)-(sy+dy)/2)*0.5];
+    const gid=`chgrad${fi}`;
+    g+=`<defs><linearGradient id="${gid}" x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${dx.toFixed(1)}" y2="${dy.toFixed(1)}" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="${aColor(a)}" stop-opacity=".35"/><stop offset="1" stop-color="${aColor(b)}" stop-opacity=".95"/></linearGradient></defs>`;
+    g+=`<path fill="url(#${gid})" stroke="none"
+      d="M${s1[0].toFixed(1)},${s1[1].toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${t1[0].toFixed(1)},${t1[1].toFixed(1)}
+         L${t2[0].toFixed(1)},${t2[1].toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${s2[0].toFixed(1)},${s2[1].toFixed(1)} Z">
+      <title>${agents[a]} → ${agents[b]} · ${c} transfers (${agents[a]} initiates)</title></path>`;
+    // arrowhead landing on the target arc, pointing outward at the receiver
+    const outward=[Math.cos(dTh),-Math.sin(dTh)]; // unit vector from centre outward at dst
+    const tip=onArc(dTh,R-1);
+    const base=[tip[0]-outward[0]*8, tip[1]-outward[1]*8];
+    g+=`<path d="M${(base[0]+tD[0]*4).toFixed(1)},${(base[1]+tD[1]*4).toFixed(1)} L${tip[0].toFixed(1)},${tip[1].toFixed(1)} L${(base[0]-tD[0]*4).toFixed(1)},${(base[1]-tD[1]*4).toFixed(1)} Z" fill="${aColor(b)}"/>`;
+  });
+  // nodes + labels
+  agents.forEach((a,i)=>{ const th=ang(i), [x,y]=onArc(th,R);
+    g+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${aColor(i)}"/>`;
+    const lr=R+16, [lx,ly]=onArc(th,lr);
+    const anchor = lx<cx-10?'end':(lx>cx+10?'start':'middle');
+    g+=`<text class="gm-label" x="${lx.toFixed(1)}" y="${(ly+ (ly<40?-2:4)).toFixed(1)}" text-anchor="${anchor}">${a}</text>`; });
+  g+=`</svg>`;
+  return g;
+}
+function mountChord(){
+  document.getElementById('fig-chord').innerHTML = chordSVG({
+    W:560, H:230,
+    agents:['planner','coder','reviewer','tester','goldfive'],
+    flows:[[0,1,6],[0,2,3],[1,3,4],[1,2,2],[4,0,2]] });
+}
+
+/* ===== 12 conductor's marks ===== */
+function mountSteer(){
+  const W=880, H=140, padL=96, X=t=>padL+(W-padL-20)*t, yL=46, yM=104;
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="conductor's marks — operator steering in the margin">`;
+  g+=`<text class="gm-label" x="8" y="${yL+4}">coder</text>`;
+  g+=`<text class="gm-faint" x="8" y="${yM+4}">operator</text>`;
+  g+=`<line class="hg-gantt-lane-sep" x1="${padL}" y1="${yM-14}" x2="${W-20}" y2="${yM-14}" opacity=".5"/>`;
+  // lane: work → waiting → work → gate → running
+  g+=`<rect x="${X(.02)}" y="${yL-6}" width="${X(.28)-X(.02)}" height="12" rx="3" fill="${KIND('llm-call')}" fill-opacity=".55"/>`;
+  g+=`<rect x="${X(.28)}" y="${yL-6}" width="${X(.42)-X(.28)}" height="12" rx="3" fill="${KIND('wait-for-human')}" fill-opacity=".30" stroke="${KIND('wait-for-human')}" stroke-dasharray="3 2" stroke-width="1"><title>waiting for human · 14s</title></rect>`;
+  g+=`<rect x="${X(.42)}" y="${yL-6}" width="${X(.60)-X(.42)}" height="12" rx="3" fill="${KIND('tool-call')}" fill-opacity=".55"/>`;
+  g+=`<rect x="${X(.64)}" y="${yL-6}" width="${X(.86)-X(.64)}" height="12" rx="3" fill="${KIND('llm-call')}" fill-opacity=".55" stroke="var(--accent)" stroke-width="2"><title>running</title></rect>`;
+  // gate at .62
+  g+=`<circle class="gm-gate" cx="${X(.62)}" cy="${yL}" r="6"><title>approval gate</title></circle>`;
+  g+=`<text x="${X(.62)-3.5}" y="${yL+3.5}" font-size="9" fill="var(--good)">✓</text>`;
+  g+=`<text class="gm-faint" x="${X(.595)}" y="${yL-14}">gate</text>`;
+  // margin marks
+  g+=`<text x="${X(.28)-4}" y="${yM+4}" font-size="11" fill="${KIND('wait-for-human')}"><title>paused for human @ 28%</title>◷</text>`;
+  g+=`<line class="gm-tick" x1="${X(.42)}" y1="${yM-9}" x2="${X(.42)}" y2="${yM+5}" stroke="var(--accent)"/>`;
+  g+=`<text class="gm-faint" x="${X(.435)}" y="${yM+4}">“prefer the streaming api” — steer</text>`;
+  g+=`<text x="${X(.62)-4}" y="${yM+4}" font-size="10" fill="var(--good)"><title>approved @ 62%</title>✓</text>`;
+  const nx=X(.86);
+  g+=`<line class="hg-gantt-now" x1="${nx}" y1="16" x2="${nx}" y2="${yM-20}"/><circle class="hg-gantt-now-cap" cx="${nx}" cy="16" r="2.5"/>`;
+  g+=`</svg>`;
+  document.getElementById('fig-steer').innerHTML=g;
+}
+
+/* ===== 13 context tide ===== */
+function mountTide(){
+  const W=880, H=120, padL=96, X=t=>padL+(W-padL-20)*t, base=96, top=22;
+  const keys=[[0,.12],[.18,.34],[.34,.58],[.48,.78],[.55,.80],[.555,.34],[.7,.52],[.85,.68],[1,.72]];
+  const yOf=v=>base-(base-top)*v;
+  const pts=[]; for(let i=0;i<=400;i++){ const t=i/400; pts.push([X(t), yOf(lerpKeys(keys,t)), lerpKeys(keys,t), t]); }
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="context tide — window occupancy with a compaction relief seam">`;
+  g+=`<text class="gm-label" x="8" y="${(base+top)/2}">coder ctx</text>`;
+  g+=`<line class="gm-onplan" x1="${X(0)}" y1="${top}" x2="${X(1)}" y2="${top}"/><text class="gm-faint" x="${X(0)}" y="${top-6}">window limit</text>`;
+  // base area
+  g+=`<path d="${P(pts)} L${X(1)},${base} L${X(0)},${base} Z" fill="var(--accent)" fill-opacity=".10"/>`;
+  g+=`<path d="${P(pts)}" fill="none" stroke="var(--accent)" stroke-width="1" opacity=".6"/>`;
+  // caution overlay where v > .72
+  let seg=null; const segs=[];
+  pts.forEach(p=>{ if(p[2]>.72){ if(!seg) seg=[]; seg.push(p); } else if(seg){ segs.push(seg); seg=null; } });
+  if(seg) segs.push(seg);
+  segs.forEach(s=>{ const lim=yOf(.72);
+    const poly=s.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')+` ${s[s.length-1][0].toFixed(1)},${lim} ${s[0][0].toFixed(1)},${lim}`;
+    g+=`<polygon points="${poly}" fill="var(--caution)" fill-opacity=".30"/>`; });
+  // compaction seam
+  const sx=X(.553);
+  g+=`<line class="gm-seam" x1="${sx}" y1="${top-2}" x2="${sx}" y2="${base+4}"/>`;
+  g+=`<text class="gm-faint" x="${sx+5}" y="${base-44}">compaction · −46%</text>`;
+  for(let i=0;i<=4;i++){ g+=`<text class="gm-axis" x="${X(i/4)-6}" y="${H-6}">${i*25}%</text>`; }
+  g+=`</svg>`;
+  document.getElementById('fig-tide').innerHTML=g;
+}
+
+/* ===== 14 plan DAG ===== */
+function mountDag(){
+  const W=880, H=200;
+  const NODES = {
+    'design-api': {x:90,  y:96,  st:'done'},
+    'impl-core':  {x:310, y:96,  st:'done'},
+    'wire-cli':   {x:530, y:56,  st:'running'},
+    'run-suite':  {x:530, y:136, st:'done'},
+    'polish-ux':  {x:750, y:96,  st:'pending'},
+    'write-docs': {x:310, y:170, st:'ghost'},
+  };
+  const EDGES = [ ['design-api','impl-core',1], ['impl-core','wire-cli',1], ['impl-core','run-suite',0],
+                  ['wire-cli','polish-ux',1], ['run-suite','polish-ux',0], ['design-api','write-docs','ghost'] ];
+  const BW=128, BH=26;
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="plan dependency DAG with the critical path as the accent spine">`;
+  EDGES.forEach(([a,b,crit])=>{ const A=NODES[a], B=NODES[b];
+    const x0=A.x+BW/2, y0=A.y, x1=B.x-BW/2, y1=B.y, c=(x0+x1)/2;
+    const stroke = crit===1 ? 'var(--accent)' : 'var(--ink-faint)';
+    const extra = crit==='ghost' ? ` stroke-dasharray="3 4" opacity=".45"` : crit===1 ? ` stroke-width="2"` : ` stroke-width="1" opacity=".6"`;
+    g+=`<path d="M${x0},${y0} C ${c},${y0} ${c},${y1} ${x1},${y1}" fill="none" stroke="${stroke}"${extra} vector-effect="non-scaling-stroke"><title>${a} → ${b}${crit===1?' · critical path':crit==='ghost'?' · severed at replan v2':''}</title></path>`; });
+  Object.entries(NODES).forEach(([id,n])=>{
+    const ghost = n.st==='ghost';
+    const stroke = n.st==='done' ? 'var(--good)' : n.st==='running' ? 'var(--accent)' : ghost ? 'var(--rule)' : 'var(--ink-faint)';
+    const glyph = n.st==='done' ? ['✓','var(--good)'] : n.st==='running' ? ['●','var(--accent)'] : ghost ? ['✕','var(--bad)'] : ['○','var(--ink-faint)'];
+    g+=`<rect x="${n.x-BW/2}" y="${n.y-BH/2}" width="${BW}" height="${BH}" rx="4" fill="var(--panel)" stroke="${stroke}" stroke-width="${n.st==='running'?2:1.2}"${ghost?` stroke-dasharray="4 3" opacity=".55"`:''} tabindex="0" vector-effect="non-scaling-stroke"><title>${id} · ${ghost?'dropped at replan v2':n.st}</title></rect>`;
+    g+=`<text x="${n.x-BW/2+10}" y="${n.y+3.5}" font-size="10.5" fill="${ghost?'var(--ink-faint)':'var(--ink-soft)'}"${ghost?` opacity=".7" text-decoration="line-through"`:''}>${id}</text>`;
+    g+=`<text x="${n.x+BW/2-17}" y="${n.y+4}" font-size="10" fill="${glyph[1]}">${glyph[0]}</text>`; });
+  g+=`<text class="gm-faint" x="12" y="${H-10}">layers = dependency depth · the accent spine = the critical path · ghost = dropped at a replan</text>`;
+  g+=`</svg>`;
+  document.getElementById('fig-dag').innerHTML=g;
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('[data-theme-picker]').forEach(buildPicker);
+  mountFP(); mountSeismo(); mountHeart(); mountLadders(); mountSlopes(); mountSankey();
+  mountStrata(); mountReplan(); mountReel(); mountScore(); mountChord(); mountSteer(); mountTide(); mountDag();
+});
+</script>
+<script>window.__EMBED_CFG__ = { optSel: '[data-opt]', bareHide: ['h2', '.rationale', '.legend', '.ba-tag'] };</script>
+<script src="_embed.js"></script>
+</body>
+</html>

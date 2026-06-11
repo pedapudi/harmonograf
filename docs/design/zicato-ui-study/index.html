@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="monokai">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>harmonograf × zicato — UI study</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_tokens.css">
+<link rel="stylesheet" href="_study.css">
+<style>
+  .hero-thesis { border:1px solid var(--rule); border-left:3px solid var(--accent); border-radius:0 var(--r-panel) var(--r-panel) 0;
+    background:var(--panel); padding:18px 20px; margin:18px 0 26px; }
+  .hero-thesis p { margin:0 0 10px; font-size:13.5px; color:var(--ink); max-width:92ch; }
+  .hero-thesis p:last-child { margin-bottom:0; }
+  .hero-thesis b { color:var(--accent); }
+  .axes { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:14px 0 0; }
+  @media (max-width:760px){ .axes { grid-template-columns:1fr; } }
+  .axis { border:1px dashed var(--rule); border-radius:var(--r-panel); padding:12px 14px; background:var(--panel-2); }
+  .axis h4 { margin:0 0 8px; font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--ink-faint); }
+  .axis .row { display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--ink-soft); margin:5px 0; }
+  .axis .sw { width:16px; height:11px; border-radius:2px; flex:none; }
+  .axis .mk { width:18px; height:13px; border-radius:2px; flex:none; display:inline-flex; align-items:center; justify-content:center; font-size:10px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px,1fr)); gap:14px; margin:8px 0 0; }
+  a.surface-card { display:block; border:1px solid var(--rule); border-radius:var(--r-card); background:var(--panel);
+    padding:16px 18px; text-decoration:none; transition:border-color .12s, transform .12s; }
+  a.surface-card:hover { border-color:var(--accent); transform:translateY(-1px); text-decoration:none; }
+  a.surface-card .sc-name { font-size:14px; font-weight:700; color:var(--ink); display:flex; align-items:baseline; gap:8px; }
+  a.surface-card .sc-arrow { color:var(--accent); margin-left:auto; }
+  a.surface-card .sc-desc { font-size:11.5px; color:var(--ink-soft); margin-top:6px; line-height:1.5; }
+  a.surface-card.compose { border-style:dashed; }
+  .themewall { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:8px; margin-top:8px; }
+  .twcell { border:1px solid var(--rule); border-radius:var(--r-panel); overflow:hidden; cursor:pointer; background:var(--panel); }
+  .twcell .tw-strip { display:flex; height:26px; }
+  .twcell .tw-strip span { flex:1; }
+  .twcell .tw-name { font-size:10px; color:var(--ink-soft); padding:4px 7px; display:flex; justify-content:space-between; }
+  .twcell.active { border-color:var(--accent); }
+  .twcell.active .tw-name { color:var(--accent); }
+</style>
+</head>
+<body>
+<header class="study">
+  <span class="brand-row"><span data-brand-mark="24"></span><span data-brand-wordmark></span></span>
+  <h1>harmonograf — a UI study in the zicato design language</h1>
+  <span class="spacer"></span>
+  <span class="theme-pick-label">theme</span>
+  <span data-theme-picker></span>
+</header>
+
+<main class="study">
+  <p class="lede" style="margin-top:22px">
+    harmonograf is a multi-agent coordination console — a Gantt-forward instrument for watching many agents, 9 span kinds
+    and goldfive's steering unfold over wall-clock. This study redraws it in <b>zicato's design language</b>: Tufte
+    data-ink line-art, a calm mono ground, theme-adaptive by pure CSS swap. It is a <b>design artifact</b> — standalone
+    HTML/CSS/JS, no build step, opens from <code>file://</code> — theme-switchable across all 16 Console palettes.
+  </p>
+
+  <section class="study">
+    <h2>The thesis — a full categorical palette, sourced from terminal ANSI</h2>
+    <div class="hero-thesis">
+      <p>zicato spends exactly <b>one green accent</b> on a neutral ground — perfect for a binary promote/reject surface.
+        harmonograf is a <b>categorical instrument</b>: it needs many distinguishable hues at once. So this study
+        <b>keeps the full categorical palette</b> — but sources every categorical hue from the active theme's
+        <b>terminal ANSI palette</b> (the Gogh scheme each zicato theme derives from). Switch the theme: the whole
+        categorical encoding re-skins, ANSI and all.</p>
+      <p>That keeps harmonograf's elegant <b>2-axis encoding</b> intact while honoring zicato's "earned by direction"
+        rule. KIND is an identity hue; STATUS is a treatment. good / bad / accent appear <b>only</b> for status — so a
+        span is never red for what it is, only when it failed.</p>
+      <div class="axes">
+        <div class="axis">
+          <h4>KIND = hue (ANSI slot)</h4>
+          <div class="row"><span class="sw" style="background:var(--hg-kind-llm-call);opacity:.6"></span> LLM_CALL — blue</div>
+          <div class="row"><span class="sw" style="background:var(--hg-kind-tool-call);opacity:.6"></span> TOOL_CALL — cyan</div>
+          <div class="row"><span class="sw" style="background:var(--hg-kind-user-message);opacity:.6"></span> USER_MESSAGE — green</div>
+          <div class="row"><span class="sw" style="background:var(--hg-kind-transfer);opacity:.6"></span> TRANSFER — yellow</div>
+          <div class="row"><span class="sw" style="background:var(--hg-kind-wait-for-human);opacity:.6"></span> WAIT_FOR_HUMAN — magenta</div>
+        </div>
+        <div class="axis">
+          <h4>STATUS = treatment (role)</h4>
+          <div class="row"><span class="mk" style="border:2px solid var(--accent)"></span> RUNNING — accent + breathe (now)</div>
+          <div class="row"><span class="mk" style="background:var(--bad);color:var(--paper)">✕</span> FAILED — bad + glyph</div>
+          <div class="row"><span class="mk" style="background:var(--good)"></span> COMPLETED ok — good</div>
+          <div class="row"><span class="mk" style="background:var(--hg-kind-tool-call);opacity:.32"></span> PENDING — faint (neutral, not red)</div>
+          <div class="row"><span class="mk" style="background:var(--ink-faint);opacity:.4"></span> CANCELLED — hatch</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="study">
+    <h2>The surfaces</h2>
+    <div class="cards">
+      <a class="surface-card" href="shell.html">
+        <div class="sc-name">shell <span class="sc-arrow">→</span></div>
+        <div class="sc-desc">The chrome: AppBar → console topbar (the harmonograf α mark + plain-letter wordmark, breadcrumbs,
+          status / RUN pill), NavRail, CurrentTaskStrip, TransportBar, inspector Drawer. Before/after per element.</div>
+      </a>
+      <a class="surface-card" href="gantt.html">
+        <div class="sc-name">gantt <span class="sc-arrow">→</span></div>
+        <div class="sc-desc"><b>The hero.</b> The execution timeline in line-art: categorical kind hues, status treatments,
+          the accent now-cursor, agent lifelines, context band. Both the SVG and canvas options.</div>
+      </a>
+      <a class="surface-card" href="sequence.html">
+        <div class="sc-name">sequence <span class="sc-arrow">→</span></div>
+        <div class="sc-desc"><b>How the agents talk to one another.</b> The agent-interaction sequence diagram
+          (lifelines down, time down, each message a directional connector) paired with the directional transfer
+          chord for topology; the horizontal score is the Gantt-companion alternative. Lifelines stay neutral;
+          messages carry the kind hue; direction is explicit.</div>
+      </a>
+      <a class="surface-card" href="figures.html">
+        <div class="sc-name">figures <span class="sc-arrow">→</span></div>
+        <div class="sc-desc">The component catalogue: OrchestrationTimeline, TaskStages, LiveActivity
+          (<code>.dn-board-table</code>), Interventions (goldfive steering), the ⌘K SessionPicker.</div>
+      </a>
+      <a class="surface-card" href="brand.html">
+        <div class="sc-name">brand <span class="sc-arrow">→</span></div>
+        <div class="sc-desc"><b>harmonograf's own mark.</b> A logo study for the standalone console — the double namesake
+          (Adamiecki's 1896 harmonogram × the Victorian harmonograph), four line-art marks generated live from the
+          damped-oscillator equations, wordmark, favicon cuts, the accent question.</div>
+      </a>
+      <a class="surface-card" href="grammar.html">
+        <div class="sc-name">grammar <span class="sc-arrow">→</span></div>
+        <div class="sc-desc"><b>Fourteen new figures.</b> Drift seismograph, intervention ladder, correction slopegraphs,
+          drift sankey, plan strata, replan slopegraph, plan DAG (critical path as the spine), delegation score,
+          transfer chord, conductor's marks, context tide, the harmonograph session fingerprint.</div>
+      </a>
+      <a class="surface-card compose" href="compose.html">
+        <div class="sc-name">compose <span class="sc-arrow">→</span></div>
+        <div class="sc-desc"><b>The full console, interactive.</b> The gantt stands alone as the hero view; one
+          coalesced instruments view leads with the plan — the reel sits above the DAG and <b>drives</b> it (click a
+          revision; the DAG redraws that version, added in accent, dropped ghosted) — then sequence, the projectable
+          topology chord, and one time-track stack: the drift seismograph with the judge heartbeat folded in, over a
+          time-aligned intervention ladder. Sessions switch only through the ⌘K fingerprint picker; spans → inspector.</div>
+      </a>
+    </div>
+  </section>
+
+  <section class="study">
+    <h2>Sixteen themes — the re-skin</h2>
+    <p class="rationale">Every mark on every page reads <code>--v2-*</code> roles + <code>--ansi-*</code> categorical from
+      <code>_tokens.css</code>. Click any palette to set it across the whole study (persists). The strip is
+      <em>ground · panel · ink · good · bad · accent</em>.</p>
+    <div class="themewall" id="themewall"></div>
+  </section>
+</main>
+
+<footer class="study">
+  harmonograf UI study · the bar is zicato's own <code>tournament-viz-study</code> · token-only colour · fit-to-width ·
+  reduced-motion-aware · verified in <code>paper</code> + <code>monokai</code>. Foundation &amp; decisions:
+  <a href="STYLE-GUIDE.md">STYLE-GUIDE.md</a> · palette: <a href="_refs/gogh-palettes.json">gogh-palettes.json</a>.
+</footer>
+
+<!-- shared chrome -->
+<script>
+window.THEME_IDS = ['monokai','solarized-dark','solarized-light','google-light','google-dark',
+  'lunaria-light','lunaria-eclipse','belafonte-day','belafonte-night','paper','zenburn',
+  'selenized-black','relaxed','espresso','dracula','ubuntu'];
+const THEME_SWATCHES = {
+  'monokai':['#1e1f1c','#272822','#f8f8f2','#a6e22e','#f92672','#66d9ef'],
+  'solarized-dark':['#04222B','#0A2D38','#93A1A1','#8BB80E','#E0483C','#2AA198'],
+  'solarized-light':['#FDF6E3','#FBF1D6','#586E75','#6B9B0B','#DC322F','#268BD2'],
+  'google-light':['#FFFFFF','#F4F4F4','#474A4E','#34A853','#EA4335','#1B9CB8'],
+  'google-dark':['#202124','#2C2D30','#FFFFFF','#34A853','#EA4335','#24C1E0'],
+  'lunaria-light':['#EBE4E1','#E2DCD9','#363434','#497D46','#783C1F','#3778A9'],
+  'lunaria-eclipse':['#323F46','#3B484F','#DFE2ED','#BEDBC1','#BA9088','#C8429F'],
+  'belafonte-day':['#D5CCBA','#CCC3B2','#34292D','#6E6A4E','#BE100E','#426A79'],
+  'belafonte-night':['#20111B','#271821','#D5CCBA','#A6A07A','#D6403E','#6F8E97'],
+  'paper':['#F2EEDE','#E6E2D3','#1A1A1A','#216609','#CC3E28','#1E6FCC'],
+  'zenburn':['#3A3A3A','#424241','#DCDCCC','#8FB28F','#CC9393','#8CD0D3'],
+  'selenized-black':['#181818','#202020','#DEDEDE','#83C746','#FF5E56','#56D8C9'],
+  'relaxed':['#353A44','#3D424B','#F7F7F7','#A0AC77','#BC5653','#7EAAC7'],
+  'espresso':['#323232','#3A3A3A','#FFFFFF','#A5C261','#D25252','#6C99BB'],
+  'dracula':['#282A36','#343746','#F8F8F2','#50FA7B','#FF5555','#BD93F9'],
+  'ubuntu':['#300A24','#3D1530','#EEEEEC','#8AE234','#CC0000','#34E2E2'],
+};
+const THEME_LABELS = {'monokai':'Monokai','solarized-dark':'Solarized Dark','solarized-light':'Solarized Light',
+  'google-light':'Google Light','google-dark':'Google Dark','lunaria-light':'Lunaria Light','lunaria-eclipse':'Lunaria Eclipse',
+  'belafonte-day':'Belafonte Day','belafonte-night':'Belafonte Night','paper':'Paper','zenburn':'Zenburn',
+  'selenized-black':'Selenized Black','relaxed':'Relaxed','espresso':'Espresso','dracula':'Dracula','ubuntu':'Ubuntu'};
+const THEME_KEY = 'hgraf-study-theme';
+let themeListeners = []; function onThemeChange(fn){ themeListeners.push(fn); }
+function swatchStrip(id, sm){ const t = THEME_SWATCHES[id] || [];
+  return `<span class="dt-swatch-strip${sm?' dt-swatch-strip-sm':''}">`+t.map(c=>`<span class="dt-swatch" style="background:${c}"></span>`).join('')+`</span>`; }
+function currentTheme(){ return document.documentElement.getAttribute('data-theme') || 'monokai'; }
+function applyTheme(id){ document.documentElement.setAttribute('data-theme', id);
+  try { localStorage.setItem(THEME_KEY, id); } catch(e){}
+  document.querySelectorAll('[data-theme-picker]').forEach(buildPicker);
+  themeListeners.forEach(fn=>{ try{fn();}catch(e){} }); }
+function buildPicker(host){ const cur = currentTheme();
+  host.innerHTML = `<div class="dt-cd"><button class="dt-cd-trigger" aria-haspopup="listbox" aria-expanded="false">${swatchStrip(cur,true)}<span class="dt-cd-name">${THEME_LABELS[cur]}</span><span class="dt-cd-caret" aria-hidden="true">▾</span></button><div class="dt-cd-list" role="listbox" aria-label="theme">${window.THEME_IDS.map(id=>`<div class="dt-cd-option" role="option" data-id="${id}" aria-selected="${id===cur}">${swatchStrip(id)}<span class="dt-cd-name">${THEME_LABELS[id]}</span></div>`).join('')}</div></div>`;
+  const cd = host.querySelector('.dt-cd'), trig = host.querySelector('.dt-cd-trigger');
+  trig.addEventListener('click', e=>{ e.stopPropagation(); const open = cd.classList.toggle('dt-cd-open'); trig.setAttribute('aria-expanded', open); });
+  host.querySelectorAll('.dt-cd-option').forEach(o=> o.addEventListener('click', ()=>{ applyTheme(o.dataset.id); cd.classList.remove('dt-cd-open'); })); }
+document.addEventListener('click', ()=> document.querySelectorAll('.dt-cd-open').forEach(c=>c.classList.remove('dt-cd-open')));
+(function initTheme(){ let saved=null; try { saved=localStorage.getItem(THEME_KEY); } catch(e){}
+  const P=new URLSearchParams(location.search), fromUrl=P.get('theme');
+  const id=(fromUrl&&window.THEME_IDS.includes(fromUrl))?fromUrl:(saved&&window.THEME_IDS.includes(saved))?saved:'monokai';
+  document.documentElement.setAttribute('data-theme', id); })();
+/* harmonograf brand — the Option-D alpha: one period of the 2:3 Lissajous,
+   MIRRORED about the vertical axis (x = cx − A·cos2t, y = cy + B·sin3t) so the
+   knot reads as a lowercase α — still a Lissajous, loop left, tails right.
+   Stroke currentColor; the one dot rides the lower-right tail tip: the pen at
+   rest. ONE ALPHA PER LOCKUP: beside this mark the wordmark is PLAIN LETTERS
+   (the glyph already carries the α and the dot); only a STANDALONE wordmark
+   spells the "a" of graf with the drawn α. */
+function hgAlphaPath(cx, cy, A, B){ const pts=[];
+  for(let i=0;i<=240;i++){ const t=2*Math.PI*i/240;
+    pts.push((cx - A*Math.cos(2*t)).toFixed(2)+','+(cy + B*Math.sin(3*t)).toFixed(2)); }
+  return 'M'+pts.join(' L')+' Z'; }
+function hgBrandMarkSVG(h){ return `<svg class="hg-brand-mark" style="height:${h||24}px" viewBox="0 0 48 48" role="img" aria-label="harmonograf" focusable="false"><path d="${hgAlphaPath(24,24,19,15)}" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="43" cy="39" r="3.2" fill="var(--hgraf-brand, #5EA3EC)"/></svg>`; }
+function hgWordmarkSVG(){ const T='harmonograf', X0=1, ADV=9.6, BASE=15; const W=X0*2+T.length*ADV;
+  return `<svg class="hg-brand-name" viewBox="0 0 ${W} 18" role="img" aria-label="harmonograf" focusable="false"><text x="${X0}" y="${BASE}" font-family="var(--brand-mono)" font-size="15" font-weight="700" textLength="${T.length*ADV}" lengthAdjust="spacing" fill="currentColor" xml:space="preserve">${T}</text></svg>`; }
+function mountBrand(){ document.querySelectorAll('[data-brand-mark]').forEach(n=>{ n.innerHTML=hgBrandMarkSVG(+n.dataset.brandMark||24); });
+  document.querySelectorAll('[data-brand-wordmark]').forEach(n=>{ n.innerHTML=hgWordmarkSVG(); }); }
+
+function buildThemewall(){
+  const host=document.getElementById('themewall'); if(!host) return;
+  const cur=currentTheme();
+  host.innerHTML = window.THEME_IDS.map(id=>{
+    const t=THEME_SWATCHES[id];
+    return `<div class="twcell${id===cur?' active':''}" data-id="${id}" role="button" tabindex="0" aria-label="${THEME_LABELS[id]}">
+      <div class="tw-strip">${t.map(c=>`<span style="background:${c}"></span>`).join('')}</div>
+      <div class="tw-name"><span>${THEME_LABELS[id]}</span><span>${id===cur?'●':''}</span></div>
+    </div>`;
+  }).join('');
+  host.querySelectorAll('.twcell').forEach(c=>{
+    c.addEventListener('click', ()=>applyTheme(c.dataset.id));
+    c.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); applyTheme(c.dataset.id); } });
+  });
+}
+onThemeChange(buildThemewall);
+window.addEventListener('DOMContentLoaded', ()=>{
+  document.querySelectorAll('[data-theme-picker]').forEach(buildPicker);
+  mountBrand(); buildThemewall();
+});
+</script>
+</body>
+</html>

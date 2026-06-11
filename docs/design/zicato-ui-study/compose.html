@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="monokai">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>harmonograf — the composed console (interactive)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_tokens.css">
+<link rel="stylesheet" href="_study.css">
+<style>
+  body { padding: 0; overflow: hidden; }
+  /* keep the header positioned: it loses the base rule's z-index as static, and
+     the .app paints after it — the open theme dropdown must clear the app */
+  header.study { position: relative; z-index: 60; }
+  .prop-note { font-size: 10.5px; color: var(--ink-faint); }
+
+  .app { height: calc(100vh - 59px); display: flex; flex-direction: column; min-height: 0; position: relative; }
+  /* rail (observatory) · main · inspector — sessions live ONLY in the ⌘K picker */
+  .app-body { flex: 1; display: grid; min-height: 0;
+    grid-template-columns: 84px minmax(0,1fr) auto; }
+  .app-main { overflow: auto; padding: 14px 18px; min-width: 0; }
+  .app-main h3 { font-size: 10.5px; text-transform: uppercase; letter-spacing: .12em; color: var(--ink-faint);
+    margin: 16px 0 8px; font-weight: 600; }
+  .app-main h3:first-child { margin-top: 0; }
+  .panes-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 1100px) { .panes-2 { grid-template-columns: 1fr; } }
+
+  .hg-drawer-host { width: 0; overflow: hidden; transition: width .16s ease; }
+  .hg-drawer-host.open { width: 320px; }
+  .hg-drawer-host .hg-drawer { width: 320px; }
+  .hg-drawer-close { background: transparent; border: none; color: var(--ink-faint); cursor: pointer;
+    font: inherit; font-size: 14px; padding: 2px 6px; border-radius: 4px; }
+  .hg-drawer-close:hover { color: var(--ink); background: var(--rule-soft); }
+
+  .margin-item { font-size: 10.5px; color: var(--ink-soft); margin: 4px 0; }
+
+  /* chord interactivity: hover/click an agent to PROJECT its conversations */
+  .topo-chord g[data-agent] { cursor: pointer; }
+  .topo-chord [data-ribbon], .topo-chord [data-ahead], .topo-chord [data-agent] { transition: opacity .15s ease; }
+  .tch-count { fill: var(--ink); font-size: 9px; font-variant-numeric: tabular-nums; pointer-events: none;
+    paint-order: stroke; stroke: var(--paper); stroke-width: 3px; opacity: 0; transition: opacity .15s ease; }
+
+  .sess-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+  .sess-title { font-size: 15px; font-weight: 700; }
+  .sess-stats { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  .sq-act { fill-opacity: .55; } .sq-act:hover { fill-opacity: 1; }
+  .sq-staff { stroke: var(--rule); stroke-width: 1; vector-effect: non-scaling-stroke; }
+  .sq-life { stroke: var(--rule); stroke-width: 1.1; stroke-dasharray: 1 4; vector-effect: non-scaling-stroke; }
+  .sq-chip { fill: var(--panel); stroke: var(--rule); }
+  .sq-msg { fill: none; stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+  .sq-head { stroke-width: 1.2; fill: none; vector-effect: non-scaling-stroke; }
+  .sq-name { fill: var(--ink); font-size: 10px; font-weight: 500; }
+  .sq-lbl { fill: var(--ink-soft); font-size: 8.5px; }
+  .gm-onplan { stroke: var(--ink-faint); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+  .gm-tol { fill: var(--good); fill-opacity: .07; }
+  .gm-trace { stroke: var(--ink); stroke-width: 1.3; fill: none; vector-effect: non-scaling-stroke; }
+  .gm-excursion { fill: var(--bad); fill-opacity: .14; }
+  .gm-tick { stroke: var(--caution); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .gm-tick-label { fill: var(--caution); font-size: 8.5px; }
+  .gm-label { fill: var(--ink-soft); font-size: 10px; }
+  .gm-faint { fill: var(--ink-faint); font-size: 9px; }
+  .gm-axis { fill: var(--ink-faint); font-size: 9px; font-variant-numeric: tabular-nums; }
+  .gm-seam { stroke: var(--rule); stroke-width: 1; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+  .gm-spine { stroke: var(--accent); stroke-width: 2.2; vector-effect: non-scaling-stroke; }
+  .gantt-click .hg-gantt-bar, .gantt-click .sq-act { cursor: pointer; }
+
+  /* the plan reel drives the DAG: each version stop is a button */
+  .plan-reel .reel-stop[data-ver] { cursor: pointer; }
+  .plan-reel .reel-stop[data-ver]:hover .reel-hit,
+  .plan-reel .reel-stop[data-ver]:focus-visible .reel-hit { fill: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .plan-reel .reel-stop[data-ver]:focus { outline: none; }
+  .plan-reel .reel-stop[data-ver]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 50%; }
+  #dag-host, .reel-host { display: block; }
+
+  /* the coordinated time-track stack: seismograph over the time-aligned ladder.
+     They share padL/padR/width, so a reading at t lines up vertically. */
+  .track-stack { display: block; }
+  .track-stack .track-sub { font-size: 9.5px; color: var(--ink-faint); margin: 2px 0 0; padding-left: 76px; }
+</style>
+</head>
+<body>
+
+<header class="study">
+  <span class="brand-row"><span data-brand-mark="22"></span><span data-brand-wordmark></span></span>
+  <h1>the composed console</h1>
+  <span class="prop-note">the gantt stands alone · the instruments coalesce plans (DAG + reel), sequence, topology &amp; drift · sessions live in the ⌘K picker</span>
+  <span class="spacer"></span>
+  <span class="theme-pick-label">theme</span>
+  <span data-theme-picker></span>
+</header>
+
+<div class="app" id="app"></div>
+
+<script>
+/* ===== theme picker (study-standard) ===== */
+window.THEME_IDS = ['monokai','solarized-dark','solarized-light','google-light','google-dark',
+  'lunaria-light','lunaria-eclipse','belafonte-day','belafonte-night','paper','zenburn',
+  'selenized-black','relaxed','espresso','dracula','ubuntu'];
+const THEME_SWATCHES = {
+  'monokai':['#1e1f1c','#272822','#f8f8f2','#a6e22e','#f92672','#66d9ef'],
+  'solarized-dark':['#04222B','#0A2D38','#93A1A1','#8BB80E','#E0483C','#2AA198'],
+  'solarized-light':['#FDF6E3','#FBF1D6','#586E75','#6B9B0B','#DC322F','#268BD2'],
+  'google-light':['#FFFFFF','#F4F4F4','#474A4E','#34A853','#EA4335','#1B9CB8'],
+  'google-dark':['#202124','#2C2D30','#FFFFFF','#34A853','#EA4335','#24C1E0'],
+  'lunaria-light':['#EBE4E1','#E2DCD9','#363434','#497D46','#783C1F','#3778A9'],
+  'lunaria-eclipse':['#323F46','#3B484F','#DFE2ED','#BEDBC1','#BA9088','#C8429F'],
+  'belafonte-day':['#D5CCBA','#CCC3B2','#34292D','#6E6A4E','#BE100E','#426A79'],
+  'belafonte-night':['#20111B','#271821','#D5CCBA','#A6A07A','#D6403E','#6F8E97'],
+  'paper':['#F2EEDE','#E6E2D3','#1A1A1A','#216609','#CC3E28','#1E6FCC'],
+  'zenburn':['#3A3A3A','#424241','#DCDCCC','#8FB28F','#CC9393','#8CD0D3'],
+  'selenized-black':['#181818','#202020','#DEDEDE','#83C746','#FF5E56','#56D8C9'],
+  'relaxed':['#353A44','#3D424B','#F7F7F7','#A0AC77','#BC5653','#7EAAC7'],
+  'espresso':['#323232','#3A3A3A','#FFFFFF','#A5C261','#D25252','#6C99BB'],
+  'dracula':['#282A36','#343746','#F8F8F2','#50FA7B','#FF5555','#BD93F9'],
+  'ubuntu':['#300A24','#3D1530','#EEEEEC','#8AE234','#CC0000','#34E2E2'],
+};
+const THEME_LABELS = {'monokai':'Monokai','solarized-dark':'Solarized Dark','solarized-light':'Solarized Light',
+  'google-light':'Google Light','google-dark':'Google Dark','lunaria-light':'Lunaria Light','lunaria-eclipse':'Lunaria Eclipse',
+  'belafonte-day':'Belafonte Day','belafonte-night':'Belafonte Night','paper':'Paper','zenburn':'Zenburn',
+  'selenized-black':'Selenized Black','relaxed':'Relaxed','espresso':'Espresso','dracula':'Dracula','ubuntu':'Ubuntu'};
+const THEME_KEY = 'hgraf-study-theme';
+function swatchStrip(id, sm){ const t = THEME_SWATCHES[id] || [];
+  return `<span class="dt-swatch-strip${sm?' dt-swatch-strip-sm':''}">`+t.map(c=>`<span class="dt-swatch" style="background:${c}"></span>`).join('')+`</span>`; }
+function currentTheme(){ return document.documentElement.getAttribute('data-theme') || 'monokai'; }
+function applyTheme(id){ document.documentElement.setAttribute('data-theme', id);
+  try { localStorage.setItem(THEME_KEY, id); } catch(e){}
+  document.querySelectorAll('[data-theme-picker]').forEach(buildPicker); }
+function buildPicker(host){ const cur = currentTheme();
+  host.innerHTML = `<div class="dt-cd"><button class="dt-cd-trigger" aria-haspopup="listbox" aria-expanded="false">${swatchStrip(cur,true)}<span class="dt-cd-name">${THEME_LABELS[cur]}</span><span class="dt-cd-caret" aria-hidden="true">▾</span></button><div class="dt-cd-list" role="listbox" aria-label="theme">${window.THEME_IDS.map(id=>`<div class="dt-cd-option" role="option" data-id="${id}" aria-selected="${id===cur}">${swatchStrip(id)}<span class="dt-cd-name">${THEME_LABELS[id]}</span></div>`).join('')}</div></div>`;
+  const cd = host.querySelector('.dt-cd'), trig = host.querySelector('.dt-cd-trigger');
+  trig.addEventListener('click', e=>{ e.stopPropagation(); const open = cd.classList.toggle('dt-cd-open'); trig.setAttribute('aria-expanded', open); });
+  host.querySelectorAll('.dt-cd-option').forEach(o=> o.addEventListener('click', ()=>{ applyTheme(o.dataset.id); cd.classList.remove('dt-cd-open'); })); }
+document.addEventListener('click', ()=> document.querySelectorAll('.dt-cd-open').forEach(c=>c.classList.remove('dt-cd-open')));
+(function initTheme(){ let saved=null; try { saved=localStorage.getItem(THEME_KEY); } catch(e){}
+  const P=new URLSearchParams(location.search), fromUrl=P.get('theme');
+  const id=(fromUrl&&window.THEME_IDS.includes(fromUrl))?fromUrl:(saved&&window.THEME_IDS.includes(saved))?saved:'monokai';
+  document.documentElement.setAttribute('data-theme', id); })();
+
+/* harmonograf brand — the Option-D alpha: one period of the 2:3 Lissajous,
+   MIRRORED about the vertical axis (x = cx − A·cos2t, y = cy + B·sin3t) so the
+   knot reads as a lowercase α — still a Lissajous, loop left, tails right.
+   Stroke currentColor; the one dot rides the lower-right tail tip: the pen at
+   rest. ONE ALPHA PER LOCKUP: beside this mark the wordmark is PLAIN LETTERS
+   (the glyph already carries the α and the dot); only a STANDALONE wordmark
+   spells the "a" of graf with the drawn α. */
+function hgAlphaPath(cx, cy, A, B){ const pts=[];
+  for(let i=0;i<=240;i++){ const t=2*Math.PI*i/240;
+    pts.push((cx - A*Math.cos(2*t)).toFixed(2)+','+(cy + B*Math.sin(3*t)).toFixed(2)); }
+  return 'M'+pts.join(' L')+' Z'; }
+function hgBrandMarkSVG(h){ return `<svg class="hg-brand-mark" style="height:${h||24}px" viewBox="0 0 48 48" role="img" aria-label="harmonograf" focusable="false"><path d="${hgAlphaPath(24,24,19,15)}" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="43" cy="39" r="3.2" fill="var(--hgraf-brand, #5EA3EC)"/></svg>`; }
+function hgWordmarkSVG(){ const T='harmonograf', X0=1, ADV=9.6, BASE=15; const W=X0*2+T.length*ADV;
+  return `<svg class="hg-brand-name" viewBox="0 0 ${W} 18" role="img" aria-label="harmonograf" focusable="false"><text x="${X0}" y="${BASE}" font-family="var(--brand-mono)" font-size="15" font-weight="700" textLength="${T.length*ADV}" lengthAdjust="spacing" fill="currentColor" xml:space="preserve">${T}</text></svg>`; }
+function mountBrand(){ document.querySelectorAll('[data-brand-mark]').forEach(n=>{ n.innerHTML=hgBrandMarkSVG(+n.dataset.brandMark||24); });
+  document.querySelectorAll('[data-brand-wordmark]').forEach(n=>{ n.innerHTML=hgWordmarkSVG(); }); }
+
+/* ===================================================================== */
+/* ===== mock data: four sessions, one rich =============================*/
+const KIND = k => `var(--hg-kind-${k})`;
+function lerpKeys(keys, t){ if(t<=keys[0][0]) return keys[0][1];
+  for(let i=1;i<keys.length;i++){ if(t<=keys[i][0]){ const [t0,v0]=keys[i-1],[t1,v1]=keys[i];
+    return v0+(v1-v0)*(t-t0)/(t1-t0); } } return keys[keys.length-1][1]; }
+function lcg(seed){ let s=seed>>>0; return ()=>((s=(s*1664525+1013904223)>>>0)/4294967296); }
+
+const PRIMARY = {
+  id: 'checkout-refactor', status: 'live', T: 96, now: 80,
+  goal: 'refactor checkout to the streaming api',
+  agents: ['planner','coder','tester','reviewer','goldfive'],
+  fp: {fx:3.0, fy:2.03, px:Math.PI/2, d:.013, corrAt:13},
+  spans: [
+    {id:'s2', agent:'planner', kind:'user-message', t0:0,  t1:3,  label:'user: refactor checkout → streaming', status:'done'},
+    {id:'s3', agent:'planner', kind:'llm-call',     t0:3,  t1:14, label:'draft plan v1', status:'done'},
+    {id:'s4', agent:'planner', kind:'agent-message',t0:14, t1:16, label:'plan posted', status:'done'},
+    {id:'s5', agent:'coder',   kind:'llm-call',     t0:18, t1:30, label:'implement core', status:'done'},
+    {id:'s6', agent:'coder',   kind:'tool-call',    t0:30, t1:38, label:'edit 12 files', status:'done'},
+    {id:'s7', agent:'coder',   kind:'tool-call',    t0:38, t1:44, label:'tsc --noEmit', status:'failed'},
+    {id:'s8', agent:'coder',   kind:'llm-call',     t0:44, t1:54, label:'fix types', status:'done'},
+    {id:'sD', agent:'tester',  kind:'tool-call',    t0:56, t1:68, label:'run suite · 38k tok (delegated)', status:'done'},
+    {id:'s9', agent:'reviewer',kind:'llm-call',     t0:72, t1:76, label:'review diff', status:'done'},
+    {id:'sW', agent:'reviewer',kind:'wait-for-human',t0:76,t1:80, label:'approve api change', status:'awaiting'},
+    {id:'sG1',agent:'goldfive',kind:'custom',       t0:20, t1:22, label:'judge · on-task', status:'done', gf:'judge-on-task'},
+    {id:'sG2',agent:'goldfive',kind:'custom',       t0:40, t1:42, label:'judge · warning (drift 14)', status:'done', gf:'judge-warning'},
+    {id:'sG3',agent:'goldfive',kind:'custom',       t0:42, t1:46, label:'refine · re-anchor plan', status:'done', gf:'refine'},
+    {id:'sG4',agent:'goldfive',kind:'custom',       t0:60, t1:62, label:'judge · on-task', status:'done', gf:'judge-on-task'},
+    {id:'sP1',agent:'coder',   kind:'planned',      t0:84, t1:90, label:'lint pass', status:'planned'},
+    {id:'sP2',agent:'reviewer',kind:'planned',      t0:88, t1:94, label:'merge', status:'planned'},
+    {id:'sR', agent:'coder',   kind:'llm-call',     t0:80, t1:96, label:'address review notes', status:'running'},
+  ],
+  transfers: [ {t:16, from:'planner', to:'coder'}, {t:70, from:'coder', to:'reviewer'} ],
+  delegation: {from:'coder', to:'tester', t0:54, t1:70, tokens:'38k', verdict:'✓ 214 passed'},
+  judges: {
+    coder:    [[0,1],[6,2],[10,3],[13,11],[15,14],[17,6],[22,3],[26,2],[30,4],[36,12],[40,15],[44,7],[52,3],[64,2],[80,2]],
+    reviewer: [[0,1],[20,2],[40,2],[60,3],[70,6],[76,4],[80,3]],
+    planner:  [[0,.5],[12,1.5],[30,1],[50,2],[80,1]],
+  },
+  ticks: { coder: [[35,'nudge · operator'],[42,'refine · goldfive']], reviewer: [], planner: [] },
+  ladder: [[35,0],[42,1]],
+  ctx: [[0,.10],[18,.22],[30,.44],[44,.62],[54,.78],[55,.34],[68,.5],[80,.62],[96,.66]],
+  heart: (()=>{ const r=lcg(7), e=[]; for(let i=0;i<30;i++){ const t=2+i*2.5+r();
+    e.push([t, (i===12||i===13)?'warn':(i===15?'crit':'ok')]); } return e; })(),
+  plan: {
+    // tid bridges each DAG node to its strata task-id (T1…T7) so the reel can
+    // drive the DAG: the live DAG below == version v3's task set {T1,T2,T4,T6,T7}
+    // plus write-docs (T3) carried as the dropped-at-replan ghost.
+    nodes: { 'design-api':{x:0,y:0,st:'done',tid:'T1'}, 'impl-core':{x:1,y:0,st:'done',tid:'T2'},
+             'wire-cli':{x:2,y:-1,st:'running',tid:'T6'}, 'run-suite':{x:2,y:1,st:'done',tid:'T4'},
+             'polish-ux':{x:3,y:0,st:'pending',tid:'T7'}, 'write-docs':{x:1,y:2,st:'ghost',tid:'T3'} },
+    edges: [ ['design-api','impl-core',1],['impl-core','wire-cli',1],['impl-core','run-suite',0],
+             ['wire-cli','polish-ux',1],['run-suite','polish-ux',0],['design-api','write-docs','ghost'] ],
+    strata: [ {v:'v3 · live', has:['T1','T2','T4','T6','T7'], added:['T7'], live:true},
+              {v:'v2', has:['T1','T2','T4','T5','T6'], added:['T6'], seam:'replan · goal-drift'},
+              {v:'v1', has:['T1','T2','T3','T4','T5'], added:[], seam:'replan · scope-creep'} ],
+    rem: [12,9,5,2],
+  },
+};
+function makeVariant(id){
+  const s = JSON.parse(JSON.stringify(PRIMARY)); s.id = id;
+  if(id==='nightly-eval'){ s.status='done'; s.now=96; s.goal='nightly eval sweep · board 7';
+    s.fp={fx:3.0, fy:2.02, px:Math.PI/2, d:.025};
+    s.spans=s.spans.filter(x=>x.status!=='planned').map(x=>({...x,
+      status: (x.status==='awaiting'||x.status==='running'||x.status==='failed')?'done':x.status,
+      label: x.id==='s7'?'tsc --noEmit ✓':x.label}));
+    s.judges.coder=[[0,1],[20,3],[40,2],[60,3],[80,2],[96,1]]; s.ticks.coder=[]; s.ladder=[];
+  }
+  if(id==='data-migration'){ s.status='failed'; s.now=64; s.T=64; s.goal='migrate orders db → v2 schema';
+    s.fp={fx:2.6, fy:1.7, px:.3, d:-.012, T:26, grow:true};
+    s.spans=s.spans.filter(x=>x.t0<54&&x.status!=='planned'&&x.status!=='running').map(x=>({...x,
+      status:x.status==='awaiting'?'failed':x.status}));
+    s.spans.push({id:'sF', agent:'coder', kind:'llm-call', t0:54, t1:62, label:'rollback — irrecoverable', status:'failed'});
+    s.judges.coder=[[0,2],[10,5],[20,9],[30,13],[40,16],[50,19],[60,22],[64,24]];
+    s.ticks.coder=[[22,'nudge'],[34,'refine'],[46,'replan']]; s.ladder=[[22,0],[34,1],[46,2],[58,3]];
+  }
+  if(id==='docs-sweep'){ s.status='live'; s.now=40; s.T=64; s.goal='sweep + regenerate user docs';
+    s.fp={fx:1.0, fy:1.0, px:Math.PI/2, d:.02};
+    s.spans=s.spans.filter(x=>['s2','s3','s4','s5','s6'].includes(x.id));
+    s.spans.push({id:'sR', agent:'coder', kind:'tool-call', t0:34, t1:64, label:'render docs', status:'running'});
+    s.judges.coder=[[0,1],[10,2],[20,1.5],[30,2],[40,2]]; s.ticks.coder=[]; s.ladder=[];
+  }
+  return s;
+}
+const SESSIONS = { 'checkout-refactor': PRIMARY, 'nightly-eval': makeVariant('nightly-eval'),
+  'data-migration': makeVariant('data-migration'), 'docs-sweep': makeVariant('docs-sweep') };
+
+/* ===== figure renderers (all token-only, fit-to-width) ===== */
+function fpSVG(s, size){
+  const o=s.fp, n=800, T=o.T||30, pts=[];
+  for(let i=0;i<=n;i++){ const t=T*i/n;
+    let m = o.grow ? .3+.55*t/T : (o.corrAt!=null ? (t<o.corrAt?1:(t<o.corrAt+3?1-(t-o.corrAt)/3*.55:.45)) : 1);
+    pts.push([32+24*m*Math.exp(-(o.d||0)*t)*Math.sin(o.fx*t+(o.px||0)), 32+24*m*Math.exp(-(o.d||0)*t)*Math.sin(o.fy*t)]); }
+  const end=pts[pts.length-1];
+  const dot = s.status==='failed' ? 'var(--bad)' : s.status==='done' ? 'var(--good)' : 'var(--accent)';
+  return `<svg width="${size}" height="${size}" viewBox="0 0 64 64" role="img" aria-label="fingerprint ${s.id}">
+    <path d="M${pts.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' L')}" fill="none" stroke="currentColor" stroke-width="0.9" opacity=".7"/>
+    <circle cx="${end[0].toFixed(1)}" cy="${end[1].toFixed(1)}" r="2.4" fill="${dot}"/></svg>`;
+}
+function ganttSVG(s, o){ // o: {compact, mini, selected}
+  o=o||{}; const W=940, rowH=o.compact?24:30, padL=o.mini?8:76, padR=14;
+  const agents = o.mini ? s.agents.filter(a=>a!=='goldfive') : s.agents;
+  const H = agents.length*rowH + (o.mini?10:30), X=t=>padL+(W-padL-padR)*t/s.T;
+  const Y={}; agents.forEach((a,i)=>Y[a]= (o.mini?5:12)+i*rowH+rowH/2);
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="execution gantt — ${s.id}">`;
+  if(!o.mini){ for(let i=0;i<=8;i++){ const gx=X(s.T*i/8);
+    g+=`<line class="hg-gantt-grid" x1="${gx}" y1="6" x2="${gx}" y2="${H-22}"/><text class="gm-axis" x="${gx-7}" y="${H-8}">${Math.round(s.T*i/8)}s</text>`; } }
+  agents.forEach(a=>{ const y=Y[a];
+    if(!o.mini) g+=`<text class="hg-gantt-lane-label" x="6" y="${y+3}">${a}</text>`;
+    g+=`<line class="hg-gantt-lane-sep" x1="${padL}" y1="${y+rowH/2-2}" x2="${W-padR}" y2="${y+rowH/2-2}" opacity=".35"/>`; });
+  if(!o.mini && !o.compact && s.ctx && Y.coder){ const y=Y.coder+rowH/2-3;
+    let d='M'+X(0)+','+y; s.ctx.forEach(([t,v])=>{ if(t<=s.T) d+=` L${X(t).toFixed(1)},${(y-v*9).toFixed(1)}`; });
+    g+=`<path d="${d}" fill="none" stroke="var(--caution)" stroke-width="0.8" opacity=".5" vector-effect="non-scaling-stroke"><title>coder context window · compaction at 54s</title></path>`; }
+  s.spans.forEach(sp=>{ if(!Y[sp.agent]) return; const y=Y[sp.agent], x0=X(sp.t0), w=Math.max(4,X(sp.t1)-x0), bh=o.mini?6:12;
+    const fill = sp.status==='failed' ? 'var(--bad)' : sp.gf ? `var(--hg-gf-${sp.gf})` : KIND(sp.kind);
+    let cls='hg-gantt-bar is-'+sp.kind + (sp.status==='running'?' is-running':'') + (sp.status==='planned'?' is-planned':'')
+      + (o.selected===sp.id?' is-selected':'');
+    let extra = sp.status==='awaiting' ? ` stroke="${KIND('wait-for-human')}" stroke-dasharray="3 2" stroke-width="1.2"` : '';
+    g+=`<rect class="${cls}" data-span="${sp.id}" x="${x0}" y="${y-bh/2}" width="${w}" height="${bh}" rx="3"${sp.status==='planned'?'':` fill="${fill}"`}${extra} tabindex="${o.mini?-1:0}"><title>${sp.agent} · ${sp.label} · ${sp.t0}–${sp.t1}s · ${sp.status}</title></rect>`;
+    if(!o.mini && sp.status==='failed') g+=`<text class="hg-gantt-glyph-fail" x="${x0+w-11}" y="${y-bh/2-2}">✕</text>`;
+    if(!o.mini && sp.status==='awaiting') g+=`<text class="hg-gantt-glyph-wait" x="${x0+w+3}" y="${y+3.5}">◷</text>`; });
+  if(!o.mini){ s.transfers.forEach(tr=>{ if(!Y[tr.from]||!Y[tr.to]) return; const x=X(tr.t);
+    g+=`<path class="hg-gantt-edge is-transfer" d="M${x},${Y[tr.from]+7} C ${x+2},${(Y[tr.from]+Y[tr.to])/2} ${x+2},${(Y[tr.from]+Y[tr.to])/2} ${x+4},${Y[tr.to]-7}"><title>transfer ${tr.from} → ${tr.to}</title></path>`; });
+    if(s.delegation && Y[s.delegation.to]){ const d=s.delegation;
+      g+=`<path class="hg-gantt-edge" d="M${X(d.t0)},${Y[d.from]+7} C ${X(d.t0)+3},${Y[d.to]-20} ${X(d.t0)+3},${Y[d.to]-16} ${X(d.t0)+6},${Y[d.to]-7}"><title>delegate → ${d.to} · ${d.tokens} tok</title></path>`;
+      g+=`<path class="hg-gantt-edge" d="M${X(d.t1)-6},${Y[d.to]-7} C ${X(d.t1)-3},${Y[d.to]-16} ${X(d.t1)-3},${Y[d.to]-20} ${X(d.t1)},${Y[d.from]+7}"><title>rejoin · ${d.verdict}</title></path>`;
+      g+=`<text x="${X(d.t1)+2}" y="${Y[d.from]+18}" font-size="9" fill="var(--good)">✓</text>`; } }
+  const nx=X(Math.min(s.now,s.T));
+  g+=`<line class="hg-gantt-now" x1="${nx}" y1="4" x2="${nx}" y2="${H-(o.mini?6:22)}"/>`;
+  if(!o.mini) g+=`<circle class="hg-gantt-now-cap" cx="${nx}" cy="4" r="2.5"/><text class="hg-gantt-now-label" x="${nx+5}" y="11">now ${s.now}s</text>`;
+  g+=`</svg>`; return g;
+}
+/* ----- the agent-interaction messages, derived from the session model ----- */
+function sessionMessages(s){
+  const msgs=[];
+  const um=s.spans.find(x=>x.kind==='user-message'); if(um) msgs.push([um.t0,'user',um.agent,'user-message','user: '+s.goal.split(' ').slice(0,4).join(' ')+'…']);
+  (s.transfers||[]).forEach(tr=>msgs.push([tr.t,tr.from,tr.to,'transfer','transfer']));
+  if(s.delegation){ const d=s.delegation;
+    msgs.push([d.t0,d.from,d.to,'delegate','delegate · '+d.tokens+' tok']);
+    msgs.push([d.t1,d.to,d.from,'result',d.verdict]); }
+  const am=s.spans.find(x=>x.kind==='agent-message'); if(am) msgs.push([am.t1||am.t0,am.agent,'user','agent-message','approval requested']);
+  return msgs.sort((a,b)=>a[0]-b[0]);
+}
+/* ----- RECOMMENDED sequence diagram: lifelines down, time down, each message
+   a horizontal connector with a clear arrowhead (call=solid, return=dashed) ----- */
+function seqDiagramSVG(s, o){ o=o||{};
+  const cols=['user','planner','coder','tester','reviewer'].filter(a=>s.agents.includes(a)||a==='user');
+  const W=o.W||720, padT=52, H=o.H||440, padL=58;
+  const step=(W-padL-44)/(cols.length-1), X={}; cols.forEach((a,i)=>X[a]=padL+30+i*step);
+  const yT=t=>padT+(t/s.T)*(H-padT-26);
+  const aColor=a=> a==='user'?'var(--hg-agent-user)':a==='goldfive'?'var(--hg-agent-goldfive)'
+    :`var(--hg-agent-${['planner','coder','tester','reviewer'].indexOf(a)+1})`;
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="agent-interaction sequence diagram — ${s.id}">`;
+  for(let i=0;i<=6;i++){ const y=yT(s.T*i/6);
+    g+=`<line class="hg-gantt-grid" x1="${padL-4}" y1="${y}" x2="${W-12}" y2="${y}" opacity=".5"/><text class="gm-axis" x="26" y="${y+3}">${Math.round(s.T*i/6)}s</text>`; }
+  cols.forEach(a=>{ const x=X[a];
+    g+=`<line class="sq-life" x1="${x}" y1="30" x2="${x}" y2="${H-14}" stroke="${aColor(a)}" opacity=".8"/>`;
+    g+=`<rect class="sq-chip" x="${x-34}" y="10" width="68" height="19" rx="4" stroke="${aColor(a)}"/>`;
+    g+=`<text class="sq-name" x="${x}" y="${23}" text-anchor="middle">${a}</text>`; });
+  s.spans.forEach(sp=>{ if(!X[sp.agent]||sp.status==='planned'||sp.gf) return;
+    const x=X[sp.agent], y0=yT(sp.t0), h=Math.max(6,yT(sp.t1)-y0);
+    const fill = sp.status==='failed'?'var(--bad)':sp.status==='awaiting'?KIND('wait-for-human'):KIND(sp.kind);
+    g+=`<rect class="sq-act" data-span="${sp.id}" x="${x-4}" y="${y0}" width="8" height="${h}" rx="2.5" fill="${fill}" fill-opacity="${sp.status==='awaiting'?.4:sp.status==='failed'?.85:.55}" tabindex="0"><title>${sp.agent} · ${sp.label} · ${sp.status}</title></rect>`;
+    if(sp.status==='failed') g+=`<text x="${x+9}" y="${y0+h/2+3}" font-size="8.5" fill="var(--bad)">✕</text>`; });
+  // messages with min-row-gap layout (each message its own row, time-ordered)
+  const MINGAP=24; let prevY=-1e9;
+  sessionMessages(s).forEach(([t,f,o2,k,lbl])=>{ if(!X[f]||!X[o2]) return;
+    let y=Math.max(yT(t), prevY+MINGAP); prevY=y; const x0=X[f], x1=X[o2], dir=x1>x0?1:-1;
+    const isReturn=k==='result';
+    const color = k==='transfer'?KIND('transfer'):k==='user-message'?KIND('user-message')
+      :k==='delegate'?'var(--ink-soft)':isReturn?'var(--ink-faint)':KIND('agent-message');
+    const dash = k==='transfer'?` stroke-dasharray="5 3"`:isReturn?` stroke-dasharray="4 3"`:'';
+    g+=`<line class="sq-msg" x1="${x0+4*dir}" y1="${y}" x2="${x1-9*dir}" y2="${y}" stroke="${color}"${dash}><title>${f} → ${o2} · ${lbl} · ${t}s</title></line>`;
+    const ah = isReturn
+      ? `<path d="M${x1-9*dir},${y-4} L${x1-1*dir},${y} L${x1-9*dir},${y+4}" fill="none" stroke="${color}" stroke-width="1.3" vector-effect="non-scaling-stroke"/>`
+      : `<path d="M${x1-9*dir},${y-4} L${x1-1*dir},${y} L${x1-9*dir},${y+4} Z" fill="${color}"/>`;
+    g+=ah;
+    g+=`<text class="sq-lbl" x="${x0+16*dir}" y="${y-5}" text-anchor="${dir>0?'start':'end'}" fill="${color}">${lbl}</text>`; });
+  const wait=s.spans.find(x=>x.status==='awaiting');
+  if(wait&&X[wait.agent]) g+=`<circle cx="${X[wait.agent]}" cy="${yT(Math.min(wait.t1,s.T))}" r="5.5" fill="none" stroke="var(--ink-soft)" stroke-width="1.4"><title>gate · deciding…</title></circle>`;
+  const ny=yT(Math.min(s.now,s.T));
+  g+=`<line class="hg-gantt-now" x1="${padL-4}" y1="${ny}" x2="${W-12}" y2="${ny}"/><text class="hg-gantt-now-label" x="${padL}" y="${ny-5}">now ${s.now}s</text>`;
+  g+=`</svg>`; return g;
+}
+/* ----- the directional transfer chord (communication topology) -----
+   Scaling discipline: ribbon width grows with √count and CAPS, so a chatty
+   pair can never flood the figure; hover an agent to PROJECT its conversations
+   (everything else fades), click to pin, click empty space to clear. ----- */
+function topoChordSVG(s, W){ W=W||320;
+  const agents=['user','planner','coder','tester','reviewer'].filter(a=>s.agents.includes(a)||a==='user');
+  const idx=a=>agents.indexOf(a);
+  const counts={};
+  const bump=(f,o)=>{ if(idx(f)<0||idx(o)<0) return; const k=idx(f)+'>'+idx(o); counts[k]=(counts[k]||0)+1; };
+  const um=s.spans.find(x=>x.kind==='user-message'); if(um) bump('user',um.agent);
+  (s.transfers||[]).forEach(tr=>bump(tr.from,tr.to));
+  if(s.delegation){ bump(s.delegation.from,s.delegation.to); bump(s.delegation.to,s.delegation.from); }
+  const am=s.spans.find(x=>x.kind==='agent-message'); if(am) bump(am.agent,'user');
+  const flows=Object.entries(counts).map(([k,c])=>{ const [a,b]=k.split('>').map(Number); return [a,b,c]; });
+  const H=Math.round(W*0.82), cx=W/2, cyA=H-26, R=W*0.34, n=agents.length, SECTOR=Math.PI/n*0.74;
+  const ang=i=>Math.PI-Math.PI*i/(n-1), onArc=(th,r)=>[cx+r*Math.cos(th), cyA-r*Math.sin(th)];
+  const aColor=a=> a==='user'?'var(--hg-agent-user)':a==='goldfive'?'var(--hg-agent-goldfive)'
+    :`var(--hg-agent-${['planner','coder','tester','reviewer'].indexOf(a)+1})`;
+  const outN=agents.map(()=>0), inN=agents.map(()=>0); flows.forEach(([a,b,c])=>{outN[a]+=c;inN[b]+=c;});
+  const outUsed=agents.map(()=>0), inUsed=agents.map(()=>0);
+  let g=`<svg class="fig topo-chord" viewBox="0 0 ${W} ${H}" role="img" aria-label="directional transfer chord — who initiates and who receives · ${s.id}">`;
+  agents.forEach((a,i)=>{ const th=ang(i), oA=th+SECTOR/2,oB=th+0.05,iA=th-0.05,iB=th-SECTOR/2;
+    const arc=(thA,thB,attrs)=>{ const [xA,yA]=onArc(thA,R),[xB,yB]=onArc(thB,R);
+      return `<path data-agent="${a}" d="M${xA.toFixed(1)},${yA.toFixed(1)} A${R},${R} 0 0 ${thA>thB?1:0} ${xB.toFixed(1)},${yB.toFixed(1)}" fill="none" ${attrs}/>`; };
+    if(outN[i]) g+=arc(oA,oB,`stroke="${aColor(a)}" stroke-width="5" stroke-linecap="round" opacity=".9"`);
+    if(inN[i])  g+=arc(iA,iB,`stroke="${aColor(a)}" stroke-width="5" stroke-linecap="round" opacity=".9" stroke-dasharray="1.5 2.4"`);
+  });
+  let cLabels='';
+  flows.forEach(([a,b,c],fi)=>{ const ths=ang(a),thd=ang(b);
+    const sF=(outUsed[a]+c/2)/Math.max(outN[a],1); outUsed[a]+=c;
+    const dF=(inUsed[b]+c/2)/Math.max(inN[b],1);  inUsed[b]+=c;
+    const sTh=ths+0.07+(SECTOR/2-0.07)*sF, dTh=thd-0.07-(SECTOR/2-0.07)*dF;
+    // √count with a hard cap: heavy traffic thickens slowly and can never flood
+    const wS=1.6, wT=Math.min(15, 4+Math.sqrt(c)*3.4), [sx,sy]=onArc(sTh,R-4),[dx,dy]=onArc(dTh,R-9);
+    const tS=[Math.sin(sTh),Math.cos(sTh)],tD=[Math.sin(dTh),Math.cos(dTh)];
+    const s1=[sx+tS[0]*wS/2,sy+tS[1]*wS/2],s2=[sx-tS[0]*wS/2,sy-tS[1]*wS/2];
+    const t1=[dx+tD[0]*wT/2,dy+tD[1]*wT/2],t2=[dx-tD[0]*wT/2,dy-tD[1]*wT/2];
+    const mid=[(sx+dx)/2+(cx-(sx+dx)/2)*0.62,(sy+dy)/2+((cyA-34)-(sy+dy)/2)*0.5], gid=`tch${s.id}${fi}`;
+    const FT=`data-f="${agents[a]}" data-t="${agents[b]}"`;
+    g+=`<defs><linearGradient id="${gid}" x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${dx.toFixed(1)}" y2="${dy.toFixed(1)}" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="${aColor(agents[a])}" stop-opacity=".32"/><stop offset="1" stop-color="${aColor(agents[b])}" stop-opacity=".95"/></linearGradient></defs>`;
+    g+=`<path data-ribbon="1" ${FT} fill="url(#${gid})" stroke="none" d="M${s1[0].toFixed(1)},${s1[1].toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${t1[0].toFixed(1)},${t1[1].toFixed(1)} L${t2[0].toFixed(1)},${t2[1].toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${s2[0].toFixed(1)},${s2[1].toFixed(1)} Z"><title>${agents[a]} → ${agents[b]} · ${c} (${agents[a]} initiates)</title></path>`;
+    const outward=[Math.cos(dTh),-Math.sin(dTh)], tip=onArc(dTh,R-1), base=[tip[0]-outward[0]*8,tip[1]-outward[1]*8];
+    g+=`<path data-ahead="1" ${FT} d="M${(base[0]+tD[0]*4).toFixed(1)},${(base[1]+tD[1]*4).toFixed(1)} L${tip[0].toFixed(1)},${tip[1].toFixed(1)} L${(base[0]-tD[0]*4).toFixed(1)},${(base[1]-tD[1]*4).toFixed(1)} Z" fill="${aColor(agents[b])}"/>`;
+    cLabels+=`<text class="tch-count" data-count="1" ${FT} x="${mid[0].toFixed(1)}" y="${(mid[1]+3).toFixed(1)}" text-anchor="middle">${c}×</text>`;
+  });
+  agents.forEach((a,i)=>{ const th=ang(i),[x,y]=onArc(th,R);
+    const [lx,ly]=onArc(th,R+14), anc= lx<cx-10?'end':(lx>cx+10?'start':'middle');
+    g+=`<g data-agent="${a}" tabindex="0" role="button" aria-label="project ${a}'s conversations">
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="12" fill="transparent" stroke="none"/>
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${aColor(a)}"/>
+      <text class="sq-lbl" x="${lx.toFixed(1)}" y="${(ly+(ly<36?-2:4)).toFixed(1)}" text-anchor="${anc}" fill="var(--ink)">${a}</text></g>`; });
+  g+=cLabels+`</svg>`; return g;
+}
+/* hover an agent → project (dim everything not involving it); click → pin */
+function wireChord(scope){
+  scope.querySelectorAll('svg.topo-chord').forEach(svg=>{
+    let pinned=null;
+    const apply=f=>{
+      svg.querySelectorAll('[data-ribbon],[data-ahead]').forEach(p=>{
+        p.style.opacity = (!f || p.dataset.f===f || p.dataset.t===f) ? '' : .05; });
+      svg.querySelectorAll('[data-count]').forEach(tx=>{
+        tx.style.opacity = (f && (tx.dataset.f===f || tx.dataset.t===f)) ? 1 : ''; });
+      svg.querySelectorAll('[data-agent]').forEach(n=>{
+        n.style.opacity = (!f || n.dataset.agent===f) ? '' : .3; });
+    };
+    svg.querySelectorAll('g[data-agent]').forEach(h=>{
+      h.addEventListener('mouseenter',()=>{ if(!pinned) apply(h.dataset.agent); });
+      h.addEventListener('mouseleave',()=>{ if(!pinned) apply(null); });
+      h.addEventListener('click',e=>{ e.stopPropagation();
+        pinned = pinned===h.dataset.agent ? null : h.dataset.agent; apply(pinned); });
+      h.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); h.click(); } });
+    });
+    svg.addEventListener('click',()=>{ if(pinned){ pinned=null; apply(null); } });
+    const want=new URLSearchParams(location.search).get('chord');
+    if(want && svg.querySelector(`g[data-agent="${want}"]`)){ pinned=want; apply(want); }
+  });
+}
+/* Shared time-track geometry — the seismograph, the heartbeat overlay, and the
+   intervention ladder ALL derive padL/padR/X from this, so a reading at time t
+   sits at the same x in every panel of the stack. */
+function trackGeom(s, W){ const padL=W<400?40:76, padR=14;
+  return { padL, padR, X:t=>padL+(W-padL-padR)*t/s.T }; }
+function timeAxisSVG(s, W, H){ const {padL,padR,X}=trackGeom(s,W); let g='';
+  for(let i=0;i<=4;i++){ const gx=X(s.T*i/4);
+    g+=`<line class="hg-gantt-grid" x1="${gx}" y1="2" x2="${gx}" y2="${H}"/>`; }
+  return g;
+}
+/* ONE combined drift+judge instrument: the seismograph traces as before, with
+   the judge-firing HEARTBEAT folded in as a strip along the same time axis —
+   ok ticks in the judge (goldfive) KIND hue, warnings/criticals carried by the
+   STATUS treatment (caution / bad). One axis, two readings. */
+/* wire the reel: clicking/keying a version sets state.planVer and repaints ONLY
+   the plan block (DAG + reel marks) — no console-wide re-render. */
+function wireReel(scope){
+  scope.querySelectorAll('.reel-stop[data-ver]').forEach(stop=>{
+    const pick=()=>{ const vi=+stop.dataset.ver; if(vi===state.planVer) return; state.planVer=vi; repaintPlan(); };
+    stop.addEventListener('click', pick);
+    stop.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); pick(); } });
+  });
+}
+function seismoSVG(s, lanes, W, opts){ opts=opts||{};
+  W=W||940; const {padL,padR,X}=trackGeom(s,W), TOL=8;
+  const heart=opts.heart!==false, heartH=heart?30:0, rowH=54;
+  const top=heartH, H=top+lanes.length*rowH+(opts.axis===false?6:24);
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="drift seismograph + judge heartbeat — ${s.id}">`;
+  for(let i=0;i<=4;i++){ const gx=X(s.T*i/4);
+    g+=`<line class="hg-gantt-grid" x1="${gx}" y1="4" x2="${gx}" y2="${H-(opts.axis===false?6:18)}"/>`;
+    if(opts.axis!==false) g+=`<text class="gm-axis" x="${gx-7}" y="${H-5}">${Math.round(s.T*i/4)}s</text>`; }
+  // judge heartbeat strip — KIND hue baseline, STATUS treatment on warn/crit
+  if(heart){ const hy=heartH-10;
+    g+=`<text class="gm-label" x="6" y="${hy+4}" fill="var(--hg-agent-goldfive)">judges</text>`;
+    g+=`<line class="gm-onplan" x1="${X(0)}" y1="${hy}" x2="${X(s.T)}" y2="${hy}"/>`;
+    s.heart.forEach(([t,k])=>{ if(t>s.T) return; const x=X(t);
+      if(k==='ok')   g+=`<circle cx="${x}" cy="${hy}" r="1.7" fill="var(--hg-agent-goldfive)" opacity=".8"><title>judge fired · on-task @ ${t.toFixed(0)}s</title></circle>`;
+      if(k==='warn') g+=`<line x1="${x}" y1="${hy-6}" x2="${x}" y2="${hy+6}" stroke="var(--caution)" stroke-width="1.4" vector-effect="non-scaling-stroke"/><text x="${x-3.5}" y="${hy+3}" font-size="8.5" fill="var(--caution)">▲</text>`;
+      if(k==='crit') g+=`<line x1="${x}" y1="${hy-7}" x2="${x}" y2="${hy+7}" stroke="var(--bad)" stroke-width="1.6" vector-effect="non-scaling-stroke"/><text x="${x-3.5}" y="${hy+3.5}" font-size="9.5" fill="var(--bad)" font-weight="700">✕</text>`; });
+    g+=`<line class="gm-seam" x1="${X(0)}" y1="${heartH-1}" x2="${X(s.T)}" y2="${heartH-1}" opacity=".5"/>`; }
+  lanes.forEach((a,li)=>{ const keys=s.judges[a]; if(!keys) return;
+    const base=top+10+li*rowH+rowH-16, rnd=lcg(40+li), yOf=v=>base-v*1.9;
+    g+=`<text class="gm-label" x="6" y="${base-12}">${a}</text>`;
+    g+=`<rect class="gm-tol" x="${X(0)}" y="${yOf(TOL)}" width="${X(s.T)-X(0)}" height="${yOf(0)-yOf(TOL)}"/>`;
+    g+=`<line class="gm-onplan" x1="${X(0)}" y1="${base}" x2="${X(s.T)}" y2="${base}"/>`;
+    const pts=[]; for(let i=0;i<=260;i++){ const t=s.T*i/260;
+      const v=Math.max(0, lerpKeys(keys,t)+Math.sin(t*2.3+li)*0.5+(rnd()-0.5)*0.9); pts.push([X(t),yOf(v),v]); }
+    let seg=null; const segs=[];
+    pts.forEach(p=>{ if(p[2]>TOL){ if(!seg) seg=[]; seg.push(p); } else if(seg){ segs.push(seg); seg=null; } });
+    if(seg) segs.push(seg);
+    segs.forEach(sg=>{ g+=`<polygon class="gm-excursion" points="${sg.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')} ${sg[sg.length-1][0].toFixed(1)},${yOf(TOL).toFixed(1)} ${sg[0][0].toFixed(1)},${yOf(TOL).toFixed(1)}"/>`; });
+    g+=`<path class="gm-trace" d="M${pts.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' L')}"/>`;
+    (s.ticks[a]||[]).forEach(([t,lbl])=>{ const tx=X(t);
+      g+=`<line class="gm-tick" x1="${tx}" y1="${base-rowH+22}" x2="${tx}" y2="${base+3}"><title>intervention · ${lbl}</title></line>`;
+      g+=`<text class="gm-tick-label" x="${tx+3}" y="${base-rowH+27}">${lbl.split(' ')[0]}</text>`; }); });
+  const nx=X(Math.min(s.now,s.T));
+  g+=`<line class="hg-gantt-now" x1="${nx}" y1="4" x2="${nx}" y2="${H-(opts.axis===false?6:18)}"/>`;
+  g+=`</svg>`; return g;
+}
+/* heartbeat as its own small figure is still available (e.g. the inspector),
+   but the console folds it into the seismograph above. */
+function heartSVG(s, W){ W=W||940; const H=40, padL=W<400?40:76, X=t=>padL+(W-padL-14)*t/s.T;
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="judge heartbeat — ${s.id}">`;
+  g+=`<text class="gm-label" x="6" y="22" fill="var(--hg-agent-goldfive)">judges</text>`;
+  g+=`<line class="gm-onplan" x1="${X(0)}" y1="26" x2="${X(s.T)}" y2="26"/>`;
+  s.heart.forEach(([t,k])=>{ if(t>s.T) return; const x=X(t);
+    if(k==='ok') g+=`<circle cx="${x}" cy="18" r="1.5" fill="var(--hg-agent-goldfive)" opacity=".8"/>`;
+    if(k==='warn') g+=`<text x="${x-3.5}" y="22" font-size="9" fill="var(--caution)">▲</text>`;
+    if(k==='crit') g+=`<text x="${x-3.5}" y="22" font-size="10" fill="var(--bad)" font-weight="700">✕</text>`; });
+  g+=`</svg>`; return g;
+}
+/* The intervention ladder, time-scale-LOCKED to the seismograph: pass the same
+   session + width and it derives an identical x-domain (padL/padR/X via
+   trackGeom over s.T), so a rung-dot at time t sits directly beneath the drift
+   reading at t. The legacy fixed-width call (no session) still works. */
+function ladderSVG(dots, W, s){ W=W||440; const H=124;
+  const geo = s ? trackGeom(s, W) : { padL:66, X:t=>66+(W-66-12)*t/96 };
+  const padL=geo.padL, X=geo.X;
+  const RUNGS=['nudge','refine','replan','escalate'], rungY=i=>96-i*25;
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="intervention ladder${s?' (time-aligned to the seismograph)':''}">`;
+  if(s){ for(let i=0;i<=4;i++){ const gx=X(s.T*i/4);
+    g+=`<line class="hg-gantt-grid" x1="${gx}" y1="2" x2="${gx}" y2="${rungY(3)-6}" opacity=".5"/>`; } }
+  RUNGS.forEach((r,i)=>{ const y=rungY(i);
+    g+=`<line x1="${padL}" y1="${y}" x2="${W-(s?geo.padR:12)}" y2="${y}" stroke="var(--rule)" stroke-width="1" vector-effect="non-scaling-stroke"/><text class="gm-faint" x="8" y="${y+3}">${r}</text>`; });
+  if(dots.length>1) g+=`<path d="${dots.map((d,i)=>(i?'L':'M')+X(d[0]).toFixed(1)+','+rungY(d[1]).toFixed(1)).join(' ')}" fill="none" stroke="var(--ink-faint)" stroke-width="0.8" stroke-dasharray="2 3" opacity=".7" vector-effect="non-scaling-stroke"/>`;
+  dots.forEach(d=>{ g+=`<circle cx="${X(d[0])}" cy="${rungY(d[1])}" r="3.2" fill="${d[1]===3?'var(--bad)':'var(--ink-soft)'}"><title>${RUNGS[d[1]]} @ ${d[0]}s</title></circle>`; });
+  if(!dots.length) g+=`<text class="gm-faint" x="${padL+10}" y="${rungY(0)-8}" font-style="italic">no interventions — never left the ground</text>`;
+  if(s){ for(let i=0;i<=4;i++){ const gx=X(s.T*i/4);
+    g+=`<text class="gm-axis" x="${gx-7}" y="${H-4}">${Math.round(s.T*i/4)}s</text>`; } }
+  g+=`</svg>`; return g;
+}
+/* The DAG can render either the LIVE plan (no version arg) or a specific reel
+   version's plan: pass {strata, vi} and each node is reframed by that version's
+   task set — `added` tasks get the accent "new" treatment, tasks dropped since
+   the previous (older) revision are ghosted/dashed exactly like the live ghost. */
+function dagSVG(p, W, sel){ W=W||940; const H=216, BW=118, BH=24;
+  const LX=[80,300,520,740], LY=v=>92+v*44;
+  // per-node role under the selected version: present / added / dropped / absent
+  let role=null;
+  if(sel){ const cur=p.strata[sel.vi], prev=p.strata[sel.vi+1];
+    role=id=>{ const tid=p.nodes[id].tid;
+      if(!tid) return cur.has.length?'absent':'present';
+      if(cur.has.includes(tid)) return cur.added.includes(tid)?'added':'present';
+      if(prev && prev.has.includes(tid)) return 'dropped';   // present last revision, gone now
+      return 'absent'; }; }
+  const ghosted=id=>{ if(!sel) return p.nodes[id].st==='ghost'; const r=role(id); return r==='dropped'||r==='absent'; };
+  let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="plan dependency DAG${sel?' · '+p.strata[sel.vi].v:''}">`;
+  p.edges.forEach(([a,b,crit])=>{ const A=p.nodes[a], B=p.nodes[b];
+    const x0=LX[A.x]+BW/2, y0=LY(A.y), x1=LX[B.x]-BW/2, y1=LY(B.y), c=(x0+x1)/2;
+    const eGhost = ghosted(a)||ghosted(b)||crit==='ghost';
+    const stroke = eGhost?'var(--ink-faint)':crit===1?'var(--accent)':'var(--ink-faint)';
+    const extra = eGhost?` stroke-dasharray="3 4" opacity=".45"`:crit===1?` stroke-width="2"`:` stroke-width="1" opacity=".6"`;
+    g+=`<path d="M${x0},${y0} C ${c},${y0} ${c},${y1} ${x1},${y1}" fill="none" stroke="${stroke}"${extra} vector-effect="non-scaling-stroke"><title>${a} → ${b}${crit===1&&!eGhost?' · critical path':''}</title></path>`; });
+  Object.entries(p.nodes).forEach(([id,n])=>{ const x=LX[n.x], y=LY(n.y);
+    const r = sel?role(id):null, ghost=ghosted(id), added=r==='added';
+    const stroke = ghost?'var(--rule)':added?'var(--accent)':n.st==='done'?'var(--good)':n.st==='running'?'var(--accent)':'var(--ink-faint)';
+    const glyph = ghost?(r==='dropped'||(!sel&&n.st==='ghost')?['✕','var(--bad)']:['·','var(--ink-faint)'])
+      :added?['○','var(--accent)']:n.st==='done'?['✓','var(--good)']:n.st==='running'?['●','var(--accent)']:['○','var(--ink-faint)'];
+    const sw = (n.st==='running'&&!ghost)||added?2:1.2;
+    const tip = ghost?(r==='dropped'?`dropped at ${p.strata[sel.vi].v} (was in ${p.strata[sel.vi+1].v})`:!sel?'dropped at replan v2':'not in this revision')
+      :added?`added in ${p.strata[sel.vi].v}`:n.st;
+    g+=`<rect x="${x-BW/2}" y="${y-BH/2}" width="${BW}" height="${BH}" rx="4" fill="var(--panel)" stroke="${stroke}" stroke-width="${sw}"${ghost?` stroke-dasharray="4 3" opacity=".55"`:''} vector-effect="non-scaling-stroke"><title>${id}${n.tid?' · '+n.tid:''} · ${tip}</title></rect>`;
+    g+=`<text x="${x-BW/2+9}" y="${y+3.5}" font-size="10" fill="${ghost?'var(--ink-faint)':'var(--ink-soft)'}">${id}</text>`;
+    g+=`<text x="${x+BW/2-15}" y="${y+4}" font-size="9.5" fill="${glyph[1]}">${glyph[0]}</text>`; });
+  const cap = sel ? `${p.strata[sel.vi].v} · ○ accent = added at this revision · dashed = dropped since the prior revision`
+    : 'the accent spine = the critical path · ghost = dropped at replan';
+  g+=`<text class="gm-faint" x="10" y="${H-8}">${cap}</text></svg>`; return g;
+}
+/* The plan reel is the version timeline (v0…v3) with its replan-trigger seams.
+   It reads oldest→newest left to right, while p.strata is stored newest-first —
+   so version index `i` here maps to strata index `(strata.length-1)-i`. Each
+   stop is a button (data-ver=strata index) that drives the DAG; `selVi` marks
+   which strata version is active. */
+function reelSVG(p, W, selVi){ W=W||940; const H=92, xs=[0.12,0.36,0.6,0.84].map(f=>Math.round(W*f));
+  const n=p.strata.length;  // strata is newest-first; the reel reads oldest→newest
+  let g=`<svg class="fig plan-reel" viewBox="0 0 ${W} ${H}" role="img" aria-label="plan reel — click a version to drive the DAG">`;
+  g+=`<line class="gm-spine" x1="${xs[0]}" y1="50" x2="${xs[3]}" y2="50"/>`;
+  const trig=['','scope-creep','goal-drift','tool-misuse'];
+  xs.forEach((x,i)=>{
+    // stops 1..3 are real strata versions (newest at the rightmost); stop 0 is the v0 origin
+    const sIdx = i===0 ? null : (n-1)-(i-1);  // i=1→v1=strata[n-1]; i=3→v3=strata[0]
+    const active = sIdx!=null && sIdx===selVi, latest=i===xs.length-1;
+    if(i>0) g+=`<text class="gm-tick-label" x="${(xs[i-1]+x)/2-26}" y="30">↯ ${trig[i]}</text>`;
+    const dotFill = active?'var(--accent)':latest?'var(--accent)':'var(--panel)';
+    const dotStroke = active||latest?'var(--accent)':'var(--ink-soft)';
+    g+=`<g class="reel-stop" ${sIdx!=null?`data-ver="${sIdx}" tabindex="0" role="button" aria-pressed="${active}" aria-label="show plan ${p.strata[sIdx].v}"`:''}>`;
+    if(active) g+=`<circle cx="${x}" cy="50" r="10" fill="none" stroke="var(--accent)" stroke-width="1.4" opacity=".9"/>`;
+    g+=`<circle class="reel-hit" cx="${x}" cy="50" r="14" fill="transparent"/>`;
+    g+=`<circle cx="${x}" cy="50" r="${latest||active?5.5:4}" fill="${dotFill}" stroke="${dotStroke}" stroke-width="1.5"/>`;
+    g+=`<text class="gm-label" x="${x-8}" y="71"${active?' fill="var(--accent)" font-weight="600"':''}>v${i}</text>`;
+    g+=`<text class="gm-axis" x="${x-24}" y="85">${p.rem[i]} tasks left</text></g>`;
+    if(i>0) g+=`<text x="${(xs[i-1]+x)/2-10}" y="46" font-size="9" fill="var(--good)">−${p.rem[i-1]-p.rem[i]}</text>`; });
+  g+=`</svg>`; return g;
+}
+
+/* ===== app state + shell =====
+   Sessions are navigated ONLY through the ⌘K picker (fingerprint rows) — no
+   sidebar. The rail keeps the GANTT as its own hero view; every other reading
+   — plans (DAG + reel, leading), sequence, topology, drift, interventions —
+   coalesces into one scrolling INSTRUMENTS view. */
+const state = {
+  view: 'gantt', sessionId: 'checkout-refactor',
+  drawerSpan: null, drawerOpen: true, live: true, elapsed: 80, picker: false,
+  planVer: 0,   // selected reel version as a strata index (0 = newest/live); drives the DAG
+};
+(function initState(){ const P=new URLSearchParams(location.search);
+  const v=P.get('view'); if(v && ['gantt','instruments'].includes(v)) state.view=v;
+  const s=P.get('session'); if(s && SESSIONS[s]) state.sessionId=s;
+  // deep-link a span's inspector
+  const sp=P.get('span'); if(sp){ state.drawerSpan=sp; state.drawerOpen=true; }
+  // deep-link a reel version (strata index) to drive the DAG
+  const pv=P.get('ver'); if(pv!=null && SESSIONS[state.sessionId].plan.strata[+pv]) state.planVer=+pv; })();
+const S = () => SESSIONS[state.sessionId];
+
+function statusPill(s){ return s.status==='live' ? `<span class="dn-pill live">● live</span>`
+  : s.status==='done' ? `<span class="dn-pill good">✓ done</span>` : `<span class="dn-pill bad">✕ failed</span>`; }
+function fmtClock(sec){ const m=String(Math.floor(sec/60)).padStart(2,'0'), x=String(sec%60).padStart(2,'0'); return `00:${m}:${x}`; }
+
+function topbarHTML(){ const s=S();
+  return `<div class="hg-topbar">
+    <span class="hg-brand"><span data-brand-mark="20"></span><span data-brand-wordmark></span></span>
+    <span class="hg-crumbs"><span class="hg-crumb">~/ws</span><span class="hg-crumb-sep">▸</span>
+      <button class="hg-crumb hg-crumb-current" id="open-picker" style="background:none;border:none;cursor:pointer;font:inherit;padding:0">${s.id} ▾</button>
+      <span class="hg-picker-kbd">⌘K</span></span>
+    <span class="hg-topbar-spacer"></span>
+    <span class="hg-status ${s.status==='live'?'is-running':'is-connected'}">
+      <span class="hg-status-dot"></span><span>${s.status==='live'?'streaming':'connected'}</span>
+      <span class="hg-run-badge"><span class="hg-run-pulse"></span><span class="hg-run-label">${s.agents.length} agents</span><span>· ${s.spans.filter(x=>x.status==='running'||x.status==='awaiting').length} in flight</span></span>
+    </span></div>`;
+}
+function stripHTML(){ const s=S(); const run=s.spans.find(x=>x.status==='running')||s.spans.find(x=>x.status==='awaiting');
+  return `<div class="hg-strip"><span class="hg-strip-label">goal</span><span class="hg-strip-title">${s.goal}</span>
+    ${run?`<span class="hg-strip-agent">${run.agent}</span><span class="dn-pill ${run.status==='awaiting'?'caution':'accent'}">${run.status==='awaiting'?'◷ awaiting human':'● '+run.label}</span>`:''}
+    <span style="flex:1"></span>${statusPill(s)}</div>`;
+}
+function transportHTML(){
+  return `<div class="hg-transport">
+    <span class="hg-transport-group">
+      <button class="hg-transport-btn" title="jump to start">⏮</button>
+      <button class="hg-transport-btn" id="btn-live" title="toggle live">${state.live?'⏸ pause':'▶ resume'}</button>
+      <button class="hg-transport-btn" title="jump to now">⏭</button></span>
+    <span class="hg-transport-divider"></span>
+    ${state.live?`<span class="hg-live-badge"><span class="hg-live-dot"></span>LIVE</span>`:`<span class="dn-pill flat">paused</span>`}
+    <span class="hg-clock tnum" id="clock">${fmtClock(state.elapsed)}</span>
+    <span class="hg-transport-spacer"></span>
+    <span class="prop-note">zoom: fit · scrubbing disabled in the mock</span></div>`;
+}
+function drawerHTML(){ const s=S(); const sp = s.spans.find(x=>x.id===state.drawerSpan);
+  let body;
+  if(sp){ body = `
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      <span class="dn-pill flat">${sp.kind}</span>
+      <span class="dn-pill ${sp.status==='failed'?'bad':sp.status==='running'?'accent':sp.status==='awaiting'?'caution':'good'}">${sp.status}</span></div>
+    <dl class="hg-attrs"><dt>agent</dt><dd>${sp.agent}</dd><dt>label</dt><dd>${sp.label}</dd>
+      <dt>start</dt><dd class="tnum">${sp.t0}s</dd><dt>end</dt><dd class="tnum">${sp.t1}s</dd>
+      <dt>duration</dt><dd class="tnum">${sp.t1-sp.t0}s</dd>${sp.gf?`<dt>gf category</dt><dd>${sp.gf}</dd>`:''}</dl>
+    <h3 style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-faint);margin:14px 0 6px">payload</h3>
+    <code class="hg-drawer-code"><span class="hg-j-punct">{</span> <span class="hg-j-key">"span_id"</span><span class="hg-j-punct">:</span> <span class="hg-j-str">"${sp.id}"</span><span class="hg-j-punct">,</span>
+  <span class="hg-j-key">"kind"</span><span class="hg-j-punct">:</span> <span class="hg-j-str">"${sp.kind.toUpperCase().replaceAll('-','_')}"</span><span class="hg-j-punct">,</span>
+  <span class="hg-j-key">"tokens"</span><span class="hg-j-punct">:</span> <span class="hg-j-num">${(sp.t1-sp.t0)*310}</span><span class="hg-j-punct">,</span>
+  <span class="hg-j-key">"ok"</span><span class="hg-j-punct">:</span> <span class="hg-j-bool">${sp.status!=='failed'}</span> <span class="hg-j-punct">}</span></code>`;
+  } else { body = `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">${fpSVG(s,72)}
+      <div><div style="font-weight:700">${s.id}</div><div style="font-size:10.5px;color:var(--ink-faint)">${s.goal}</div>
+      <div style="margin-top:5px">${statusPill(s)}</div></div></div>
+    <dl class="hg-attrs"><dt>agents</dt><dd>${s.agents.length}</dd><dt>spans</dt><dd class="tnum">${s.spans.length}</dd>
+      <dt>elapsed</dt><dd class="tnum">${s.now}s</dd>
+      <dt>interventions</dt><dd class="tnum">${(s.ticks.coder||[]).length}</dd></dl>
+    <h3 style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-faint);margin:14px 0 4px">judge heartbeat</h3>
+    ${heartSVG(s, 290)}
+    <p style="font-size:10px;color:var(--ink-faint)">click any span for its detail · Esc closes</p>`; }
+  const inner = `<div class="hg-drawer">
+    <div class="hg-drawer-header"><span class="hg-drawer-title">${sp?sp.label:'session'}</span>
+      <button class="hg-drawer-close" id="drawer-close" title="close">×</button></div>
+    <div class="hg-drawer-body">${body}</div></div>`;
+  return `<div class="hg-drawer-host ${state.drawerOpen?'open':''}">${inner}</div>`;
+}
+function pickerHTML(){ if(!state.picker) return '';
+  return `<div class="hg-picker-backdrop" id="picker-backdrop"><div class="hg-picker">
+    <div class="hg-picker-search"><span style="color:var(--ink-faint)">⌕</span><input placeholder="switch session…" id="picker-input"><span class="hg-picker-kbd">esc</span></div>
+    <div class="hg-picker-list"><div class="hg-picker-section">sessions</div>
+    ${Object.values(SESSIONS).map(s=>`<button class="hg-picker-row" data-sess="${s.id}" aria-selected="${s.id===state.sessionId}">
+      ${fpSVG(s,30)}<span><span class="hg-picker-row-title">${s.id}</span><br><span class="hg-picker-row-sub">${s.goal}</span></span>
+      <span class="hg-picker-row-meta">${s.status}</span></button>`).join('')}
+    <div class="hg-picker-section" style="padding-bottom:10px;text-transform:none;letter-spacing:0">
+      fingerprint: x = plan progress · y = drift, damped — tight = harmonic, scribble = drifting,
+      outward spiral = diverging; the dot is status, earned</div></div></div></div>`;
+}
+
+/* ----- the plan block: the reel sits DIRECTLY ABOVE the DAG, sharing the same
+   horizontal alignment, and each reel version drives the DAG below it. The DAG
+   lives in its own host so a reel click re-renders ONLY the DAG (digest-gated —
+   no full re-render, no flash). ----- */
+function planBlockHTML(s){ const sel=state.planVer, ver=s.plan.strata[sel];
+  return `<h3>plan reel — pick a revision to drive the DAG below</h3>
+    <div class="reel-host">${reelSVG(s.plan, 940, sel)}</div>
+    <h3>plan DAG — ${ver.v}'s plan · interdependence (the critical path is the spine)</h3>
+    <div id="dag-host">${dagSVG(s.plan, 940, {vi:sel})}</div>`;
+}
+/* re-render ONLY the DAG host + the reel's active marks — local UI state, no
+   structural repaint of the rest of the console. */
+function repaintPlan(){ const s=S(), host=document.getElementById('dag-host');
+  if(!host) return; host.innerHTML=dagSVG(s.plan, 940, {vi:state.planVer});
+  const h3=host.previousElementSibling; if(h3&&h3.tagName==='H3')
+    h3.textContent=`plan DAG — ${s.plan.strata[state.planVer].v}'s plan · interdependence (the critical path is the spine)`;
+  const reel=document.querySelector('.reel-host'); if(reel){ reel.innerHTML=reelSVG(s.plan,940,state.planVer); wireReel(reel); }
+}
+/* ----- the two rail views ----- */
+function mainHybrid(){ const s=S();
+  if(state.view==='gantt')
+    // the gantt stands alone: the one hero reading, full size, nothing competing
+    return `<h3>execution — gantt</h3><div class="gantt-click">${ganttSVG(s,{selected:state.drawerSpan})}</div>
+      <h3>judge heartbeat</h3>${heartSVG(s)}`;
+  // the instruments: everything that is NOT the gantt, coalesced into one
+  // mission-control scroll — THE PLAN LEADS (reel → DAG), then conversation,
+  // topology, and ONE coordinated time-track stack: drift+judge seismograph
+  // over the time-aligned intervention ladder.
+  return `<div class="sess-head">${fpSVG(s,58)}<div><div class="sess-title">${s.id}</div>
+      <div style="font-size:11px;color:var(--ink-faint)">${s.goal}</div></div>
+      <span style="flex:1"></span><span class="sess-stats">${statusPill(s)}
+      <span class="dn-pill flat tnum">${s.spans.length} spans</span><span class="dn-pill flat tnum">${s.now}s</span></span></div>
+    ${planBlockHTML(s)}
+    <div class="panes-2"><div class="gantt-click"><h3>sequence — who said what to whom, when</h3>${seqDiagramSVG(s,{W:520,H:380})}</div>
+      <div><h3>topology — who initiates, who receives</h3>${topoChordSVG(s,300)}
+        <p class="prop-note" style="margin:6px 2px 0;line-height:1.5">hover an agent to <b>project</b> its
+        conversations (click to pin · click away to clear) · ribbon width grows with √count and caps, so heavy
+        traffic can never flood the figure</p></div></div>
+    <h3>drift seismograph + judge heartbeat — one instrument, one time axis</h3>
+    <div class="track-stack">${seismoSVG(s,['coder','reviewer','planner'],940,{axis:false})}
+      <div class="track-sub">interventions, time-aligned beneath the drift above ↓</div>
+      ${ladderSVG(s.ladder,940,s)}</div>`;
+}
+function railHTML(){
+  const items=[['gantt','▤'],['instruments','⧉']];
+  return `<nav class="hg-rail">${items.map(([v,ic])=>
+    `<button class="hg-rail-item" data-view="${v}" aria-selected="${state.view===v}"><span class="hg-rail-icon">${ic}</span><span>${v}</span></button>`).join('')}</nav>`;
+}
+function appHybrid(){
+  return topbarHTML()+stripHTML()+`<div class="app-body">${railHTML()}
+    <main class="app-main">${mainHybrid()}</main>${drawerHTML()}</div>`+transportHTML();
+}
+
+/* ----- render + wire ----- */
+function render(){
+  const app=document.getElementById('app');
+  app.innerHTML = appHybrid() + pickerHTML();
+  mountBrand();
+  app.querySelectorAll('.hg-rail-item').forEach(b=>b.addEventListener('click',()=>{ state.view=b.dataset.view; render(); }));
+  app.querySelectorAll('[data-span]').forEach(el=>el.addEventListener('click',()=>{
+    state.drawerSpan=el.dataset.span; state.drawerOpen=true; render(); }));
+  const dc=app.querySelector('#drawer-close'); if(dc) dc.addEventListener('click',()=>{
+    if(state.drawerSpan){ state.drawerSpan=null; } else { state.drawerOpen=false; } render(); });
+  const bl=app.querySelector('#btn-live'); if(bl) bl.addEventListener('click',()=>{ state.live=!state.live; render(); });
+  const op=app.querySelector('#open-picker'); if(op) op.addEventListener('click',()=>{ state.picker=true; render(); });
+  const pb=app.querySelector('#picker-backdrop'); if(pb){
+    pb.addEventListener('click',e=>{ if(e.target===pb){ state.picker=false; render(); } });
+    pb.querySelectorAll('[data-sess]').forEach(b=>b.addEventListener('click',()=>{
+      state.sessionId=b.dataset.sess; state.picker=false; state.drawerSpan=null; state.planVer=0; state.elapsed=S().now; render(); }));
+    const pi=app.querySelector('#picker-input'); if(pi) pi.focus(); }
+  wireChord(app);
+  const rh=app.querySelector('.reel-host'); if(rh) wireReel(rh);
+}
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){ if(state.picker){ state.picker=false; render(); } else if(state.drawerSpan){ state.drawerSpan=null; render(); } }
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){ e.preventDefault(); state.picker=!state.picker; render(); }
+});
+// the clock ticks while live — text-only mutation, never a repaint of structure
+setInterval(()=>{ if(!state.live) return; state.elapsed++;
+  const c=document.getElementById('clock'); if(c) c.textContent=fmtClock(state.elapsed); }, 1000);
+
+window.addEventListener('DOMContentLoaded', ()=>{ state.elapsed=S().now;
+  document.querySelectorAll('[data-theme-picker]').forEach(buildPicker); mountBrand(); render(); });
+</script>
+</body>
+</html>
