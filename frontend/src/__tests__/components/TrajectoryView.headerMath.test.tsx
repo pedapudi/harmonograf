@@ -146,26 +146,25 @@ describe('<TrajectoryView /> header "rev N of M" math', () => {
     expect(headerHint()).toBe('rev 2 of 2');
   });
 
-  it('uses revisionIndex (not length-1) when the rev numbering has a gap (R0 + R2, no R1)', () => {
-    // Goldfive planners can mint a fresh plan_id mid-stream, leaving the
-    // rev sequence non-contiguous when the trajectory merges both plans.
-    // The header denominator must reflect the highest revisionIndex
-    // observed, not `vm.revs.length - 1`.
+  it('reads the highest revisionIndex (not array position) for a plan that starts at a non-zero rev', () => {
+    // A goldfive planner can mint a fresh plan_id mid-stream that begins at a
+    // non-zero revisionIndex (here p2 jumps straight to rev 2). The default
+    // selection is the latest plan (p2), and the header denominator must come
+    // from its revisionIndex (2), not the scoped vm.revs length-1 (0).
     //
-    // Multi-plan note (Item 4 of UX cleanup batch): two distinct plan
-    // ids (p1, p2) means the header now prefixes the rev label with
-    // "Plan {N} · " so operators can see which plan the current rev
-    // belongs to (the H1 plan picker lands the picker UI on top of this
-    // label). The numerator/denominator math is unchanged.
+    // Multi-plan identity is conveyed by the plan-picker chip-bar (see
+    // TrajectoryView.planPicker test), NOT a header prefix: an earlier
+    // "Plan {N} · " prefix (#195, written for a merged-trajectory model) was
+    // superseded when the picker (#196) landed and scoped the view model to a
+    // single selected plan. So the header stays a plain "rev N of M".
     mockStore.tasks.upsertPlan(mkPlan('p1', [mkTask('t1')], 0));
     mockStore.tasks.upsertPlan(
       mkPlan('p2', [mkTask('t1'), mkTask('t2')], 2, 'user steer', 'user_steer'),
     );
     render(<TrajectoryView />);
-    // vm.revs.length === 2, but max revisionIndex === 2 → "rev 2 of 2",
-    // not the buggy "rev 1 of 1". Multi-plan prefix surfaces "Plan 2"
-    // because the latest rev belongs to the second distinct plan id.
-    expect(headerHint()).toBe('Plan 2 · rev 2 of 2');
+    // Selected = latest = p2, revisionIndex 2 → "rev 2 of 2" (not "rev 2 of 0").
+    expect(headerHint()).toBe('rev 2 of 2');
+    expect(headerHint()).not.toContain('Plan');
   });
 
   it('switches between "no plan yet" and a "rev N of M" hint as plans land', () => {
@@ -194,10 +193,11 @@ describe('<TrajectoryView /> header "rev N of M" math', () => {
     expect(headerHint()).not.toContain('Plan');
   });
 
-  it('prefixes "Plan N · " when multiple plan ids are present (Item 4)', () => {
-    // Three distinct plan ids → header surfaces the index of the plan
-    // the current rev belongs to, so an operator viewing rev 2 can tell
-    // which plan they're scoped to ahead of the H1 plan picker landing.
+  it('keeps a plain "rev N of M" header on multi-plan sessions (plan identity comes from the picker chips)', () => {
+    // Three distinct plan ids → the plan-picker chip-bar (see
+    // TrajectoryView.planPicker test) shows which plan is selected, so the
+    // header does NOT duplicate that with a "Plan N · " prefix. The earlier
+    // prefix (#195) was superseded when the picker (#196) landed.
     mockStore.tasks.upsertPlan(mkPlan('p1', [mkTask('t1')], 0));
     mockStore.tasks.upsertPlan(
       mkPlan('p2', [mkTask('t1'), mkTask('t2')], 1, 'split', 'plan_divergence'),
@@ -206,7 +206,8 @@ describe('<TrajectoryView /> header "rev N of M" math', () => {
       mkPlan('p3', [mkTask('t1'), mkTask('t2'), mkTask('t3')], 2, 'next', 'goldfive'),
     );
     render(<TrajectoryView />);
-    // Latest rev belongs to the third distinct plan id → "Plan 3".
-    expect(headerHint()).toBe('Plan 3 · rev 2 of 2');
+    // Latest = p3, revisionIndex 2 → "rev 2 of 2", no "Plan 3 · " prefix.
+    expect(headerHint()).toBe('rev 2 of 2');
+    expect(headerHint()).not.toContain('Plan');
   });
 });
