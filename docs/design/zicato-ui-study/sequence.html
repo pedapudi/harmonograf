@@ -74,8 +74,8 @@
     <p class="rationale">
       <b>One vertical lifeline per agent, time flowing down</b> — the canonical sequence-diagram orientation, so it
       reads as one at a glance. Every message is a <b>horizontal connector</b> from the sender's lifeline to the
-      receiver's, with a <b>solid arrowhead at the receiving end</b> (a synchronous call) or a <b>dashed return</b>
-      (a result/reply), the label riding above in the KIND hue — dashed TRANSFER yellow for hand-offs, user green,
+      receiver's, ending in a <b>small solid arrowhead</b> at the receiver — a <b>solid connector</b> for a synchronous
+      call, a <b>dashed return</b> for a result/reply, the label riding above in the KIND hue — dashed TRANSFER yellow for hand-offs, user green,
       agent-message bright-green. <b>Activations</b> hug each lifeline as kind-hue bars (the agent is busy). The
       tester delegation <b>opens a child lifeline, runs beneath, and returns ✓</b>. The reviewer's approval is a
       <b>gate</b> (○ deciding). The failed check is the only red. It paginates vertically like a transcript, which
@@ -91,8 +91,8 @@
         <div class="ba-frame" id="fig-chord"></div>
         <p class="sq-lbl" style="margin:8px 2px 0;line-height:1.5">
           The transfer chord, made directional: each agent's arc splits into a solid <b>outbound</b> half and a
-          dashed <b>inbound</b> half; every ribbon is pinched at its source and broad at its target, carries the
-          source→target hue, and lands an arrowhead on the receiver. A coordinator-and-spokes run fans out from one
+          dashed <b>inbound</b> half; every chord is a thin line that fades from a faint source to a bright target
+          and lands an arrowhead on the receiver. A coordinator-and-spokes run fans out from one
           sector; a web means everyone is talking to everyone. <b>Built to scale:</b> ribbon width grows with
           <b>√count and caps</b>, so a chatty pair can never flood the figure — and the chord is <b>interactive</b>:
           hover an agent to <b>project</b> its conversations (everything else fades to a whisper, counts appear on
@@ -120,7 +120,7 @@
     <p class="rationale">
       The same trace laid <b>horizontally</b>, sharing the Gantt's time axis exactly. Agents are horizontal
       <b>staves</b>; work sits ON the staff as quiet kind-hue activations; messages are thin vertical connectors with
-      open arrowheads. Its strength is being the Gantt's connective tissue — drop it over the same axis and the two
+      small solid arrowheads. Its strength is being the Gantt's connective tissue — drop it over the same axis and the two
       views scrub together — but as a <i>sequence</i> diagram it is weaker: vertical message connectors between five
       closely-stacked staves are cramped, and it reads as an execution overlay more than a conversation. Keep it as
       the Gantt-companion lane; <b>the vertical sequence diagram above is the view</b> for reading the interaction.
@@ -273,10 +273,8 @@ function mountUML(){
    connector in the KIND hue. Activations hug each lifeline. The delegation
    opens a child lifeline that runs beneath the parent and returns. */
 function arrowHead(x, y, dir, color, open){ // dir: +1 head points right, -1 left
-  const b = open
-    ? `<path d="M${x-9*dir},${y-4.5} L${x},${y} L${x-9*dir},${y+4.5}" fill="none" stroke="${color}" stroke-width="1.4" vector-effect="non-scaling-stroke"/>`
-    : `<path d="M${x-9*dir},${y-4.5} L${x},${y} L${x-9*dir},${y+4.5} Z" fill="${color}"/>`;
-  return b;
+  // a small SOLID arrowhead; the SOLID-vs-DASHED connector carries call/return
+  return `<path d="M${x-6*dir},${y-2.4} L${x},${y} L${x-6*dir},${y+2.4} Z" fill="${color}" stroke="none"/>`;
 }
 function mountStaff(){
   const W=760, padT=58, H=520;
@@ -358,31 +356,32 @@ function chordSVG(o){
     const oA=th+SECTOR/2, oB=th+0.05, iA=th-0.05, iB=th-SECTOR/2;
     const arcStroke=(thA,thB,r,attrs)=>{ const [xA,yA]=onArc(thA,r), [xB,yB]=onArc(thB,r);
       return `<path data-agent="${a}" d="M${xA.toFixed(1)},${yA.toFixed(1)} A${r},${r} 0 0 ${thA>thB?1:0} ${xB.toFixed(1)},${yB.toFixed(1)}" fill="none" ${attrs}/>`; };
-    if(outN[i]) g+=arcStroke(oA,oB,R, `stroke="${aColor(a)}" stroke-width="5" stroke-linecap="round" opacity=".9"`);
-    if(inN[i])  g+=arcStroke(iA,iB,R, `stroke="${aColor(a)}" stroke-width="5" stroke-linecap="round" opacity=".9" stroke-dasharray="1.5 2.4"`);
+    if(outN[i]) g+=arcStroke(oA,oB,R, `stroke="${aColor(a)}" stroke-width="4.5" stroke-linecap="round" vector-effect="non-scaling-stroke" opacity=".9"`);
+    if(inN[i])  g+=arcStroke(iA,iB,R, `stroke="${aColor(a)}" stroke-width="4.5" stroke-linecap="round" vector-effect="non-scaling-stroke" opacity=".9" stroke-dasharray="1.5 2.4"`);
   });
   let counts='';
   flows.forEach(([a,b,c],fi)=>{ const ths=ang(a), thd=ang(b);
     const sFrac=(outUsed[a]+c/2)/Math.max(outN[a],1); outUsed[a]+=c;
     const dFrac=(inUsed[b]+c/2)/Math.max(inN[b],1);  inUsed[b]+=c;
     const sTh=ths+0.07+(SECTOR/2-0.07)*sFrac, dTh=thd-0.07-(SECTOR/2-0.07)*dFrac;
-    // √count with a hard cap: heavy traffic thickens slowly and can never flood
-    const wS=1.6, wT=Math.min(15, 4+Math.sqrt(c)*3.4);
-    const [sx,sy]=onArc(sTh,R-4), [dx,dy]=onArc(dTh,R-9);
-    const tS=[Math.sin(sTh),Math.cos(sTh)], tD=[Math.sin(dTh),Math.cos(dTh)];
-    const s1=[sx+tS[0]*wS/2, sy+tS[1]*wS/2], s2=[sx-tS[0]*wS/2, sy-tS[1]*wS/2];
-    const t1=[dx+tD[0]*wT/2, dy+tD[1]*wT/2], t2=[dx-tD[0]*wT/2, dy-tD[1]*wT/2];
+    // ribbon = a THIN stroked curve, not a fat filled teardrop: width is a
+    // restrained √count, hard-capped, and non-scaling so it stays a crisp
+    // hairline at any container width. Direction still reads from the gradient
+    // (faint source → bright target), the solid/dashed arc split and the
+    // arrowhead — the swelling teardrop was a redundant fourth cue.
+    const w=Math.min(4, 0.9+Math.sqrt(c)*1.1);
+    const [sx,sy]=onArc(sTh,R-4), [dx,dy]=onArc(dTh,R-6);
+    const tD=[Math.sin(dTh),Math.cos(dTh)];
     const mid=[(sx+dx)/2 + (cx-(sx+dx)/2)*0.62, (sy+dy)/2 + ((cyA-34)-(sy+dy)/2)*0.5];
     const gid=`sqchg${fi}`, FT=`data-f="${agents[a]}" data-t="${agents[b]}"`;
     g+=`<defs><linearGradient id="${gid}" x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${dx.toFixed(1)}" y2="${dy.toFixed(1)}" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="${aColor(agents[a])}" stop-opacity=".32"/><stop offset="1" stop-color="${aColor(agents[b])}" stop-opacity=".95"/></linearGradient></defs>`;
-    g+=`<path data-ribbon="1" ${FT} fill="url(#${gid})" stroke="none"
-      d="M${s1[0].toFixed(1)},${s1[1].toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${t1[0].toFixed(1)},${t1[1].toFixed(1)}
-         L${t2[0].toFixed(1)},${t2[1].toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${s2[0].toFixed(1)},${s2[1].toFixed(1)} Z">
+      <stop offset="0" stop-color="${aColor(agents[a])}" stop-opacity=".45"/><stop offset="1" stop-color="${aColor(agents[b])}" stop-opacity=".95"/></linearGradient></defs>`;
+    g+=`<path data-ribbon="1" ${FT} fill="none" stroke="url(#${gid})" stroke-width="${w.toFixed(2)}" stroke-linecap="round" vector-effect="non-scaling-stroke"
+      d="M${sx.toFixed(1)},${sy.toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${dx.toFixed(1)},${dy.toFixed(1)}">
       <title>${agents[a]} → ${agents[b]} · ${c} transfers (${agents[a]} initiates)</title></path>`;
-    const outward=[Math.cos(dTh),-Math.sin(dTh)], tip=onArc(dTh,R-1);
-    const base=[tip[0]-outward[0]*8, tip[1]-outward[1]*8];
-    g+=`<path data-ahead="1" ${FT} d="M${(base[0]+tD[0]*4).toFixed(1)},${(base[1]+tD[1]*4).toFixed(1)} L${tip[0].toFixed(1)},${tip[1].toFixed(1)} L${(base[0]-tD[0]*4).toFixed(1)},${(base[1]-tD[1]*4).toFixed(1)} Z" fill="${aColor(agents[b])}"/>`;
+    const outward=[Math.cos(dTh),-Math.sin(dTh)], tip=[dx+outward[0]*4, dy+outward[1]*4];
+    // a small SOLID arrowhead tipping the chord onto the receiver
+    g+=`<path data-ahead="1" ${FT} d="M${(dx+tD[0]*1.4).toFixed(1)},${(dy+tD[1]*1.4).toFixed(1)} L${tip[0].toFixed(1)},${tip[1].toFixed(1)} L${(dx-tD[0]*1.4).toFixed(1)},${(dy-tD[1]*1.4).toFixed(1)} Z" fill="${aColor(agents[b])}" stroke="none"/>`;
     counts+=`<text class="tch-count" data-count="1" ${FT} x="${mid[0].toFixed(1)}" y="${(mid[1]+3).toFixed(1)}" text-anchor="middle">${c}×</text>`;
   });
   agents.forEach((a,i)=>{ const th=ang(i), [x,y]=onArc(th,R);
@@ -442,7 +441,7 @@ function mountScore(){
     if(st==='awaiting') g+=`<text x="${x0+w+3}" y="${y+3.5}" font-size="10" fill="${KIND('wait-for-human')}">◷</text>`; });
   function arrow(x, y0, y1, color, dash, lbl){ const d=y1>y0?1:-1, bend=14*d;
     let s=`<path class="sq-msg" d="M${x},${y0+7*d} C ${x+3},${y0+bend} ${x+3},${y1-bend} ${x},${y1-8*d}" stroke="${color}"${dash?` stroke-dasharray="4 3"`:''}><title>${lbl}</title></path>`;
-    s+=`<path class="sq-head" d="M${x-3.5},${y1-9.5*d} L${x},${y1-2*d} L${x+3.5},${y1-9.5*d}" stroke="${color}" stroke-width="1.2" fill="none" vector-effect="non-scaling-stroke"/>`;
+    s+=`<path class="sq-head" d="M${x-2.4},${y1-7*d} L${x},${y1-2*d} L${x+2.4},${y1-7*d} Z" stroke="none" fill="${color}"/>`;
     return s; }
   MSGS.forEach(([t,f,o,k,lbl])=>{ const x=X(t);
     if(k==='delegate'||k==='result') return;

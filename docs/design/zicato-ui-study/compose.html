@@ -163,6 +163,17 @@ function lerpKeys(keys, t){ if(t<=keys[0][0]) return keys[0][1];
   for(let i=1;i<keys.length;i++){ if(t<=keys[i][0]){ const [t0,v0]=keys[i-1],[t1,v1]=keys[i];
     return v0+(v1-v0)*(t-t0)/(t1-t0); } } return keys[keys.length-1][1]; }
 function lcg(seed){ let s=seed>>>0; return ()=>((s=(s*1664525+1013904223)>>>0)/4294967296); }
+/* The judge heartbeat is DERIVED from the drift the judges watch, so every
+   firing mark sits exactly above the drift reading that earned it: a steady ok
+   cadence, a warn (▲) when the worst watched lane crosses the tolerance band,
+   a crit (✕) at a deep excursion. Same lanes, same time mapping as the
+   seismograph — the heartbeat and the drift trace cannot disagree. */
+function judgeBeats(s, lanes){ lanes=lanes||['coder','reviewer','planner']; const TOL=8, beats=[];
+  const end=Math.min(s.now, s.T);
+  for(let t=2; t<=end+0.001; t+=2.6){
+    let d=0; lanes.forEach(a=>{ if(s.judges[a]) d=Math.max(d, lerpKeys(s.judges[a], t)); });
+    beats.push([t, d>=TOL*1.5 ? 'crit' : d>=TOL ? 'warn' : 'ok']); }
+  return beats; }
 
 const PRIMARY = {
   id: 'checkout-refactor', status: 'live', T: 96, now: 80,
@@ -198,8 +209,6 @@ const PRIMARY = {
   ticks: { coder: [[35,'nudge · operator'],[42,'refine · goldfive']], reviewer: [], planner: [] },
   ladder: [[35,0],[42,1]],
   ctx: [[0,.10],[18,.22],[30,.44],[44,.62],[54,.78],[55,.34],[68,.5],[80,.62],[96,.66]],
-  heart: (()=>{ const r=lcg(7), e=[]; for(let i=0;i<30;i++){ const t=2+i*2.5+r();
-    e.push([t, (i===12||i===13)?'warn':(i===15?'crit':'ok')]); } return e; })(),
   plan: {
     // tid bridges each DAG node to its strata task-id (T1…T7) so the reel can
     // drive the DAG: the live DAG below == version v3's task set {T1,T2,T4,T6,T7}
@@ -277,12 +286,25 @@ function ganttSVG(s, o){ // o: {compact, mini, selected}
     g+=`<rect class="${cls}" data-span="${sp.id}" x="${x0}" y="${y-bh/2}" width="${w}" height="${bh}" rx="3"${sp.status==='planned'?'':` fill="${fill}"`}${extra} tabindex="${o.mini?-1:0}"><title>${sp.agent} · ${sp.label} · ${sp.t0}–${sp.t1}s · ${sp.status}</title></rect>`;
     if(!o.mini && sp.status==='failed') g+=`<text class="hg-gantt-glyph-fail" x="${x0+w-11}" y="${y-bh/2-2}">✕</text>`;
     if(!o.mini && sp.status==='awaiting') g+=`<text class="hg-gantt-glyph-wait" x="${x0+w+3}" y="${y+3.5}">◷</text>`; });
-  if(!o.mini){ s.transfers.forEach(tr=>{ if(!Y[tr.from]||!Y[tr.to]) return; const x=X(tr.t);
-    g+=`<path class="hg-gantt-edge is-transfer" d="M${x},${Y[tr.from]+7} C ${x+2},${(Y[tr.from]+Y[tr.to])/2} ${x+2},${(Y[tr.from]+Y[tr.to])/2} ${x+4},${Y[tr.to]-7}"><title>transfer ${tr.from} → ${tr.to}</title></path>`; });
-    if(s.delegation && Y[s.delegation.to]){ const d=s.delegation;
-      g+=`<path class="hg-gantt-edge" d="M${X(d.t0)},${Y[d.from]+7} C ${X(d.t0)+3},${Y[d.to]-20} ${X(d.t0)+3},${Y[d.to]-16} ${X(d.t0)+6},${Y[d.to]-7}"><title>delegate → ${d.to} · ${d.tokens} tok</title></path>`;
-      g+=`<path class="hg-gantt-edge" d="M${X(d.t1)-6},${Y[d.to]-7} C ${X(d.t1)-3},${Y[d.to]-16} ${X(d.t1)-3},${Y[d.to]-20} ${X(d.t1)},${Y[d.from]+7}"><title>rejoin · ${d.verdict}</title></path>`;
-      g+=`<text x="${X(d.t1)+2}" y="${Y[d.from]+18}" font-size="9" fill="var(--good)">✓</text>`; } }
+  if(!o.mini){
+    // Edges connect the END of the source span to the START of the receiver's
+    // next span: a smooth S anchored on the bar edges, with an open line-art
+    // chevron landing on the receiver, so a hand-off visibly joins the two bars.
+    // (The chevron is classless on purpose — a CSS class rule would override its
+    //  presentation attributes; classless, its own dash/colour/opacity hold.)
+    const spanStart=(ag,t)=>{ let b=null; s.spans.forEach(sp=>{ if(sp.agent===ag&&Y[sp.agent]&&sp.t0>=t-3&&(!b||sp.t0<b.t0)) b=sp; }); return b; };
+    const edge=(x0,y0,x1,y1,cls,col,tip)=>{ const vs=Math.sign(y1-y0)||1, ya=y0+vs*5, yb=y1-vs*5;
+      const dx=Math.max(10,Math.abs(x1-x0)*0.5), ad=x1>=x0?1:-1;
+      return `<path class="hg-gantt-edge${cls}" d="M${x0.toFixed(1)},${ya.toFixed(1)} C ${(x0+dx).toFixed(1)},${ya.toFixed(1)} ${(x1-dx).toFixed(1)},${yb.toFixed(1)} ${x1.toFixed(1)},${yb.toFixed(1)}"><title>${tip}</title></path>`
+        + `<path d="M${(x1-3*ad).toFixed(1)},${(yb-1.4).toFixed(1)} L${x1.toFixed(1)},${yb.toFixed(1)} L${(x1-3*ad).toFixed(1)},${(yb+1.4).toFixed(1)} Z" fill="${col}" stroke="none" opacity="0.85"/>`; };
+    s.transfers.forEach(tr=>{ if(!Y[tr.from]||!Y[tr.to]||tr.t>s.T) return; const dst=spanStart(tr.to,tr.t);
+      g+=edge(X(tr.t), Y[tr.from], X(dst?dst.t0:tr.t), Y[tr.to], ' is-transfer',
+        'var(--hg-kind-transfer)', `transfer ${tr.from} → ${tr.to} · ${tr.t}s`); });
+    if(s.delegation && Y[s.delegation.to]){ const d=s.delegation, out=spanStart(d.to,d.t0);
+      if(out && d.t0<s.T){
+        g+=edge(X(d.t0), Y[d.from], X(out.t0), Y[d.to], '', 'var(--ink-soft)', `delegate → ${d.to} · ${d.tokens} tok`);
+        g+=edge(X(Math.min(out.t1,s.T)), Y[d.to], X(Math.min(d.t1,s.T)), Y[d.from], '', 'var(--ink-soft)', `rejoin · ${d.verdict}`);
+        g+=`<text x="${X(Math.min(d.t1,s.T))+3}" y="${Y[d.from]+16}" font-size="9" fill="var(--good)">✓</text>`; } } }
   const nx=X(Math.min(s.now,s.T));
   g+=`<line class="hg-gantt-now" x1="${nx}" y1="4" x2="${nx}" y2="${H-(o.mini?6:22)}"/>`;
   if(!o.mini) g+=`<circle class="hg-gantt-now-cap" cx="${nx}" cy="4" r="2.5"/><text class="hg-gantt-now-label" x="${nx+5}" y="11">now ${s.now}s</text>`;
@@ -329,10 +351,9 @@ function seqDiagramSVG(s, o){ o=o||{};
       :k==='delegate'?'var(--ink-soft)':isReturn?'var(--ink-faint)':KIND('agent-message');
     const dash = k==='transfer'?` stroke-dasharray="5 3"`:isReturn?` stroke-dasharray="4 3"`:'';
     g+=`<line class="sq-msg" x1="${x0+4*dir}" y1="${y}" x2="${x1-9*dir}" y2="${y}" stroke="${color}"${dash}><title>${f} → ${o2} · ${lbl} · ${t}s</title></line>`;
-    const ah = isReturn
-      ? `<path d="M${x1-9*dir},${y-4} L${x1-1*dir},${y} L${x1-9*dir},${y+4}" fill="none" stroke="${color}" stroke-width="1.3" vector-effect="non-scaling-stroke"/>`
-      : `<path d="M${x1-9*dir},${y-4} L${x1-1*dir},${y} L${x1-9*dir},${y+4} Z" fill="${color}"/>`;
-    g+=ah;
+    // a small SOLID arrowhead at the receiver; the SOLID-vs-DASHED connector
+    // (and the hue) carries the call/return distinction
+    g+=`<path d="M${x1-6*dir},${y-2.2} L${x1-1*dir},${y} L${x1-6*dir},${y+2.2} Z" fill="${color}" stroke="none"/>`;
     g+=`<text class="sq-lbl" x="${x0+16*dir}" y="${y-5}" text-anchor="${dir>0?'start':'end'}" fill="${color}">${lbl}</text>`; });
   const wait=s.spans.find(x=>x.status==='awaiting');
   if(wait&&X[wait.agent]) g+=`<circle cx="${X[wait.agent]}" cy="${yT(Math.min(wait.t1,s.T))}" r="5.5" fill="none" stroke="var(--ink-soft)" stroke-width="1.4"><title>gate · deciding…</title></circle>`;
@@ -364,26 +385,29 @@ function topoChordSVG(s, W){ W=W||320;
   agents.forEach((a,i)=>{ const th=ang(i), oA=th+SECTOR/2,oB=th+0.05,iA=th-0.05,iB=th-SECTOR/2;
     const arc=(thA,thB,attrs)=>{ const [xA,yA]=onArc(thA,R),[xB,yB]=onArc(thB,R);
       return `<path data-agent="${a}" d="M${xA.toFixed(1)},${yA.toFixed(1)} A${R},${R} 0 0 ${thA>thB?1:0} ${xB.toFixed(1)},${yB.toFixed(1)}" fill="none" ${attrs}/>`; };
-    if(outN[i]) g+=arc(oA,oB,`stroke="${aColor(a)}" stroke-width="5" stroke-linecap="round" opacity=".9"`);
-    if(inN[i])  g+=arc(iA,iB,`stroke="${aColor(a)}" stroke-width="5" stroke-linecap="round" opacity=".9" stroke-dasharray="1.5 2.4"`);
+    if(outN[i]) g+=arc(oA,oB,`stroke="${aColor(a)}" stroke-width="4.5" stroke-linecap="round" vector-effect="non-scaling-stroke" opacity=".9"`);
+    if(inN[i])  g+=arc(iA,iB,`stroke="${aColor(a)}" stroke-width="4.5" stroke-linecap="round" vector-effect="non-scaling-stroke" opacity=".9" stroke-dasharray="1.5 2.4"`);
   });
   let cLabels='';
   flows.forEach(([a,b,c],fi)=>{ const ths=ang(a),thd=ang(b);
     const sF=(outUsed[a]+c/2)/Math.max(outN[a],1); outUsed[a]+=c;
     const dF=(inUsed[b]+c/2)/Math.max(inN[b],1);  inUsed[b]+=c;
     const sTh=ths+0.07+(SECTOR/2-0.07)*sF, dTh=thd-0.07-(SECTOR/2-0.07)*dF;
-    // √count with a hard cap: heavy traffic thickens slowly and can never flood
-    const wS=1.6, wT=Math.min(15, 4+Math.sqrt(c)*3.4), [sx,sy]=onArc(sTh,R-4),[dx,dy]=onArc(dTh,R-9);
-    const tS=[Math.sin(sTh),Math.cos(sTh)],tD=[Math.sin(dTh),Math.cos(dTh)];
-    const s1=[sx+tS[0]*wS/2,sy+tS[1]*wS/2],s2=[sx-tS[0]*wS/2,sy-tS[1]*wS/2];
-    const t1=[dx+tD[0]*wT/2,dy+tD[1]*wT/2],t2=[dx-tD[0]*wT/2,dy-tD[1]*wT/2];
+    // ribbon = a THIN stroked curve, not a fat filled teardrop: width is a
+    // restrained √count, hard-capped, and non-scaling so it stays a crisp
+    // hairline at any container width. Direction still reads from the gradient
+    // (faint source → bright target), the solid/dashed arc split and the
+    // arrowhead — the swelling teardrop was a redundant fourth cue.
+    const w=Math.min(4, 0.9+Math.sqrt(c)*1.1), [sx,sy]=onArc(sTh,R-4),[dx,dy]=onArc(dTh,R-6);
+    const tD=[Math.sin(dTh),Math.cos(dTh)];
     const mid=[(sx+dx)/2+(cx-(sx+dx)/2)*0.62,(sy+dy)/2+((cyA-34)-(sy+dy)/2)*0.5], gid=`tch${s.id}${fi}`;
     const FT=`data-f="${agents[a]}" data-t="${agents[b]}"`;
     g+=`<defs><linearGradient id="${gid}" x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${dx.toFixed(1)}" y2="${dy.toFixed(1)}" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="${aColor(agents[a])}" stop-opacity=".32"/><stop offset="1" stop-color="${aColor(agents[b])}" stop-opacity=".95"/></linearGradient></defs>`;
-    g+=`<path data-ribbon="1" ${FT} fill="url(#${gid})" stroke="none" d="M${s1[0].toFixed(1)},${s1[1].toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${t1[0].toFixed(1)},${t1[1].toFixed(1)} L${t2[0].toFixed(1)},${t2[1].toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${s2[0].toFixed(1)},${s2[1].toFixed(1)} Z"><title>${agents[a]} → ${agents[b]} · ${c} (${agents[a]} initiates)</title></path>`;
-    const outward=[Math.cos(dTh),-Math.sin(dTh)], tip=onArc(dTh,R-1), base=[tip[0]-outward[0]*8,tip[1]-outward[1]*8];
-    g+=`<path data-ahead="1" ${FT} d="M${(base[0]+tD[0]*4).toFixed(1)},${(base[1]+tD[1]*4).toFixed(1)} L${tip[0].toFixed(1)},${tip[1].toFixed(1)} L${(base[0]-tD[0]*4).toFixed(1)},${(base[1]-tD[1]*4).toFixed(1)} Z" fill="${aColor(agents[b])}"/>`;
+      <stop offset="0" stop-color="${aColor(agents[a])}" stop-opacity=".45"/><stop offset="1" stop-color="${aColor(agents[b])}" stop-opacity=".95"/></linearGradient></defs>`;
+    g+=`<path data-ribbon="1" ${FT} fill="none" stroke="url(#${gid})" stroke-width="${w.toFixed(2)}" stroke-linecap="round" vector-effect="non-scaling-stroke" d="M${sx.toFixed(1)},${sy.toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${dx.toFixed(1)},${dy.toFixed(1)}"><title>${agents[a]} → ${agents[b]} · ${c} (${agents[a]} initiates)</title></path>`;
+    const outward=[Math.cos(dTh),-Math.sin(dTh)], tip=[dx+outward[0]*4,dy+outward[1]*4];
+    // a small SOLID arrowhead tipping the chord onto the receiver
+    g+=`<path data-ahead="1" ${FT} d="M${(dx+tD[0]*1.4).toFixed(1)},${(dy+tD[1]*1.4).toFixed(1)} L${tip[0].toFixed(1)},${tip[1].toFixed(1)} L${(dx-tD[0]*1.4).toFixed(1)},${(dy-tD[1]*1.4).toFixed(1)} Z" fill="${aColor(agents[b])}" stroke="none"/>`;
     cLabels+=`<text class="tch-count" data-count="1" ${FT} x="${mid[0].toFixed(1)}" y="${(mid[1]+3).toFixed(1)}" text-anchor="middle">${c}×</text>`;
   });
   agents.forEach((a,i)=>{ const th=ang(i),[x,y]=onArc(th,R);
@@ -453,7 +477,7 @@ function seismoSVG(s, lanes, W, opts){ opts=opts||{};
   if(heart){ const hy=heartH-10;
     g+=`<text class="gm-label" x="6" y="${hy+4}" fill="var(--hg-agent-goldfive)">judges</text>`;
     g+=`<line class="gm-onplan" x1="${X(0)}" y1="${hy}" x2="${X(s.T)}" y2="${hy}"/>`;
-    s.heart.forEach(([t,k])=>{ if(t>s.T) return; const x=X(t);
+    judgeBeats(s, lanes).forEach(([t,k])=>{ if(t>s.T) return; const x=X(t);
       if(k==='ok')   g+=`<circle cx="${x}" cy="${hy}" r="1.7" fill="var(--hg-agent-goldfive)" opacity=".8"><title>judge fired · on-task @ ${t.toFixed(0)}s</title></circle>`;
       if(k==='warn') g+=`<line x1="${x}" y1="${hy-6}" x2="${x}" y2="${hy+6}" stroke="var(--caution)" stroke-width="1.4" vector-effect="non-scaling-stroke"/><text x="${x-3.5}" y="${hy+3}" font-size="8.5" fill="var(--caution)">▲</text>`;
       if(k==='crit') g+=`<line x1="${x}" y1="${hy-7}" x2="${x}" y2="${hy+7}" stroke="var(--bad)" stroke-width="1.6" vector-effect="non-scaling-stroke"/><text x="${x-3.5}" y="${hy+3.5}" font-size="9.5" fill="var(--bad)" font-weight="700">✕</text>`; });
@@ -483,7 +507,7 @@ function heartSVG(s, W){ W=W||940; const H=40, padL=W<400?40:76, X=t=>padL+(W-pa
   let g=`<svg class="fig" viewBox="0 0 ${W} ${H}" role="img" aria-label="judge heartbeat — ${s.id}">`;
   g+=`<text class="gm-label" x="6" y="22" fill="var(--hg-agent-goldfive)">judges</text>`;
   g+=`<line class="gm-onplan" x1="${X(0)}" y1="26" x2="${X(s.T)}" y2="26"/>`;
-  s.heart.forEach(([t,k])=>{ if(t>s.T) return; const x=X(t);
+  judgeBeats(s).forEach(([t,k])=>{ if(t>s.T) return; const x=X(t);
     if(k==='ok') g+=`<circle cx="${x}" cy="18" r="1.5" fill="var(--hg-agent-goldfive)" opacity=".8"/>`;
     if(k==='warn') g+=`<text x="${x-3.5}" y="22" font-size="9" fill="var(--caution)">▲</text>`;
     if(k==='crit') g+=`<text x="${x-3.5}" y="22" font-size="10" fill="var(--bad)" font-weight="700">✕</text>`; });

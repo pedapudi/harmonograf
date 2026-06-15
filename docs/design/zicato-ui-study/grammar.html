@@ -211,16 +211,16 @@
       Agents on an arc, transfer counts as chords, width ∝ frequency, quiet agent-ramp hues. A plain chord hides the
       one thing the operator most needs — <b>who initiates vs. who receives</b> — so this one is <b>directional three
       ways at once</b>: (1) each agent's sector is split into an <b>outbound half</b> (solid, source side) and an
-      <b>inbound half</b> (hollow tick, target side); (2) every ribbon is an <b>asymmetric teardrop</b> — pinched at
-      the source, broad at the target — so the chord visibly <i>flows</i> toward whom it reaches; (3) it carries the
-      <b>source→target hue</b> and ends in a small arrowhead on the target arc. A coordinator-and-spokes system fans
+      <b>inbound half</b> (hollow tick, target side); (2) every chord is a <b>thin line</b> whose hue <b>fades from a
+      faint source to a bright target</b>, so it visibly <i>flows</i> toward whom it reaches; (3) and it ends in a
+      small arrowhead on the target arc. A coordinator-and-spokes system fans
       <i>out</i> from one sector; <b>if it looks like a web, something's off</b>. The session-summary topology check.
     </p>
     <div class="figwrap" id="fig-chord"></div>
     <div class="legend">
       <span><span class="sw" style="background:var(--hg-agent-1);opacity:.8"></span>outbound (source) half</span>
       <span><span class="sw" style="background:var(--panel);border:1px solid var(--rule)"></span>inbound (target) half</span>
-      <span>pinched ▸ source · broad ▸ target · ▸ arrowhead at the receiver</span>
+      <span>faint ▸ source · bright ▸ target · ▸ arrowhead at the receiver</span>
     </div>
   </div>
 </section>
@@ -621,8 +621,8 @@ function chordSVG(o){
     const arcStroke=(thA,thB,r,attrs)=>{ const [xA,yA]=onArc(thA,r), [xB,yB]=onArc(thB,r);
       const large=0; const sweep= thA>thB?1:0;
       return `<path d="M${xA.toFixed(1)},${yA.toFixed(1)} A${r},${r} 0 ${large} ${sweep} ${xB.toFixed(1)},${yB.toFixed(1)}" fill="none" ${attrs}/>`; };
-    if(outN[i]) g+=arcStroke(oA,oB,R, `stroke="${aColor(i)}" stroke-width="5" stroke-linecap="round" opacity=".9"`);
-    if(inN[i])  g+=arcStroke(iA,iB,R, `stroke="${aColor(i)}" stroke-width="5" stroke-linecap="round" opacity=".9" stroke-dasharray="1.5 2.4"`);
+    if(outN[i]) g+=arcStroke(oA,oB,R, `stroke="${aColor(i)}" stroke-width="4.5" stroke-linecap="round" vector-effect="non-scaling-stroke" opacity=".9"`);
+    if(inN[i])  g+=arcStroke(iA,iB,R, `stroke="${aColor(i)}" stroke-width="4.5" stroke-linecap="round" vector-effect="non-scaling-stroke" opacity=".9" stroke-dasharray="1.5 2.4"`);
   });
   // ribbons: asymmetric teardrop, src→dst hue gradient, arrowhead on the target
   flows.forEach(([a,b,c],fi)=>{ const ths=ang(a), thd=ang(b);
@@ -631,26 +631,25 @@ function chordSVG(o){
     const dFrac=(inUsed[b]+c/2)/Math.max(inN[b],1);  inUsed[b]+=c;
     const sTh=ths+0.06+ (SECTOR/2-0.06)*sFrac;       // along the outbound half
     const dTh=thd-0.06- (SECTOR/2-0.06)*dFrac;       // along the inbound half
-    const wS=1.6, wT=Math.max(5, c*1.9);             // pinched at source, broad at target
-    const [sx,sy]=onArc(sTh,R-4), [dx,dy]=onArc(dTh,R-9); // target inset so the arrowhead sits on the arc
-    // tangent at each end spreads the ribbon edges along the arc
-    const tS=[Math.sin(sTh),Math.cos(sTh)], tD=[Math.sin(dTh),Math.cos(dTh)];
-    const s1=[sx+tS[0]*wS/2, sy+tS[1]*wS/2], s2=[sx-tS[0]*wS/2, sy-tS[1]*wS/2];
-    const t1=[dx+tD[0]*wT/2, dy+tD[1]*wT/2], t2=[dx-tD[0]*wT/2, dy-tD[1]*wT/2];
-    // a single shared control point near the centre so the teardrop body bends inward
+    // ribbon = a THIN stroked curve, not a fat filled teardrop: width is a
+    // restrained √count, hard-capped and non-scaling so it stays a crisp
+    // hairline. Direction reads from the gradient (faint source → bright
+    // target), the solid/dashed arc split and the arrowhead.
+    const w=Math.min(4, 0.9+Math.sqrt(c)*1.1);
+    const [sx,sy]=onArc(sTh,R-4), [dx,dy]=onArc(dTh,R-6); // target inset so the arrowhead sits on the arc
+    const tD=[Math.sin(dTh),Math.cos(dTh)];
+    // a single shared control point near the centre so the chord bends inward
     const mid=[(sx+dx)/2 + (cx-(sx+dx)/2)*0.62, (sy+dy)/2 + ((cyA-34)-(sy+dy)/2)*0.5];
     const gid=`chgrad${fi}`;
     g+=`<defs><linearGradient id="${gid}" x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${dx.toFixed(1)}" y2="${dy.toFixed(1)}" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="${aColor(a)}" stop-opacity=".35"/><stop offset="1" stop-color="${aColor(b)}" stop-opacity=".95"/></linearGradient></defs>`;
-    g+=`<path fill="url(#${gid})" stroke="none"
-      d="M${s1[0].toFixed(1)},${s1[1].toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${t1[0].toFixed(1)},${t1[1].toFixed(1)}
-         L${t2[0].toFixed(1)},${t2[1].toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${s2[0].toFixed(1)},${s2[1].toFixed(1)} Z">
+      <stop offset="0" stop-color="${aColor(a)}" stop-opacity=".45"/><stop offset="1" stop-color="${aColor(b)}" stop-opacity=".95"/></linearGradient></defs>`;
+    g+=`<path fill="none" stroke="url(#${gid})" stroke-width="${w.toFixed(2)}" stroke-linecap="round" vector-effect="non-scaling-stroke"
+      d="M${sx.toFixed(1)},${sy.toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${dx.toFixed(1)},${dy.toFixed(1)}">
       <title>${agents[a]} → ${agents[b]} · ${c} transfers (${agents[a]} initiates)</title></path>`;
-    // arrowhead landing on the target arc, pointing outward at the receiver
+    // a small SOLID arrowhead tipping the chord onto the target arc
     const outward=[Math.cos(dTh),-Math.sin(dTh)]; // unit vector from centre outward at dst
-    const tip=onArc(dTh,R-1);
-    const base=[tip[0]-outward[0]*8, tip[1]-outward[1]*8];
-    g+=`<path d="M${(base[0]+tD[0]*4).toFixed(1)},${(base[1]+tD[1]*4).toFixed(1)} L${tip[0].toFixed(1)},${tip[1].toFixed(1)} L${(base[0]-tD[0]*4).toFixed(1)},${(base[1]-tD[1]*4).toFixed(1)} Z" fill="${aColor(b)}"/>`;
+    const tip=[dx+outward[0]*4, dy+outward[1]*4];
+    g+=`<path d="M${(dx+tD[0]*1.4).toFixed(1)},${(dy+tD[1]*1.4).toFixed(1)} L${tip[0].toFixed(1)},${tip[1].toFixed(1)} L${(dx-tD[0]*1.4).toFixed(1)},${(dy-tD[1]*1.4).toFixed(1)} Z" fill="${aColor(b)}" stroke="none"/>`;
   });
   // nodes + labels
   agents.forEach((a,i)=>{ const th=ang(i), [x,y]=onArc(th,R);

@@ -334,7 +334,7 @@ svg.fig text { font-family: var(--mono); }
 .hg-gantt-now-label { fill: var(--accent); font-size: 9.5px; font-variant-numeric: tabular-nums; }
 .hg-gantt-glyph-fail { fill: var(--bad); font-size: 10px; }
 .hg-gantt-glyph-wait { fill: var(--caution); font-size: 10px; }
-.hg-gantt-edge { stroke: var(--ink-faint); stroke-width: 1; fill: none; vector-effect: non-scaling-stroke; opacity: .5; }
+.hg-gantt-edge { stroke: var(--ink-faint); stroke-width: 1; fill: none; vector-effect: non-scaling-stroke; opacity: .62; }
 .hg-gantt-edge.is-transfer { stroke: var(--hg-kind-transfer); stroke-dasharray: 3 2; }
 .hg-gantt-ctxband { fill: var(--caution); fill-opacity: .14; }
 .hg-gantt-ctxband-line { stroke: var(--caution); stroke-width: 0.8; fill: none; vector-effect: non-scaling-stroke; opacity: .6; }
