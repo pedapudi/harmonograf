@@ -530,30 +530,14 @@ export function TrajectoryView() {
   const currentRevisionIndex = currentRev?.revisionIndex ?? revIdx;
   const compareRevisionIndex =
     compareRev?.revisionIndex ?? compareRevIdx ?? null;
-  // Multi-plan awareness for the header (Item 4 of UX cleanup batch).
-  // Compute the distinct plan_ids spanned by ``vm.revs`` — when the
-  // session contains more than one we prefix the rev label with "Plan
-  // {N}" so operators can tell which plan the current revision belongs
-  // to. Plans are numbered by first appearance in the time-sorted rev
-  // list; this composes naturally with the H1 plan picker landing in a
-  // sibling PR (the picker selects a plan and the header reflects which
-  // plan is selected). Single-plan sessions retain the unchanged
-  // "rev N of M" label.
-  const distinctPlanIds: string[] = [];
-  const planIdSeen = new Set<string>();
-  for (const rev of vm.revs) {
-    if (!planIdSeen.has(rev.id)) {
-      planIdSeen.add(rev.id);
-      distinctPlanIds.push(rev.id);
-    }
-  }
-  const multiPlan = distinctPlanIds.length > 1;
-  const currentPlanIndex = currentRev
-    ? distinctPlanIds.indexOf(currentRev.id) + 1
-    : 0;
-  const planPrefix = multiPlan && currentPlanIndex > 0
-    ? `Plan ${currentPlanIndex} · `
-    : '';
+  // Multi-plan identity in the header is conveyed by the plan-picker
+  // chip-bar (rendered for multi-plan sessions — see TrajectoryView.planPicker
+  // test): the selected chip shows which of the session's plans the trajectory
+  // is scoped to, and ``vm`` is scoped to that plan (see buildViewModel above).
+  // An earlier "Plan {N} · " header prefix (#195, written for a merged-trajectory
+  // model) was superseded when the picker (#196) landed — the chips make a
+  // header prefix redundant — so the header stays a plain "rev N of M".
+  const planPrefix = '';
   // Only produce diff marks when the user has explicitly pinned a compare
   // rev — otherwise every task would be flagged "added" against a null prev.
   const marks =
