@@ -1,0 +1,1041 @@
+/* =====================================================================
+   zicato.css — chrome + line-art component vocabulary for the in-app
+   zicato-language console. Ported from
+   docs/design/zicato-ui-study/_study.css (sections 0-7) + the figure-local
+   classes in compose.html's <style> block (lines 30-82). EVERY selector is
+   scoped under `.zk-root` so nothing leaks into the MD3 tree.
+
+   The token vars (--paper/--ink/--accent/--hg-kind-N/--hg-gf-N/--hg-agent-N)
+   come from zicato-tokens.css, scoped to `.zk-root[data-zicato-theme]`.
+
+   Sections:
+     0  root vars (mono/radii) + the zk-N grid layout
+     1  topbar / brand / crumbs / status / run badge
+     2  rail / strip / transport
+     3  drawer + json tint
+     4  pills / cards / hovercard / ⌘K picker
+     5  theme picker (the .dt-N swatch dropdown)
+     6  the GANTT line-art classes (.hg-gantt-N)
+     7  figure-local classes (.sq-N / .gm-N / .topo-chord / .plan-reel / …)
+     8  motion (now/breathe pulse) + reduced-motion
+   ===================================================================== */
+
+/* ---- 0. root vars + the zk-N grid layout --------------------------- */
+.zk-root {
+  --mono: ui-monospace, 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+  --brand-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --r-panel: 4px; /* panels */
+  --r-pill: 10px; /* pills */
+  --r-card: 5px; /* cards / buttons */
+
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+  position: relative;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+.zk-root *,
+.zk-root *::before,
+.zk-root *::after {
+  box-sizing: border-box;
+}
+.zk-root .tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* rail (observatory) · main · inspector — sessions live ONLY in the ⌘K picker */
+.zk-app-body {
+  flex: 1;
+  display: grid;
+  min-height: 0;
+  grid-template-columns: 84px minmax(0, 1fr) auto;
+}
+.zk-main {
+  overflow: auto;
+  padding: 14px 18px;
+  min-width: 0;
+}
+.zk-main h3 {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+  margin: 16px 0 8px;
+  font-weight: 600;
+}
+.zk-main h3:first-child {
+  margin-top: 0;
+}
+.zk-panes-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 1100px) {
+  .zk-panes-2 {
+    grid-template-columns: 1fr;
+  }
+}
+.zk-prop-note {
+  font-size: 10.5px;
+  color: var(--ink-faint);
+}
+.zk-sess-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 6px;
+}
+.zk-sess-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+.zk-sess-stats {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ---- 1. topbar / brand / crumbs / status --------------------------- */
+.zk-root .hg-topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 18px;
+  background: color-mix(in srgb, var(--paper) 92%, transparent);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--rule);
+}
+.zk-root .hg-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+.zk-root .hg-brand-mark {
+  height: 24px;
+  width: auto;
+  display: block;
+  flex: none;
+  overflow: visible;
+}
+.zk-root .hg-brand-name {
+  height: 15px;
+  width: auto;
+  display: block;
+  flex: none;
+  color: var(--ink);
+  overflow: visible;
+}
+.zk-root .hg-crumbs {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.zk-root .hg-crumb {
+  color: var(--ink-soft);
+}
+.zk-root .hg-crumb:hover {
+  color: var(--accent);
+  text-decoration: none;
+}
+.zk-root .hg-crumb-current {
+  color: var(--ink);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.zk-root .hg-crumb-sep {
+  opacity: 0.5;
+}
+.zk-root .hg-topbar-spacer {
+  flex: 1;
+}
+.zk-root .hg-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--ink-faint);
+}
+.zk-root .hg-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--flat);
+  transition: background 0.2s;
+}
+.zk-root .hg-status.is-connected .hg-status-dot {
+  background: var(--good);
+}
+.zk-root .hg-status.is-running .hg-status-dot {
+  background: var(--accent);
+}
+.zk-root .hg-run-badge {
+  display: none;
+  align-items: center;
+  gap: 5px;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--ink-soft);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.zk-root .hg-status.is-running .hg-run-badge {
+  display: inline-flex;
+}
+.zk-root .hg-run-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+  box-shadow: 0 0 0 0 var(--accent);
+  animation: hg-now-pulse 1.6s ease-out infinite;
+}
+.zk-root .hg-run-label {
+  color: var(--accent);
+}
+.zk-root .hg-picker-kbd {
+  font-size: 10px;
+  color: var(--ink-faint);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+/* the md3 toggle + theme picker host live in the topbar; plain mono button */
+.zk-root .zk-iconbtn {
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-panel);
+  padding: 4px 9px;
+  cursor: pointer;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  transition: border-color 0.12s, color 0.12s;
+}
+.zk-root .zk-iconbtn:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+/* ---- 2. rail / strip / transport ----------------------------------- */
+.zk-root .hg-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 8px;
+  background: var(--panel);
+  border-right: 1px solid var(--rule);
+}
+.zk-root .hg-rail-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 8px 4px;
+  background: transparent;
+  border: none;
+  border-radius: var(--r-panel);
+  color: var(--ink-soft);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  transition: background 0.12s, color 0.12s;
+}
+.zk-root .hg-rail-item:hover {
+  background: var(--rule-soft);
+  color: var(--ink);
+}
+.zk-root .hg-rail-item[aria-selected='true'] {
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+  color: var(--accent);
+}
+.zk-root .hg-rail-icon {
+  font-size: 17px;
+  line-height: 1;
+}
+
+.zk-root .hg-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 16px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--rule);
+  font-size: 11.5px;
+  min-height: 26px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.zk-root .hg-strip-label {
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+.zk-root .hg-strip-title {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink);
+}
+.zk-root .hg-strip-agent {
+  color: var(--ink-soft);
+  border: 1px solid var(--rule);
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  font-size: 10.5px;
+}
+
+.zk-root .hg-transport {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  background: var(--panel);
+  border-top: 1px solid var(--rule);
+  height: 42px;
+}
+.zk-root .hg-transport-btn {
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-panel);
+  padding: 4px 9px;
+  cursor: pointer;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 11px;
+  transition: border-color 0.12s, color 0.12s;
+}
+.zk-root .hg-transport-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.zk-root .hg-transport-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.zk-root .hg-transport-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.zk-root .hg-transport-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--rule);
+}
+.zk-root .hg-transport-spacer {
+  flex: 1;
+}
+.zk-root .hg-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+.zk-root .hg-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: hg-now-pulse 1.6s ease-out infinite;
+  flex: none;
+}
+.zk-root .hg-clock {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+/* ---- 3. drawer + json tint ----------------------------------------- */
+.zk-drawer-host {
+  width: 0;
+  overflow: hidden;
+  transition: width 0.16s ease;
+}
+.zk-drawer-host.open {
+  width: 320px;
+}
+.zk-drawer-host .hg-drawer {
+  width: 320px;
+}
+.zk-root .hg-drawer {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-left: 1px solid var(--rule);
+  height: 100%;
+  min-height: 0;
+}
+.zk-root .hg-drawer-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--rule);
+}
+.zk-root .hg-drawer-title {
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.zk-root .hg-drawer-close {
+  background: transparent;
+  border: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.zk-root .hg-drawer-close:hover {
+  color: var(--ink);
+  background: var(--rule-soft);
+}
+.zk-root .hg-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  font-size: 12.5px;
+}
+.zk-root .hg-attrs {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 5px 14px;
+  font-size: 12px;
+}
+.zk-root .hg-attrs dt {
+  color: var(--ink-faint);
+}
+.zk-root .hg-attrs dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.zk-root .hg-drawer-code {
+  display: block;
+  background: var(--panel-2);
+  padding: 9px 11px;
+  border-radius: var(--r-panel);
+  border: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  max-height: 320px;
+}
+.zk-root .hg-j-key {
+  color: var(--accent);
+}
+.zk-root .hg-j-str {
+  color: var(--good);
+}
+.zk-root .hg-j-num {
+  color: var(--caution);
+}
+.zk-root .hg-j-bool {
+  color: var(--bad);
+}
+.zk-root .hg-j-null {
+  color: var(--ink-faint);
+  font-style: italic;
+}
+.zk-root .hg-j-punct {
+  color: var(--ink-soft);
+}
+
+/* ---- 4. pills / cards / hovercard / ⌘K picker ---------------------- */
+.zk-root .dn-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--rule);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+.zk-root .dn-pill.good {
+  border-color: var(--good);
+  color: var(--good);
+}
+.zk-root .dn-pill.bad {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+.zk-root .dn-pill.caution {
+  border-color: var(--caution);
+  color: var(--caution);
+}
+.zk-root .dn-pill.accent {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.zk-root .dn-pill.live {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.zk-root .dn-pill.flat {
+  border-color: var(--rule);
+  color: var(--ink-soft);
+}
+.zk-root .dn-card {
+  border: 1px solid var(--rule);
+  border-radius: var(--r-card);
+  background: var(--panel);
+  padding: 12px 14px;
+  transition: border-color 0.12s, transform 0.12s;
+}
+.zk-root .dn-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+.zk-root .dn-card.is-current {
+  border-color: var(--good);
+}
+.zk-root .hg-hovercard {
+  position: fixed;
+  z-index: 200;
+  pointer-events: none;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  max-width: 320px;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 0.12s, transform 0.12s;
+}
+.zk-root .hg-hovercard.on {
+  opacity: 1;
+  transform: translateY(0);
+}
+.zk-root .hg-hc-title {
+  color: var(--ink);
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+.zk-root .hg-hc-row {
+  color: var(--ink-soft);
+  font-size: 10.5px;
+}
+.zk-root .hg-hc-row b {
+  color: var(--ink);
+}
+
+/* ⌘K session picker — note: cut 1 reuses the global <SessionPicker/>, so
+   these zicato-styled picker classes are ported for the deferred zicato
+   picker (§7 of PLAN.md). Scoped + harmless when unused. */
+.zk-root .hg-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--paper) 30%, rgba(0, 0, 0, 0.55));
+  backdrop-filter: blur(4px);
+  z-index: 900;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+.zk-root .hg-picker {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  width: min(640px, 92vw);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 66vh;
+}
+.zk-root .hg-picker-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--rule);
+}
+.zk-root .hg-picker-search input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+.zk-root .hg-picker-list {
+  overflow-y: auto;
+}
+.zk-root .hg-picker-section {
+  padding: 8px 16px 4px;
+  font-size: 10px;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.zk-root .hg-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 16px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  width: 100%;
+  text-align: left;
+  font: inherit;
+}
+.zk-root .hg-picker-row:hover,
+.zk-root .hg-picker-row[aria-selected='true'] {
+  background: var(--rule-soft);
+}
+.zk-root .hg-picker-row-title {
+  font-size: 13px;
+}
+.zk-root .hg-picker-row-sub {
+  font-size: 10.5px;
+  color: var(--ink-faint);
+}
+.zk-root .hg-picker-row-meta {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--ink-faint);
+}
+
+/* ---- 5. theme picker (the .dt-N swatch dropdown) ------------------- */
+.zk-root .dt-cd {
+  position: relative;
+  display: inline-block;
+}
+.zk-root .dt-cd-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  padding: 3px 8px;
+  cursor: pointer;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 10.5px;
+}
+.zk-root .dt-cd-trigger:hover {
+  border-color: var(--accent);
+}
+.zk-root .dt-cd-name {
+  color: var(--ink);
+}
+.zk-root .dt-cd-caret {
+  color: var(--ink-faint);
+  font-size: 8px;
+  transition: transform 0.15s;
+}
+.zk-root .dt-cd.dt-cd-open .dt-cd-caret {
+  transform: rotate(180deg);
+}
+.zk-root .dt-swatch-strip {
+  display: inline-flex;
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid var(--rule);
+}
+.zk-root .dt-swatch {
+  display: inline-block;
+  width: 11px;
+  height: 13px;
+}
+.zk-root .dt-cd-list {
+  display: none;
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  z-index: 60;
+  min-width: 210px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  padding: 4px;
+}
+.zk-root .dt-cd.dt-cd-open .dt-cd-list {
+  display: block;
+}
+.zk-root .dt-cd-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--ink-soft);
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  transition: background 0.12s, color 0.12s;
+}
+.zk-root .dt-cd-option .dt-cd-name {
+  font-size: 10.5px;
+}
+.zk-root .dt-cd-option:hover,
+.zk-root .dt-cd-option.dt-cd-active {
+  background: var(--rule-soft);
+  color: var(--ink);
+}
+.zk-root .dt-cd-option[aria-selected='true'] .dt-cd-name {
+  color: var(--accent);
+}
+
+/* ---- 6. GANTT line-art classes (.hg-gantt-N) ----------------------- */
+.zk-root svg.fig {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+.zk-root svg.fig text {
+  font-family: var(--mono);
+}
+.zk-root .hg-gantt-grid {
+  stroke: var(--rule-soft);
+  stroke-width: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+.zk-root .hg-gantt-axis {
+  fill: var(--ink-faint);
+  font-size: 9.5px;
+}
+.zk-root .hg-gantt-axis-major {
+  fill: var(--ink-soft);
+  font-size: 9.5px;
+}
+.zk-root .hg-gantt-lane-label {
+  fill: var(--ink-soft);
+  font-size: 10px;
+}
+.zk-root .hg-gantt-lane-sep {
+  stroke: var(--rule-soft);
+  stroke-width: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+.zk-root .hg-gantt-gutter {
+  fill: var(--panel-2);
+}
+.zk-root .hg-gantt-bar {
+  rx: 3;
+  stroke: none;
+  fill-opacity: 0.55;
+  transition: fill-opacity 0.1s;
+}
+.zk-root .hg-gantt-bar:hover {
+  fill-opacity: 1;
+}
+.zk-root .hg-gantt-bar.is-pending {
+  fill-opacity: 0.32;
+}
+.zk-root .hg-gantt-bar.is-invocation {
+  fill-opacity: 0.3;
+}
+.zk-root .hg-gantt-bar.is-planned {
+  fill: var(--rule-soft);
+  stroke: var(--ink-faint);
+  stroke-dasharray: 4 3;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  fill-opacity: 0.5;
+}
+.zk-root .hg-gantt-bar.is-running {
+  stroke: var(--accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.zk-root .hg-gantt-bar.is-failed {
+  fill: var(--bad);
+  fill-opacity: 0.8;
+}
+.zk-root .hg-gantt-bar.is-cancelled {
+  fill-opacity: 0.28;
+}
+.zk-root .hg-gantt-bar.is-selected {
+  stroke: var(--accent);
+  stroke-width: 2.2;
+  vector-effect: non-scaling-stroke;
+  fill-opacity: 1;
+}
+.zk-root .hg-gantt-now {
+  stroke: var(--accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.zk-root .hg-gantt-now-cap {
+  fill: var(--accent);
+}
+.zk-root .hg-gantt-now-label {
+  fill: var(--accent);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+}
+.zk-root .hg-gantt-glyph-fail {
+  fill: var(--bad);
+  font-size: 10px;
+}
+.zk-root .hg-gantt-glyph-wait {
+  fill: var(--caution);
+  font-size: 10px;
+}
+.zk-root .hg-gantt-edge {
+  stroke: var(--ink-faint);
+  stroke-width: 1;
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.62;
+}
+.zk-root .hg-gantt-edge.is-transfer {
+  stroke: var(--hg-kind-transfer);
+  stroke-dasharray: 3 2;
+}
+.zk-root .hg-gantt-ctxband {
+  fill: var(--caution);
+  fill-opacity: 0.14;
+}
+.zk-root .hg-gantt-ctxband-line {
+  stroke: var(--caution);
+  stroke-width: 0.8;
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.6;
+}
+.zk-root .hg-gantt-row:focus-visible,
+.zk-root .hg-gantt-bar:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+/* ---- 7. figure-local classes (compose.html <style> 30-82) ---------- */
+/* chord interactivity */
+.zk-root .topo-chord g[data-agent] {
+  cursor: pointer;
+}
+.zk-root .topo-chord [data-ribbon],
+.zk-root .topo-chord [data-ahead],
+.zk-root .topo-chord [data-agent] {
+  transition: opacity 0.15s ease;
+}
+.zk-root .tch-count {
+  fill: var(--ink);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: var(--paper);
+  stroke-width: 3px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+/* sequence */
+.zk-root .sq-act {
+  fill-opacity: 0.55;
+}
+.zk-root .sq-act:hover {
+  fill-opacity: 1;
+}
+.zk-root .sq-staff {
+  stroke: var(--rule);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.zk-root .sq-life {
+  stroke: var(--rule);
+  stroke-width: 1.1;
+  stroke-dasharray: 1 4;
+  vector-effect: non-scaling-stroke;
+}
+.zk-root .sq-chip {
+  fill: var(--panel);
+  stroke: var(--rule);
+}
+.zk-root .sq-msg {
+  fill: none;
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+}
+.zk-root .sq-head {
+  stroke-width: 1.2;
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+.zk-root .sq-name {
+  fill: var(--ink);
+  font-size: 10px;
+  font-weight: 500;
+}
+.zk-root .sq-lbl {
+  fill: var(--ink-soft);
+  font-size: 8.5px;
+}
+/* seismograph / ladder / reel */
+.zk-root .gm-onplan {
+  stroke: var(--ink-faint);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+.zk-root .gm-tol {
+  fill: var(--good);
+  fill-opacity: 0.07;
+}
+.zk-root .gm-trace {
+  stroke: var(--ink);
+  stroke-width: 1.3;
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+.zk-root .gm-excursion {
+  fill: var(--bad);
+  fill-opacity: 0.14;
+}
+.zk-root .gm-tick {
+  stroke: var(--caution);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.zk-root .gm-tick-label {
+  fill: var(--caution);
+  font-size: 8.5px;
+}
+.zk-root .gm-label {
+  fill: var(--ink-soft);
+  font-size: 10px;
+}
+.zk-root .gm-faint {
+  fill: var(--ink-faint);
+  font-size: 9px;
+}
+.zk-root .gm-axis {
+  fill: var(--ink-faint);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.zk-root .gm-seam {
+  stroke: var(--rule);
+  stroke-width: 1;
+  stroke-dasharray: 5 4;
+  vector-effect: non-scaling-stroke;
+}
+.zk-root .gm-spine {
+  stroke: var(--accent);
+  stroke-width: 2.2;
+  vector-effect: non-scaling-stroke;
+}
+.zk-root .gantt-click .hg-gantt-bar,
+.zk-root .gantt-click .sq-act {
+  cursor: pointer;
+}
+/* the plan reel drives the DAG: each version stop is a button */
+.zk-root .plan-reel .reel-stop[data-ver] {
+  cursor: pointer;
+}
+.zk-root .plan-reel .reel-stop[data-ver]:hover .reel-hit,
+.zk-root .plan-reel .reel-stop[data-ver]:focus-visible .reel-hit {
+  fill: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.zk-root .plan-reel .reel-stop[data-ver]:focus {
+  outline: none;
+}
+.zk-root .plan-reel .reel-stop[data-ver]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 50%;
+}
+.zk-root .reel-host,
+.zk-root .dag-host {
+  display: block;
+}
+/* the coordinated time-track stack: seismograph over the time-aligned ladder */
+.zk-root .track-stack {
+  display: block;
+}
+.zk-root .track-stack .track-sub {
+  font-size: 9.5px;
+  color: var(--ink-faint);
+  margin: 2px 0 0;
+  padding-left: 76px;
+}
+
+/* ---- 8. motion + a11y ---------------------------------------------- */
+@keyframes hg-now-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 70%, transparent);
+    opacity: 1;
+  }
+  70% {
+    box-shadow: 0 0 0 5px transparent;
+    opacity: 0.65;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    opacity: 1;
+  }
+}
+@keyframes hg-breathe {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.zk-root .hg-breathe {
+  animation: hg-breathe 2s ease-in-out infinite;
+}
+.zk-root :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zk-root *,
+  .zk-root *::before,
+  .zk-root *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+  }
+}
