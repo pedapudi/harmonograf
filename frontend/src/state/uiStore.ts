@@ -13,6 +13,51 @@ export type NavSection =
 
 export type TaskPlanMode = 'pre-strip' | 'ghost' | 'hybrid';
 
+// Console UI mode. 'md3' (default) = the existing Material console; 'zicato' =
+// the parallel zicato-language console (a separate render tree under
+// src/components/zicato). Persisted to localStorage so a toggle survives reload.
+export type UiMode = 'md3' | 'zicato';
+
+// The 16 zicato palette ids (ported from the study's THEME_IDS). The zicato
+// console scopes these under `data-zicato-theme` on its own root element, so
+// they never collide with the MD3 `<html data-theme>` (dark/light/…).
+export type ZicatoTheme =
+  | 'monokai'
+  | 'solarized-dark'
+  | 'solarized-light'
+  | 'google-light'
+  | 'google-dark'
+  | 'lunaria-light'
+  | 'lunaria-eclipse'
+  | 'belafonte-day'
+  | 'belafonte-night'
+  | 'paper'
+  | 'zenburn'
+  | 'selenized-black'
+  | 'relaxed'
+  | 'espresso'
+  | 'dracula'
+  | 'ubuntu';
+
+const ZICATO_THEME_IDS: readonly ZicatoTheme[] = [
+  'monokai',
+  'solarized-dark',
+  'solarized-light',
+  'google-light',
+  'google-dark',
+  'lunaria-light',
+  'lunaria-eclipse',
+  'belafonte-day',
+  'belafonte-night',
+  'paper',
+  'zenburn',
+  'selenized-black',
+  'relaxed',
+  'espresso',
+  'dracula',
+  'ubuntu',
+];
+
 // Task/Plan panel view mode. 'cumulative' renders the union-DAG across
 // revisions (default, with generation badges + supersedes edges).
 // 'latest' renders only the latest revision of each plan (legacy view).
@@ -31,6 +76,12 @@ const INTERVENTION_BANDS_VISIBLE_KEY = 'harmonograf.interventionBandsVisible';
 // (new compact layout); persisted so a user who expands it doesn't lose the
 // state on reload.
 const TRAJECTORY_LEGACY_EXPANDED_KEY = 'harmonograf.trajectoryLegacyExpanded';
+// Parallel zicato console: the active console mode + its scoped palette.
+// Deliberately NOT reusing the study's `hgraf-study-theme` key — keeps the
+// in-app zicato theme independent of any standalone study page in the same
+// origin.
+const UI_MODE_KEY = 'harmonograf.uiMode';
+const ZICATO_THEME_KEY = 'harmonograf.zicatoTheme';
 
 function readGraphViewport(): GraphViewport | null {
   try {
@@ -176,6 +227,44 @@ function writeTrajectoryLegacyExpanded(v: boolean): void {
   }
 }
 
+function readUiMode(): UiMode {
+  try {
+    const v = localStorage.getItem(UI_MODE_KEY);
+    if (v === 'md3' || v === 'zicato') return v;
+  } catch {
+    /* ignore (SSR / privacy mode) */
+  }
+  return 'md3'; // DEFAULT: production unchanged until toggled
+}
+
+function writeUiMode(m: UiMode): void {
+  try {
+    localStorage.setItem(UI_MODE_KEY, m);
+  } catch {
+    /* ignore */
+  }
+}
+
+function readZicatoTheme(): ZicatoTheme {
+  try {
+    const v = localStorage.getItem(ZICATO_THEME_KEY);
+    if (v && (ZICATO_THEME_IDS as readonly string[]).includes(v)) {
+      return v as ZicatoTheme;
+    }
+  } catch {
+    /* ignore */
+  }
+  return 'monokai';
+}
+
+function writeZicatoTheme(t: ZicatoTheme): void {
+  try {
+    localStorage.setItem(ZICATO_THEME_KEY, t);
+  } catch {
+    /* ignore */
+  }
+}
+
 // harmonograf: TrajectoryView plan picker selection. Persisted across
 // reloads so the operator's choice survives a refresh. ``null`` ⇒
 // default to latest plan by created_at.
@@ -272,6 +361,16 @@ interface UiState {
   jumpToLive: () => void;
   toggleLiveFollow: () => void;
   setActiveRenderer: (r: GanttRenderer | null) => void;
+
+  // Console UI mode. 'md3' (default) = existing Material console; 'zicato' =
+  // the parallel zicato-language console. Persisted to localStorage.
+  uiMode: UiMode;
+  setUiMode: (m: UiMode) => void;
+  toggleUiMode: () => void;
+  // Active zicato palette (16 study themes). Persisted; scoped to the zicato
+  // subtree via `data-zicato-theme` (never touches the MD3 :root data-theme).
+  zicatoTheme: ZicatoTheme;
+  setZicatoTheme: (t: ZicatoTheme) => void;
 
   // Task-plan rendering preferences (persisted to localStorage).
   taskPlanMode: TaskPlanMode;
@@ -433,6 +532,25 @@ export const useUiStore = create<UiState>((set) => ({
       return { liveFollow: next };
     }),
   setActiveRenderer: (r) => set({ activeRenderer: r }),
+
+  uiMode: readUiMode(),
+  setUiMode: (m) =>
+    set(() => {
+      writeUiMode(m);
+      return { uiMode: m };
+    }),
+  toggleUiMode: () =>
+    set((s) => {
+      const next: UiMode = s.uiMode === 'md3' ? 'zicato' : 'md3';
+      writeUiMode(next);
+      return { uiMode: next };
+    }),
+  zicatoTheme: readZicatoTheme(),
+  setZicatoTheme: (t) =>
+    set(() => {
+      writeZicatoTheme(t);
+      return { zicatoTheme: t };
+    }),
 
   taskPlanMode: readTaskPlanMode(),
   taskPlanVisible: readTaskPlanVisible(),

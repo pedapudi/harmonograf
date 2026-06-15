@@ -24,6 +24,7 @@ export function AppBar() {
   const toggleRail = useUiStore((s) => s.toggleNavRail);
   const setNavSection = useUiStore((s) => s.setNavSection);
   const toggleLegend = useUiStore((s) => s.toggleLegend);
+  const setUiMode = useUiStore((s) => s.setUiMode);
   const sessionId = useUiStore((s) => s.currentSessionId);
   const rpcSessions = useSessionsStore((s) => s.sessions);
   const rpcError = useSessionsStore((s) => s.error);
@@ -69,6 +70,15 @@ export function AppBar() {
         ⌘K
       </span>
       <div className="hg-appbar__spacer" />
+      <button
+        className="hg-appbar__icon-btn"
+        onClick={() => setUiMode('zicato')}
+        aria-label="Switch to zicato console"
+        title="zicato console"
+        data-testid="ui-mode-toggle"
+      >
+        ⧉
+      </button>
       <button
         className="hg-appbar__icon-btn hg-appbar__attention-badge"
         data-count={attention}

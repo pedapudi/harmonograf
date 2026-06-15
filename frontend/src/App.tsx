@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Shell } from './components/shell/Shell';
 import { StressPage } from './gantt/StressPage';
+import { ZicatoConsole } from './components/zicato/ZicatoConsole';
 import { useUiStore } from './state/uiStore';
 import { sessionIdFromHash } from './lib/sessionRoute';
 
@@ -43,7 +44,9 @@ function useSessionDeepLink(hash: string): void {
 
 export default function App() {
   const hash = useHashRoute();
-  useSessionDeepLink(hash);
-  if (hash.startsWith('#/stress')) return <StressPage />;
+  useSessionDeepLink(hash); // keep ABOVE the branch — deep links select in both consoles
+  const uiMode = useUiStore((s) => s.uiMode);
+  if (hash.startsWith('#/stress')) return <StressPage />; // dev route unaffected
+  if (uiMode === 'zicato') return <ZicatoConsole />;
   return <Shell />;
 }
