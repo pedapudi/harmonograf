@@ -111,6 +111,12 @@
   background: color-mix(in srgb, var(--paper) 92%, transparent);
   backdrop-filter: blur(6px);
   border-bottom: 1px solid var(--rule);
+  /* The topbar's backdrop-filter creates a stacking context that, in DOM order,
+     paints BEHIND the app body below it — which buried the theme dropdown
+     (.dt-cd-list) under the gantt/inspector. Lift the whole topbar's stacking
+     context above the app body so its popover menus layer on top. */
+  position: relative;
+  z-index: 200;
 }
 .zk-root .hg-brand {
   display: inline-flex;
@@ -1258,4 +1264,151 @@
 }
 .zk-root .zk-reasoning-glyph {
   font-size: 14px;
+}
+/* goldfive / judge detail headers in the docked inspector. */
+.zk-root .zk-detail-h {
+  margin: 0 0 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+  font-weight: 600;
+}
+.zk-root .zk-detail-sub {
+  margin: 10px 0 5px;
+}
+.zk-root .zk-detail-text {
+  margin: 6px 0 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+/* ---- span quick-look hovercard ------------------------------------- */
+/* A compact line-art card anchored to a hovered gantt bar (the in-language
+   analogue of MD3's SpanPopover quick-look). Token-only color, monospace,
+   single accent; pointer-events:none so it never blocks span click /
+   wheel-zoom / drag-pan. Positioned inside the position:relative .zk-app-body. */
+.zk-root .zk-hovercard {
+  position: absolute;
+  z-index: 40;
+  pointer-events: none;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  padding: 9px 11px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.zk-root .zk-hovercard-title {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 6px;
+}
+.zk-root .zk-hovercard-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 7px;
+}
+.zk-root .zk-hovercard-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 0;
+}
+.zk-root .zk-hovercard-meta dt {
+  color: var(--ink-faint);
+}
+.zk-root .zk-hovercard-meta dd {
+  margin: 0;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zk-root .zk-hovercard-verdict {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid var(--rule-soft);
+  color: var(--ink-soft);
+}
+.zk-root .zk-hovercard-reasoning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid var(--rule-soft);
+  color: var(--ink-soft);
+}
+.zk-root .zk-hovercard-reasoning-glyph {
+  flex: none;
+}
+.zk-root .zk-hovercard-reasoning-text {
+  font-style: italic;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+.zk-root .zk-hovercard-hint {
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+
+/* ── gantt vertical resize (TASK #5) ───────────────────────────────────────
+   The gantt sizes to fit ALL agent lanes, so a many-lane session is very tall.
+   .zk-gantt-scroll caps the gantt area to a held px height and scrolls when the
+   content overflows; .zk-gantt-resize is the centred line-art drag pill that
+   sets that height (cursor: ns-resize, drag adjusts by dy). */
+.zk-root .zk-gantt-scroll {
+  /* height + overflow-y are applied inline only when a height is held; auto
+     (null) leaves the natural full-lane layout untouched. A thin gutter keeps
+     the scrollbar off the bars when it does appear. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule) transparent;
+}
+.zk-root .zk-gantt-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.zk-root .zk-gantt-scroll::-webkit-scrollbar-thumb {
+  background: var(--rule);
+  border-radius: var(--r-panel);
+}
+.zk-root .zk-gantt-resize {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 14px;
+  margin: 2px 0;
+  cursor: ns-resize;
+  /* a drag must not scroll the page or select text */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.zk-root .zk-gantt-resize-grip {
+  display: block;
+  width: 40px;
+  height: 4px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--panel);
+  transition: border-color 0.12s, background 0.12s;
+}
+.zk-root .zk-gantt-resize:hover .zk-gantt-resize-grip {
+  border-color: var(--accent);
+}
+.zk-root .zk-gantt-resize:active .zk-gantt-resize-grip {
+  border-color: var(--accent);
+  background: var(--accent);
 }

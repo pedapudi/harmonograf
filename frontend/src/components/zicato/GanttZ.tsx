@@ -14,8 +14,15 @@ import { useEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNo
 import { useUiStore } from '../../state/uiStore';
 import type { ZSession, ZSpan } from './adapter';
 import { KIND, statusFill, steerColor, uniqueId } from './svgUtils';
-import { fitView, panView, zoomView, type GanttView } from './ganttViewport';
+import {
+  contentDomain,
+  fitView,
+  panView,
+  zoomView,
+  type GanttView,
+} from './ganttViewport';
 import { useSteerSelect } from './steerContext';
+import { useSpanHover } from './hoverContext';
 
 export interface GanttZProps {
   z: ZSession;
@@ -52,17 +59,23 @@ export function GanttZ({
   // Steer-arrow click → the console floating drawer (no-op when GanttZ is
   // rendered outside the console's SteerSelectContext provider, e.g. in tests).
   const onSteerSelect = useSteerSelect();
+  // Span hover → the console's quick-look hovercard (no-op when GanttZ is
+  // rendered outside the console's SpanHoverContext provider, e.g. in tests).
+  const { report: reportHover, clear: clearHover } = useSpanHover();
 
   // ── layout ─────────────────────────────────────────────────────────────────
   const rowH = compact ? 24 : 30;
   const padL = mini ? 8 : 76;
   const bh = mini ? 6 : 12;
   const T = z.T > 0 ? z.T : 30;
+  // Content domain ([first span, last span]) bounds the viewport so "fit" and
+  // pan/zoom snap to the spans and skip any agent-startup lead-in.
+  const dom = contentDomain(z.spans, T);
 
-  // The visible window. Default = the full range, so with no `view` prop the
-  // figure renders identically to today (X collapses to padL + frac*plotW * t/T).
-  const eff = view ?? fitView(T);
-  const vSpan = eff.t1 - eff.t0 > 0 ? eff.t1 - eff.t0 : T;
+  // The visible window. Default = the full content range, so with no `view`
+  // prop the figure shows exactly where the spans are.
+  const eff = view ?? fitView(dom);
+  const vSpan = eff.t1 - eff.t0 > 0 ? eff.t1 - eff.t0 : dom.hi - dom.lo;
   const plotW = W - padL - PAD_R;
 
   // Lanes: mini drops the goldfive lane. Lane order = adapter join-time order.
@@ -156,54 +169,120 @@ export function GanttZ({
     startX: number;
     moved: boolean;
     view: GanttView;
+    pointerId: number;
+    /** true once we've actually grabbed the pointer (only on a real drag). */
+    captured: boolean;
   } | null>(null);
 
-  // Wheel-zoom toward the cursor. Attached as a NON-PASSIVE native listener (a
-  // React onWheel is passive in React 19 → preventDefault would no-op + warn), so
-  // the page never scrolls while zooming. The effect re-registers when the view /
-  // handler changes so the closure always reads the current window.
+  // ── wheel-zoom: accumulate across a burst (fixes "scroll barely zooms / snaps
+  //    back to widest") ───────────────────────────────────────────────────────
+  // A trackpad/mouse flick fires a BURST of wheel events synchronously. React
+  // batches the re-render, so reading the committed `eff` prop inside the burst
+  // returns the SAME stale (pre-burst) window for every event — all of them
+  // compute the identical one-step zoom, so a hard scroll moves the window only
+  // one notch and feels like it reverts to the widest view. We instead keep the
+  // latest window in a ref and zoom from THAT each tick, so N events = N steps.
+  const wheelCfgRef = useRef({ plotW, padL, W, dom, onViewChange });
+  wheelCfgRef.current = { plotW, padL, W, dom, onViewChange };
+  // The live (possibly mid-burst) window + the last window WE pushed. When the
+  // committed view changes for any other reason (+/- buttons, minimap brush,
+  // drag-pan), `eff` differs from what we applied → resync the accumulator.
+  const liveViewRef = useRef<GanttView>(eff);
+  const appliedRef = useRef<GanttView>(eff);
+  if (eff !== appliedRef.current) {
+    liveViewRef.current = eff;
+    appliedRef.current = eff;
+  }
+
+  // Attached as a NON-PASSIVE native listener (a React onWheel is passive in
+  // React 19 → preventDefault would no-op + warn) so the page never scrolls
+  // while zooming. Registered ONCE; all live values are read from refs.
   useEffect(() => {
     const el = svgRef.current;
-    if (!el || !interactive || !onViewChange) return;
+    if (!el || !interactive) return;
     const handler = (e: WheelEvent): void => {
       e.preventDefault();
+      const cfg = wheelCfgRef.current;
+      if (!cfg.onViewChange) return;
       const rect = el.getBoundingClientRect();
       if (rect.width <= 0) return;
-      const svgX = ((e.clientX - rect.left) / rect.width) * W;
-      const focusT = eff.t0 + ((svgX - padL) / plotW) * vSpan;
+      const cur = liveViewRef.current;
+      const span = cur.t1 - cur.t0 > 0 ? cur.t1 - cur.t0 : cfg.dom.hi - cfg.dom.lo;
+      const svgX = ((e.clientX - rect.left) / rect.width) * cfg.W;
+      const focusT = cur.t0 + ((svgX - cfg.padL) / cfg.plotW) * span;
       // deltaY > 0 (scroll down) → zoom OUT; deltaY < 0 → zoom IN.
       const factor = e.deltaY > 0 ? 1 / 0.85 : 0.85;
-      onViewChange(zoomView(eff, factor, focusT, T));
+      const next = zoomView(cur, factor, focusT, cfg.dom);
+      liveViewRef.current = next;
+      appliedRef.current = next;
+      cfg.onViewChange(next);
     };
     el.addEventListener('wheel', handler, { passive: false });
     return () => el.removeEventListener('wheel', handler);
-  }, [interactive, onViewChange, eff, vSpan, plotW, padL, W, T]);
+  }, [interactive]);
 
   const onPointerDown = (e: ReactPointerEvent<SVGSVGElement>): void => {
     if (!onViewChange || e.button !== 0) return;
-    dragRef.current = { startX: e.clientX, moved: false, view: eff };
-    e.currentTarget.setPointerCapture(e.pointerId);
+    // IMPORTANT: do NOT setPointerCapture here. Capturing the pointer on a plain
+    // press retargets the follow-up `click` to the SVG, so a span <rect>'s
+    // onClick never fires and the inspector never opens. We arm the drag here
+    // but only grab the pointer once movement actually exceeds DRAG_THRESHOLD
+    // (in onPointerMove), which keeps a plain click → span-select working while
+    // still letting a genuine drag pan smoothly.
+    dragRef.current = {
+      startX: e.clientX,
+      moved: false,
+      view: eff,
+      pointerId: e.pointerId,
+      captured: false,
+    };
   };
 
   const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>): void => {
     const d = dragRef.current;
     if (!d || !onViewChange) return;
-    const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect || rect.width <= 0) return;
+    // Pan ONLY while the primary button is held. The pointer is NOT captured
+    // until a real drag begins, so plain hover moves still fire on the SVG; and
+    // `dragRef` is intentionally kept alive past pointerup (so the trailing
+    // click can read `moved`). Without this guard that lingering drag state
+    // makes every button-less mouse move pan the gantt — the bug where moving
+    // the mouse scrolls the timeline. `e.buttons & 1` = left button down.
+    if ((e.buttons & 1) === 0) {
+      // A move with no button after a completed drag → the gesture is over.
+      // Drop the stale drag so the next interaction starts clean.
+      if (d.moved) dragRef.current = null;
+      return;
+    }
+    // Recognise the drag from the cursor delta alone (no layout needed), so the
+    // trailing span-click is suppressed even before the pan math runs.
     const dxPx = e.clientX - d.startX;
     if (!d.moved && Math.abs(dxPx) < DRAG_THRESHOLD) return;
-    d.moved = true;
+    if (!d.moved) {
+      // First frame past the threshold → this is a real drag. Grab the pointer
+      // NOW (not on press) so the pan tracks even outside the SVG box. Any span
+      // hovercard is irrelevant once we're panning, so dismiss it.
+      d.moved = true;
+      clearHover();
+      try {
+        e.currentTarget.setPointerCapture(d.pointerId);
+        d.captured = true;
+      } catch {
+        /* capture may be unavailable (jsdom / very old browsers) */
+      }
+    }
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return;
     // Pan from the drag-start view: dt = -(dxPx in svg units) → window seconds.
     const dxSvg = (dxPx / rect.width) * W;
     const dt = -(dxSvg / plotW) * vSpan;
-    onViewChange(panView(d.view, dt, T));
+    onViewChange(panView(d.view, dt, dom));
   };
 
   const onPointerUp = (e: ReactPointerEvent<SVGSVGElement>): void => {
     const d = dragRef.current;
-    if (d) {
+    if (d && d.captured) {
       try {
-        e.currentTarget.releasePointerCapture(e.pointerId);
+        e.currentTarget.releasePointerCapture(d.pointerId);
       } catch {
         /* capture may already be released */
       }
@@ -323,6 +402,21 @@ export function GanttZ({
               }
             : {};
         const onActivate = (): void => selectSpanGuarded(sp.id);
+        // Hover → quick-look hovercard. Report the span id + its live on-screen
+        // box (getBoundingClientRect) so the console can anchor the card. mini
+        // bars (the minimap) never raise a hovercard. A drag-in-progress (moved)
+        // suppresses it so panning never flickers a card.
+        const onHoverEnter = (
+          e: ReactPointerEvent<SVGRectElement>,
+        ): void => {
+          if (mini || dragRef.current?.moved) return;
+          const r = (e.currentTarget as SVGRectElement).getBoundingClientRect();
+          reportHover(sp.id, r);
+        };
+        const onHoverLeave = (): void => {
+          if (mini) return;
+          clearHover();
+        };
         return (
           <g key={sp.id}>
             <rect
@@ -340,6 +434,8 @@ export function GanttZ({
               role="button"
               aria-label={`${a_label(z, sp.agent)} · ${sp.label} · ${sp.status}`}
               onClick={onActivate}
+              onPointerEnter={onHoverEnter}
+              onPointerLeave={onHoverLeave}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();

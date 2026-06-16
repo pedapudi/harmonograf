@@ -2,13 +2,14 @@
 // TrajectoryFloatingDrawer (focus-trap + Esc + backdrop + 200ms slide) restyled
 // in the zicato language (Tufte line-art, token-only colours, monospace). It
 // overlays the main area rather than reserving a right column, and surfaces the
-// two kinds of detail this work adds:
+// steering detail:
 //
-//   * REASONING — the 🧠 chain-of-thought of a selected span, rendered verbatim
-//                 (extractThinkingText output from the adapter's ZSpan).
-//   * STEERING  — a goldfive correction: what triggered it (drift kind +
-//                 severity), what it decided (reason), and the agent/task it
-//                 steered (the ZSteer the user clicked on the Gantt arrow).
+//   * STEERING — a goldfive correction: what triggered it (drift kind +
+//                severity), what it decided (reason), and the agent/task it
+//                steered (the ZSteer the user clicked on the Gantt arrow).
+//
+// (Reasoning is rendered inline in the docked inspector — see ZicatoConsole —
+// so there is no separate floating reasoning body here.)
 //
 // It is mounted INSIDE the .zk-root subtree (ZicatoConsole) so it inherits the
 // scoped theme and never touches the MD3 console. When `open=false` the drawer
@@ -23,7 +24,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
-import type { ZSession, ZSpan, ZSteer } from './adapter';
+import type { ZSession, ZSteer } from './adapter';
 import { steerColor } from './svgUtils';
 
 const FOCUSABLE_SELECTOR = [
@@ -166,52 +167,6 @@ export function FloatingDrawerZ(props: FloatingDrawerZProps): ReactElement | nul
 /** Resolve a lane label from an agent id (falls back to the id itself). */
 function labelOf(z: ZSession, agentId: string): string {
   return z.agents.find((a) => a.id === agentId)?.label ?? agentId;
-}
-
-export interface ReasoningDetailBodyProps {
-  span: ZSpan;
-  z: ZSession;
-}
-
-/**
- * The reasoning detail: agent / span identity + the verbatim 🧠 chain-of-thought
- * (ZSpan.reasoning). Degrades to a placeholder line when the span carries the
- * has_reasoning flag but no decoded text (large reasoning rides a payload_ref
- * the zicato console does not fetch).
- */
-export function ReasoningDetailBody(
-  props: ReasoningDetailBodyProps,
-): ReactElement {
-  const { span, z } = props;
-  return (
-    <div data-testid="zk-reasoning-detail">
-      <div className="zk-detail-kicker">
-        <span className="zk-reasoning-glyph" aria-hidden="true">
-          🧠
-        </span>
-        reasoning · {labelOf(z, span.agent)}
-      </div>
-      <section className="zk-detail-section">
-        <h4>span</h4>
-        <div className="zk-detail-target">{span.label}</div>
-      </section>
-      <section className="zk-detail-section">
-        <div className="zk-reasoning-head">
-          <h4>chain of thought</h4>
-        </div>
-        {span.reasoning ? (
-          <pre className="zk-reasoning" data-testid="zk-reasoning-text">
-            {span.reasoning}
-          </pre>
-        ) : (
-          <div className="zk-reasoning-empty">
-            This span carries reasoning, but the full text was not captured
-            inline (it lives in a payload reference).
-          </div>
-        )}
-      </section>
-    </div>
-  );
 }
 
 export interface SteeringDetailBodyZProps {

@@ -11,7 +11,14 @@
 // Theme: scoped to the zicato subtree via `data-zicato-theme` on .zk-root, so
 // the MD3 `<html data-theme>` is never touched (no MD3 regression).
 
-import { useEffect, useReducer, useState, type ReactElement } from 'react';
+import {
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactElement,
+} from 'react';
 import './zicato-tokens.css';
 import './zicato.css';
 import { useUiStore, type ZicatoTheme } from '../../state/uiStore';
@@ -25,25 +32,34 @@ import { SessionPicker } from '../SessionPicker/SessionPicker';
 import { useGlobalShortcuts } from '../../lib/shortcuts';
 import { formatDuration } from '../../lib/format';
 import { bareAgentName } from '../../gantt/index';
-import { extractThinkingText, hasThinking } from '../../lib/thinking';
+import type { Span } from '../../gantt/types';
+import { hasThinking } from '../../lib/thinking';
+import { useReasoningText } from './useReasoningText';
 import { actorDisplayLabel } from '../../theme/agentColors';
+import {
+  isGoldfiveSpan,
+  resolveGoldfiveSpanInfo,
+  truncatePreview,
+} from '../../lib/goldfiveSpan';
+import { isJudgeSpan, resolveJudgeDetail } from '../../lib/interventionDetail';
 import {
   useZicatoSession,
   toStatusToken,
   gfClassForSpan,
   type ZSession,
-  type ZSpan,
   type ZSteer,
 } from './adapter';
 import { BrandMark, Wordmark } from './Brand';
 import { GanttViewZ } from './GanttViewZ';
 import { InstrumentsViewZ } from './InstrumentsViewZ';
-import {
-  FloatingDrawerZ,
-  ReasoningDetailBody,
-  SteeringDetailBodyZ,
-} from './FloatingDrawerZ';
+import { FloatingDrawerZ, SteeringDetailBodyZ } from './FloatingDrawerZ';
 import { SteerSelectContext } from './steerContext';
+import { SpanHoverContext } from './hoverContext';
+import {
+  SpanHovercardZ,
+  useHoverController,
+  displayedSpanId,
+} from './SpanHovercardZ';
 
 // ── Theme picker data tables (ported from compose.html 99-123) ───────────────
 
@@ -86,22 +102,22 @@ const THEME_SWATCHES: Record<ZicatoTheme, string[]> = {
 };
 
 const THEME_LABELS: Record<ZicatoTheme, string> = {
-  monokai: 'Monokai',
-  'solarized-dark': 'Solarized Dark',
-  'solarized-light': 'Solarized Light',
-  'google-light': 'Google Light',
-  'google-dark': 'Google Dark',
-  'lunaria-light': 'Lunaria Light',
-  'lunaria-eclipse': 'Lunaria Eclipse',
-  'belafonte-day': 'Belafonte Day',
-  'belafonte-night': 'Belafonte Night',
-  paper: 'Paper',
-  zenburn: 'Zenburn',
-  'selenized-black': 'Selenized Black',
-  relaxed: 'Relaxed',
-  espresso: 'Espresso',
-  dracula: 'Dracula',
-  ubuntu: 'Ubuntu',
+  monokai: 'monokai',
+  'solarized-dark': 'solarized dark',
+  'solarized-light': 'solarized light',
+  'google-light': 'google light',
+  'google-dark': 'google dark',
+  'lunaria-light': 'lunaria light',
+  'lunaria-eclipse': 'lunaria eclipse',
+  'belafonte-day': 'belafonte day',
+  'belafonte-night': 'belafonte night',
+  paper: 'paper',
+  zenburn: 'zenburn',
+  'selenized-black': 'selenized black',
+  relaxed: 'relaxed',
+  espresso: 'espresso',
+  dracula: 'dracula',
+  ubuntu: 'ubuntu',
 };
 
 function SwatchStrip({ id }: { id: ZicatoTheme }) {
@@ -393,12 +409,84 @@ function escapeJson(s: string): string {
   return s.replace(/"/g, '\\"');
 }
 
-function ZicatoInspector({
-  onOpenReasoning,
-}: {
-  /** Open the selected span's full reasoning in the floating drawer. */
-  onOpenReasoning?: (spanId: string) => void;
-}) {
+// Compact goldfive / judge detail for the docked inspector. For a JUDGE span it
+// shows the verdict pill + the judge's decision summary + the chain-of-thought
+// it saw; for a non-judge goldfive span (refine / goal_derive / plan / …) it
+// shows the decision summary, target, and input/output previews. Zicato-styled
+// (dn-pill / hg-attrs / zk-reasoning), the in-language analogue of MD3's
+// JudgeInvocationDetail + GoldfiveSpanDetail.
+function SpanGoldfiveJudgeZ({ span }: { span: Span }): ReactElement | null {
+  const judge = isJudgeSpan(span);
+  if (judge) {
+    const d = resolveJudgeDetail(span, []);
+    const verdict =
+      d.verdictBucket === 'on_task'
+        ? 'on task'
+        : d.verdictBucket === 'no_verdict'
+          ? 'no verdict'
+          : d.severity
+            ? `off task · ${d.severity}`
+            : 'off task';
+    const pill =
+      d.verdictBucket === 'on_task'
+        ? 'good'
+        : d.verdictBucket === 'no_verdict'
+          ? 'flat'
+          : d.severity === 'critical'
+            ? 'bad'
+            : 'caution';
+    return (
+      <section className="zk-detail-section" data-testid="zk-inspector-judge" style={{ marginTop: 14 }}>
+        <h3 className="zk-detail-h">judge verdict</h3>
+        <span className={`dn-pill ${pill}`}>{verdict}</span>
+        {d.decisionSummary && <p className="zk-detail-text">{d.decisionSummary}</p>}
+        {d.reasoningInput && (
+          <pre className="zk-reasoning" data-testid="zk-inspector-judge-reasoning">
+            {truncatePreview(d.reasoningInput, 800)}
+          </pre>
+        )}
+      </section>
+    );
+  }
+  if (!isGoldfiveSpan(span)) return null;
+  const info = resolveGoldfiveSpanInfo(span);
+  return (
+    <section className="zk-detail-section" data-testid="zk-inspector-goldfive" style={{ marginTop: 14 }}>
+      <h3 className="zk-detail-h">decision</h3>
+      {info.decisionSummary && <p className="zk-detail-text">{info.decisionSummary}</p>}
+      {(info.targetAgentId || info.targetTaskId) && (
+        <dl className="hg-attrs">
+          {info.targetAgentId && (
+            <>
+              <dt>target</dt>
+              <dd>{info.targetAgentId}</dd>
+            </>
+          )}
+          {info.targetTaskId && (
+            <>
+              <dt>task</dt>
+              <dd><code>{info.targetTaskId}</code></dd>
+            </>
+          )}
+        </dl>
+      )}
+      {info.inputPreview && (
+        <>
+          <h4 className="zk-detail-sub">input</h4>
+          <pre className="zk-reasoning">{truncatePreview(info.inputPreview, 800)}</pre>
+        </>
+      )}
+      {info.outputPreview && (
+        <>
+          <h4 className="zk-detail-sub">output</h4>
+          <pre className="zk-reasoning">{truncatePreview(info.outputPreview, 800)}</pre>
+        </>
+      )}
+    </section>
+  );
+}
+
+function ZicatoInspector() {
   const drawerOpen = useUiStore((s) => s.drawerOpen);
   const selectedSpanId = useUiStore((s) => s.selectedSpanId);
   const closeDrawer = useUiStore((s) => s.closeDrawer);
@@ -412,15 +500,23 @@ function ZicatoInspector({
 
   const span = selectedSpanId ? store?.spans.get(selectedSpanId) : undefined;
 
+  // Resolve the reasoning text up front (hooks can't be conditional). Inline
+  // reasoning returns immediately; a large trace that spilled to a payload_ref
+  // (role: 'reasoning') is fetched + decoded here so the inspector renders the
+  // real chain-of-thought, not the "captured in a payload reference" stub.
+  const reasoning = useReasoningText(span ?? null);
+
   let body: ReactElement;
   if (span) {
     const status = toStatusToken(span.status);
     const gf = gfClassForSpan(span);
     // Reasoning detection mirrors the adapter (lib/thinking). The docked
-    // inspector shows a preview + a button to pop the full 🧠 chain-of-thought
-    // into the floating drawer.
-    const spanHasReasoning = hasThinking(span);
-    const reasoningText = extractThinkingText(span);
+    // inspector renders the full 🧠 chain-of-thought inline (no redundant
+    // "open in drawer" hop — the inspector IS the drawer). The text itself
+    // (inline or payload-backed) was resolved by useReasoningText above; gate
+    // the section on the reasoning flag OR a pending/resolved fetch.
+    const spanHasReasoning =
+      hasThinking(span) || reasoning.text != null || reasoning.loading;
     const t0 = span.startMs / 1000;
     const t1 = span.endMs != null ? span.endMs / 1000 : t0;
     const statusClass =
@@ -464,6 +560,7 @@ function ZicatoInspector({
             </>
           )}
         </dl>
+        <SpanGoldfiveJudgeZ span={span} />
         <h3
           style={{
             fontSize: 10,
@@ -514,25 +611,14 @@ function ZicatoInspector({
                 reasoning
               </h3>
             </div>
-            {reasoningText ? (
+            {reasoning.text ? (
               <pre className="zk-reasoning" data-testid="zk-inspector-reasoning-text">
-                {reasoningText}
+                {reasoning.text}
               </pre>
+            ) : reasoning.loading ? (
+              <div className="zk-reasoning-empty">loading reasoning…</div>
             ) : (
-              <div className="zk-reasoning-empty">
-                reasoning captured (full text in a payload reference)
-              </div>
-            )}
-            {onOpenReasoning && (
-              <button
-                type="button"
-                className="hg-transport-btn"
-                style={{ marginTop: 8 }}
-                onClick={() => onOpenReasoning(span.id)}
-                data-testid="zk-inspector-reasoning-expand"
-              >
-                🧠 open in drawer
-              </button>
+              <div className="zk-reasoning-empty">reasoning not available</div>
             )}
           </section>
         )}
@@ -568,11 +654,10 @@ function ZicatoInspector({
 
 // ── The console shell ────────────────────────────────────────────────────────
 
-// Floating-drawer content union: a reasoning span detail or a steering detail.
-// Kept typed at the boundary so the drawer body never re-derives the selection.
-type ZDrawerContent =
-  | { type: 'reasoning'; span: ZSpan }
-  | { type: 'steering'; steer: ZSteer };
+// Floating-drawer content: a steering detail (the docked inspector renders
+// reasoning inline, so the floating drawer is steering-only now). Kept typed at
+// the boundary so the drawer body never re-derives the selection.
+type ZDrawerContent = { type: 'steering'; steer: ZSteer };
 
 export function ZicatoConsole() {
   useGlobalShortcuts(); // ⌘K / Esc / j-k — owned here (not inherited from Shell)
@@ -587,24 +672,91 @@ export function ZicatoConsole() {
   const [view, setView] = useState<ZicatoView>('gantt'); // local; map-shell §6
   const z = useZicatoSession(sessionId);
 
-  // Floating-drawer state: a steering-arrow click (via SteerSelectProvider) or
-  // an inspector "open reasoning" click lands a typed content union here. The
-  // drawer overlays the main area and unmounts when closed.
+  // Span quick-look hovercard: GanttZ reports the hovered span (id + on-screen
+  // rect) through SpanHoverContext; the controller debounces leave with a grace
+  // delay. We resolve the live Span from the store and anchor the card inside
+  // the (position:relative) .zk-app-body via its measured rect.
+  //
+  // PINNING: when a span is SELECTED (the user clicked it → drawer open) its
+  // hovercard pins — it wins over the transient hover and stays visible until
+  // the span is deselected (closeDrawer / Esc). The pinned span's anchor is the
+  // hover rect when it happens to be hovered, otherwise a rect measured from the
+  // DOM (the span's <rect> may not be under the pointer). With no selection we
+  // keep the original transient hover behaviour exactly.
+  const hover = useHoverController();
+  const selectedSpanId = useUiStore((s) => s.selectedSpanId);
+  const appBodyRef = useRef<HTMLDivElement | null>(null);
+  const hoverStore = getSessionStore(sessionId);
+
+  // The span the card should show = selection (pinned) ?? hover (transient).
+  const cardSpanId = displayedSpanId(selectedSpanId, hover.hovered);
+
+  // DOM-measured anchor for the pinned (selected) span. Refreshed whenever the
+  // selection changes or that same span is (re)hovered, so a pan/zoom that moves
+  // the bar keeps the card glued to it.
+  const [pinnedRect, setPinnedRect] = useState<DOMRect | null>(null);
+  const hoveredIsSelected =
+    selectedSpanId != null && hover.hovered?.spanId === selectedSpanId;
+  useEffect(() => {
+    if (selectedSpanId == null) {
+      setPinnedRect(null);
+      return;
+    }
+    const el = appBodyRef.current?.querySelector(
+      `[data-span="${selectedSpanId}"]`,
+    );
+    setPinnedRect(el ? el.getBoundingClientRect() : null);
+    // `view` is a dep so the rect is re-measured when returning to the gantt
+    // (the bar isn't in the DOM while the instruments view is showing).
+  }, [selectedSpanId, hoveredIsSelected, hoverStore, view]);
+
+  // Resolve the displayed Span from the live store (as before).
+  const hoverSpan = cardSpanId ? hoverStore?.spans.get(cardSpanId) : undefined;
+
+  // Anchor: a hovered span uses the live hover rect; a pinned-only span uses the
+  // DOM-measured rect. Prefer the hover rect when it points at the same span.
+  const cardAnchor: DOMRect | null =
+    hover.hovered?.spanId === cardSpanId
+      ? hover.hovered.rect
+      : selectedSpanId != null && cardSpanId === selectedSpanId
+        ? pinnedRect
+        : null;
+
+  // Leaving the gantt view drops the hovercard: it is anchored to gantt span
+  // <rect>s, so in the instruments view it would otherwise linger at a stale
+  // position with no bar left to hover off (and no way to dismiss it).
+  useEffect(() => {
+    if (view !== 'gantt') hover.clear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
+  // Click-away to deselect: a click anywhere in the body that is NOT a span, the
+  // inspector drawer, or an interactive control clears the selection (closes the
+  // drawer + releases the pinned hovercard) — so you needn't find and re-click
+  // the exact bar to unselect it.
+  const onAppBodyClick = (e: ReactMouseEvent<HTMLDivElement>): void => {
+    if (!useUiStore.getState().selectedSpanId) return;
+    const t = e.target as Element | null;
+    if (
+      t?.closest(
+        '[data-span],.zk-drawer-host,button,[role="button"],.zk-minimap,.zk-gantt-resize,input,select,textarea,a',
+      )
+    ) {
+      return;
+    }
+    useUiStore.getState().selectSpan(null);
+  };
+
+  // Floating-drawer state: a steering-arrow click (via SteerSelectProvider)
+  // lands a typed content union here. The drawer overlays the main area and
+  // unmounts when closed.
   const [drawerContent, setDrawerContent] = useState<ZDrawerContent | null>(null);
   const openSteerDrawer = (steer: ZSteer): void =>
     setDrawerContent({ type: 'steering', steer });
-  const openReasoningDrawer = (spanId: string): void => {
-    const span = z.spans.find((s) => s.id === spanId);
-    if (span) setDrawerContent({ type: 'reasoning', span });
-  };
   const closeFloatingDrawer = (): void => setDrawerContent(null);
 
   const drawerTitle =
-    drawerContent?.type === 'steering'
-      ? 'steering detail'
-      : drawerContent?.type === 'reasoning'
-        ? 'reasoning detail'
-        : undefined;
+    drawerContent?.type === 'steering' ? 'steering detail' : undefined;
 
   return (
     <div className="zk-root" data-zicato-theme={zicatoTheme} data-testid="zicato-console">
@@ -612,27 +764,38 @@ export function ZicatoConsole() {
       <ZicatoTopbar z={z} onToMd3={() => setUiMode('md3')} />
       <ZicatoStrip z={z} />
       <SteerSelectContext.Provider value={openSteerDrawer}>
-        <div className="zk-app-body" style={{ position: 'relative' }}>
-          <ZicatoRail view={view} onView={setView} />
-          <main className="zk-main" data-view={view}>
-            {view === 'gantt' && <GanttViewZ z={z} />}
-            {view === 'instruments' && <InstrumentsViewZ z={z} />}
-          </main>
-          <ZicatoInspector onOpenReasoning={openReasoningDrawer} />
-          <FloatingDrawerZ
-            open={drawerContent !== null}
-            onClose={closeFloatingDrawer}
-            title={drawerTitle}
-            testId="zk-floating-drawer"
+        <SpanHoverContext.Provider value={{ report: hover.report, clear: hover.clear }}>
+          <div
+            className="zk-app-body"
+            ref={appBodyRef}
+            onClick={onAppBodyClick}
+            style={{ position: 'relative' }}
           >
-            {drawerContent?.type === 'reasoning' && (
-              <ReasoningDetailBody span={drawerContent.span} z={z} />
+            <ZicatoRail view={view} onView={setView} />
+            <main className="zk-main" data-view={view}>
+              {view === 'gantt' && <GanttViewZ z={z} />}
+              {view === 'instruments' && <InstrumentsViewZ z={z} />}
+            </main>
+            <ZicatoInspector />
+            <FloatingDrawerZ
+              open={drawerContent !== null}
+              onClose={closeFloatingDrawer}
+              title={drawerTitle}
+              testId="zk-floating-drawer"
+            >
+              {drawerContent?.type === 'steering' && (
+                <SteeringDetailBodyZ steer={drawerContent.steer} z={z} />
+              )}
+            </FloatingDrawerZ>
+            {view === 'gantt' && hoverSpan && cardAnchor && appBodyRef.current && (
+              <SpanHovercardZ
+                span={hoverSpan}
+                anchor={cardAnchor}
+                containerRect={appBodyRef.current.getBoundingClientRect()}
+              />
             )}
-            {drawerContent?.type === 'steering' && (
-              <SteeringDetailBodyZ steer={drawerContent.steer} z={z} />
-            )}
-          </FloatingDrawerZ>
-        </div>
+          </div>
+        </SpanHoverContext.Provider>
       </SteerSelectContext.Provider>
       <ZicatoTransport />
       <SessionPicker />

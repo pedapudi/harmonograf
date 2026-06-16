@@ -1261,9 +1261,12 @@ export function useZicatoSession(sessionId: string | null): ZSession {
 
     const T = maxEndMs / 1000;
     const wallNowSec = (tick.nowMs - store.wallClockStartMs) / 1000;
-    const now = Math.max(0, Math.max(T, wallNowSec));
-
     const status = deriveStatus(store);
+    // The play-head advances with wall-clock only while the session is LIVE.
+    // Once it has ended the clock must STOP at the last activity (T) — otherwise
+    // the now-cursor + sequence-diagram clock run indefinitely (e.g. a completed
+    // run showing "now 2861668s" and climbing).
+    const now = status === 'live' ? Math.max(0, Math.max(T, wallNowSec)) : T;
     const agents = buildAgents(store);
     const spans = buildSpans(store, agents, now);
     const edges = buildEdges(store);

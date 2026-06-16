@@ -48,24 +48,37 @@ export function InstrumentsViewZ({ z }: InstrumentsViewZProps) {
 
       <Fig>{(w) => <PlanZ z={z} W={w} />}</Fig>
 
-      <div className="zk-panes-2">
-        <div className="gantt-click">
-          <h3>sequence — who said what to whom, when</h3>
-          <Fig fallback={520}>{(w) => <SequenceZ z={z} W={w} H={380} />}</Fig>
-        </div>
-        <div>
-          <h3>topology — who initiates, who receives</h3>
-          <Fig fallback={300}>{(w) => <ChordZ z={z} W={Math.min(w, 460)} />}</Fig>
-          <p
-            className="zk-prop-note"
-            style={{ margin: '6px 2px 0', lineHeight: 1.5 }}
-          >
-            hover an agent to <b>project</b> its conversations (click to pin · click
-            away to clear) · ribbon width grows with √count and caps, so heavy
-            traffic can never flood the figure
-          </p>
-        </div>
+      {/* Sequence — FULL WIDTH so the lifelines spread out and the diagram reads
+          cleanly (it was too crowded in the half-width pane). */}
+      <div className="gantt-click">
+        <h3>sequence — who said what to whom, when</h3>
+        <Fig fallback={940}>{(w) => <SequenceZ z={z} W={w} H={420} />}</Fig>
       </div>
+
+      {/* Topology — FULL WIDTH row; the chord itself stays clamped to ~460 and
+          centred (see note below). */}
+      <h3>topology — who initiates, who receives</h3>
+      {/* Clamp the chord's LOGICAL size AND its rendered width to the same
+          value. `.fig { width:100% }` would otherwise stretch the 460-wide
+          viewBox to the full column and upscale the whole semicircle (H, R,
+          and its bottom-anchored centre all scale with W) right off the
+          fold. The inner box pins width = the clamped W so viewBox px = CSS
+          px (1:1), centred in the row. */}
+      <Fig fallback={300}>
+        {(w) => {
+          const cw = Math.min(w, 460);
+          return (
+            <div style={{ width: cw, maxWidth: '100%', margin: '0 auto' }}>
+              <ChordZ z={z} W={cw} />
+            </div>
+          );
+        }}
+      </Fig>
+      <p className="zk-prop-note" style={{ margin: '6px 2px 0', lineHeight: 1.5 }}>
+        hover an agent to <b>project</b> its conversations (click to pin · click
+        away to clear) · ribbon width grows with √count and caps, so heavy traffic
+        can never flood the figure
+      </p>
 
       <h3>drift seismograph + judge heartbeat — one instrument, one time axis</h3>
       <div className="track-stack">

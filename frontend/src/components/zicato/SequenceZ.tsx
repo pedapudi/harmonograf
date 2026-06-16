@@ -133,6 +133,11 @@ function userAgentId(z: ZSession): string | null {
   return z.agents.find((a) => a.synthetic === 'user')?.id ?? null;
 }
 
+/** Truncate a lane name so its centred chip/label fits inside the column inset. */
+function truncLabel(s: string): string {
+  return s.length > 18 ? s.slice(0, 17) + '…' : s;
+}
+
 /** Activation-bar fill (compose.html 342): failed→--bad, awaiting→wait hue, else KIND. */
 function actFill(sp: ZSpan): string {
   if (sp.status === 'failed') return 'var(--bad)';
@@ -156,10 +161,18 @@ export function SequenceZ({ z, W = 520, H = 380 }: SequenceZProps) {
   const present = new Set(cols.map((a) => a.id));
   const denom = z.T > 0 ? z.T : 1;
 
-  // Column x-positions (study geometry: padL+30 then evenly stepped).
-  const step = cols.length > 1 ? (W - padL - 44) / (cols.length - 1) : 0;
+  // Column x-positions. Inset the first/last lifelines by LANE_PAD so their
+  // CENTRED chip + name never spill past the SVG edges (the long orchestrator
+  // lane name used to fall off the sides at full width). Labels are also
+  // truncated (see `truncLabel`) so a centred label fits inside the inset.
+  const LANE_PAD = 74;
+  const x0 = padL + LANE_PAD;
+  const x1 = W - LANE_PAD;
+  const step = cols.length > 1 ? (x1 - x0) / (cols.length - 1) : 0;
   const X = new Map<string, number>();
-  cols.forEach((a, i) => X.set(a.id, padL + 30 + i * step));
+  cols.forEach((a, i) =>
+    X.set(a.id, cols.length > 1 ? x0 + i * step : (x0 + x1) / 2),
+  );
   const colorById = new Map<string, string>();
   cols.forEach((a) => colorById.set(a.id, colorVar(a)));
 
@@ -189,11 +202,16 @@ export function SequenceZ({ z, W = 520, H = 380 }: SequenceZProps) {
     );
   }
 
-  // Lifelines + chips + names.
+  // Lifelines + chips + names. Long lane names (e.g. the orchestrator root id)
+  // are truncated so the centred chip/label fits inside the column inset; the
+  // full name rides a <title> tooltip. The chip width tracks the (truncated)
+  // label so the text always sits inside its chip.
   const lifelines: React.ReactNode[] = [];
   cols.forEach((a) => {
     const x = X.get(a.id)!;
     const col = colorById.get(a.id)!;
+    const lbl = truncLabel(a.label);
+    const chipW = Math.max(46, Math.min(140, lbl.length * 6.6 + 14));
     lifelines.push(
       <line
         key={`life-${a.id}`}
@@ -210,9 +228,9 @@ export function SequenceZ({ z, W = 520, H = 380 }: SequenceZProps) {
       <rect
         key={`chip-${a.id}`}
         className="sq-chip"
-        x={x - 34}
+        x={x - chipW / 2}
         y={10}
-        width={68}
+        width={chipW}
         height={19}
         rx={4}
         stroke={col}
@@ -226,7 +244,8 @@ export function SequenceZ({ z, W = 520, H = 380 }: SequenceZProps) {
         y={23}
         textAnchor="middle"
       >
-        {a.label}
+        {lbl}
+        <title>{a.label}</title>
       </text>,
     );
   });
@@ -277,15 +296,14 @@ export function SequenceZ({ z, W = 520, H = 380 }: SequenceZProps) {
     }
   }
 
-  // Messages — min-row-gap layout so each connector gets its own row.
-  const MINGAP = 24;
-  let prevY = -1e9;
+  // Messages — placed at their TRUE time position (yT(m.t)) so a delegate arrow
+  // lines up with the TOP of the target's activation bar and the return lines up
+  // with its BOTTOM (both activation bars and messages share the yT(time) scale).
   const messages: React.ReactNode[] = [];
   for (const m of buildMessages(z, present)) {
     const x0 = X.get(m.from)!;
     const x1 = X.get(m.to)!;
-    const y = Math.max(yT(m.t), prevY + MINGAP);
-    prevY = y;
+    const y = yT(m.t);
     const dir = x1 > x0 ? 1 : -1;
     const color = msgColor(m.family);
     const dash = msgDash(m.family);
@@ -312,18 +330,23 @@ export function SequenceZ({ z, W = 520, H = 380 }: SequenceZProps) {
         stroke="none"
       />,
     );
-    messages.push(
-      <text
-        key={`lbl-${m.t}-${m.from}-${m.to}`}
-        className="sq-lbl"
-        x={x0 + 16 * dir}
-        y={y - 5}
-        textAnchor={dir > 0 ? 'start' : 'end'}
-        fill={color}
-      >
-        {m.label}
-      </text>,
-    );
+    // Labels for delegate / transfer / user-message / agent-message only — a
+    // dashed line + leftward arrowhead already reads as a return, so dropping
+    // the (repeated, misaligned) "return" labels cuts the clutter.
+    if (m.family !== 'return') {
+      messages.push(
+        <text
+          key={`lbl-${m.t}-${m.from}-${m.to}`}
+          className="sq-lbl"
+          x={x0 + 16 * dir}
+          y={y - 5}
+          textAnchor={dir > 0 ? 'start' : 'end'}
+          fill={color}
+        >
+          {m.label}
+        </text>,
+      );
+    }
   }
 
   // Approval gate — a ring on the first awaiting span's lifeline.

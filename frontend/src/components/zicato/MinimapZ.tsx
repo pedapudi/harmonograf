@@ -19,10 +19,15 @@
 // It is rendered inside <Fig> by GanttViewZ, so it accepts a MEASURED W (1:1,
 // no upscaling) exactly like GanttZ. Signatures are part of the frozen contract.
 
-import { useRef, type PointerEvent as ReactPointerEvent } from 'react';
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { ZSession } from './adapter';
 import { statusFill } from './svgUtils';
-import { panView, type GanttView } from './ganttViewport';
+import {
+  clampWindow,
+  contentDomain,
+  panView,
+  type GanttView,
+} from './ganttViewport';
 
 export interface MinimapZProps {
   z: ZSession;
@@ -33,6 +38,9 @@ export interface MinimapZProps {
   /** viewBox width in px (measured container width from <Fig>). */
   W?: number;
 }
+
+/** A drag past this many px is a brush-zoom; below it, a click-to-pan. */
+const BRUSH_THRESHOLD_PX = 4;
 
 // Plot frame — narrow gutter (the minimap carries no lane labels), matched to
 // the hero PAD_R so the right edges line up under the gantt above.
@@ -45,15 +53,27 @@ const AXIS_H = 12; // px reserved for the baseline time axis
 
 export function MinimapZ({ z, view, onViewChange, W = 940 }: MinimapZProps) {
   const svgRef = useRef<SVGSVGElement>(null);
-  const draggingRef = useRef(false);
+  // Drag gesture state: the press anchor (clientX + its time) and whether the
+  // pointer has moved past the brush threshold yet. A live brush selection
+  // (in seconds) is mirrored into React state so the selection rectangle draws.
+  const dragRef = useRef<{ startClientX: number; startT: number; moved: boolean } | null>(
+    null,
+  );
+  const [brush, setBrush] = useState<{ t0: number; t1: number } | null>(null);
 
   const T = z.T > 0 ? z.T : 30;
   const agents = z.agents;
   const plotW = W - PAD_L - PAD_R;
 
-  // Full-range time → x. The minimap ALWAYS spans [0, T] (it is the overview),
-  // independent of the zoomed `view`.
-  const mmX = (t: number): number => PAD_L + (plotW * t) / T;
+  // The minimap spans the CONTENT range ([first span, last span]) — the same
+  // domain the gantt is bounded to — so the overview matches "fit" and carries
+  // no empty agent-startup lead-in.
+  const dom = contentDomain(z.spans, T);
+  const domSpan = dom.hi - dom.lo > 0 ? dom.hi - dom.lo : 1;
+
+  // Content-range time → x. The minimap ALWAYS spans the full content range
+  // (it is the overview), independent of the zoomed `view`.
+  const mmX = (t: number): number => PAD_L + (plotW * (t - dom.lo)) / domSpan;
 
   // Row geometry. Keep a sane minimum height so an empty/agent-less session
   // still draws a frame + axis instead of collapsing.
@@ -63,49 +83,77 @@ export function MinimapZ({ z, view, onViewChange, W = 940 }: MinimapZProps) {
   const agentRow = new Map<string, number>();
   agents.forEach((a, i) => agentRow.set(a.id, i));
 
-  // ── pointer → time, then recenter the window on it (keeping its width) ───────
-  // Map clientX → svg-x → time over the FULL [0, T] domain (mirrors GanttZ's
-  // mapping but with view fixed to fit). A click and a drag both seek: pan the
-  // current window so its CENTER lands on the pointer time.
-  const seekToClientX = (clientX: number): void => {
+  // ── pointer → time over the content-range domain (mirrors GanttZ's mapping) ──
+  const clientXToT = (clientX: number): number | null => {
     const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect || rect.width <= 0) return;
+    if (!rect || rect.width <= 0) return null;
     const svgX = ((clientX - rect.left) / rect.width) * W;
-    const targetT = (plotW > 0 ? (svgX - PAD_L) / plotW : 0) * T;
+    return dom.lo + (plotW > 0 ? (svgX - PAD_L) / plotW : 0) * domSpan;
+  };
+
+  // Click (no drag) → recenter the current window on the pointer time, keeping
+  // its width (a quick scrub, like the MD3 minimap).
+  const panToT = (targetT: number): void => {
     const center = (view.t0 + view.t1) / 2;
-    onViewChange(panView(view, targetT - center, T));
+    onViewChange(panView(view, targetT - center, dom));
   };
 
   const onPointerDown = (e: ReactPointerEvent<SVGSVGElement>): void => {
     if (e.button !== 0) return;
-    draggingRef.current = true;
+    const t = clientXToT(e.clientX);
+    if (t === null) return;
+    dragRef.current = { startClientX: e.clientX, startT: t, moved: false };
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
       /* capture may be unavailable (jsdom) */
     }
-    seekToClientX(e.clientX);
   };
 
   const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>): void => {
-    if (!draggingRef.current) return;
-    seekToClientX(e.clientX);
+    const d = dragRef.current;
+    if (!d) return;
+    if (!d.moved && Math.abs(e.clientX - d.startClientX) < BRUSH_THRESHOLD_PX) return;
+    d.moved = true;
+    const t = clientXToT(e.clientX);
+    if (t === null) return;
+    // Live brush selection: drag a region to define the zoom window.
+    setBrush({ t0: d.startT, t1: t });
   };
 
   const onPointerUp = (e: ReactPointerEvent<SVGSVGElement>): void => {
-    draggingRef.current = false;
+    const d = dragRef.current;
+    dragRef.current = null;
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {
       /* capture may already be released */
     }
+    if (!d) return;
+    if (d.moved) {
+      // Brushed a region → zoom the gantt to it.
+      const end = clientXToT(e.clientX) ?? d.startT;
+      onViewChange(clampWindow(d.startT, end, dom));
+    } else {
+      // A plain click → recenter (pan) on the press point.
+      panToT(d.startT);
+    }
+    setBrush(null);
   };
 
   // ── viewport indicator geometry (clamped into the plot rect) ─────────────────
-  const vx0 = Math.max(PAD_L, mmX(Math.max(0, Math.min(T, view.t0))));
-  const vx1 = Math.min(W - PAD_R, mmX(Math.max(0, Math.min(T, view.t1))));
+  const vx0 = Math.max(PAD_L, mmX(Math.max(dom.lo, Math.min(dom.hi, view.t0))));
+  const vx1 = Math.min(W - PAD_R, mmX(Math.max(dom.lo, Math.min(dom.hi, view.t1))));
   const vw = Math.max(1, vx1 - vx0);
   const axisY = H - AXIS_H + 4;
+
+  // ── live brush selection geometry (while dragging a zoom region) ─────────────
+  const brushX0 = brush
+    ? Math.max(PAD_L, mmX(Math.max(dom.lo, Math.min(dom.hi, Math.min(brush.t0, brush.t1)))))
+    : 0;
+  const brushX1 = brush
+    ? Math.min(W - PAD_R, mmX(Math.max(dom.lo, Math.min(dom.hi, Math.max(brush.t0, brush.t1)))))
+    : 0;
 
   return (
     <svg
@@ -114,7 +162,7 @@ export function MinimapZ({ z, view, onViewChange, W = 940 }: MinimapZProps) {
       viewBox={`0 0 ${W} ${H}`}
       role="img"
       aria-label={`gantt minimap — ${z.id || 'session'}`}
-      style={{ touchAction: 'none', cursor: 'pointer' }}
+      style={{ touchAction: 'none', cursor: 'crosshair' }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -137,8 +185,8 @@ export function MinimapZ({ z, view, onViewChange, W = 940 }: MinimapZProps) {
             />
             {z.spans.map((sp) => {
               if (sp.agent !== a.id) return null;
-              const t0 = Math.max(0, Math.min(T, sp.t0));
-              const t1 = Math.max(t0, Math.min(T, sp.t1));
+              const t0 = Math.max(dom.lo, Math.min(dom.hi, sp.t0));
+              const t1 = Math.max(t0, Math.min(dom.hi, sp.t1));
               const x = mmX(t0);
               const w = Math.max(1, mmX(t1) - x);
               return (
@@ -202,6 +250,25 @@ export function MinimapZ({ z, view, onViewChange, W = 940 }: MinimapZProps) {
         strokeWidth={1}
         vectorEffect="non-scaling-stroke"
       />
+
+      {/* live brush selection: the region being dragged to zoom into. Drawn on
+          top of the viewport rect with a brighter outline so the target window
+          is unmistakable while dragging. */}
+      {brush && brushX1 - brushX0 >= 1 && (
+        <rect
+          className="zk-mm-brush"
+          data-testid="zk-mm-brush"
+          x={brushX0}
+          y={TOP - 2}
+          width={brushX1 - brushX0}
+          height={rowsH + 4}
+          fill="var(--accent)"
+          fillOpacity={0.22}
+          stroke="var(--accent)"
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
     </svg>
   );
 }

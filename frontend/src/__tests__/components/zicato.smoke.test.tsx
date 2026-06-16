@@ -19,6 +19,8 @@ vi.mock('../../rpc/hooks', () => ({
   }),
   getSessionStore: () => undefined,
   useSendControl: () => async () => {},
+  // ZicatoInspector → useReasoningText → usePayload (payload-backed reasoning).
+  usePayload: () => ({ bytes: null, mimeType: '', loading: false, error: null }),
 }));
 vi.mock('../../rpc/SessionsSyncer', () => ({ SessionsSyncer: () => null }));
 vi.mock('../../components/SessionPicker/SessionPicker', () => ({
