@@ -1,0 +1,212 @@
+// MinimapZ.tsx — the zicato-language port of Gantt/Minimap.tsx: a compact,
+// full-timeline overview of the session strip beneath the hero GanttZ. It draws
+// the WHOLE session range [0, T] (never the zoomed window) so the user always
+// sees where the current viewport sits within the run.
+//
+// Encoding (Tufte / line-art, token-only colour — matches the rest of the
+// zicato chrome):
+//   • one thin row per z.agent; every span a small rect coloured by statusFill
+//     (the SAME KIND-hue / gf / --bad encoding the hero gantt uses).
+//   • a translucent --accent VIEWPORT rectangle from mmX(view.t0)..mmX(view.t1)
+//     with crisp left/right edge strokes — the "you are here" indicator.
+//   • a faint baseline time axis.
+//
+// Interaction: click OR drag anywhere recenters the main window on the pointer
+// time, KEEPING the current width, via onViewChange(panView(...)). The pointer
+// time is mapped through an svg ref + getBoundingClientRect, mirroring GanttZ's
+// clientX→time math but over the full [0, T] domain.
+//
+// It is rendered inside <Fig> by GanttViewZ, so it accepts a MEASURED W (1:1,
+// no upscaling) exactly like GanttZ. Signatures are part of the frozen contract.
+
+import { useRef, type PointerEvent as ReactPointerEvent } from 'react';
+import type { ZSession } from './adapter';
+import { statusFill } from './svgUtils';
+import { panView, type GanttView } from './ganttViewport';
+
+export interface MinimapZProps {
+  z: ZSession;
+  /** the CURRENT visible window (= GanttViewZ's eff). The viewport rect tracks it. */
+  view: GanttView;
+  /** recenter the main window on a pointer time (keeps width) via panView. */
+  onViewChange: (v: GanttView) => void;
+  /** viewBox width in px (measured container width from <Fig>). */
+  W?: number;
+}
+
+// Plot frame — narrow gutter (the minimap carries no lane labels), matched to
+// the hero PAD_R so the right edges line up under the gantt above.
+const PAD_L = 8;
+const PAD_R = 14;
+const ROW_H = 6; // px per agent row
+const ROW_GAP = 2; // px between agent rows
+const TOP = 5; // px above the first row
+const AXIS_H = 12; // px reserved for the baseline time axis
+
+export function MinimapZ({ z, view, onViewChange, W = 940 }: MinimapZProps) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const draggingRef = useRef(false);
+
+  const T = z.T > 0 ? z.T : 30;
+  const agents = z.agents;
+  const plotW = W - PAD_L - PAD_R;
+
+  // Full-range time → x. The minimap ALWAYS spans [0, T] (it is the overview),
+  // independent of the zoomed `view`.
+  const mmX = (t: number): number => PAD_L + (plotW * t) / T;
+
+  // Row geometry. Keep a sane minimum height so an empty/agent-less session
+  // still draws a frame + axis instead of collapsing.
+  const rowsH = agents.length > 0 ? agents.length * (ROW_H + ROW_GAP) - ROW_GAP : ROW_H;
+  const H = TOP + rowsH + AXIS_H;
+  const rowTop = (i: number): number => TOP + i * (ROW_H + ROW_GAP);
+  const agentRow = new Map<string, number>();
+  agents.forEach((a, i) => agentRow.set(a.id, i));
+
+  // ── pointer → time, then recenter the window on it (keeping its width) ───────
+  // Map clientX → svg-x → time over the FULL [0, T] domain (mirrors GanttZ's
+  // mapping but with view fixed to fit). A click and a drag both seek: pan the
+  // current window so its CENTER lands on the pointer time.
+  const seekToClientX = (clientX: number): void => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return;
+    const svgX = ((clientX - rect.left) / rect.width) * W;
+    const targetT = (plotW > 0 ? (svgX - PAD_L) / plotW : 0) * T;
+    const center = (view.t0 + view.t1) / 2;
+    onViewChange(panView(view, targetT - center, T));
+  };
+
+  const onPointerDown = (e: ReactPointerEvent<SVGSVGElement>): void => {
+    if (e.button !== 0) return;
+    draggingRef.current = true;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* capture may be unavailable (jsdom) */
+    }
+    seekToClientX(e.clientX);
+  };
+
+  const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>): void => {
+    if (!draggingRef.current) return;
+    seekToClientX(e.clientX);
+  };
+
+  const onPointerUp = (e: ReactPointerEvent<SVGSVGElement>): void => {
+    draggingRef.current = false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* capture may already be released */
+    }
+  };
+
+  // ── viewport indicator geometry (clamped into the plot rect) ─────────────────
+  const vx0 = Math.max(PAD_L, mmX(Math.max(0, Math.min(T, view.t0))));
+  const vx1 = Math.min(W - PAD_R, mmX(Math.max(0, Math.min(T, view.t1))));
+  const vw = Math.max(1, vx1 - vx0);
+  const axisY = H - AXIS_H + 4;
+
+  return (
+    <svg
+      ref={svgRef}
+      className="fig zk-minimap"
+      viewBox={`0 0 ${W} ${H}`}
+      role="img"
+      aria-label={`gantt minimap — ${z.id || 'session'}`}
+      style={{ touchAction: 'none', cursor: 'pointer' }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+    >
+      {/* per-agent rows: a faint row track + every span as a small rect coloured
+          by statusFill (the same KIND-hue / gf / --bad encoding as the hero). */}
+      {agents.map((a, i) => {
+        const y = rowTop(i);
+        return (
+          <g key={`mm-row-${a.id}`}>
+            <rect
+              className="zk-mm-track"
+              x={PAD_L}
+              y={y}
+              width={Math.max(0, plotW)}
+              height={ROW_H}
+              fill="var(--rule-soft)"
+              opacity={0.5}
+            />
+            {z.spans.map((sp) => {
+              if (sp.agent !== a.id) return null;
+              const t0 = Math.max(0, Math.min(T, sp.t0));
+              const t1 = Math.max(t0, Math.min(T, sp.t1));
+              const x = mmX(t0);
+              const w = Math.max(1, mmX(t1) - x);
+              return (
+                <rect
+                  key={`mm-${sp.id}`}
+                  className="zk-mm-span"
+                  x={x}
+                  y={y}
+                  width={w}
+                  height={ROW_H}
+                  fill={statusFill(sp)}
+                  opacity={sp.status === 'cancelled' ? 0.35 : 0.85}
+                />
+              );
+            })}
+          </g>
+        );
+      })}
+
+      {/* faint baseline time axis across the full range. */}
+      <line
+        className="hg-gantt-grid"
+        x1={PAD_L}
+        y1={axisY}
+        x2={W - PAD_R}
+        y2={axisY}
+        opacity={0.7}
+      />
+
+      {/* the --accent viewport rectangle: translucent fill + crisp edge strokes.
+          Drawn last so it sits above the span rects. */}
+      <rect
+        className="zk-mm-viewport"
+        x={vx0}
+        y={TOP - 2}
+        width={vw}
+        height={rowsH + 4}
+        fill="var(--accent)"
+        fillOpacity={0.14}
+        stroke="none"
+      >
+        <title>{`viewport · ${fmt(view.t0)}–${fmt(view.t1)}s of ${fmt(T)}s`}</title>
+      </rect>
+      <line
+        className="zk-mm-viewport-edge"
+        x1={vx0}
+        y1={TOP - 2}
+        x2={vx0}
+        y2={TOP + rowsH + 2}
+        stroke="var(--accent)"
+        strokeWidth={1}
+        vectorEffect="non-scaling-stroke"
+      />
+      <line
+        className="zk-mm-viewport-edge"
+        x1={vx1}
+        y1={TOP - 2}
+        x2={vx1}
+        y2={TOP + rowsH + 2}
+        stroke="var(--accent)"
+        strokeWidth={1}
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  );
+}
+
+/** Trim trailing `.0` so the tooltip reads like the rest of zicato (`16s`). */
+function fmt(t: number): string {
+  return Number.isInteger(t) ? String(t) : t.toFixed(1);
+}

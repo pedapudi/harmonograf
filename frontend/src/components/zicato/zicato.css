@@ -852,6 +852,80 @@
   outline: 2px solid var(--accent);
 }
 
+/* ---- 6b. gantt zoom toolbar + minimap (zoom/pan/overview) ---------- */
+/* the gantt header row: the §6.5 <h3> on the left, the zoom controls right.
+   align-items:baseline so the small monospace buttons sit on the h3's
+   text baseline, matching the calm zicato chrome. */
+.zk-root .zk-gantt-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.zk-root .zk-gantt-head h3 {
+  margin: 16px 0 8px;
+}
+.zk-root .zk-gantt-head h3:first-child {
+  margin-top: 0;
+}
+/* − / + / fit cluster — modeled on .zk-iconbtn / .hg-transport-btn */
+.zk-root .zk-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.zk-root .zk-zoom button {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-panel);
+  padding: 2px 8px;
+  min-width: 22px;
+  cursor: pointer;
+  color: var(--ink-soft);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.3;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.zk-root .zk-zoom button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.zk-root .zk-zoom button:active:not(:disabled),
+.zk-root .zk-zoom button[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.zk-root .zk-zoom button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* the full-range overview strip beneath the gantt */
+.zk-root .zk-minimap {
+  display: block;
+  margin-top: 8px;
+}
+/* one thin per-agent row track; every span coloured by statusFill (inline). The
+   load-bearing fills are set inline on the rects (so it renders pre-CSS); these
+   just keep the non-scaling stroke crisp. */
+.zk-root .zk-minimap .zk-mm-track {
+  vector-effect: non-scaling-stroke;
+}
+.zk-root .zk-minimap .zk-mm-span {
+  vector-effect: non-scaling-stroke;
+}
+/* the translucent draggable viewport window over the overview */
+.zk-root .zk-minimap .zk-mm-viewport {
+  fill: var(--accent);
+  fill-opacity: 0.14;
+}
+.zk-root .zk-minimap .zk-mm-viewport-edge {
+  stroke: var(--accent);
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+
 /* ---- 7. figure-local classes (compose.html <style> 30-82) ---------- */
 /* chord interactivity */
 .zk-root .topo-chord g[data-agent] {
