@@ -285,15 +285,36 @@ class FrontendServicerMixin:
             if request.HasField("window_end"):
                 window_end = ts_to_float(request.window_end)
             if window_start is None and window_end is None:
-                # default: last ``rpc_watch_window_seconds`` (or all,
-                # whichever smaller)
-                window_start = max(
-                    0.0, time.time() - self._config.rpc_watch_window_seconds
+                # Default span window when the client requests none.
+                #
+                # The rolling ``now - rpc_watch_window_seconds`` window only
+                # makes sense for a LIVE session, where it caps the initial
+                # burst to recent activity and the live delta stream fills in
+                # the rest. For a session that has already ENDED, wall-clock
+                # ``now`` is unrelated to the run's timeline — a session that
+                # finished an hour+ ago would have every span fall outside the
+                # window, so the client receives agents + plan events but ZERO
+                # spans (empty Gantt/minimap). Stream the full range for ended
+                # sessions so completed-session review is populated.
+                session_live = (
+                    sess.status == SessionStatus.LIVE and sess.ended_at is None
                 )
+                if session_live:
+                    window_start = max(
+                        0.0, time.time() - self._config.rpc_watch_window_seconds
+                    )
 
             spans = await self._store.get_spans(
                 session_id, time_start=window_start, time_end=window_end
             )
+            # Live-but-idle fallback: a session can be marked LIVE yet have had no
+            # activity for longer than the rolling window (e.g. an observed run
+            # that stalled, or a session left open). The windowed query then comes
+            # back empty and the client shows agents but an empty Gantt. If the
+            # default window dropped everything, retry unbounded so any session
+            # that HAS spans always renders them.
+            if not spans and window_start is not None and window_end is None:
+                spans = await self._store.get_spans(session_id)
             for sp in spans:
                 yield frontend_pb2.SessionUpdate(initial_span=storage_span_to_pb(sp))
 

@@ -239,6 +239,83 @@ async def test_watch_session_translates_annotation_delta(harness, stub):
     assert got.annotation.body == "hey"
 
 
+async def _count_initial_spans(stub, session_id: str) -> int:
+    call = stub.WatchSession(
+        frontend_pb2.WatchSessionRequest(session_id=session_id)
+    )
+    n = 0
+
+    async def run():
+        nonlocal n
+        async for upd in call:
+            w = upd.WhichOneof("kind")
+            if w == "initial_span":
+                n += 1
+            elif w == "burst_complete":
+                break
+
+    await asyncio.wait_for(run(), timeout=3.0)
+    call.cancel()
+    return n
+
+
+async def test_watch_session_completed_streams_full_history(harness, stub):
+    # Regression: a COMPLETED session whose spans are far older than
+    # rpc_watch_window_seconds (default 3600s) must still stream ALL its spans
+    # on a windowless watch. The wall-clock rolling window only makes sense for
+    # a live run; applying it to an ended session left the client with agents +
+    # plan events but ZERO spans (empty Gantt / minimap, dead zoom).
+    store = harness["store"]
+    old = time.time() - 100_000  # well outside the 1h rolling window
+    await _seed_minimal(
+        store, "sess_done", n_spans=5, created_at=old,
+        status=SessionStatus.COMPLETED,
+    )
+    assert await _count_initial_spans(stub, "sess_done") == 5
+
+
+async def test_watch_session_active_live_applies_rolling_window(harness, stub):
+    # An ACTIVE live session (it has recent spans) keeps the rolling window:
+    # spans older than it stay out of the initial burst (the live delta stream
+    # covers anything newer), capping the burst for a long-running run.
+    store = harness["store"]
+    now = time.time()
+    await _seed_minimal(
+        store, "sess_live", n_spans=0, created_at=now - 100_000,
+        status=SessionStatus.LIVE,
+    )
+    # 3 OLD spans (far outside the window) + 2 RECENT spans (inside it).
+    for i in range(3):
+        await store.append_span(Span(
+            id=f"old_{i}", session_id="sess_live", agent_id="a",
+            kind=SpanKind.TOOL_CALL, name=f"old_{i}",
+            start_time=now - 100_000 + i, end_time=now - 100_000 + i + 0.5,
+            status=SpanStatus.COMPLETED))
+    for i in range(2):
+        await store.append_span(Span(
+            id=f"new_{i}", session_id="sess_live", agent_id="a",
+            kind=SpanKind.TOOL_CALL, name=f"new_{i}",
+            start_time=now - 10 + i, end_time=now - 10 + i + 0.5,
+            status=SpanStatus.COMPLETED))
+    # Only the 2 recent spans are in the burst — the window dropped the 3 old
+    # ones, and since the windowed query was NON-empty the idle fallback did
+    # not fire.
+    assert await _count_initial_spans(stub, "sess_live") == 2
+
+
+async def test_watch_session_idle_live_falls_back_to_full_history(harness, stub):
+    # A LIVE session with NO recent activity (every span older than the window)
+    # must still stream all its spans: the windowed query is empty, so the
+    # fallback re-queries unbounded. Prevents an empty Gantt on a stalled run.
+    store = harness["store"]
+    old = time.time() - 100_000
+    await _seed_minimal(
+        store, "sess_idle", n_spans=5, created_at=old,
+        status=SessionStatus.LIVE,
+    )
+    assert await _count_initial_spans(stub, "sess_idle") == 5
+
+
 # task_plan / updated_task_status WatchSession delta translation tests were
 # removed in Phase A of the goldfive migration (issue #2). SessionUpdate
 # reserves those field numbers until Phase B routes goldfive_event-based
