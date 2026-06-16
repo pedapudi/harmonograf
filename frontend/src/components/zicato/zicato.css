@@ -236,6 +236,11 @@
 
 /* ---- 2. rail / strip / transport ----------------------------------- */
 .zk-root .hg-rail {
+  /* reset the leaked MD3 global `.hg-rail { grid-area: rail }`: the zicato
+     grid (.zk-app-body) has no named `rail` area, so the inherited grid-area
+     pulled the rail out of placement and collapsed .zk-main into the 84px
+     first column. Auto-placement puts it back as the left column. */
+  grid-area: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
