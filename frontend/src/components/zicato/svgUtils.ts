@@ -4,10 +4,23 @@
 // the figure components import. `colorVar`/`severityToValue` are owned by
 // adapter.ts and re-exported here so there is exactly one definition of each.
 
-import type { ZKindToken, ZGfClass, ZSpan, ZJudges } from './adapter';
+import type { ZKindToken, ZGfClass, ZSpan, ZJudges, ZSteer } from './adapter';
 import { colorVar, severityToValue } from './adapter';
 
 export { colorVar, severityToValue };
+
+/**
+ * The hue a goldfive steering arrow takes, keyed off the trigger severity:
+ * critical → --bad, warning → --caution, anything else (info / unspecified) →
+ * the goldfive-refine token. Keeps steering distinct from transfer/delegation
+ * edges while still reading as "a correction".
+ */
+export function steerColor(s: Pick<ZSteer, 'severity'>): string {
+  const sev = (s.severity || '').toLowerCase();
+  if (sev === 'critical') return 'var(--bad)';
+  if (sev === 'warning' || sev === 'warn') return 'var(--caution)';
+  return 'var(--hg-gf-refine)';
+}
 
 /** KIND = hue. `'llm-call'` → `var(--hg-kind-llm-call)`. (compose.html:161) */
 export const KIND = (k: ZKindToken): string => `var(--hg-kind-${k})`;

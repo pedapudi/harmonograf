@@ -31,6 +31,7 @@ import type {
 import { useAnnotationStore, type Annotation } from '../../state/annotationStore';
 import { deriveInterventionsFromStore } from '../../lib/interventions';
 import { bareAgentName, type SessionStore } from '../../gantt/index';
+import { extractThinkingText, hasThinking } from '../../lib/thinking';
 import type {
   Span,
   SpanKind,
@@ -106,6 +107,18 @@ export interface ZSpan {
   t1: number;
   /** span.name */
   label: string;
+  /**
+   * True when the span carries model reasoning / chain-of-thought (detected
+   * via lib/thinking.hasThinking — the `has_reasoning` flag or any
+   * `llm.reasoning` / `llm.reasoning_trail` attribute). Drives the 🧠 glyph.
+   */
+  hasReasoning: boolean;
+  /**
+   * The reasoning text for this span (extractThinkingText), or null. The
+   * INVOCATION-level `llm.reasoning_trail` aggregate is preferred over a
+   * single LLM_CALL's `llm.reasoning`. Surfaced in the inspector + drawer.
+   */
+  reasoning: string | null;
 }
 
 /** Hand-off chord. seconds, agent ids. */
@@ -133,6 +146,32 @@ export interface ZEdge {
   from: string;
   to: string;
   kind: ZArrowKind;
+}
+
+/**
+ * A goldfive steering / correction event: a refine (or plan revision) the
+ * orchestrator emitted in response to a drift, pointing at the agent/task it
+ * steered. The gantt renders an arrow from the correction's moment on the
+ * goldfive lane → the target agent's span at the steer time. Severity drives
+ * the arrow hue (warning → --caution, critical → --bad).
+ */
+export interface ZSteer {
+  /** seconds — when goldfive emitted the correction (refine recordedAt). */
+  t: number;
+  /** the goldfive lane id the arrow originates from. */
+  from: string;
+  /** the target agent id the correction steered (arrow lands here). */
+  to: string;
+  /** target task id, if the correction scoped one ('' otherwise). */
+  taskId: string;
+  /** lowercase drift kind that triggered the refine (e.g. 'off_topic'). */
+  kind: string;
+  /** lowercase severity of the trigger ('info'|'warning'|'critical'|''). */
+  severity: string;
+  /** short reason / detail text for the tooltip + drawer. */
+  reason: string;
+  /** revision number this correction produced, when resolvable (0 if not). */
+  revision: number;
 }
 
 // Plan DAG + reel (study p.* shape).
@@ -204,6 +243,8 @@ export interface ZSession {
   delegation: ZDelegation | null;
   /** derived transfer/delegation/return edges (GraphView algo) */
   edges: ZEdge[];
+  /** goldfive steering corrections → their target agent/task (drift-driven). */
+  steers: ZSteer[];
   judges: ZJudges;
   ticks: ZTicks;
   ladder: ZLadder;
@@ -247,6 +288,7 @@ export const EMPTY_SESSION: ZSession = {
   transfers: [],
   delegation: null,
   edges: [],
+  steers: [],
   judges: {},
   ticks: {},
   ladder: [],
@@ -441,6 +483,9 @@ export function buildSpans(
   for (const sp of spans) {
     const t0 = sp.startMs / 1000;
     const t1 = sp.endMs != null ? sp.endMs / 1000 : nowSec;
+    // Reasoning detection: reuse lib/thinking heuristics (has_reasoning flag
+    // or any llm.reasoning / llm.reasoning_trail attribute). The 🧠 glyph and
+    // the inspector/drawer reasoning block key off these two fields.
     out.push({
       id: sp.id,
       agent: sp.agentId,
@@ -450,6 +495,8 @@ export function buildSpans(
       t0,
       t1: Math.max(t0, t1),
       label: sp.name,
+      hasReasoning: hasThinking(sp),
+      reasoning: extractThinkingText(sp),
     });
   }
   out.sort((a, b) => a.t0 - b.t0);
@@ -625,6 +672,132 @@ export function buildEdges(store: SessionStore): ZEdge[] {
   }
   out.sort((a, b) => a.t - b.t);
   return out;
+}
+
+/**
+ * steers → goldfive correction arrows. A "steer" is a refine the orchestrator
+ * emitted in response to a drift, pointing at the agent/task it corrected. We
+ * model the arrow from the goldfive lane (at the refine moment) → the steered
+ * agent. (Mirrors TrajectoryView.buildSteeringEvents but anchored in time so it
+ * can ride the Gantt's lanes/zoom window instead of the plan DAG.)
+ *
+ * Target resolution, in priority order:
+ *   1. the synthesized `refine:` span's `refine.target_agent_id` (matched by
+ *      `refine.index == revision`) — the authoritative post-merge wire field.
+ *   2. the RefineAttemptRecord's own `agentId` (the steered agent).
+ *   3. the triggering DriftRecord's `agentId`.
+ * The origin is always the goldfive lane. A steer with no resolvable, non-self
+ * target agent is dropped (no arrow to draw).
+ *
+ * Primary source is `store.refineAttempts.list()`; when that registry is empty
+ * (older sessions that never emitted RefineAttempted) we fall back to drifts
+ * that triggered a plan revision (history.triggerEventId == driftId).
+ */
+export function buildSteers(
+  store: SessionStore,
+  history: readonly PlanRevisionRecord[],
+): ZSteer[] {
+  const goldfiveId = store.resolveGoldfiveActorId() || GOLDFIVE_ACTOR_ID;
+  // Index refine spans on the goldfive row by refine.index so we can read the
+  // target_agent_id the orchestrator stamped.
+  const refineSpans: Span[] = [];
+  store.spans.queryAgent(goldfiveId, 0, Number.POSITIVE_INFINITY, refineSpans);
+  const targetByIndex = new Map<string, string>();
+  for (const s of refineSpans) {
+    if (!s.name.startsWith('refine:')) continue;
+    const idx = readStringAttr(s, 'refine.index');
+    const tgt = readStringAttr(s, 'refine.target_agent_id');
+    if (idx && tgt) targetByIndex.set(idx, tgt);
+  }
+  // driftId → revision number, from the plan history (a plan revision triggered
+  // by a drift carries triggerEventId == driftId).
+  const revisionByDrift = new Map<string, number>();
+  const reasonByDrift = new Map<string, string>();
+  for (const rec of history) {
+    if (rec.revision <= 0) continue;
+    if (rec.triggerEventId) {
+      if (!revisionByDrift.has(rec.triggerEventId)) {
+        revisionByDrift.set(rec.triggerEventId, rec.revision);
+      }
+      if (rec.reason) reasonByDrift.set(rec.triggerEventId, rec.reason);
+    }
+  }
+  const driftById = new Map<string, ReturnType<typeof driftToTuple>>();
+  for (const d of store.drifts.list()) {
+    if (d.driftId) driftById.set(d.driftId, driftToTuple(d));
+  }
+
+  const out: ZSteer[] = [];
+  const attempts = store.refineAttempts.list();
+  if (attempts.length > 0) {
+    for (const a of attempts) {
+      const revision =
+        revisionByDrift.get(a.driftId) ?? 0;
+      const target =
+        (revision ? targetByIndex.get(String(revision)) : undefined) ||
+        a.agentId ||
+        driftById.get(a.driftId)?.agentId ||
+        '';
+      if (!target || target === goldfiveId) continue;
+      out.push({
+        t: a.recordedAtMs / 1000,
+        from: goldfiveId,
+        to: target,
+        taskId: a.taskId || driftById.get(a.driftId)?.taskId || '',
+        kind: a.triggerKind || driftById.get(a.driftId)?.kind || '',
+        severity: a.triggerSeverity || driftById.get(a.driftId)?.severity || '',
+        reason:
+          reasonByDrift.get(a.driftId) || driftById.get(a.driftId)?.detail || '',
+        revision,
+      });
+    }
+  } else {
+    // Fallback: drifts that produced a plan revision (no RefineAttempted rows).
+    for (const d of store.drifts.list()) {
+      const revision = d.driftId ? revisionByDrift.get(d.driftId) ?? 0 : 0;
+      if (revision <= 0) continue;
+      const target =
+        targetByIndex.get(String(revision)) || d.agentId || '';
+      if (!target || target === goldfiveId) continue;
+      out.push({
+        t: d.recordedAtMs / 1000,
+        from: goldfiveId,
+        to: target,
+        taskId: d.taskId || '',
+        kind: d.kind || '',
+        severity: d.severity || '',
+        reason: reasonByDrift.get(d.driftId) || d.detail || '',
+        revision,
+      });
+    }
+  }
+  out.sort((a, b) => a.t - b.t);
+  return out;
+}
+
+/** Pull a string attribute off a span (helper for the steer/target lookups). */
+function readStringAttr(span: Span | null, key: string): string {
+  if (!span) return '';
+  const attr = span.attributes[key];
+  if (!attr || attr.kind !== 'string') return '';
+  return attr.value;
+}
+
+/** Narrow a DriftRecord to the fields buildSteers reads (keeps the Map typed). */
+function driftToTuple(d: {
+  agentId: string;
+  taskId: string;
+  kind: string;
+  severity: string;
+  detail: string;
+}): { agentId: string; taskId: string; kind: string; severity: string; detail: string } {
+  return {
+    agentId: d.agentId,
+    taskId: d.taskId,
+    kind: d.kind,
+    severity: d.severity,
+    detail: d.detail,
+  };
 }
 
 /**
@@ -1098,6 +1271,7 @@ export function useZicatoSession(sessionId: string | null): ZSession {
       .filter((e) => e.kind === 'transfer')
       .map((e) => ({ t: e.t, from: e.from, to: e.to }));
     const delegation = buildDelegation(store);
+    const steers = buildSteers(store, history);
     const judges = buildJudges(store, agents);
     const ticks = buildTicks(store, annotations);
     const ladder = buildLadder(store, annotations);
@@ -1116,6 +1290,7 @@ export function useZicatoSession(sessionId: string | null): ZSession {
       transfers,
       delegation,
       edges,
+      steers,
       judges,
       ticks,
       ladder,

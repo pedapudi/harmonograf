@@ -25,16 +25,25 @@ import { SessionPicker } from '../SessionPicker/SessionPicker';
 import { useGlobalShortcuts } from '../../lib/shortcuts';
 import { formatDuration } from '../../lib/format';
 import { bareAgentName } from '../../gantt/index';
+import { extractThinkingText, hasThinking } from '../../lib/thinking';
 import { actorDisplayLabel } from '../../theme/agentColors';
 import {
   useZicatoSession,
   toStatusToken,
   gfClassForSpan,
   type ZSession,
+  type ZSpan,
+  type ZSteer,
 } from './adapter';
 import { BrandMark, Wordmark } from './Brand';
 import { GanttViewZ } from './GanttViewZ';
 import { InstrumentsViewZ } from './InstrumentsViewZ';
+import {
+  FloatingDrawerZ,
+  ReasoningDetailBody,
+  SteeringDetailBodyZ,
+} from './FloatingDrawerZ';
+import { SteerSelectContext } from './steerContext';
 
 // ── Theme picker data tables (ported from compose.html 99-123) ───────────────
 
@@ -384,7 +393,12 @@ function escapeJson(s: string): string {
   return s.replace(/"/g, '\\"');
 }
 
-function ZicatoInspector() {
+function ZicatoInspector({
+  onOpenReasoning,
+}: {
+  /** Open the selected span's full reasoning in the floating drawer. */
+  onOpenReasoning?: (spanId: string) => void;
+}) {
   const drawerOpen = useUiStore((s) => s.drawerOpen);
   const selectedSpanId = useUiStore((s) => s.selectedSpanId);
   const closeDrawer = useUiStore((s) => s.closeDrawer);
@@ -402,6 +416,11 @@ function ZicatoInspector() {
   if (span) {
     const status = toStatusToken(span.status);
     const gf = gfClassForSpan(span);
+    // Reasoning detection mirrors the adapter (lib/thinking). The docked
+    // inspector shows a preview + a button to pop the full 🧠 chain-of-thought
+    // into the floating drawer.
+    const spanHasReasoning = hasThinking(span);
+    const reasoningText = extractThinkingText(span);
     const t0 = span.startMs / 1000;
     const t1 = span.endMs != null ? span.endMs / 1000 : t0;
     const statusClass =
@@ -473,6 +492,50 @@ function ZicatoInspector() {
           <span className="hg-j-str">"{span.status}"</span>
           <span className="hg-j-punct"> {'}'}</span>
         </code>
+        {spanHasReasoning && (
+          <section
+            className="zk-detail-section"
+            data-testid="zk-inspector-reasoning"
+            style={{ marginTop: 14 }}
+          >
+            <div className="zk-reasoning-head" style={{ marginBottom: 6 }}>
+              <span className="zk-reasoning-glyph" aria-hidden="true">
+                🧠
+              </span>
+              <h3
+                style={{
+                  fontSize: 10,
+                  textTransform: 'uppercase',
+                  letterSpacing: '.1em',
+                  color: 'var(--ink-faint)',
+                  margin: 0,
+                }}
+              >
+                reasoning
+              </h3>
+            </div>
+            {reasoningText ? (
+              <pre className="zk-reasoning" data-testid="zk-inspector-reasoning-text">
+                {reasoningText}
+              </pre>
+            ) : (
+              <div className="zk-reasoning-empty">
+                reasoning captured (full text in a payload reference)
+              </div>
+            )}
+            {onOpenReasoning && (
+              <button
+                type="button"
+                className="hg-transport-btn"
+                style={{ marginTop: 8 }}
+                onClick={() => onOpenReasoning(span.id)}
+                data-testid="zk-inspector-reasoning-expand"
+              >
+                🧠 open in drawer
+              </button>
+            )}
+          </section>
+        )}
       </>
     );
   } else {
@@ -505,6 +568,12 @@ function ZicatoInspector() {
 
 // ── The console shell ────────────────────────────────────────────────────────
 
+// Floating-drawer content union: a reasoning span detail or a steering detail.
+// Kept typed at the boundary so the drawer body never re-derives the selection.
+type ZDrawerContent =
+  | { type: 'reasoning'; span: ZSpan }
+  | { type: 'steering'; steer: ZSteer };
+
 export function ZicatoConsole() {
   useGlobalShortcuts(); // ⌘K / Esc / j-k — owned here (not inherited from Shell)
 
@@ -518,19 +587,53 @@ export function ZicatoConsole() {
   const [view, setView] = useState<ZicatoView>('gantt'); // local; map-shell §6
   const z = useZicatoSession(sessionId);
 
+  // Floating-drawer state: a steering-arrow click (via SteerSelectProvider) or
+  // an inspector "open reasoning" click lands a typed content union here. The
+  // drawer overlays the main area and unmounts when closed.
+  const [drawerContent, setDrawerContent] = useState<ZDrawerContent | null>(null);
+  const openSteerDrawer = (steer: ZSteer): void =>
+    setDrawerContent({ type: 'steering', steer });
+  const openReasoningDrawer = (spanId: string): void => {
+    const span = z.spans.find((s) => s.id === spanId);
+    if (span) setDrawerContent({ type: 'reasoning', span });
+  };
+  const closeFloatingDrawer = (): void => setDrawerContent(null);
+
+  const drawerTitle =
+    drawerContent?.type === 'steering'
+      ? 'steering detail'
+      : drawerContent?.type === 'reasoning'
+        ? 'reasoning detail'
+        : undefined;
+
   return (
     <div className="zk-root" data-zicato-theme={zicatoTheme} data-testid="zicato-console">
       <SessionsSyncer />
       <ZicatoTopbar z={z} onToMd3={() => setUiMode('md3')} />
       <ZicatoStrip z={z} />
-      <div className="zk-app-body">
-        <ZicatoRail view={view} onView={setView} />
-        <main className="zk-main" data-view={view}>
-          {view === 'gantt' && <GanttViewZ z={z} />}
-          {view === 'instruments' && <InstrumentsViewZ z={z} />}
-        </main>
-        <ZicatoInspector />
-      </div>
+      <SteerSelectContext.Provider value={openSteerDrawer}>
+        <div className="zk-app-body" style={{ position: 'relative' }}>
+          <ZicatoRail view={view} onView={setView} />
+          <main className="zk-main" data-view={view}>
+            {view === 'gantt' && <GanttViewZ z={z} />}
+            {view === 'instruments' && <InstrumentsViewZ z={z} />}
+          </main>
+          <ZicatoInspector onOpenReasoning={openReasoningDrawer} />
+          <FloatingDrawerZ
+            open={drawerContent !== null}
+            onClose={closeFloatingDrawer}
+            title={drawerTitle}
+            testId="zk-floating-drawer"
+          >
+            {drawerContent?.type === 'reasoning' && (
+              <ReasoningDetailBody span={drawerContent.span} z={z} />
+            )}
+            {drawerContent?.type === 'steering' && (
+              <SteeringDetailBodyZ steer={drawerContent.steer} z={z} />
+            )}
+          </FloatingDrawerZ>
+        </div>
+      </SteerSelectContext.Provider>
       <ZicatoTransport />
       <SessionPicker />
     </div>
