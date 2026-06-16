@@ -348,7 +348,20 @@ export function gfClassForSpan(sp: Span): ZGfClass {
       break;
     }
   }
-  if (!raw) return null;
+  if (!raw) {
+    // Goldfive's OWN llm spans (goal_derive / refine / judge_* / plan) carry no
+    // category attribute, so they would all fall through to one llm-call hue.
+    // Infer the sub-type from the span name — but ONLY for the goldfive actor,
+    // so a work span that merely mentions "plan" is never miscoloured.
+    const isGf =
+      sp.agentId === GOLDFIVE_ACTOR_ID || sp.agentId.endsWith(':goldfive');
+    if (!isGf) return null;
+    const n = (sp.name ?? '').toLowerCase();
+    if (n.includes('judge')) return 'judge-neutral';
+    if (n.includes('refine') || n.includes('steer')) return 'refine';
+    if (n.includes('plan')) return 'plan';
+    return 'reflective'; // goal_derive and other goldfive own-ops
+  }
   const v = raw.toLowerCase().replace(/_/g, '-');
   switch (v) {
     case 'judge-on-task':

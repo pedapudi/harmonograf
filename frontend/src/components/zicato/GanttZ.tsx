@@ -47,12 +47,55 @@ export function GanttZ({
 
   // Lanes: mini drops the goldfive lane. Lane order = adapter join-time order.
   const agents = mini ? z.agents.filter((a) => a.synthetic !== 'goldfive') : z.agents;
-  const H = agents.length * rowH + (mini ? 10 : 30);
   const X = (t: number): number => padL + ((W - padL - PAD_R) * t) / T;
 
-  // Per-agent center-y, keyed by agent id. (Study keys Y by name; here by id.)
+  // ── span stacking (MD3 packLanes) ───────────────────────────────────────────
+  // Greedy interval packing: each agent's concurrent spans get distinct sub-
+  // lanes instead of overlapping; the agent's row then grows to fit its lanes.
+  const GAP = 3;
+  const subPitch = bh + GAP;
+  const ROWPAD = mini ? 4 : 10;
+  const laneOf = new Map<string, number>();
+  const laneCount = new Map<string, number>();
+  agents.forEach((a) => {
+    const spans = z.spans
+      .filter((s) => s.agent === a.id)
+      .sort((p, q) => p.t0 - q.t0 || p.t1 - q.t1);
+    const laneEnds: number[] = [];
+    for (const s of spans) {
+      let lane = laneEnds.findIndex((end) => end <= s.t0);
+      if (lane === -1) {
+        lane = laneEnds.length;
+        laneEnds.push(0);
+      }
+      laneEnds[lane] = s.t1;
+      laneOf.set(s.id, lane);
+    }
+    laneCount.set(a.id, Math.max(1, laneEnds.length));
+  });
+
+  // Variable per-agent row geometry; Y keeps the row CENTER (edges/ctx/label).
+  const rowTop = new Map<string, number>();
+  const rowHt = new Map<string, number>();
   const Y = new Map<string, number>();
-  agents.forEach((a, i) => Y.set(a.id, (mini ? 5 : 12) + i * rowH + rowH / 2));
+  let acc = mini ? 5 : 10;
+  agents.forEach((a) => {
+    const h = Math.max(rowH, laneCount.get(a.id)! * subPitch - GAP + ROWPAD);
+    rowTop.set(a.id, acc);
+    rowHt.set(a.id, h);
+    Y.set(a.id, acc + h / 2);
+    acc += h;
+  });
+  const H = acc + (mini ? 5 : 24);
+
+  // y-top of a span's bar within its agent row (centers the lane block).
+  const spanYTop = (sp: ZSpan): number => {
+    const top = rowTop.get(sp.agent);
+    if (top == null) return 0;
+    const blockH = laneCount.get(sp.agent)! * subPitch - GAP;
+    const padTop = (rowHt.get(sp.agent)! - blockH) / 2;
+    return top + padTop + (laneOf.get(sp.id) ?? 0) * subPitch;
+  };
 
   // Empty/loading: render the grid + axis frame so the view never collapses.
   // (The adapter never returns null; an empty session has no agents/spans.)
@@ -116,9 +159,9 @@ export function GanttZ({
             <line
               className="hg-gantt-lane-sep"
               x1={padL}
-              y1={y + rowH / 2 - 2}
+              y1={rowTop.get(a.id)! + rowHt.get(a.id)! - 1}
               x2={W - PAD_R}
-              y2={y + rowH / 2 - 2}
+              y2={rowTop.get(a.id)! + rowHt.get(a.id)! - 1}
               opacity={0.35}
             />
           </g>
@@ -134,8 +177,8 @@ export function GanttZ({
 
       {/* span bars + failed/awaiting glyphs */}
       {z.spans.map((sp) => {
-        const y = Y.get(sp.agent);
-        if (y == null) return null;
+        if (!rowTop.has(sp.agent)) return null;
+        const yTop = spanYTop(sp);
         const x0 = X(sp.t0);
         const w = Math.max(4, X(sp.t1) - x0);
         const fill = statusFill(sp); // failed→--bad, gf→gfVar, else KIND(kind)
@@ -164,7 +207,7 @@ export function GanttZ({
               className={cls}
               data-span={sp.id}
               x={x0}
-              y={y - bh / 2}
+              y={yTop}
               width={w}
               height={bh}
               rx={3}
@@ -188,12 +231,12 @@ export function GanttZ({
               </title>
             </rect>
             {!mini && sp.status === 'failed' && (
-              <text className="hg-gantt-glyph-fail" x={x0 + w - 11} y={y - bh / 2 - 2}>
+              <text className="hg-gantt-glyph-fail" x={x0 + w - 11} y={yTop - 2}>
                 ✕
               </text>
             )}
             {!mini && sp.status === 'awaiting' && (
-              <text className="hg-gantt-glyph-wait" x={x0 + w + 3} y={y + 3.5}>
+              <text className="hg-gantt-glyph-wait" x={x0 + w + 3} y={yTop + bh / 2 + 3.5}>
                 ◷
               </text>
             )}
