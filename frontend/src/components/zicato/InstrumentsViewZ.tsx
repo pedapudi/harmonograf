@@ -5,6 +5,7 @@
 // (compose.html mainHybrid instruments branch 718-735.)
 
 import type { ZSession } from './adapter';
+import { Fig } from './Fig';
 import { FingerprintZ } from './FingerprintZ';
 import { PlanZ } from './PlanZ';
 import { SequenceZ } from './SequenceZ';
@@ -45,16 +46,16 @@ export function InstrumentsViewZ({ z }: InstrumentsViewZProps) {
         </span>
       </div>
 
-      <PlanZ z={z} />
+      <Fig>{(w) => <PlanZ z={z} W={w} />}</Fig>
 
       <div className="zk-panes-2">
         <div className="gantt-click">
           <h3>sequence — who said what to whom, when</h3>
-          <SequenceZ z={z} W={520} H={380} />
+          <Fig fallback={520}>{(w) => <SequenceZ z={z} W={w} H={380} />}</Fig>
         </div>
         <div>
           <h3>topology — who initiates, who receives</h3>
-          <ChordZ z={z} W={300} />
+          <Fig fallback={300}>{(w) => <ChordZ z={z} W={Math.min(w, 460)} />}</Fig>
           <p
             className="zk-prop-note"
             style={{ margin: '6px 2px 0', lineHeight: 1.5 }}
@@ -68,11 +69,11 @@ export function InstrumentsViewZ({ z }: InstrumentsViewZProps) {
 
       <h3>drift seismograph + judge heartbeat — one instrument, one time axis</h3>
       <div className="track-stack">
-        <SeismographZ z={z} W={940} axis={false} />
+        <Fig>{(w) => <SeismographZ z={z} W={w} axis={false} />}</Fig>
         <div className="track-sub">
           interventions, time-aligned beneath the drift above ↓
         </div>
-        <LadderZ z={z} W={940} />
+        <Fig>{(w) => <LadderZ z={z} W={w} />}</Fig>
       </div>
     </>
   );

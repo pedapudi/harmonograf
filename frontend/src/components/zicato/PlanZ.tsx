@@ -24,13 +24,15 @@ import type { ZPlan, ZPlanNode, ZSession, ZStratum } from './adapter';
 
 export interface PlanZProps {
   z: ZSession;
+  /** viewBox width in px (measured container width from <Fig>). */
+  W?: number;
 }
 
 // DAG node box geometry (compose.html dagSVG 540).
 const BW = 118;
 const BH = 24;
 
-export function PlanZ({ z }: PlanZProps) {
+export function PlanZ({ z, W = 940 }: PlanZProps) {
   const selectedRevision = useUiStore((s) => s.selectedRevision);
   const setSelectedRevision = useUiStore((s) => s.setSelectedRevision);
   const plan = z.plan;
@@ -40,7 +42,7 @@ export function PlanZ({ z }: PlanZProps) {
     return (
       <svg
         className="fig plan-reel"
-        viewBox="0 0 940 60"
+        viewBox={`0 0 ${W} 60`}
         role="img"
         aria-label={`plan ${z.id} — no plan yet`}
       >
@@ -55,10 +57,11 @@ export function PlanZ({ z }: PlanZProps) {
     <div>
       <ReelZ
         plan={plan}
+        W={W}
         selectedRevision={selectedRevision}
         onSelectRevision={setSelectedRevision}
       />
-      <DagZ plan={plan} selectedRevision={selectedRevision} />
+      <DagZ plan={plan} W={W} selectedRevision={selectedRevision} />
     </div>
   );
 }
@@ -71,12 +74,12 @@ export function PlanZ({ z }: PlanZProps) {
 
 interface ReelZProps {
   plan: ZPlan;
+  W: number;
   selectedRevision: number | null;
   onSelectRevision: (rev: number | null) => void;
 }
 
-function ReelZ({ plan, selectedRevision, onSelectRevision }: ReelZProps) {
-  const W = 940;
+function ReelZ({ plan, W, selectedRevision, onSelectRevision }: ReelZProps) {
   const H = 92;
   // OLDEST→NEWEST for display (strata is stored newest-first).
   const ordered: ZStratum[] = [...plan.strata].reverse();
@@ -222,6 +225,7 @@ function ReelZ({ plan, selectedRevision, onSelectRevision }: ReelZProps) {
 
 interface DagZProps {
   plan: ZPlan;
+  W: number;
   selectedRevision: number | null;
 }
 
@@ -290,9 +294,12 @@ function nodeGlyph(st: ZPlanNode['st']): NodeGlyph {
   }
 }
 
-function DagZ({ plan, selectedRevision }: DagZProps) {
-  const W = 940;
+function DagZ({ plan, W, selectedRevision }: DagZProps) {
   const H = 216;
+  // The DAG has a fixed 4-column layout (node x from the adapter, 80..740 in a
+  // 940 design space); scale those x by W/940 so it fills the measured width
+  // while text/boxes stay 1:1 (no upscaling).
+  const sx = W / 940;
   const selectTask = useUiStore.getState().selectTask;
 
   // Node lookup by task id (edges reference ids, not array indices).
@@ -319,9 +326,9 @@ function DagZ({ plan, selectedRevision }: DagZProps) {
         const A = byId.get(e.from);
         const B = byId.get(e.to);
         if (!A || !B) return null;
-        const x0 = A.x + BW / 2;
+        const x0 = A.x * sx + BW / 2;
         const y0 = A.y;
-        const x1 = B.x - BW / 2;
+        const x1 = B.x * sx - BW / 2;
         const y1 = B.y;
         const c = (x0 + x1) / 2;
         const eGhost = A.st === 'ghost' || B.st === 'ghost';
@@ -355,7 +362,7 @@ function DagZ({ plan, selectedRevision }: DagZProps) {
       {/* nodes */}
       {plan.nodes.map((node) => {
         const g = nodeGlyph(node.st);
-        const x = node.x;
+        const x = node.x * sx;
         const y = node.y;
         return (
           <g
