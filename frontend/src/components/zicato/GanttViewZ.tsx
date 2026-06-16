@@ -3,6 +3,7 @@
 
 import { useUiStore } from '../../state/uiStore';
 import type { ZSession } from './adapter';
+import { Fig } from './Fig';
 import { GanttZ } from './GanttZ';
 import { JudgeHeartbeatZ } from './SeismographZ';
 
@@ -17,14 +18,19 @@ export function GanttViewZ({ z }: GanttViewZProps) {
     <>
       <h3>execution — gantt</h3>
       <div className="gantt-click">
-        <GanttZ
-          z={z}
-          selectedSpanId={selectedSpanId}
-          onSpanSelect={(id) => selectSpan(id)}
-        />
+        <Fig>
+          {(w) => (
+            <GanttZ
+              z={z}
+              W={w}
+              selectedSpanId={selectedSpanId}
+              onSpanSelect={(id) => selectSpan(id)}
+            />
+          )}
+        </Fig>
       </div>
       <h3>judge heartbeat</h3>
-      <JudgeHeartbeatZ z={z} />
+      <Fig>{(w) => <JudgeHeartbeatZ z={z} W={w} />}</Fig>
     </>
   );
 }

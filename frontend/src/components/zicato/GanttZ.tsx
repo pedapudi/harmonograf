@@ -7,9 +7,8 @@
 // KIND = hue (--hg-kind-*), STATUS = treatment (running→accent+breathe via
 // .is-running, failed→--bad+✕, awaiting→wait-for-human dashed stroke+◷,
 // planned→dashed). goldfive spans → --hg-gf-*. THIN line-art, token-only colors,
-// fit-to-width viewBox + non-scaling strokes.
-//
-// SIGNATURE IS FROZEN — do not change the props.
+// viewBox width = container px (responsive, via <Fig>) so the drawing never
+// upscales; non-scaling strokes.
 
 import { type ReactNode } from 'react';
 import { useUiStore } from '../../state/uiStore';
@@ -18,6 +17,8 @@ import { KIND, statusFill } from './svgUtils';
 
 export interface GanttZProps {
   z: ZSession;
+  /** viewBox width in px (pass the measured container width from <Fig>). */
+  W?: number;
   /** mini drops the goldfive lane/axis/labels and uses bh=6. */
   compact?: boolean;
   mini?: boolean;
@@ -26,11 +27,11 @@ export interface GanttZProps {
   onSpanSelect?: (spanId: string) => void;
 }
 
-const W = 940;
 const PAD_R = 14;
 
 export function GanttZ({
   z,
+  W = 940,
   compact = false,
   mini = false,
   selectedSpanId = null,
