@@ -139,6 +139,28 @@
   color: var(--ink);
   overflow: visible;
 }
+/* research-preview status tag — a QUIET product-status mark pinned next to the
+   wordmark. Faint mono, uppercase tracking, two stacked lines, a hairline
+   divider off the wordmark; no fill / glow / animation, informational only. */
+.zk-root .zk-respreview {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  align-self: center;
+  pointer-events: none;
+  user-select: none;
+  font: 9.5px/1.25 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+  border-left: 1px solid var(--rule);
+  padding-left: 7px;
+  margin-left: 2px;
+}
+.zk-root .zk-respreview-line {
+  display: block;
+  white-space: nowrap;
+}
 .zk-root .hg-crumbs {
   display: inline-flex;
   align-items: center;

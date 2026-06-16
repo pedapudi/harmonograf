@@ -203,6 +203,12 @@ function ZicatoTopbar({
         <BrandMark height={20} />
         <Wordmark />
       </span>
+      {/* A quiet product-status tag pinned beside the wordmark — faint mono,
+          stacked two lines, a hairline divider; no fill/glow/animation. */}
+      <span className="zk-respreview" role="note" aria-label="research preview">
+        <span className="zk-respreview-line">research</span>
+        <span className="zk-respreview-line">preview</span>
+      </span>
       <span className="hg-crumbs">
         <span className="hg-crumb">~/ws</span>
         <span className="hg-crumb-sep">▸</span>

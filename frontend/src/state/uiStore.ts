@@ -234,7 +234,7 @@ function readUiMode(): UiMode {
   } catch {
     /* ignore (SSR / privacy mode) */
   }
-  return 'md3'; // DEFAULT: production unchanged until toggled
+  return 'zicato'; // DEFAULT: the zicato console (md3 stays reachable via the ▤ toggle)
 }
 
 function writeUiMode(m: UiMode): void {
