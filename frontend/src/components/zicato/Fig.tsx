@@ -9,7 +9,9 @@
 
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 
-export function useMeasuredWidth(
+// Local (not exported): keeping Fig.tsx exporting only the <Fig> component keeps
+// React Fast Refresh happy (react-refresh/only-export-components).
+function useMeasuredWidth(
   fallback: number,
 ): [RefObject<HTMLDivElement | null>, number] {
   const ref = useRef<HTMLDivElement>(null);

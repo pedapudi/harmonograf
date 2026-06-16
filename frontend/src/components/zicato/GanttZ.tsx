@@ -10,10 +10,11 @@
 // viewBox width = container px (responsive, via <Fig>) so the drawing never
 // upscales; non-scaling strokes.
 
-import { type ReactNode } from 'react';
+import { useEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { useUiStore } from '../../state/uiStore';
 import type { ZSession, ZSpan } from './adapter';
-import { KIND, statusFill } from './svgUtils';
+import { KIND, statusFill, uniqueId } from './svgUtils';
+import { fitView, panView, zoomView, type GanttView } from './ganttViewport';
 
 export interface GanttZProps {
   z: ZSession;
@@ -25,9 +26,15 @@ export interface GanttZProps {
   selectedSpanId?: string | null;
   /** default → useUiStore.getState().selectSpan */
   onSpanSelect?: (spanId: string) => void;
+  /** Visible time window in seconds. Default = fitView(T) → renders as today. */
+  view?: GanttView;
+  /** When set, wheel zooms toward the cursor + pointer-drag pans (else static). */
+  onViewChange?: (v: GanttView) => void;
 }
 
 const PAD_R = 14;
+/** A pointer move under this many px from press is a click (selects), not a drag. */
+const DRAG_THRESHOLD = 4;
 
 export function GanttZ({
   z,
@@ -36,6 +43,8 @@ export function GanttZ({
   mini = false,
   selectedSpanId = null,
   onSpanSelect,
+  view,
+  onViewChange,
 }: GanttZProps) {
   // Default selection handler: open the existing inspector drawer.
   const select = onSpanSelect ?? ((id: string) => useUiStore.getState().selectSpan(id));
@@ -46,9 +55,16 @@ export function GanttZ({
   const bh = mini ? 6 : 12;
   const T = z.T > 0 ? z.T : 30;
 
+  // The visible window. Default = the full range, so with no `view` prop the
+  // figure renders identically to today (X collapses to padL + frac*plotW * t/T).
+  const eff = view ?? fitView(T);
+  const vSpan = eff.t1 - eff.t0 > 0 ? eff.t1 - eff.t0 : T;
+  const plotW = W - padL - PAD_R;
+
   // Lanes: mini drops the goldfive lane. Lane order = adapter join-time order.
   const agents = mini ? z.agents.filter((a) => a.synthetic !== 'goldfive') : z.agents;
-  const X = (t: number): number => padL + ((W - padL - PAD_R) * t) / T;
+  // Time → x over the VISIBLE window. With eff = fitView(T) this is the original.
+  const X = (t: number): number => padL + (plotW * (t - eff.t0)) / vSpan;
 
   // ── span stacking (MD3 packLanes) ───────────────────────────────────────────
   // Greedy interval packing: each agent's concurrent spans get distinct sub-
@@ -126,28 +142,126 @@ export function GanttZ({
     return best;
   };
 
+  // ── interactions: wheel-zoom-toward-cursor + drag-to-pan ─────────────────────
+  // Only active when onViewChange is wired. A drag past DRAG_THRESHOLD suppresses
+  // the trailing span-click so selection still works on a plain click. The svg
+  // ref + getBoundingClientRect map clientX → svg-x → time over the live window.
+  const svgRef = useRef<SVGSVGElement>(null);
+  const interactive = !mini && !!onViewChange;
+  const dragRef = useRef<{
+    startX: number;
+    moved: boolean;
+    view: GanttView;
+  } | null>(null);
+
+  // Wheel-zoom toward the cursor. Attached as a NON-PASSIVE native listener (a
+  // React onWheel is passive in React 19 → preventDefault would no-op + warn), so
+  // the page never scrolls while zooming. The effect re-registers when the view /
+  // handler changes so the closure always reads the current window.
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el || !interactive || !onViewChange) return;
+    const handler = (e: WheelEvent): void => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const svgX = ((e.clientX - rect.left) / rect.width) * W;
+      const focusT = eff.t0 + ((svgX - padL) / plotW) * vSpan;
+      // deltaY > 0 (scroll down) → zoom OUT; deltaY < 0 → zoom IN.
+      const factor = e.deltaY > 0 ? 1 / 0.85 : 0.85;
+      onViewChange(zoomView(eff, factor, focusT, T));
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, [interactive, onViewChange, eff, vSpan, plotW, padL, W, T]);
+
+  const onPointerDown = (e: ReactPointerEvent<SVGSVGElement>): void => {
+    if (!onViewChange || e.button !== 0) return;
+    dragRef.current = { startX: e.clientX, moved: false, view: eff };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>): void => {
+    const d = dragRef.current;
+    if (!d || !onViewChange) return;
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return;
+    const dxPx = e.clientX - d.startX;
+    if (!d.moved && Math.abs(dxPx) < DRAG_THRESHOLD) return;
+    d.moved = true;
+    // Pan from the drag-start view: dt = -(dxPx in svg units) → window seconds.
+    const dxSvg = (dxPx / rect.width) * W;
+    const dt = -(dxSvg / plotW) * vSpan;
+    onViewChange(panView(d.view, dt, T));
+  };
+
+  const onPointerUp = (e: ReactPointerEvent<SVGSVGElement>): void => {
+    const d = dragRef.current;
+    if (d) {
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* capture may already be released */
+      }
+    }
+    // Keep `moved` readable through the trailing click (cleared on next press).
+  };
+
+  // A span click is swallowed when the gesture was a drag (movement past thresh).
+  const selectSpanGuarded = (id: string): void => {
+    if (dragRef.current?.moved) {
+      dragRef.current = null;
+      return;
+    }
+    dragRef.current = null;
+    select(id);
+  };
+
+  // Unique clip id so the time-varying content can't spill into the lane gutter.
+  const clipId = uniqueId(`gantt-${z.id}-${W}-${H}`);
+
   return (
     <svg
+      ref={svgRef}
       className="fig"
       viewBox={`0 0 ${W} ${H}`}
       role="img"
       aria-label={`execution gantt — ${z.id || 'session'}`}
+      style={interactive ? { touchAction: 'none', cursor: 'grab' } : undefined}
+      onPointerDown={interactive ? onPointerDown : undefined}
+      onPointerMove={interactive ? onPointerMove : undefined}
+      onPointerUp={interactive ? onPointerUp : undefined}
+      onPointerCancel={interactive ? onPointerUp : undefined}
     >
-      {/* vertical gridlines + Ns axis labels (non-mini) */}
-      {!mini &&
-        Array.from({ length: 9 }, (_, i) => {
-          const gx = X((T * i) / 8);
-          return (
-            <g key={`grid-${i}`}>
-              <line className="hg-gantt-grid" x1={gx} y1={6} x2={gx} y2={H - 22} />
-              <text className="gm-axis hg-gantt-axis" x={gx - 7} y={H - 8}>
-                {Math.round((T * i) / 8)}s
-              </text>
-            </g>
-          );
-        })}
+      {/* Clip the time-varying content to the plot rect so a zoomed window
+          never draws over the left lane-label gutter. */}
+      <defs>
+        <clipPath id={clipId}>
+          <rect x={padL} y={0} width={Math.max(0, W - PAD_R - padL)} height={H} />
+        </clipPath>
+      </defs>
+      {/* vertical gridlines + Ns axis labels (non-mini). Lines span the visible
+          window so they stay aligned under zoom; clipped to the plot rect.
+          Labels sit BELOW the plot (y=H-8) and are clipped too — that gutter is
+          inside the clip x-range. */}
+      {!mini && (
+        <g clipPath={`url(#${clipId})`}>
+          {Array.from({ length: 9 }, (_, i) => {
+            const t = eff.t0 + (vSpan * i) / 8;
+            const gx = X(t);
+            return (
+              <g key={`grid-${i}`}>
+                <line className="hg-gantt-grid" x1={gx} y1={6} x2={gx} y2={H - 22} />
+                <text className="gm-axis hg-gantt-axis" x={gx - 7} y={H - 8}>
+                  {Math.round(t)}s
+                </text>
+              </g>
+            );
+          })}
+        </g>
+      )}
 
-      {/* lane labels + separators */}
+      {/* lane labels + separators — UNclipped (the left gutter + full-width sep). */}
       {agents.map((a) => {
         const y = Y.get(a.id)!;
         return (
@@ -169,6 +283,9 @@ export function GanttZ({
         );
       })}
 
+      {/* ── time-varying content: clipped to the plot rect so a zoomed window
+          never spills into the lane-label gutter. ─────────────────────────── */}
+      <g clipPath={`url(#${clipId})`}>
       {/* context-window utilisation curve */}
       {ctxPath && (
         <path className="hg-gantt-ctxband-line" d={ctxPath}>
@@ -201,7 +318,7 @@ export function GanttZ({
                 strokeWidth: 1.2,
               }
             : {};
-        const onActivate = (): void => select(sp.id);
+        const onActivate = (): void => selectSpanGuarded(sp.id);
         return (
           <g key={sp.id}>
             <rect
@@ -256,8 +373,12 @@ export function GanttZ({
         />
       )}
 
-      {/* now-cursor accent line + cap + label */}
-      <NowCursor X={X} now={z.now} T={T} H={H} mini={mini} />
+      {/* now-cursor accent line + cap + label — only when the play-head (clamped
+          to the session end T) falls inside the visible window. */}
+      {Math.min(z.now, T) >= eff.t0 && Math.min(z.now, T) <= eff.t1 && (
+        <NowCursor X={X} now={Math.min(z.now, T)} H={H} mini={mini} />
+      )}
+      </g>
     </svg>
   );
 }
@@ -390,14 +511,14 @@ function Edge({ x0, y0, x1, y1, cls, col, tip }: EdgeProps) {
 
 interface NowCursorProps {
   X: (t: number) => number;
+  /** the play-head time, already clamped to the session end. */
   now: number;
-  T: number;
   H: number;
   mini: boolean;
 }
 
-function NowCursor({ X, now, T, H, mini }: NowCursorProps) {
-  const nx = X(Math.min(now, T));
+function NowCursor({ X, now, H, mini }: NowCursorProps) {
+  const nx = X(now);
   return (
     <>
       <line
