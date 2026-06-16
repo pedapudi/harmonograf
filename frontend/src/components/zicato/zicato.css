@@ -825,6 +825,13 @@
   fill: var(--caution);
   font-size: 10px;
 }
+/* 🧠 reasoning glyph — rendered LITERAL (emoji). Sized prominently so the
+   reasoning marker reads at a glance; the emoji carries its own colour. */
+.zk-root .hg-gantt-glyph-reason {
+  font-size: 11px;
+  /* keep the bar drawing crisp under zoom; the emoji ignores fill anyway */
+  pointer-events: none;
+}
 .zk-root .hg-gantt-edge {
   stroke: var(--ink-faint);
   stroke-width: 1;
@@ -835,6 +842,13 @@
 .zk-root .hg-gantt-edge.is-transfer {
   stroke: var(--hg-kind-transfer);
   stroke-dasharray: 3 2;
+}
+/* goldfive steering / correction edge — the curve hue is set inline from the
+   trigger severity (steerColor); here we only nudge weight/opacity so it reads
+   as a deliberate correction rather than an ambient transfer. */
+.zk-root .hg-gantt-edge.is-steer {
+  stroke-width: 1.3;
+  opacity: 0.92;
 }
 .zk-root .hg-gantt-ctxband {
   fill: var(--caution);
@@ -1117,4 +1131,131 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0ms !important;
   }
+}
+
+/* ---- 12. floating detail drawer (reasoning / steering) ------------- */
+/* A floating panel (port of TrajectoryFloatingDrawer) that slides in over the
+   main area to surface reasoning / steering detail. Distinct from the docked
+   ZicatoInspector — it overlays rather than reserving a right column. Scoped to
+   .zk-root so it never leaks into the MD3 console. */
+.zk-root .zk-fdrawer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  z-index: 40;
+}
+.zk-root .zk-fdrawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-left: 1px solid var(--rule);
+  box-shadow: -6px 0 18px -8px rgba(0, 0, 0, 0.5);
+  z-index: 41;
+  animation: zk-fdrawer-in 0.18s ease;
+}
+@keyframes zk-fdrawer-in {
+  from {
+    transform: translateX(12px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+.zk-root .zk-fdrawer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--rule);
+}
+.zk-root .zk-fdrawer-title {
+  flex: 1;
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-soft);
+}
+.zk-root .zk-fdrawer-close {
+  background: transparent;
+  border: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+  font: inherit;
+  font-size: 15px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.zk-root .zk-fdrawer-close:hover {
+  color: var(--ink);
+  background: var(--rule-soft);
+}
+.zk-root .zk-fdrawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  font-size: 12px;
+}
+.zk-root .zk-detail-section {
+  margin-bottom: 14px;
+}
+.zk-root .zk-detail-section h4 {
+  margin: 0 0 5px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+}
+.zk-root .zk-detail-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-soft);
+  margin-bottom: 10px;
+}
+.zk-root .zk-detail-target {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink);
+}
+.zk-root .zk-detail-target .zk-detail-target-label {
+  color: var(--ink-faint);
+  margin-right: 6px;
+}
+/* The reasoning block: the 🧠 chain-of-thought rendered verbatim in a calm
+   monospace pre-block, so the operator can read what the agent was thinking. */
+.zk-root .zk-reasoning {
+  display: block;
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-panel);
+  padding: 9px 11px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+  max-height: 340px;
+  color: var(--ink);
+}
+.zk-root .zk-reasoning-empty {
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.zk-root .zk-reasoning-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.zk-root .zk-reasoning-glyph {
+  font-size: 14px;
 }

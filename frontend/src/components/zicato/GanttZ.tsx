@@ -13,8 +13,9 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { useUiStore } from '../../state/uiStore';
 import type { ZSession, ZSpan } from './adapter';
-import { KIND, statusFill, uniqueId } from './svgUtils';
+import { KIND, statusFill, steerColor, uniqueId } from './svgUtils';
 import { fitView, panView, zoomView, type GanttView } from './ganttViewport';
+import { useSteerSelect } from './steerContext';
 
 export interface GanttZProps {
   z: ZSession;
@@ -48,6 +49,9 @@ export function GanttZ({
 }: GanttZProps) {
   // Default selection handler: open the existing inspector drawer.
   const select = onSpanSelect ?? ((id: string) => useUiStore.getState().selectSpan(id));
+  // Steer-arrow click → the console floating drawer (no-op when GanttZ is
+  // rendered outside the console's SteerSelectContext provider, e.g. in tests).
+  const onSteerSelect = useSteerSelect();
 
   // ── layout ─────────────────────────────────────────────────────────────────
   const rowH = compact ? 24 : 30;
@@ -358,6 +362,11 @@ export function GanttZ({
                 ◷
               </text>
             )}
+            {!mini && sp.hasReasoning && (
+              <text className="hg-gantt-glyph-reason" x={x0 + 1} y={yTop - 1.5}>
+                🧠
+              </text>
+            )}
           </g>
         );
       })}
@@ -372,6 +381,44 @@ export function GanttZ({
           spanStart={spanStart}
         />
       )}
+
+      {/* goldfive STEERING corrections: an arrow from the goldfive lane up to the
+          steered agent at the correction time, coloured by severity; click → the
+          floating drawer. Clipped + window-aware like the other time content. */}
+      {!mini &&
+        z.steers.map((st, i) => {
+          const y0 = Y.get(st.from);
+          const y1 = Y.get(st.to);
+          if (y0 == null || y1 == null || st.t < eff.t0 || st.t > eff.t1) return null;
+          const x = X(st.t);
+          const col = steerColor(st);
+          const vs = Math.sign(y1 - y0) || 1;
+          const ya = y0 + vs * 5;
+          const yb = y1 - vs * 5;
+          const mid = ((ya + yb) / 2).toFixed(1);
+          return (
+            <g
+              key={`steer-${i}`}
+              style={{ cursor: 'pointer' }}
+              onClick={() => onSteerSelect(st)}
+            >
+              <path
+                className="hg-gantt-edge is-steer"
+                style={{ stroke: col }}
+                d={`M${x.toFixed(1)},${ya.toFixed(1)} C ${(x + 6).toFixed(1)},${mid} ${(x - 6).toFixed(1)},${mid} ${x.toFixed(1)},${yb.toFixed(1)}`}
+              />
+              <path
+                d={`M${(x - 2.5).toFixed(1)},${(yb - 3 * vs).toFixed(1)} L${x.toFixed(1)},${yb.toFixed(1)} L${(x + 2.5).toFixed(1)},${(yb - 3 * vs).toFixed(1)} Z`}
+                fill={col}
+                stroke="none"
+                opacity={0.92}
+              />
+              <title>
+                {`steer · ${st.kind || 'refine'} → ${a_label(z, st.to)}${st.reason ? ` · ${st.reason}` : ''}`}
+              </title>
+            </g>
+          );
+        })}
 
       {/* now-cursor accent line + cap + label — only when the play-head (clamped
           to the session end T) falls inside the visible window. */}
