@@ -55,7 +55,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
-import harmonograf_server.pb as _pb  # noqa: F401 — grafts goldfive.v1 onto path
+from harmonograf_server.pb import telemetry_pb2  # grafts goldfive.v1 onto path
 from goldfive.v1 import events_pb2 as goldfive_events_pb2
 from harmonograf_server.convert import (
     _drift_kind_pb_to_string,
@@ -98,6 +98,10 @@ async def _load_drift_records(store: Store, session_id: str) -> list[dict[str, A
             logger.debug("drift_detected parse failed seq=%s: %s", rec.sequence, exc)
             continue
         d = ev.drift_detected
+        # Clock: prefer the goldfive-emitted time (same clock the plan
+        # rows use, so a drift and its resulting revision sort correctly)
+        # and fall back to the server-ingest recorded_at.
+        at = _event_at(ev, rec.recorded_at)
         out.append(
             {
                 "run_id": rec.run_id,
@@ -115,10 +119,34 @@ async def _load_drift_records(store: Store, session_id: str) -> list[dict[str, A
                 "prev_severity": _drift_severity_pb_to_string(
                     getattr(d, "prev_severity", 0) or 0
                 ),
-                "recorded_at": rec.recorded_at,
+                "recorded_at": at,
             }
         )
     return out
+
+
+def _event_at(ev: Any, fallback: float) -> float:
+    """Return the goldfive event's ``emitted_at`` as epoch seconds when set,
+    else ``fallback`` (the server ingest ``recorded_at``)."""
+    try:
+        if ev.HasField("emitted_at"):
+            ts = ev.emitted_at
+            return float(ts.seconds) + float(ts.nanos) / 1e9
+    except (ValueError, AttributeError):
+        pass
+    return float(fallback)
+
+
+def _msg_at(msg: Any, fallback: float) -> float:
+    """Return a telemetry proto's ``emitted_at`` as epoch seconds when set,
+    else ``fallback`` (the server sidecar ``recorded_at``)."""
+    try:
+        if msg.HasField("emitted_at"):
+            ts = msg.emitted_at
+            return float(ts.seconds) + float(ts.nanos) / 1e9
+    except (ValueError, AttributeError):
+        pass
+    return float(fallback)
 
 
 # Drift kinds that indicate the human operator initiated the change.
@@ -175,6 +203,34 @@ class SeverityTransition:
 
 
 @dataclass
+class DriftObservation:
+    """One drift observation rolled into a collapsed condition row.
+
+    Surfaced on :class:`InterventionRecord.observations` and translated
+    to :class:`types_pb2.DriftObservation` at the RPC boundary so the UI
+    can expand a collapsed condition into its per-emit timeline.
+    """
+
+    at: float
+    severity: str = ""
+    lifecycle: str = ""
+    detail: str = ""
+    drift_id: str = ""
+
+
+# Task-transition filter ladder (goldfive#267). Mirrors the frontend
+# ``TASK_TRANSITION_TERMINAL_STATUSES`` / ``TASK_TRANSITION_MEANINGFUL_SOURCES``
+# in ``lib/interventions.ts``: only terminal to_status values from an
+# operator-meaningful source surface as intervention rows.
+_TASK_TRANSITION_TERMINAL_STATUSES: frozenset[str] = frozenset(
+    {"COMPLETED", "FAILED", "CANCELLED"}
+)
+_TASK_TRANSITION_MEANINGFUL_SOURCES: frozenset[str] = frozenset(
+    {"llm_report", "supersedes_reroute", "plan_revision", "cancellation"}
+)
+
+
+@dataclass
 class InterventionRecord:
     """In-memory projection used during aggregation.
 
@@ -222,6 +278,20 @@ class InterventionRecord:
     first_seen: float = 0.0
     last_seen: float = 0.0
     severity_transitions: list[SeverityTransition] = field(default_factory=list)
+    # Wire-stable row identity (see types.proto Intervention.key).
+    key: str = ""
+    # Lane-specific fields (cancel / refine / transition). See the proto.
+    target_agent_id: str = ""
+    drift_id: str = ""
+    attempt_id: str = ""
+    failure_kind: str = ""
+    transition_to_status: str = ""
+    transition_source: str = ""
+    transition_task_id: str = ""
+    # Plan-scoping for multi-plan sessions (attributeOutcomes fills it).
+    target_plan_id: str = ""
+    # Per-observation breakdown for a collapsed drift condition.
+    observations: list[DriftObservation] = field(default_factory=list)
     # Internal: set of trigger_event_ids that the condition-collapse
     # absorbed from non-survivor observations. Used by
     # :func:`_merge_by_trigger_event_id` to fold plan rows that
@@ -280,11 +350,26 @@ async def list_interventions(
         logger.debug("list_task_plans_for_session failed: %s", exc)
         plans = []
     drifts = await _load_drift_records(store, session_id)
+    cancels = await _load_goldfive_events(store, session_id, "invocation_cancelled")
+    transitions = await _load_goldfive_events(store, session_id, "task_transitioned")
+    attempts = await _load_sidecar(
+        store, session_id, "refine_attempted", telemetry_pb2.RefineAttempted
+    )
+    failures = await _load_sidecar(
+        store, session_id, "refine_failed", telemetry_pb2.RefineFailed
+    )
+    user_msgs = await _load_sidecar(
+        store, session_id, "user_message", telemetry_pb2.UserMessageReceived
+    )
 
     records: list[InterventionRecord] = []
     records.extend(_project_annotations(annotations))
     records.extend(_project_drifts(drifts))
     records.extend(_project_plans(plans))
+    records.extend(_project_cancels(cancels))
+    records.extend(_project_refines(attempts, failures, list(plans)))
+    records.extend(_project_user_messages(user_msgs))
+    records.extend(_project_transitions(transitions))
 
     records.sort(key=lambda r: r.at)
     _attribute_outcomes(records, plans, legacy_window_ms=window_ms)
@@ -399,6 +484,7 @@ def _project_annotations(annotations: Iterable[Annotation]) -> list[Intervention
             continue
         out.append(
             InterventionRecord(
+                key=f"ann:{ann.id}",
                 at=float(ann.created_at),
                 source="user",
                 kind=kind,
@@ -466,6 +552,9 @@ def _project_drifts(drifts: Iterable[dict[str, Any]]) -> list[InterventionRecord
         prev_severity = str(dr.get("prev_severity") or "")
         out.append(
             InterventionRecord(
+                # Wire-stable key from the goldfive drift id; the collapse
+                # survivor keeps its own id so refetches are stable.
+                key=f"drift:{drift_id}",
                 at=float(at),
                 source=source,
                 kind=kind_label,
@@ -474,6 +563,8 @@ def _project_drifts(drifts: Iterable[dict[str, Any]]) -> list[InterventionRecord
                 drift_kind=drift_kind,
                 annotation_id=ann_id,
                 trigger_event_id=trig,
+                target_agent_id=str(dr.get("current_agent_id") or ""),
+                drift_id=drift_id,
                 condition_id=condition_id,
                 lifecycle=lifecycle,
                 prev_severity=prev_severity,
@@ -525,6 +616,7 @@ def _project_plans(
         )
         out.append(
             InterventionRecord(
+                key=f"plan:{plan.id}:r{rev_index}",
                 at=float(plan.created_at),
                 source=source,
                 kind=kind_label,
@@ -534,6 +626,253 @@ def _project_plans(
                 drift_kind=rev_kind if source != "goldfive" else "",
                 outcome=f"plan_revised:r{rev_index}",
                 trigger_event_id=plan.trigger_event_id or "",
+                # Plan-rev rows are intrinsically scoped to their own plan.
+                target_plan_id=plan.id,
+            )
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Additional lanes (cancel / refine / transition / user message)
+#
+# All four are read from durable storage — invocation_cancelled and
+# task_transitioned from ``goldfive_events`` (verbatim Event envelopes);
+# refine_attempted / refine_failed / user_message from ``sidecar_events``
+# (serialized telemetry protos). Each row carries an empty
+# ``trigger_event_id`` (cancel / transition / user message) or is
+# explicitly skipped by :func:`_merge_by_trigger_event_id` (refine), so
+# the four lanes pass through the existing merge / collapse pipeline
+# untouched and are purely additive to the drift / annotation / plan
+# behaviour. Mirrors the frontend deriver in ``lib/interventions.ts``.
+# ---------------------------------------------------------------------------
+
+
+async def _load_goldfive_events(
+    store: Store, session_id: str, kind: str
+) -> list[tuple[Any, str, float]]:
+    """Read persisted ``goldfive_events`` of one kind and parse each into a
+    ``goldfive.v1.Event``. Returns ``(event, event_id, at)`` tuples with the
+    emitted_at clock applied."""
+    try:
+        recs = await store.list_goldfive_events(session_id, kind=kind)
+    except Exception as exc:  # noqa: BLE001 — degrade gracefully
+        logger.debug("list_goldfive_events(%s) failed: %s", kind, exc)
+        return []
+    out: list[tuple[Any, str, float]] = []
+    for rec in recs:
+        try:
+            ev = goldfive_events_pb2.Event()
+            ev.ParseFromString(rec.payload_bytes)
+        except Exception as exc:  # noqa: BLE001 — proto edge cases
+            logger.debug("%s parse failed seq=%s: %s", kind, rec.sequence, exc)
+            continue
+        out.append((ev, rec.event_id, _event_at(ev, rec.recorded_at)))
+    return out
+
+
+async def _load_sidecar(
+    store: Store, session_id: str, kind: str, ctor: Any
+) -> list[tuple[Any, str, float]]:
+    """Read persisted ``sidecar_events`` of one kind and parse each into the
+    telemetry proto built by ``ctor``. Returns ``(msg, event_key, at)``
+    tuples with the emitted_at clock applied."""
+    try:
+        recs = await store.list_sidecar_events(session_id, kind=kind)
+    except Exception as exc:  # noqa: BLE001 — degrade gracefully
+        logger.debug("list_sidecar_events(%s) failed: %s", kind, exc)
+        return []
+    out: list[tuple[Any, str, float]] = []
+    for rec in recs:
+        try:
+            msg = ctor()
+            msg.ParseFromString(rec.payload_bytes)
+        except Exception as exc:  # noqa: BLE001 — proto edge cases
+            logger.debug("%s parse failed key=%s: %s", kind, rec.event_key, exc)
+            continue
+        out.append((msg, rec.event_key, _msg_at(msg, rec.recorded_at)))
+    return out
+
+
+def _project_cancels(
+    cancels: list[tuple[Any, str, float]],
+) -> list[InterventionRecord]:
+    """InvocationCancelled → ``source="cancel"`` rows. A cancel is the
+    consequence of a drift, not a drift itself, so it renders alongside the
+    triggering drift (empty ``trigger_event_id`` — never merges). ``drift_id``
+    carries the backlink."""
+    out: list[InterventionRecord] = []
+    for ev, event_id, at in cancels:
+        c = ev.invocation_cancelled
+        reason = (c.reason or "").lower()
+        drift_kind = (c.drift_kind or "").lower()
+        if c.detail:
+            body = c.detail
+        elif reason and drift_kind:
+            body = f"cancelled ({reason} → {drift_kind})"
+        elif reason:
+            body = f"cancelled ({reason})"
+        else:
+            body = "cancelled"
+        key_id = event_id or c.invocation_id
+        out.append(
+            InterventionRecord(
+                key=f"cancel:{key_id}",
+                at=at,
+                source="cancel",
+                kind="CANCELLED",
+                body_or_reason=body,
+                outcome="recorded",
+                severity=c.severity or "",
+                drift_kind=drift_kind,
+                # Empty trigger_event_id — never merges into the drift.
+                trigger_event_id="",
+                target_agent_id=c.agent_name or "",
+                drift_id=c.drift_id or "",
+            )
+        )
+    return out
+
+
+def _project_user_messages(
+    user_msgs: list[tuple[Any, str, float]],
+) -> list[InterventionRecord]:
+    """UserMessageReceived → ``source="user"`` rows carrying the RAW operator
+    text (distinct from a drift(user_steer) row)."""
+    out: list[InterventionRecord] = []
+    for msg, event_key, at in user_msgs:
+        out.append(
+            InterventionRecord(
+                key=f"usermsg:{event_key}",
+                at=at,
+                source="user",
+                kind="USER_MESSAGE_INTERJECTION" if msg.mid_turn else "USER_MESSAGE",
+                body_or_reason=msg.content or "",
+                author=msg.author or "user",
+            )
+        )
+    return out
+
+
+def _project_transitions(
+    transitions: list[tuple[Any, str, float]],
+) -> list[InterventionRecord]:
+    """TaskTransitioned → ``source="transition"`` rows, filtered to terminal
+    to_status values from an operator-meaningful source (goldfive#267)."""
+    out: list[InterventionRecord] = []
+    for ev, event_id, at in transitions:
+        t = ev.task_transitioned
+        to = (t.to_status or "").upper()
+        src = (t.source or "").lower()
+        if to not in _TASK_TRANSITION_TERMINAL_STATUSES:
+            continue
+        if src not in _TASK_TRANSITION_MEANINGFUL_SOURCES:
+            continue
+        severity = "info" if to == "COMPLETED" else "warning"
+        task_label = t.task_id or "?"
+        frm = (t.from_status or "?").lower()
+        key_id = event_id or f"{t.task_id}:{to}:{int(at * 1_000_000)}"
+        out.append(
+            InterventionRecord(
+                key=f"transition:{key_id}",
+                at=at,
+                source="transition",
+                kind=f"TASK_{to}",
+                body_or_reason=f"Task {task_label} {to} via {src}",
+                outcome=f"transition:{frm}->{to.lower()}",
+                plan_revision_index=int(t.revision_stamp or 0),
+                severity=severity,
+                target_agent_id=t.agent_name or "",
+                transition_to_status=to,
+                transition_source=src,
+                transition_task_id=t.task_id or "",
+            )
+        )
+    return out
+
+
+def _project_refines(
+    attempts: list[tuple[Any, str, float]],
+    failures: list[tuple[Any, str, float]],
+    plans: list[TaskPlan],
+) -> list[InterventionRecord]:
+    """RefineAttempted + (RefineFailed | successful PlanRevised) → one merged
+    ``source="refine"`` row per attempt (goldfive#264). Correlate failures by
+    ``attempt_id`` and successes by a plan whose ``trigger_event_id`` matches
+    the attempt's ``drift_id``."""
+    if not attempts:
+        return []
+    failures_by_attempt: dict[str, Any] = {}
+    for msg, _key, _at in failures:
+        aid = msg.attempt_id or ""
+        if aid and aid not in failures_by_attempt:
+            failures_by_attempt[aid] = msg
+    plan_by_drift: dict[str, TaskPlan] = {}
+    for p in plans:
+        if int(p.revision_index or 0) <= 0:
+            continue
+        trig = p.trigger_event_id or ""
+        if trig and trig not in plan_by_drift:
+            plan_by_drift[trig] = p
+
+    out: list[InterventionRecord] = []
+    for msg, _event_key, at in attempts:
+        attempt_id = msg.attempt_id or ""
+        drift_id = msg.drift_id or ""
+        trigger_kind = (msg.trigger_kind or "").lower()
+        trigger_severity = (msg.trigger_severity or "").lower()
+        failed = failures_by_attempt.get(attempt_id) if attempt_id else None
+        succeeded = plan_by_drift.get(drift_id) if drift_id else None
+        plan_rev = 0
+        failure_kind = ""
+        if failed is not None:
+            fk_raw = (failed.failure_kind or "").lower()
+            kind = f"REFINE_FAILED:{fk_raw.upper()}" if fk_raw else "REFINE_FAILED"
+            outcome = f"refine_failed:{fk_raw}" if fk_raw else "refine_failed"
+            severity = "critical" if trigger_severity == "critical" else "warning"
+            body = (
+                failed.detail
+                or failed.reason
+                or (f"refine failed ({fk_raw})" if fk_raw else "refine failed")
+            )
+            failure_kind = fk_raw
+        elif succeeded is not None:
+            idx = int(succeeded.revision_index or 0)
+            kind = f"REFINE:{trigger_kind.upper()}" if trigger_kind else "REFINE"
+            outcome = f"plan_revised:r{idx}"
+            severity = trigger_severity or "info"
+            body = succeeded.revision_reason or (
+                f"refine succeeded ({trigger_kind})"
+                if trigger_kind
+                else "refine succeeded"
+            )
+            plan_rev = idx
+        else:
+            kind = f"REFINE:{trigger_kind.upper()}" if trigger_kind else "REFINE"
+            outcome = "pending"
+            severity = trigger_severity or "info"
+            body = (
+                f"refine pending ({trigger_kind})" if trigger_kind else "refine pending"
+            )
+        out.append(
+            InterventionRecord(
+                key=f"refine:{attempt_id or f'at{at}'}",
+                at=at,
+                source="refine",
+                kind=kind,
+                body_or_reason=body,
+                outcome=outcome,
+                plan_revision_index=plan_rev,
+                severity=severity,
+                drift_kind=trigger_kind,
+                # Carries drift_id as trigger_event_id for backlink only;
+                # _merge_by_trigger_event_id skips source="refine" so it
+                # never merges into the source drift / plan.
+                trigger_event_id=drift_id,
+                target_agent_id=msg.current_agent_id or "",
+                drift_id=drift_id,
+                attempt_id=attempt_id,
+                failure_kind=failure_kind,
             )
         )
     return out
@@ -755,6 +1094,19 @@ def _collapse_by_condition_id(
         survivor.count = len(group)
         survivor.first_seen = first_at
         survivor.last_seen = last_at
+        # Per-observation breakdown (sorted by at) so the UI can expand the
+        # collapsed row into a per-emit timeline. Mirrors the frontend's
+        # ``groupDriftConditions`` observations array.
+        survivor.observations = [
+            DriftObservation(
+                at=obs.at,
+                severity=obs.severity,
+                lifecycle=obs.lifecycle,
+                detail=obs.body_or_reason,
+                drift_id=obs.drift_id,
+            )
+            for obs in group
+        ]
         # Clear prev_severity on the collapsed row — the bumps now live
         # in severity_transitions; leaving prev_severity set on a multi-
         # observation row would imply "the row itself is a transition"
@@ -824,6 +1176,14 @@ def _merge_by_trigger_event_id(
     grouped: dict[str, list[InterventionRecord]] = {}
     passthrough: list[InterventionRecord] = []
     for rec in records:
+        # Refine rows are pre-merged by :func:`_project_refines` (one row
+        # per attempt with the outcome rolled in) and carry the source
+        # drift_id as trigger_event_id only for backlink — merging them
+        # would discard the attempt-specific failure_kind / body. Transition
+        # rows are a parallel observability stream. Both skip the merge.
+        if rec.source in ("refine", "transition"):
+            passthrough.append(rec)
+            continue
         key = alias.get(rec.trigger_event_id, rec.trigger_event_id)
         if key:
             grouped.setdefault(key, []).append(rec)
@@ -966,6 +1326,15 @@ def record_to_pb(rec: InterventionRecord, types_pb2_mod: Any) -> Any:
         # _project_drifts already initializes count=1).
         count=int(rec.count or 1),
         lifecycle=rec.lifecycle,
+        key=rec.key,
+        target_agent_id=rec.target_agent_id,
+        drift_id=rec.drift_id,
+        attempt_id=rec.attempt_id,
+        failure_kind=rec.failure_kind,
+        transition_to_status=rec.transition_to_status,
+        transition_source=rec.transition_source,
+        transition_task_id=rec.transition_task_id,
+        target_plan_id=rec.target_plan_id,
     )
     _ts_set(pb.at, rec.at)
     _ts_set(pb.first_seen, rec.first_seen or rec.at)
@@ -980,4 +1349,11 @@ def record_to_pb(rec: InterventionRecord, types_pb2_mod: Any) -> Any:
         setattr(st, "from", trans.frm)
         st.to = trans.to
         _ts_set(st.at, trans.at)
+    for obs in rec.observations:
+        ob = pb.observations.add()
+        ob.severity = obs.severity
+        ob.lifecycle = obs.lifecycle
+        ob.detail = obs.detail
+        ob.drift_id = obs.drift_id
+        _ts_set(ob.at, obs.at)
     return pb

@@ -281,7 +281,8 @@ message Annotation {
 //
 // Fields:
 //   at            — wall-clock time of the intervention
-//   source        — "user" | "drift" | "goldfive"
+//   source        — "user" | "drift" | "goldfive" | "cancel" | "refine"
+//                   | "transition"
 //   kind          — source-specific label. User: "STEER" / "CANCEL" /
 //                   "PAUSE" / "RESUME". Drift: upper-case drift kind
 //                   (e.g. "LOOPING_REASONING"). Goldfive: "CASCADE_CANCEL"
@@ -338,6 +339,51 @@ message Intervention {
   google.protobuf.Timestamp last_seen = 14;
   string lifecycle = 15;
   repeated SeverityTransition severity_transitions = 16;
+
+  // Wire-stable row identity. The frontend uses it as the React list key
+  // and to upsert rows in place across ListInterventions refetches (the
+  // list is not append-only: a later plan revision can mutate an earlier
+  // drift row's outcome). Derived server-side from stable ids — see
+  // interventions.py for the per-source scheme (ann:{id} / drift:{id} /
+  // plan:{plan_id}:r{N} / cancel:{...} / refine:{attempt_id} /
+  // usermsg:{event_key} / transition:{...}).
+  string key = 17;
+  // Cancel rows: the agent whose invocation was cancelled. Transition
+  // rows: the assignee agent the transition attributes to. Empty on
+  // annotation / drift / plan rows (attribution lives on the source
+  // record's own agent field there).
+  string target_agent_id = 18;
+  // Cancel / refine rows: backlink to the triggering DriftDetected.id.
+  // Empty on every other source.
+  string drift_id = 19;
+  // Refine rows: the goldfive-minted UUID4 correlating RefineAttempted
+  // with its terminal (RefineFailed / the successful PlanRevised). Empty
+  // on every other source.
+  string attempt_id = 20;
+  // Refine rows whose terminal was a failure: the lowercase failure
+  // taxonomy ("parse_error" / "validator_rejected" / "llm_error" /
+  // "other"). Empty for successful / pending refines and every other
+  // source.
+  string failure_kind = 21;
+  // Transition rows: the uppercase terminal to_status ("COMPLETED" /
+  // "FAILED" / "CANCELLED"). Empty on every other source.
+  string transition_to_status = 22;
+  // Transition rows: the goldfive source attribution ("llm_report" /
+  // "supersedes_reroute" / "plan_revision" / "cancellation"). Empty on
+  // every other source.
+  string transition_source = 23;
+  // Transition rows: the goldfive task id that transitioned (after
+  // supersedes-reroute this is the SUCCESSOR id). Empty on every other
+  // source.
+  string transition_task_id = 24;
+  // Plan-scoping for multi-plan sessions: the plan id this intervention
+  // is scoped to, so a per-plan filter attaches the row exactly once.
+  // Empty when the deriver could not pin a plan.
+  string target_plan_id = 25;
+  // Per-observation breakdown for a collapsed drift condition
+  // (count > 1). Sorted by ``at`` ascending; the renderer expands the
+  // collapsed row into these sub-rows. Empty on un-grouped rows.
+  repeated DriftObservation observations = 26;
 }
 
 // One severity transition observed across a collapsed condition's
@@ -349,6 +395,16 @@ message SeverityTransition {
   string from = 1;
   string to = 2;
   google.protobuf.Timestamp at = 3;
+}
+
+// One drift observation rolled into a collapsed condition row. The UI
+// expands ``Intervention.observations`` into a per-emit timeline.
+message DriftObservation {
+  google.protobuf.Timestamp at = 1;
+  string severity = 2;
+  string lifecycle = 3;
+  string detail = 4;
+  string drift_id = 5;
 }
 
 // ---------------------------------------------------------------------------

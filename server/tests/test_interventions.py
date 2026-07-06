@@ -1,11 +1,13 @@
 """Aggregator + RPC coverage for ``list_interventions`` (issue #69).
 
-The aggregator merges three sources already on the wire:
-  1. ``annotations`` — user STEER / HUMAN_RESPONSE rows.
-  2. Ingest drift ring — goldfive ``drift_detected`` events.
-  3. ``task_plans`` with a non-empty ``revision_kind`` — autonomous
-     goldfive revisions (cascade_cancel, refine_retry, …) plus user
-     drift kinds.
+The aggregator merges seven sources, all read from durable storage:
+  1. ``annotations``            — user STEER / HUMAN_RESPONSE rows.
+  2. ``goldfive_events`` drifts — ``drift_detected`` events.
+  3. ``task_plans``             — plan revisions (revision_index > 0).
+  4. ``goldfive_events``        — invocation_cancelled (cancel lane).
+  5. ``sidecar_events``         — refine_attempted + refine_failed (refine).
+  6. ``sidecar_events``         — user_message (user lane).
+  7. ``goldfive_events``        — task_transitioned (transition lane).
 
 These tests assert:
   * chronological ordering across all three sources
@@ -19,9 +21,7 @@ These tests assert:
 
 from __future__ import annotations
 
-import asyncio
 import itertools
-from pathlib import Path
 
 import grpc
 import pytest
@@ -30,6 +30,7 @@ import pytest_asyncio
 from harmonograf_server.pb import (  # noqa: F401 — grafts goldfive.v1 onto path
     frontend_pb2,
     service_pb2_grpc,
+    telemetry_pb2,
 )
 from goldfive.v1 import events_pb2 as goldfive_events_pb2
 from harmonograf_server.bus import SessionBus
@@ -41,20 +42,17 @@ from harmonograf_server.convert import (
 )
 from harmonograf_server.ingest import IngestPipeline
 from harmonograf_server.interventions import (
-    InterventionRecord,
     list_interventions,
 )
 from harmonograf_server.rpc.telemetry import TelemetryServicer
 from harmonograf_server.storage import (
-    Agent,
-    AgentStatus,
     Annotation,
     AnnotationKind,
     AnnotationTarget,
-    Framework,
     GoldfiveEventRecord,
     Session,
     SessionStatus,
+    SidecarEventRecord,
     Task,
     TaskPlan,
     TaskStatus,
@@ -119,6 +117,64 @@ async def _list(sid, store, drifts: _StubDrifts, **kwargs):
     """Seed the test's drifts into ``store`` then run the aggregator."""
     await _seed_drift_dicts(store, drifts._drifts)
     return await list_interventions(sid, store=store, **kwargs)
+
+
+async def _seed_goldfive_event(store, sid, kind, ev, recorded_at):
+    seq = next(_seed_seq)
+    await store.append_goldfive_event(
+        GoldfiveEventRecord(
+            session_id=sid,
+            run_id="run-1",
+            kind=kind,
+            sequence=seq,
+            recorded_at=float(recorded_at),
+            payload_bytes=ev.SerializeToString(),
+            event_id=f"{sid}:{kind}:{seq}",
+        )
+    )
+
+
+async def _seed_cancel(store, sid, *, recorded_at, **fields):
+    ev = goldfive_events_pb2.Event(run_id="run-1")
+    c = ev.invocation_cancelled
+    for k, v in fields.items():
+        setattr(c, k, v)
+    await _seed_goldfive_event(store, sid, "invocation_cancelled", ev, recorded_at)
+
+
+async def _seed_transition(store, sid, *, recorded_at, **fields):
+    ev = goldfive_events_pb2.Event(run_id="run-1")
+    t = ev.task_transitioned
+    for k, v in fields.items():
+        setattr(t, k, v)
+    await _seed_goldfive_event(store, sid, "task_transitioned", ev, recorded_at)
+
+
+async def _seed_sidecar(store, sid, kind, msg, recorded_at):
+    await store.append_sidecar_event(
+        SidecarEventRecord(
+            session_id=sid,
+            kind=kind,
+            event_key=f"{kind}:{next(_seed_seq)}",
+            recorded_at=float(recorded_at),
+            payload_bytes=msg.SerializeToString(),
+        )
+    )
+
+
+async def _seed_refine_attempted(store, sid, *, recorded_at, **fields):
+    msg = telemetry_pb2.RefineAttempted(**fields)
+    await _seed_sidecar(store, sid, "refine_attempted", msg, recorded_at)
+
+
+async def _seed_refine_failed(store, sid, *, recorded_at, **fields):
+    msg = telemetry_pb2.RefineFailed(**fields)
+    await _seed_sidecar(store, sid, "refine_failed", msg, recorded_at)
+
+
+async def _seed_user_message(store, sid, *, recorded_at, **fields):
+    msg = telemetry_pb2.UserMessageReceived(**fields)
+    await _seed_sidecar(store, sid, "user_message", msg, recorded_at)
 
 
 @pytest_asyncio.fixture
@@ -1524,3 +1580,336 @@ async def test_collapse_iter1_escalation_scenario(store):
     # Conditions that just re-emitted at warning stay warning.
     assert by_cid["cond_0"].severity == "warning"
     assert by_cid["cond_3"].severity == "warning"
+
+
+# ---------------------------------------------------------------------------
+# Additional lanes: cancel / refine / transition / user message
+# (ported from frontend/src/__tests__/lib/interventions.test.ts)
+# ---------------------------------------------------------------------------
+
+
+async def test_cancel_lane_renders_alongside_drift(store):
+    """A cancel row is source='cancel', kind='CANCELLED', carries the
+    drift_id backlink, and has an empty trigger_event_id so it never
+    merges into the triggering drift."""
+    sid = "sess_cancel"
+    await _seed_session(store, sid, created_at=100.0)
+    await _seed_cancel(
+        store,
+        sid,
+        recorded_at=120.0,
+        invocation_id="inv-9",
+        agent_name="a:researcher",
+        reason="drift",
+        severity="warning",
+        drift_id="drift-1",
+        drift_kind="off_topic",
+        detail="cancelled: off topic",
+    )
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "kind": "off_topic",
+                    "severity": "warning",
+                    "detail": "off topic",
+                    "id": "drift-1",
+                    "recorded_at": 119.0,
+                }
+            ]
+        }
+    )
+    records = await _list(sid, store, drifts)
+    by_source = {r.source: r for r in records}
+    assert "drift" in by_source
+    assert "cancel" in by_source
+    cancel = by_source["cancel"]
+    assert cancel.kind == "CANCELLED"
+    assert cancel.drift_id == "drift-1"
+    assert cancel.target_agent_id == "a:researcher"
+    assert cancel.trigger_event_id == ""
+    assert cancel.body_or_reason == "cancelled: off topic"
+    assert cancel.key.startswith("cancel:")
+
+
+async def test_refine_success_row(store):
+    """Attempt + a plan whose trigger_event_id matches the attempt's
+    drift_id → a REFINE row with outcome plan_revised:rN."""
+    sid = "sess_refine_ok"
+    await _seed_session(store, sid, created_at=100.0)
+    await _seed_refine_attempted(
+        store,
+        sid,
+        recorded_at=120.0,
+        attempt_id="att-1",
+        drift_id="drift-1",
+        trigger_kind="looping_reasoning",
+        trigger_severity="warning",
+        current_agent_id="a:researcher",
+    )
+    await store.put_task_plan(
+        TaskPlan(
+            id="p1",
+            session_id=sid,
+            created_at=121.0,
+            summary="revised",
+            tasks=[],
+            edges=[],
+            revision_reason="refined the plan",
+            revision_kind="looping_reasoning",
+            revision_index=2,
+            trigger_event_id="drift-1",
+        )
+    )
+    records = await _list(sid, store, _StubDrifts({}))
+    refine = next(r for r in records if r.source == "refine")
+    assert refine.kind == "REFINE:LOOPING_REASONING"
+    assert refine.outcome == "plan_revised:r2"
+    assert refine.plan_revision_index == 2
+    assert refine.attempt_id == "att-1"
+    assert refine.body_or_reason == "refined the plan"
+
+
+async def test_refine_failed_row(store):
+    """Attempt + a failure sharing attempt_id → a REFINE_FAILED row."""
+    sid = "sess_refine_fail"
+    await _seed_session(store, sid, created_at=100.0)
+    await _seed_refine_attempted(
+        store,
+        sid,
+        recorded_at=120.0,
+        attempt_id="att-2",
+        drift_id="drift-2",
+        trigger_kind="off_topic",
+        trigger_severity="warning",
+    )
+    await _seed_refine_failed(
+        store,
+        sid,
+        recorded_at=121.0,
+        attempt_id="att-2",
+        failure_kind="validator_rejected",
+        reason="supersedes coverage missing",
+        detail="task t1 superseded but no replacement",
+    )
+    records = await _list(sid, store, _StubDrifts({}))
+    refine = next(r for r in records if r.source == "refine")
+    assert refine.kind == "REFINE_FAILED:VALIDATOR_REJECTED"
+    assert refine.outcome == "refine_failed:validator_rejected"
+    assert refine.failure_kind == "validator_rejected"
+    assert refine.severity == "warning"
+    assert refine.body_or_reason == "task t1 superseded but no replacement"
+
+
+async def test_refine_pending_row(store):
+    """Attempt with no terminal → REFINE row with outcome 'pending'."""
+    sid = "sess_refine_pending"
+    await _seed_session(store, sid, created_at=100.0)
+    await _seed_refine_attempted(
+        store,
+        sid,
+        recorded_at=120.0,
+        attempt_id="att-3",
+        drift_id="drift-3",
+        trigger_kind="tool_error",
+        trigger_severity="info",
+    )
+    records = await _list(sid, store, _StubDrifts({}))
+    refine = next(r for r in records if r.source == "refine")
+    assert refine.kind == "REFINE:TOOL_ERROR"
+    assert refine.outcome == "pending"
+
+
+async def test_refine_does_not_merge_into_drift(store):
+    """A refine row carrying drift_id as trigger_event_id must NOT merge
+    into the same-id drift row — both survive."""
+    sid = "sess_refine_nomerge"
+    await _seed_session(store, sid, created_at=100.0)
+    await _seed_refine_attempted(
+        store,
+        sid,
+        recorded_at=121.0,
+        attempt_id="att-4",
+        drift_id="drift-4",
+        trigger_kind="looping_reasoning",
+        trigger_severity="warning",
+    )
+    drifts = _StubDrifts(
+        {
+            sid: [
+                {
+                    "kind": "looping_reasoning",
+                    "severity": "warning",
+                    "detail": "loop",
+                    "id": "drift-4",
+                    "recorded_at": 120.0,
+                }
+            ]
+        }
+    )
+    records = await _list(sid, store, drifts)
+    sources = sorted(r.source for r in records)
+    assert "drift" in sources
+    assert "refine" in sources
+
+
+async def test_user_message_lane(store):
+    """UserMessageReceived → source='user' rows with the raw text."""
+    sid = "sess_um"
+    await _seed_session(store, sid, created_at=100.0)
+    await _seed_user_message(
+        store,
+        sid,
+        recorded_at=110.0,
+        content="forget solar panels. tell me about solar flares.",
+        author="alice",
+        mid_turn=False,
+    )
+    await _seed_user_message(
+        store,
+        sid,
+        recorded_at=115.0,
+        content="wait, interrupt!",
+        author="alice",
+        mid_turn=True,
+    )
+    records = await _list(sid, store, _StubDrifts({}))
+    kinds = {r.kind for r in records if r.source == "user"}
+    assert "USER_MESSAGE" in kinds
+    assert "USER_MESSAGE_INTERJECTION" in kinds
+    um = next(r for r in records if r.kind == "USER_MESSAGE")
+    assert um.body_or_reason == "forget solar panels. tell me about solar flares."
+    assert um.author == "alice"
+
+
+async def test_transition_lane_terminal_and_meaningful_only(store):
+    """Only terminal to_status from a meaningful source surfaces; a
+    RUNNING transition and an unmeaningful-source transition are filtered."""
+    sid = "sess_trans"
+    await _seed_session(store, sid, created_at=100.0)
+    # Surfaced: COMPLETED via llm_report.
+    await _seed_transition(
+        store,
+        sid,
+        recorded_at=120.0,
+        task_id="t1",
+        from_status="running",
+        to_status="completed",
+        source="llm_report",
+        agent_name="a:worker",
+    )
+    # Filtered: RUNNING (non-terminal).
+    await _seed_transition(
+        store,
+        sid,
+        recorded_at=121.0,
+        task_id="t2",
+        from_status="pending",
+        to_status="running",
+        source="llm_report",
+    )
+    # Filtered: terminal but unmeaningful source.
+    await _seed_transition(
+        store,
+        sid,
+        recorded_at=122.0,
+        task_id="t3",
+        from_status="running",
+        to_status="failed",
+        source="handler_default",
+    )
+    records = await _list(sid, store, _StubDrifts({}))
+    trans = [r for r in records if r.source == "transition"]
+    assert len(trans) == 1
+    r = trans[0]
+    assert r.kind == "TASK_COMPLETED"
+    assert r.transition_to_status == "COMPLETED"
+    assert r.transition_source == "llm_report"
+    assert r.transition_task_id == "t1"
+    assert r.severity == "info"
+    assert r.target_agent_id == "a:worker"
+
+
+async def test_all_seven_sources_end_to_end_rpc(rpc_stack):
+    """The RPC surfaces every source family with the new proto fields."""
+    store = rpc_stack["store"]
+    sid = "sess_all7"
+    await _seed_session(store, sid, created_at=100.0)
+    await store.put_annotation(
+        Annotation(
+            id="ann_1",
+            session_id=sid,
+            target=AnnotationTarget(agent_id="a", time_start=105.0),
+            author="bob",
+            created_at=105.0,
+            kind=AnnotationKind.STEERING,
+            body="slow down",
+        )
+    )
+    await _seed_drift_dicts(
+        store,
+        {
+            sid: [
+                {
+                    "kind": "off_topic",
+                    "severity": "warning",
+                    "detail": "off",
+                    "id": "drift-a",
+                    "recorded_at": 110.0,
+                }
+            ]
+        },
+    )
+    await _seed_cancel(
+        store,
+        sid,
+        recorded_at=111.0,
+        invocation_id="inv-1",
+        agent_name="a",
+        reason="drift",
+        drift_id="drift-a",
+        drift_kind="off_topic",
+        detail="cancelled",
+    )
+    await _seed_refine_attempted(
+        store,
+        sid,
+        recorded_at=112.0,
+        attempt_id="att-x",
+        drift_id="drift-a",
+        trigger_kind="off_topic",
+        trigger_severity="warning",
+    )
+    await _seed_user_message(
+        store, sid, recorded_at=113.0, content="hello", author="bob"
+    )
+    await _seed_transition(
+        store,
+        sid,
+        recorded_at=114.0,
+        task_id="t1",
+        from_status="running",
+        to_status="completed",
+        source="llm_report",
+    )
+
+    ch = grpc.aio.insecure_channel(f"127.0.0.1:{rpc_stack['port']}")
+    try:
+        stub = service_pb2_grpc.HarmonografStub(ch)
+        resp = await stub.ListInterventions(
+            frontend_pb2.ListInterventionsRequest(session_id=sid)
+        )
+    finally:
+        await ch.close()
+
+    sources = {iv.source for iv in resp.interventions}
+    assert {"user", "drift", "cancel", "refine", "transition"} <= sources
+    # Every row carries a stable non-empty key.
+    assert all(iv.key for iv in resp.interventions)
+    # The refine row carries attempt_id on the wire.
+    refine = next(iv for iv in resp.interventions if iv.source == "refine")
+    assert refine.attempt_id == "att-x"
+    # The transition row carries its dedicated fields on the wire.
+    trans = next(iv for iv in resp.interventions if iv.source == "transition")
+    assert trans.transition_to_status == "COMPLETED"
+    assert trans.transition_source == "llm_report"
