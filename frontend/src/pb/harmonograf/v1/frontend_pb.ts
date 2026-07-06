@@ -1104,16 +1104,19 @@ export const DeleteSessionResponseSchema: GenMessage<DeleteSessionResponse> = /*
  * ListInterventions
  * ---------------------------------------------------------------------------
  *
- * Returns the chronological merge of user-initiated, drift-triggered, and
- * goldfive-autonomous interventions for one session. Derivable from data
- * already on the wire via WatchSession (annotations + goldfive drifts +
- * task_plans revision metadata) — this RPC exists so a late-joining
- * frontend can fetch the full history without replaying the whole session.
+ * Returns the chronological merge of all seven intervention source
+ * families (user annotations / drifts / plan revisions / invocation
+ * cancels / refine attempts / task transitions / user messages) for one
+ * session. This RPC is the SINGLE SOURCE OF TRUTH for the merged history —
+ * the merge / outcome-attribution / drift-condition-collapse logic lives
+ * only in the server (harmonograf_server/interventions.py); the frontend
+ * no longer recomputes it.
  *
- * Live updates: WatchSession still streams the underlying deltas
- * (initial_annotation, new_annotation, goldfive_event.drift_detected,
- * goldfive_event.plan_revised), so the client recomputes the merged list
- * incrementally without a second subscribe.
+ * Live updates: the frontend re-issues this RPC (debounced) whenever a
+ * WatchSession delta that could change the history lands (a drift, plan
+ * revision, cancel, refine, transition, user message, or annotation), and
+ * replaces its rows by ``Intervention.key``. All inputs are read from
+ * durable storage, so the result is identical after a server restart.
  *
  * @generated from message harmonograf.v1.ListInterventionsRequest
  */
