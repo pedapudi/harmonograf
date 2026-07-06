@@ -28,8 +28,8 @@ import type {
   PlanRevisionRecord,
   SupersessionLink,
 } from '../../state/planHistoryStore';
-import { useAnnotationStore, type Annotation } from '../../state/annotationStore';
-import { deriveInterventionsFromStore } from '../../lib/interventions';
+import type { InterventionRow } from '../../lib/interventions';
+import { useInterventions } from '../../state/interventionsStore';
 import { bareAgentName, type SessionStore } from '../../gantt/index';
 import { extractThinkingText, hasThinking } from '../../lib/thinking';
 import type {
@@ -298,8 +298,6 @@ export const EMPTY_SESSION: ZSession = {
   empty: true,
 };
 
-/** Stable empty annotation list — keeps the zustand selector reference cached. */
-const EMPTY_ANNOTATIONS: readonly Annotation[] = Object.freeze([]);
 
 // DAG layout constants (study dagSVG).
 const DAG_LX = [80, 300, 520, 740] as const;
@@ -827,10 +825,9 @@ export function buildJudges(store: SessionStore, agents: ZAgent[]): ZJudges {
  */
 export function buildTicks(
   store: SessionStore,
-  annotations: readonly Annotation[],
+  rows: readonly InterventionRow[],
 ): ZTicks {
   const goldfiveId = store.resolveGoldfiveActorId() || GOLDFIVE_ACTOR_ID;
-  const rows = deriveInterventionsFromStore(store, annotations);
   const out: ZTicks = {};
   for (const r of rows) {
     const agent = r.targetAgentId || goldfiveId;
@@ -847,11 +844,7 @@ export function buildTicks(
  * severity is critical or the row came from a goldfive escalation. Fallback: no
  * interventions → [] ("never left the ground").
  */
-export function buildLadder(
-  store: SessionStore,
-  annotations: readonly Annotation[],
-): ZLadder {
-  const rows = deriveInterventionsFromStore(store, annotations);
+export function buildLadder(rows: readonly InterventionRow[]): ZLadder {
   const out: ZLadder = [];
   for (const r of rows) {
     out.push([r.atMs / 1000, rungForRow(r.source, r.kind, r.severity, r.outcome)]);
@@ -1225,13 +1218,10 @@ export function useZicatoSession(sessionId: string | null): ZSession {
     };
   }, [store]);
 
-  // Read the per-session annotation list. Falls back to a STABLE empty array
-  // (EMPTY_ANNOTATIONS) so the zustand selector returns a cached reference when
-  // there are none — a fresh `[]` each render would trip useSyncExternalStore's
-  // infinite-loop guard.
-  const annotations = useAnnotationStore((s) =>
-    sessionId ? s.bySession.get(sessionId) ?? EMPTY_ANNOTATIONS : EMPTY_ANNOTATIONS,
-  );
+  // Server-derived intervention rows (ticks + ladder). Fetched from the
+  // ListInterventions RPC and kept fresh via a debounced refetch on the
+  // relevant WatchSession deltas — the merge logic lives on the server.
+  const interventions = useInterventions(store ?? null, sessionId ?? '');
 
   // Session goal (title) from the sessions list, AppBar-style fallback.
   const sessions = useSessionsStore((s) => s.sessions);
@@ -1276,8 +1266,8 @@ export function useZicatoSession(sessionId: string | null): ZSession {
     const delegation = buildDelegation(store);
     const steers = buildSteers(store, history);
     const judges = buildJudges(store, agents);
-    const ticks = buildTicks(store, annotations);
-    const ladder = buildLadder(store, annotations);
+    const ticks = buildTicks(store, interventions);
+    const ladder = buildLadder(interventions);
     const ctx = buildCtx(store, agents);
     const plan = buildPlan(history, cumulative, supersedes, selectedRevision);
     const fp = deriveFingerprint(history, cumulative, status, T || 30);
@@ -1308,7 +1298,7 @@ export function useZicatoSession(sessionId: string | null): ZSession {
     store,
     sessionId,
     tick.nowMs,
-    annotations,
+    interventions,
     goal,
     history,
     cumulative,

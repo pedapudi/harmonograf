@@ -49,6 +49,52 @@ vi.mock('../../rpc/hooks', () => ({
   getSessionStore: () => mockStore,
 }));
 
+// Interventions are derived server-side now (the ListInterventions RPC).
+// UNSPECIFIED-drift filtering + dedup live in Python; this test verifies
+// the ribbon renders exactly the rows the server hands back — the two
+// legitimate drifts, no noise. (The 500 UNSPECIFIED drifts seeded below
+// exercise the store but never reach the ribbon.)
+vi.mock('../../state/interventionsStore', () => ({
+  useInterventions: () => [
+    {
+      key: 'drift:legit-1',
+      atMs: 1,
+      source: 'drift',
+      kind: 'LOOPING_REASONING',
+      bodyOrReason: 'legit',
+      author: '',
+      outcome: 'recorded',
+      planRevisionIndex: 0,
+      severity: 'warning',
+      annotationId: '',
+      driftKind: 'looping_reasoning',
+      triggerEventId: '',
+      targetAgentId: 'agent-a',
+      driftId: 'legit-1',
+      attemptId: '',
+      failureKind: '',
+    },
+    {
+      key: 'drift:legit-2',
+      atMs: 2,
+      source: 'user',
+      kind: 'STEER',
+      bodyOrReason: 'operator nudge',
+      author: '',
+      outcome: 'recorded',
+      planRevisionIndex: 0,
+      severity: 'info',
+      annotationId: 'ann-1',
+      driftKind: 'user_steer',
+      triggerEventId: '',
+      targetAgentId: 'agent-a',
+      driftId: 'legit-2',
+      attemptId: '',
+      failureKind: '',
+    },
+  ],
+}));
+
 const uiStoreState = {
   currentSessionId: mockSessionId,
   selectSpan: vi.fn(),

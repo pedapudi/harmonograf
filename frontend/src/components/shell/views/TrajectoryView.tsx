@@ -12,10 +12,10 @@ import type {
 import { bareAgentName } from '../../../gantt/index';
 import { useAnnotationStore } from '../../../state/annotationStore';
 import {
-  deriveInterventionsFromStore,
   SOURCE_COLOR,
   type InterventionRow,
 } from '../../../lib/interventions';
+import { useInterventions } from '../../../state/interventionsStore';
 import {
   resolveDriftDetail,
   type InterventionDetail,
@@ -440,15 +440,11 @@ export function TrajectoryView() {
   // walk so existing behaviour is unchanged.
   const vm = buildViewModel(store, isMultiPlan ? effectivePlanId : null);
 
-  // Unified intervention history, derived from the same session store the
-  // ribbon walks above. One source of truth for the strip in the planning
-  // view, the chips in the trajectory ribbon, and the entries block below.
-  const annotationsForSession = sessionId
-    ? useAnnotationStore.getState().list(sessionId)
-    : [];
-  const interventions = store
-    ? deriveInterventionsFromStore(store, annotationsForSession)
-    : [];
+  // Unified intervention history, derived server-side (ListInterventions
+  // RPC) and kept fresh via a debounced refetch on the relevant deltas.
+  // One source of truth for the strip in the planning view, the chips in
+  // the trajectory ribbon, and the entries block below.
+  const interventions = useInterventions(store, sessionId ?? '');
 
   // Latest rev tracked live; user can pin a specific rev. `null` → live.
   const [pinnedRevIdx, setPinnedRevIdx] = useState<number | null>(null);

@@ -379,15 +379,17 @@ class SeverityTransition(_message.Message):
     def __init__(self, to: _Optional[str] = ..., at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., **kwargs) -> None: ...
 
 class DriftObservation(_message.Message):
-    __slots__ = ("at", "severity", "lifecycle", "detail", "drift_id")
+    __slots__ = ("at", "severity", "lifecycle", "detail", "drift_id", "prev_severity")
     AT_FIELD_NUMBER: _ClassVar[int]
     SEVERITY_FIELD_NUMBER: _ClassVar[int]
     LIFECYCLE_FIELD_NUMBER: _ClassVar[int]
     DETAIL_FIELD_NUMBER: _ClassVar[int]
     DRIFT_ID_FIELD_NUMBER: _ClassVar[int]
+    PREV_SEVERITY_FIELD_NUMBER: _ClassVar[int]
     at: _timestamp_pb2.Timestamp
     severity: str
     lifecycle: str
     detail: str
     drift_id: str
-    def __init__(self, at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., severity: _Optional[str] = ..., lifecycle: _Optional[str] = ..., detail: _Optional[str] = ..., drift_id: _Optional[str] = ...) -> None: ...
+    prev_severity: str
+    def __init__(self, at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., severity: _Optional[str] = ..., lifecycle: _Optional[str] = ..., detail: _Optional[str] = ..., drift_id: _Optional[str] = ..., prev_severity: _Optional[str] = ...) -> None: ...

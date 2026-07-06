@@ -8,7 +8,7 @@ import { colorForAgent } from '../../../theme/agentColors';
 import type { Task, TaskPlan, TaskStatus } from '../../../gantt/types';
 import { TaskPlanPanel } from '../../TaskStages/TaskPlanPanel';
 import { InterventionsList } from '../../Interventions/InterventionsList';
-import { deriveInterventionsFromStore } from '../../../lib/interventions';
+import { useInterventions } from '../../../state/interventionsStore';
 import { useAnnotationStore } from '../../../state/annotationStore';
 
 const DEFAULT_PANEL_HEIGHT = 120;
@@ -155,15 +155,10 @@ export function GanttView() {
   const store = watch?.store;
   const plans: readonly TaskPlan[] = store ? store.tasks.listPlans() : [];
   const totalTasks = plans.reduce((n, p) => n + p.tasks.length, 0);
-  // Derive the unified intervention history from the live session store +
-  // any pending/delivered annotations. Derived (not fetched) so live
-  // updates do not require an extra server round-trip.
-  const allAnnotations = sessionId
-    ? useAnnotationStore.getState().list(sessionId)
-    : [];
-  const interventions = store
-    ? deriveInterventionsFromStore(store, allAnnotations)
-    : [];
+  // The unified intervention history is derived server-side (the
+  // ListInterventions RPC); this hook fetches it and keeps it fresh via a
+  // debounced refetch on the relevant WatchSession deltas.
+  const interventions = useInterventions(store ?? null, sessionId ?? '');
 
   // Push the derived intervention rows down to the Gantt renderer so it
   // can paint translucent bands at each intervention's atMs on the

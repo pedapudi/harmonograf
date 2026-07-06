@@ -405,6 +405,10 @@ message DriftObservation {
   string lifecycle = 3;
   string detail = 4;
   string drift_id = 5;
+  // Severity on the prior observation of this condition, when the emit
+  // recorded a bump (prev_severity != severity). Empty otherwise. Lets
+  // the UI render a "WARNING → CRITICAL" marker inline in the expansion.
+  string prev_severity = 6;
 }
 
 // ---------------------------------------------------------------------------

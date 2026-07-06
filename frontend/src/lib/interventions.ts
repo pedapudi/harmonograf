@@ -40,6 +40,9 @@ import type {
   UserMessageRecord,
 } from '../gantt/index';
 import type { TaskPlan } from '../gantt/types';
+import type {
+  Intervention as PbIntervention,
+} from '../pb/harmonograf/v1/types_pb';
 
 // Stable source taxonomy used by the UI. Anything else renders as "goldfive"
 // grey so new kinds emitted by the server don't crash the view.
@@ -73,6 +76,15 @@ export type InterventionSource =
   | 'cancel'
   | 'refine'
   | 'transition';
+
+const KNOWN_SOURCES = new Set<InterventionSource>([
+  'user',
+  'drift',
+  'goldfive',
+  'cancel',
+  'refine',
+  'transition',
+]);
 
 export interface InterventionRow {
   // Stable key for React lists — composed from source + (annotation id /
@@ -1193,3 +1205,87 @@ export const SOURCE_GLYPH: Record<InterventionSource, string> = {
   refine: '↻',
   transition: '→',
 };
+
+// ---------------------------------------------------------------------------
+// Wire → row conversion.
+//
+// The unified intervention history is derived server-side (the
+// ``ListInterventions`` RPC — see harmonograf_server/interventions.py) so
+// the merge/attribution/collapse logic lives in exactly one place. This
+// converter maps each proto ``Intervention`` onto the ``InterventionRow``
+// the renderers consume. ``sessionStartMs`` rebases the server's absolute
+// timestamps onto the session-relative ms axis the rest of the store uses
+// (mirrors ``SessionStore.wallClockStartMs``).
+// ---------------------------------------------------------------------------
+
+function pbTsToMs(t: { seconds: bigint; nanos: number } | undefined): number {
+  if (!t) return 0;
+  return Number(t.seconds) * 1000 + Math.floor(t.nanos / 1_000_000);
+}
+
+export function interventionRowFromPb(
+  pb: PbIntervention,
+  sessionStartMs: number,
+): InterventionRow {
+  const atAbs = pbTsToMs(pb.at);
+  const source = (
+    KNOWN_SOURCES.has(pb.source as InterventionSource)
+      ? pb.source
+      : 'goldfive'
+  ) as InterventionSource;
+  const severityTransitions =
+    pb.severityTransitions.length > 0
+      ? pb.severityTransitions.map((st) => ({
+          fromSeverity: st.from,
+          toSeverity: st.to,
+          atMs: (() => {
+            const a = pbTsToMs(st.at);
+            return a ? a - sessionStartMs : 0;
+          })(),
+        }))
+      : undefined;
+  const observations =
+    pb.observations.length > 0
+      ? pb.observations.map((ob, i) => ({
+          seq: i,
+          atMs: (() => {
+            const a = pbTsToMs(ob.at);
+            return a ? a - sessionStartMs : 0;
+          })(),
+          severity: ob.severity,
+          prevSeverity: ob.prevSeverity,
+          lifecycle: ob.lifecycle,
+          detail: ob.detail,
+          driftId: ob.driftId,
+        }))
+      : undefined;
+  return {
+    key: pb.key,
+    atMs: atAbs ? atAbs - sessionStartMs : 0,
+    source,
+    kind: pb.kind,
+    bodyOrReason: pb.bodyOrReason,
+    author: pb.author,
+    outcome: pb.outcome,
+    planRevisionIndex: pb.planRevisionIndex,
+    severity: pb.severity,
+    annotationId: pb.annotationId,
+    driftKind: pb.driftKind,
+    // Server-internal merge key; the row-level merge lives on the server
+    // now, so the UI never reads this. Kept for shape compatibility.
+    triggerEventId: '',
+    targetAgentId: pb.targetAgentId,
+    driftId: pb.driftId,
+    attemptId: pb.attemptId,
+    failureKind: pb.failureKind,
+    transitionToStatus: pb.transitionToStatus || undefined,
+    transitionSource: pb.transitionSource || undefined,
+    transitionTaskId: pb.transitionTaskId || undefined,
+    conditionId: pb.conditionId || undefined,
+    currentLifecycle: pb.lifecycle || undefined,
+    observationCount: pb.count > 1 ? pb.count : undefined,
+    severityTransitions,
+    observations,
+    targetPlanId: pb.targetPlanId || undefined,
+  };
+}

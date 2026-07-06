@@ -216,6 +216,7 @@ class DriftObservation:
     lifecycle: str = ""
     detail: str = ""
     drift_id: str = ""
+    prev_severity: str = ""
 
 
 # Task-transition filter ladder (goldfive#267). Mirrors the frontend
@@ -1104,6 +1105,7 @@ def _collapse_by_condition_id(
                 lifecycle=obs.lifecycle,
                 detail=obs.body_or_reason,
                 drift_id=obs.drift_id,
+                prev_severity=obs.prev_severity,
             )
             for obs in group
         ]
@@ -1355,5 +1357,6 @@ def record_to_pb(rec: InterventionRecord, types_pb2_mod: Any) -> Any:
         ob.lifecycle = obs.lifecycle
         ob.detail = obs.detail
         ob.drift_id = obs.drift_id
+        ob.prev_severity = obs.prev_severity
         _ts_set(ob.at, obs.at)
     return pb
