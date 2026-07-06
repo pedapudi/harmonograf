@@ -284,6 +284,31 @@ class GoldfiveEventRecord:
 
 
 @dataclass
+class SidecarEventRecord:
+    """Persisted record of one harmonograf-native sidecar telemetry event.
+
+    Sidecar events (``RefineAttempted`` / ``RefineFailed`` /
+    ``UserMessageReceived``) arrive as their own ``TelemetryUp`` oneof
+    variants — NOT inside ``goldfive_event`` — so they never hit the
+    ``goldfive_events`` table. They previously lived only in bounded
+    in-memory rings on the ingest pipeline and were lost on server
+    restart. This row makes them durable so the intervention aggregator
+    (which is authoritative for the merged history) has stable inputs.
+
+    ``payload_bytes`` is the serialized ``harmonograf.v1`` telemetry proto
+    matching ``kind`` — NOT a ``goldfive.v1.Event``. ``event_key`` is the
+    idempotency key (see ingest for the per-kind scheme); a second append
+    with the same key is a no-op.
+    """
+
+    session_id: str
+    kind: str  # "refine_attempted" | "refine_failed" | "user_message"
+    event_key: str
+    recorded_at: float
+    payload_bytes: bytes = b""
+
+
+@dataclass
 class Stats:
     session_count: int
     agent_count: int
@@ -539,6 +564,23 @@ class Store(ABC):
         kind: Optional[str] = None,
         limit: Optional[int] = None,
     ) -> list[GoldfiveEventRecord]: ...
+
+    # sidecar events ------------------------------------------------------
+    @abstractmethod
+    async def append_sidecar_event(self, record: SidecarEventRecord) -> None:
+        """Persist one sidecar telemetry event. Idempotent on ``event_key``
+        (a second append with the same key is a no-op)."""
+
+    @abstractmethod
+    async def list_sidecar_events(
+        self,
+        session_id: str,
+        *,
+        kind: Optional[str] = None,
+    ) -> list[SidecarEventRecord]:
+        """Return sidecar events for a session, ordered by
+        ``(recorded_at, insertion order)`` ascending. Filter by ``kind``
+        when provided."""
 
     # stats ----------------------------------------------------------------
     @abstractmethod

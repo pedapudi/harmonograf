@@ -569,6 +569,16 @@ def _drift_severity_string_to_pb(value: str) -> int:
         return goldfive_types_pb2.DRIFT_SEVERITY_UNSPECIFIED
 
 
+def _drift_lifecycle_string_to_pb(value: str) -> int:
+    if not value:
+        return goldfive_types_pb2.DRIFT_LIFECYCLE_UNSPECIFIED
+    name = f"DRIFT_LIFECYCLE_{value.upper()}"
+    try:
+        return goldfive_types_pb2.DriftLifecycle.Value(name)
+    except (ValueError, AttributeError):
+        return goldfive_types_pb2.DRIFT_LIFECYCLE_UNSPECIFIED
+
+
 def storage_task_to_goldfive_pb(task: Task) -> Any:
     """Translate a storage ``Task`` back into ``goldfive.v1.Task``."""
 

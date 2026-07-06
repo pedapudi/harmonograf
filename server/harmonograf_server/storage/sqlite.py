@@ -41,6 +41,7 @@ from harmonograf_server.storage.base import (
     TaskStatus,
     ContextWindowSample,
     GoldfiveEventRecord,
+    SidecarEventRecord,
 )
 from goldfive.types import SupersessionKind
 
@@ -288,44 +289,59 @@ CREATE TABLE IF NOT EXISTS payloads (
 -- verbatim so the server can re-emit it onto the bus or decode new
 -- fields after a schema bump without needing a new column.
 CREATE TABLE IF NOT EXISTS goldfive_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL,
     run_id TEXT NOT NULL,
     sequence INTEGER NOT NULL,
     kind TEXT NOT NULL,
     recorded_at REAL NOT NULL,
     payload_bytes BLOB NOT NULL DEFAULT X'',
-    -- goldfive#271 Phase 3 Addition B: globally-unique event_id of the
-    -- form ``{run_id}:{sequence}:{uuid4_short}`` minted by goldfive's
-    -- Session.next_event_id. Pre-#271 producers leave the wire field
-    -- empty; the ingest path synthesises a deterministic
-    -- ``{session_id}:{run_id}:{sequence}`` fallback in that case so this
-    -- column is always non-empty. Outer-session pin (harmonograf#61)
-    -- collapses two turns onto the same outer session_id; per-turn
-    -- sequence resets at 0 and the composite PK
-    -- ``(session_id, run_id, sequence)`` collides on the seq-0 events
-    -- (silently dropped by INSERT OR IGNORE). The new event_id is
-    -- globally unique by construction (uuid4 suffix) so it is the
-    -- right dedup key for new ingests.
+    -- Dedup key. Post-#271 producers mint a globally-unique event_id of
+    -- the form ``{run_id}:{sequence}:{uuid4_short}`` via goldfive's
+    -- Session.next_event_id; pre-#271 producers leave the wire field
+    -- empty and the ingest path synthesises the deterministic
+    -- ``{session_id}:{run_id}:{sequence}`` fallback, so this column is
+    -- always non-empty on a persisted row.
     --
-    -- The composite PK is preserved for back-compat with pre-existing
-    -- data; new INSERTs dedup on the UNIQUE INDEX over event_id below.
-    -- A future migration may swap the composite for event_id once the
-    -- ecosystem has fully cut over.
-    event_id TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (session_id, run_id, sequence)
+    -- The old schema also carried a composite PRIMARY KEY
+    -- ``(session_id, run_id, sequence)``. Under outer-session pin
+    -- (harmonograf#61) two turns collapse onto one session_id with the
+    -- per-turn sequence reset to 0, so two DISTINCT events collided on
+    -- that composite and INSERT OR IGNORE silently dropped the second —
+    -- even though its event_id was distinct. The composite is gone; the
+    -- surrogate ``id`` is the PK and the UNIQUE INDEX on event_id below
+    -- is the sole dedup key (the synthetic fallback preserves legacy
+    -- de-dup semantics for empty-event_id producers). Old-shape tables
+    -- are rebuilt to this shape on start() (see _ensure_schema).
+    event_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_goldfive_events_session_kind
-    ON goldfive_events(session_id, kind);
+    ON goldfive_events(session_id, kind, recorded_at, sequence);
 CREATE INDEX IF NOT EXISTS idx_goldfive_events_session_time
     ON goldfive_events(session_id, recorded_at);
--- harmonograf#61 / goldfive#271 Phase 3 Addition B: UNIQUE on event_id
--- so duplicate event_ids (producer mis-mints, replays carrying the same
--- id) collapse cleanly without relying on the composite PK. NULLs are
--- not allowed by the column (NOT NULL DEFAULT '') so the UNIQUE
--- constraint is on real strings — but partial WHERE filters out the
--- empty-string default left by pre-#271 rows so legacy data can coexist.
+-- UNIQUE on event_id so duplicate event_ids (replays, producer
+-- mis-mints) collapse cleanly. Partial WHERE tolerates the empty-string
+-- default left by any pre-backfill row.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_goldfive_events_event_id
     ON goldfive_events(event_id) WHERE event_id != '';
+
+-- Sidecar telemetry events (RefineAttempted / RefineFailed /
+-- UserMessageReceived) that arrive as their own TelemetryUp variants
+-- rather than inside goldfive_event. payload_bytes is the serialized
+-- harmonograf.v1 telemetry proto (NOT a goldfive.v1.Event). Idempotent
+-- on event_key. Made durable so the intervention aggregator (which is
+-- authoritative for the merged history) keeps these inputs across a
+-- server restart.
+CREATE TABLE IF NOT EXISTS sidecar_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    event_key TEXT NOT NULL UNIQUE,
+    recorded_at REAL NOT NULL,
+    payload_bytes BLOB NOT NULL DEFAULT X''
+);
+CREATE INDEX IF NOT EXISTS idx_sidecar_session_time
+    ON sidecar_events(session_id, recorded_at, id);
 """
 
 
@@ -475,6 +491,47 @@ class SqliteStore(Store):
             "UPDATE goldfive_events SET event_id = session_id || ':' || run_id || ':' || sequence "
             "WHERE event_id = ''"
         )
+        # Rebuild pre-existing goldfive_events tables that still carry the
+        # composite PRIMARY KEY (session_id, run_id, sequence). That
+        # composite let INSERT OR IGNORE silently drop a distinct event
+        # whose (session_id, run_id, sequence) collided under
+        # outer-session collapse. The new shape uses a surrogate ``id`` PK
+        # and dedups solely on the event_id UNIQUE index. Runs at most
+        # once per DB — a fresh DB is already the new shape (SCHEMA above),
+        # so the guard sees no composite PK and skips. event_id is fully
+        # backfilled by the UPDATE just above, so the copy is safe.
+        async with self._db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='goldfive_events'"
+        ) as cur:
+            _ge_row = await cur.fetchone()
+        _ge_ddl = (_ge_row[0] if _ge_row else "") or ""
+        if "PRIMARY KEY (session_id, run_id, sequence)" in _ge_ddl:
+            await self._db.executescript(
+                """
+                CREATE TABLE goldfive_events_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    recorded_at REAL NOT NULL,
+                    payload_bytes BLOB NOT NULL DEFAULT X'',
+                    event_id TEXT NOT NULL DEFAULT ''
+                );
+                INSERT INTO goldfive_events_new
+                    (session_id, run_id, sequence, kind, recorded_at, payload_bytes, event_id)
+                    SELECT session_id, run_id, sequence, kind, recorded_at, payload_bytes, event_id
+                    FROM goldfive_events;
+                DROP TABLE goldfive_events;
+                ALTER TABLE goldfive_events_new RENAME TO goldfive_events;
+                CREATE INDEX idx_goldfive_events_session_kind
+                    ON goldfive_events(session_id, kind, recorded_at, sequence);
+                CREATE INDEX idx_goldfive_events_session_time
+                    ON goldfive_events(session_id, recorded_at);
+                CREATE UNIQUE INDEX idx_goldfive_events_event_id
+                    ON goldfive_events(event_id) WHERE event_id != '';
+                """
+            )
         await self._db.commit()
 
     async def close(self) -> None:
@@ -627,6 +684,12 @@ class SqliteStore(Store):
             await self.db.execute(
                 "DELETE FROM context_window_samples WHERE session_id = ?",
                 (session_id,),
+            )
+            await self.db.execute(
+                "DELETE FROM goldfive_events WHERE session_id = ?", (session_id,)
+            )
+            await self.db.execute(
+                "DELETE FROM sidecar_events WHERE session_id = ?", (session_id,)
             )
             await self.db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
             await self.db.commit()
@@ -1607,25 +1670,27 @@ class SqliteStore(Store):
         self, record: GoldfiveEventRecord
     ) -> None:
         async with self._lock:
-            # INSERT OR IGNORE: goldfive's runner emits each (run_id,
-            # sequence) exactly once, but a reconnect / replay race
-            # could re-deliver the same envelope. Idempotent-by-key
-            # matches ``_handle_span_start`` 's dedup semantics.
-            #
-            # goldfive#271 Phase 3 Addition B: ALSO write event_id. When
-            # the wire envelope carries one (post-#271 producer), use it
-            # verbatim; otherwise synthesize the deterministic
-            # ``{session_id}:{run_id}:{sequence}`` fallback that matches
-            # what the SCHEMA backfill stamped on legacy rows. The
-            # column has a UNIQUE INDEX, so the two-key dedup is:
-            # composite PK (legacy contract) + event_id UNIQUE
-            # (Phase 3 contract). Both ride the same INSERT OR IGNORE.
+            # Dedup solely on event_id. When the wire envelope carries one
+            # (post-#271 producer) use it verbatim — it is globally unique
+            # by construction (uuid4 suffix) so distinct events never
+            # collide even under outer-session collapse. Otherwise
+            # synthesize the deterministic ``{session_id}:{run_id}:{sequence}``
+            # fallback, which preserves the legacy composite dedup semantics
+            # for empty-event_id producers. Check-then-insert rather than
+            # INSERT OR IGNORE so a genuine event_id collision is a no-op
+            # while a distinct event always lands (the old composite PK is
+            # gone — see SCHEMA / _ensure_schema rebuild).
             event_id = record.event_id or (
                 f"{record.session_id}:{record.run_id}:{int(record.sequence)}"
             )
+            async with self.db.execute(
+                "SELECT 1 FROM goldfive_events WHERE event_id = ?", (event_id,)
+            ) as cur:
+                if await cur.fetchone() is not None:
+                    return
             await self.db.execute(
                 """
-                INSERT OR IGNORE INTO goldfive_events
+                INSERT INTO goldfive_events
                     (session_id, run_id, sequence, kind, recorded_at, payload_bytes, event_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -1672,6 +1737,55 @@ class SqliteStore(Store):
                 recorded_at=r["recorded_at"],
                 payload_bytes=bytes(r["payload_bytes"] or b""),
                 event_id=r["event_id"] if "event_id" in r.keys() else "",
+            )
+            for r in rows
+        ]
+
+    # sidecar events ------------------------------------------------------
+    async def append_sidecar_event(self, record: SidecarEventRecord) -> None:
+        async with self._lock:
+            await self.db.execute(
+                """
+                INSERT INTO sidecar_events
+                    (session_id, kind, event_key, recorded_at, payload_bytes)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(event_key) DO NOTHING
+                """,
+                (
+                    record.session_id,
+                    record.kind,
+                    record.event_key,
+                    record.recorded_at,
+                    record.payload_bytes or b"",
+                ),
+            )
+            await self.db.commit()
+
+    async def list_sidecar_events(
+        self,
+        session_id: str,
+        *,
+        kind: Optional[str] = None,
+    ) -> list[SidecarEventRecord]:
+        async with self._lock:
+            q = (
+                "SELECT session_id, kind, event_key, recorded_at, payload_bytes "
+                "FROM sidecar_events WHERE session_id = ?"
+            )
+            args: list[Any] = [session_id]
+            if kind is not None:
+                q += " AND kind = ?"
+                args.append(kind)
+            q += " ORDER BY recorded_at ASC, id ASC"
+            async with self.db.execute(q, args) as cur:
+                rows = await cur.fetchall()
+        return [
+            SidecarEventRecord(
+                session_id=r["session_id"],
+                kind=r["kind"],
+                event_key=r["event_key"],
+                recorded_at=r["recorded_at"],
+                payload_bytes=bytes(r["payload_bytes"] or b""),
             )
             for r in rows
         ]

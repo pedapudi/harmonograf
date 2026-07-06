@@ -33,6 +33,7 @@ from harmonograf_server.storage.base import (
     TaskStatus,
     ContextWindowSample,
     GoldfiveEventRecord,
+    SidecarEventRecord,
 )
 
 
@@ -54,13 +55,17 @@ class InMemoryStore(Store):
         # session_id -> agent_id -> list[ContextWindowSample] (append-only).
         self._ctx_samples: dict[str, dict[str, list[ContextWindowSample]]] = {}
         # session_id -> list[GoldfiveEventRecord] (append-only, in wire order).
-        # Keyed-by-tuple dedup is layered on top via ``_seen_gf_events``
-        # to match sqlite's PRIMARY KEY semantics under reconnect replay.
-        # goldfive#271 Phase 3 Addition B: dedup key is a tagged tuple —
-        # ``("event_id", record.event_id)`` for post-#271 records,
-        # ``("composite", session_id, run_id, sequence)`` for legacy.
+        # Dedup mirrors sqlite: on the effective event_id (the wire
+        # event_id when present, else the synthetic
+        # ``{session}:{run}:{sequence}`` fallback), NOT the composite —
+        # so two distinct events sharing (session, run, sequence) under
+        # outer-session collapse both land.
         self._gf_events: dict[str, list[GoldfiveEventRecord]] = {}
-        self._seen_gf_events: set[tuple] = set()
+        self._seen_gf_events: set[str] = set()
+        # session_id -> list[SidecarEventRecord] (append-only, insertion
+        # order). Dedup on event_key, mirroring sqlite's UNIQUE(event_key).
+        self._sidecar_events: dict[str, list[SidecarEventRecord]] = {}
+        self._seen_sidecar_keys: set[str] = set()
 
     async def start(self) -> None:
         return None
@@ -153,6 +158,13 @@ class InMemoryStore(Store):
             for k in rev_keys:
                 del self._task_plan_revisions[k]
             self._ctx_samples.pop(session_id, None)
+            for rec in self._gf_events.pop(session_id, []):
+                eid = rec.event_id or (
+                    f"{rec.session_id}:{rec.run_id}:{int(rec.sequence)}"
+                )
+                self._seen_gf_events.discard(eid)
+            for srec in self._sidecar_events.pop(session_id, []):
+                self._seen_sidecar_keys.discard(srec.event_key)
             return True
 
     # agents --------------------------------------------------------------
@@ -544,25 +556,18 @@ class InMemoryStore(Store):
     async def append_goldfive_event(
         self, record: GoldfiveEventRecord
     ) -> None:
-        # Composite (session_id, run_id, sequence) remains the primary
-        # dedup key — that's the contract callers (and tests) have
-        # written against. goldfive#271 Phase 3 Addition B adds the
-        # event_id field as an additional UNIQUE constraint at the
-        # sqlite layer; for the in-memory store we dedup on the
-        # composite OR a non-empty event_id whichever has been seen,
-        # mirroring sqlite's combined PK + UNIQUE INDEX semantics.
-        composite: tuple = ("composite", record.session_id, record.run_id, int(record.sequence))
-        eid_key: tuple | None = (
-            ("event_id", record.event_id) if record.event_id else None
+        # Dedup on the effective event_id: the wire event_id when present
+        # (globally unique post-#271), else the deterministic
+        # ``{session}:{run}:{sequence}`` fallback that preserves legacy
+        # composite semantics for empty-event_id producers. Matches
+        # sqlite's event_id-only dedup after the composite PK was dropped.
+        eid = record.event_id or (
+            f"{record.session_id}:{record.run_id}:{int(record.sequence)}"
         )
         async with self._lock:
-            if composite in self._seen_gf_events:
+            if eid in self._seen_gf_events:
                 return
-            if eid_key is not None and eid_key in self._seen_gf_events:
-                return
-            self._seen_gf_events.add(composite)
-            if eid_key is not None:
-                self._seen_gf_events.add(eid_key)
+            self._seen_gf_events.add(eid)
             self._gf_events.setdefault(record.session_id, []).append(
                 copy.deepcopy(record)
             )
@@ -582,6 +587,30 @@ class InMemoryStore(Store):
         out.sort(key=lambda e: (e.recorded_at, e.sequence))
         if limit is not None:
             out = out[: int(limit)]
+        return out
+
+    # sidecar events ------------------------------------------------------
+    async def append_sidecar_event(self, record: SidecarEventRecord) -> None:
+        async with self._lock:
+            if record.event_key in self._seen_sidecar_keys:
+                return
+            self._seen_sidecar_keys.add(record.event_key)
+            self._sidecar_events.setdefault(record.session_id, []).append(
+                copy.deepcopy(record)
+            )
+
+    async def list_sidecar_events(
+        self,
+        session_id: str,
+        *,
+        kind: Optional[str] = None,
+    ) -> list[SidecarEventRecord]:
+        async with self._lock:
+            lst = self._sidecar_events.get(session_id, [])
+            out = [copy.deepcopy(e) for e in lst]
+        if kind is not None:
+            out = [e for e in out if e.kind == kind]
+        # Insertion order already reflects (recorded_at, arrival); keep it.
         return out
 
     async def stats(self) -> Stats:

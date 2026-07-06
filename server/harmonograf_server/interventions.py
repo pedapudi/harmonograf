@@ -55,6 +55,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
+import harmonograf_server.pb as _pb  # noqa: F401 — grafts goldfive.v1 onto path
+from goldfive.v1 import events_pb2 as goldfive_events_pb2
+from harmonograf_server.convert import (
+    _drift_kind_pb_to_string,
+    _drift_lifecycle_pb_to_string,
+    _drift_severity_pb_to_string,
+)
 from harmonograf_server.storage import (
     Annotation,
     AnnotationKind,
@@ -65,6 +72,53 @@ from harmonograf_server.storage import (
 
 
 logger = logging.getLogger(__name__)
+
+
+async def _load_drift_records(store: Store, session_id: str) -> list[dict[str, Any]]:
+    """Read persisted ``drift_detected`` events and project them into the
+    dict shape :func:`_project_drifts` consumes.
+
+    Drifts are persisted verbatim to ``goldfive_events`` at ingest, so the
+    aggregator reads them from storage (durable across a server restart)
+    rather than a process-local ring. The parsed envelope carries every
+    field — including ``condition_id`` / ``lifecycle`` / ``prev_severity``
+    — so condition collapse survives a restart.
+    """
+    try:
+        events = await store.list_goldfive_events(session_id, kind="drift_detected")
+    except Exception as exc:  # noqa: BLE001 — degrade gracefully
+        logger.debug("list_goldfive_events(drift_detected) failed: %s", exc)
+        return []
+    out: list[dict[str, Any]] = []
+    for rec in events:
+        try:
+            ev = goldfive_events_pb2.Event()
+            ev.ParseFromString(rec.payload_bytes)
+        except Exception as exc:  # noqa: BLE001 — proto edge cases
+            logger.debug("drift_detected parse failed seq=%s: %s", rec.sequence, exc)
+            continue
+        d = ev.drift_detected
+        out.append(
+            {
+                "run_id": rec.run_id,
+                "kind": _drift_kind_pb_to_string(d.kind),
+                "severity": _drift_severity_pb_to_string(d.severity),
+                "detail": d.detail,
+                "current_task_id": d.current_task_id,
+                "current_agent_id": d.current_agent_id,
+                "annotation_id": getattr(d, "annotation_id", "") or "",
+                "id": getattr(d, "id", "") or "",
+                "condition_id": getattr(d, "condition_id", "") or "",
+                "lifecycle": _drift_lifecycle_pb_to_string(
+                    getattr(d, "lifecycle", 0) or 0
+                ),
+                "prev_severity": _drift_severity_pb_to_string(
+                    getattr(d, "prev_severity", 0) or 0
+                ),
+                "recorded_at": rec.recorded_at,
+            }
+        )
+    return out
 
 
 # Drift kinds that indicate the human operator initiated the change.
@@ -187,15 +241,14 @@ async def list_interventions(
     session_id: str,
     *,
     store: Store,
-    drifts_provider: Any,
     legacy_plan_attribution_window_ms: float = 0.0,
 ) -> list[InterventionRecord]:
     """Return chronologically ordered interventions for ``session_id``.
 
-    ``drifts_provider`` is any object with a ``drifts_for_session`` method
-    (the IngestPipeline in prod; a stub in tests). Kept as a duck-type
-    boundary so tests can drive the aggregator without spinning a full
-    ingest stack.
+    All inputs are read from durable storage — annotations and task plans
+    from their tables, drifts from the persisted ``drift_detected`` rows in
+    ``goldfive_events`` (see :func:`_load_drift_records`) — so the result is
+    identical after a server restart.
 
     ``legacy_plan_attribution_window_ms`` enables the opt-in Tier-2
     time-window fallback (see below). Default 0.0 disables. Plumbed
@@ -226,12 +279,7 @@ async def list_interventions(
     except Exception as exc:  # noqa: BLE001 — degrade gracefully
         logger.debug("list_task_plans_for_session failed: %s", exc)
         plans = []
-    drifts = []
-    try:
-        drifts = drifts_provider.drifts_for_session(session_id) or []
-    except Exception as exc:  # noqa: BLE001 — degrade gracefully
-        logger.debug("drifts_for_session failed: %s", exc)
-        drifts = []
+    drifts = await _load_drift_records(store, session_id)
 
     records: list[InterventionRecord] = []
     records.extend(_project_annotations(annotations))

@@ -49,6 +49,7 @@ from harmonograf_server.storage import (
     GoldfiveEventRecord,
     Session,
     SessionStatus,
+    SidecarEventRecord,
     SpanKind,
     SpanStatus,
     Store,
@@ -231,36 +232,11 @@ class IngestPipeline:
             tuple[str, str], list[tuple[str, str]]
         ] = {}
 
-        # Per-session ring of recent DriftDetected events. Frontend
-        # replays these on WatchSession initial burst so synthetic-actor
-        # rows (user / goldfive) and trajectory drift markers survive
-        # reconnects without requiring a Store schema migration. Bounded
-        # so a long-running session with many drifts cannot balloon RAM.
-        self._drifts_by_session: dict[str, list[dict[str, Any]]] = {}
-        self._drift_ring_max = 500
-
-        # Per-session ring of recent RefineAttempted / RefineFailed
-        # events (goldfive#264). Same reconnect-replay role as the
-        # drift ring above — goldfive ships these as dict envelopes
-        # for forward-compat (the proto promotion is tracked as
-        # goldfive Stream C #256), so the records can't round-trip
-        # through ``list_goldfive_events``. When the promotion lands,
-        # the rings can collapse into the goldfive_events replay path
-        # the way the InvocationCancelled rings did in #190.
-        self._refine_attempts_by_session: dict[str, list[dict[str, Any]]] = {}
-        self._refine_failures_by_session: dict[str, list[dict[str, Any]]] = {}
-        self._refine_ring_max = 500
-
-        # Per-session ring of recent UserMessageReceived events
-        # (harmonograf user-message UX gap). Same reconnect-replay
-        # role as the refine rings above. Lighter approach than a
-        # dedicated ``user_messages`` table: in-memory ring is
-        # sufficient for the operator-observability use case (replay
-        # what happened in the last few hundred turns), avoids a
-        # storage migration, and matches the storage class of every
-        # other operator-only marker (drifts, refines, cancels).
-        self._user_messages_by_session: dict[str, list[dict[str, Any]]] = {}
-        self._user_message_ring_max = 500
+        # DriftDetected events are persisted verbatim to goldfive_events;
+        # RefineAttempted / RefineFailed / UserMessageReceived are
+        # persisted to the sidecar_events table. WatchSession replays all
+        # of them from storage, so they survive a server restart with no
+        # in-memory ring (harmonograf interventions-server-authority).
 
     # ---- public API ---------------------------------------------------
 
@@ -1333,10 +1309,9 @@ class IngestPipeline:
             ),
             "recorded_at": self._now(),
         }
-        ring = self._drifts_by_session.setdefault(ctx.session_id, [])
-        ring.append(record)
-        if len(ring) > self._drift_ring_max:
-            del ring[: len(ring) - self._drift_ring_max]
+        # drift_detected is persisted verbatim to goldfive_events by
+        # _handle_goldfive_event before this dispatch runs, so no
+        # separate ring is needed — WatchSession replays it from storage.
         self._bus.publish_drift(
             ctx.session_id,
             run_id,
@@ -1349,15 +1324,6 @@ class IngestPipeline:
             drift_id=record["id"],
             recorded_at=record["recorded_at"],
         )
-
-    def drifts_for_session(self, session_id: str) -> list[dict[str, Any]]:
-        """Return the in-memory drift ring for ``session_id`` (oldest first).
-
-        Called by the frontend RPC during WatchSession initial burst to
-        replay drifts that have been seen this process. Returns an empty
-        list when nothing has drifted yet or the session is unknown.
-        """
-        return list(self._drifts_by_session.get(session_id, []))
 
     def _on_invocation_cancelled(
         self,
@@ -1459,23 +1425,61 @@ class IngestPipeline:
             recorded_at=self._now(),
         )
 
+    async def _persist_sidecar(
+        self, session_id: str, kind: str, natural_key: str, msg: Any
+    ) -> None:
+        """Durably persist one sidecar telemetry event (RefineAttempted /
+        RefineFailed / UserMessageReceived) before it is published to the
+        bus. ``payload_bytes`` is the serialized harmonograf telemetry
+        proto — WatchSession replay parses it back verbatim. Idempotent on
+        ``event_key``: a natural key when the event carries a stable id,
+        else a content hash so a client reconnect replay dedups cleanly.
+        Never raises — ingest must not fail on a persistence error.
+        """
+        try:
+            payload_bytes = msg.SerializeToString()
+        except Exception as exc:  # noqa: BLE001 — proto edge cases
+            logger.debug(
+                "sidecar serialize failed session_id=%s kind=%s: %s",
+                session_id,
+                kind,
+                exc,
+            )
+            payload_bytes = b""
+        event_key = (
+            f"{kind}:{natural_key}"
+            if natural_key
+            else f"{kind}:h:{hashlib.sha1(payload_bytes).hexdigest()}"
+        )
+        try:
+            await self._store.append_sidecar_event(
+                SidecarEventRecord(
+                    session_id=session_id,
+                    kind=kind,
+                    event_key=event_key,
+                    recorded_at=self._now(),
+                    payload_bytes=payload_bytes,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — ingest must not raise
+            logger.debug(
+                "sidecar persist failed session_id=%s kind=%s: %s",
+                session_id,
+                kind,
+                exc,
+            )
+
     async def _handle_refine_attempted(
         self, ctx: StreamContext, msg: Any
     ) -> None:
         """Ingest a ``RefineAttempted`` envelope.
 
         Same "operator-observability marker" role as
-        :meth:`_handle_invocation_cancelled` (post-#190 routing via the
-        goldfive_event path): stash on the per-session ring (so
-        reconnect replay during WatchSession initial burst keeps the
-        marker visible) and publish a DELTA_REFINE_ATTEMPTED on the bus
-        so live subscribers render the marker immediately.
-
-        Not persisted in the ``goldfive_events`` table — the events
-        arrive as dict envelopes, same forward-compat pattern that
-        pre-#190 InvocationCancelled used. When goldfive Stream C
-        (#256) promotes them to typed proto variants the rings can
-        collapse into the goldfive_events replay path the same way.
+        :meth:`_handle_invocation_cancelled`: persist durably (so a
+        reconnect / server restart keeps the marker visible via the
+        WatchSession initial-burst replay) and publish a
+        DELTA_REFINE_ATTEMPTED on the bus so live subscribers render the
+        marker immediately.
         """
         emitted_at_val: float | None = None
         if msg.HasField("emitted_at"):
@@ -1492,10 +1496,9 @@ class IngestPipeline:
             "current_agent_id": msg.current_agent_id or "",
             "recorded_at": self._now(),
         }
-        ring = self._refine_attempts_by_session.setdefault(ctx.session_id, [])
-        ring.append(record)
-        if len(ring) > self._refine_ring_max:
-            del ring[: len(ring) - self._refine_ring_max]
+        await self._persist_sidecar(
+            ctx.session_id, "refine_attempted", record["attempt_id"], msg
+        )
         self._bus.publish_refine_attempted(
             ctx.session_id,
             record["run_id"],
@@ -1513,10 +1516,10 @@ class IngestPipeline:
     async def _handle_refine_failed(self, ctx: StreamContext, msg: Any) -> None:
         """Ingest a ``RefineFailed`` envelope.
 
-        Companion to :meth:`_handle_refine_attempted`. Stashes on the
-        failures ring so initial-burst replay can re-deliver both the
-        attempted and the failed terminal — preserving the merge-by-
-        ``attempt_id`` correlation the frontend relies on.
+        Companion to :meth:`_handle_refine_attempted`. Persisted durably
+        so initial-burst replay can re-deliver both the attempted and the
+        failed terminal — preserving the merge-by-``attempt_id``
+        correlation the aggregator relies on.
         """
         emitted_at_val: float | None = None
         if msg.HasField("emitted_at"):
@@ -1536,10 +1539,9 @@ class IngestPipeline:
             "current_agent_id": msg.current_agent_id or "",
             "recorded_at": self._now(),
         }
-        ring = self._refine_failures_by_session.setdefault(ctx.session_id, [])
-        ring.append(record)
-        if len(ring) > self._refine_ring_max:
-            del ring[: len(ring) - self._refine_ring_max]
+        await self._persist_sidecar(
+            ctx.session_id, "refine_failed", record["attempt_id"], msg
+        )
         self._bus.publish_refine_failed(
             ctx.session_id,
             record["run_id"],
@@ -1557,35 +1559,15 @@ class IngestPipeline:
             recorded_at=record["recorded_at"],
         )
 
-    def refine_attempts_for_session(
-        self, session_id: str
-    ) -> list[dict[str, Any]]:
-        """Return the in-memory refine-attempted ring (oldest first).
-
-        Replayed during WatchSession initial burst so reconnects keep
-        the attempted side of every paired refine intervention.
-        """
-        return list(self._refine_attempts_by_session.get(session_id, []))
-
-    def refine_failures_for_session(
-        self, session_id: str
-    ) -> list[dict[str, Any]]:
-        """Return the in-memory refine-failed ring (oldest first)."""
-        return list(self._refine_failures_by_session.get(session_id, []))
-
     async def _handle_user_message(
         self, ctx: StreamContext, msg: Any
     ) -> None:
         """Ingest a ``UserMessageReceived`` envelope.
 
-        Stash on the per-session ring (so reconnect replay during
-        WatchSession initial burst keeps the user marker visible)
-        and publish a DELTA_USER_MESSAGE on the bus so live
-        subscribers render the marker immediately.
-
-        Lighter than persisting in a dedicated ``user_messages``
-        table: same in-memory ring class as RefineAttempted /
-        RefineFailed, no storage migration.
+        Persist durably (so reconnect / server restart replay during
+        WatchSession initial burst keeps the user marker visible) and
+        publish a DELTA_USER_MESSAGE on the bus so live subscribers
+        render the marker immediately.
         """
         emitted_at_val: float | None = None
         if msg.HasField("emitted_at"):
@@ -1600,10 +1582,17 @@ class IngestPipeline:
             "invocation_id": msg.invocation_id or "",
             "recorded_at": self._now(),
         }
-        ring = self._user_messages_by_session.setdefault(ctx.session_id, [])
-        ring.append(record)
-        if len(ring) > self._user_message_ring_max:
-            del ring[: len(ring) - self._user_message_ring_max]
+        # Natural key when we have a stable emit timestamp; else the
+        # helper falls back to a payload hash (replay-stable by
+        # construction). sequence resets per turn so it alone is not
+        # unique — run_id + emitted-microseconds disambiguates.
+        if emitted_at_val is not None:
+            um_key = f"{record['run_id']}:{record['sequence']}:{int(emitted_at_val * 1_000_000)}"
+        else:
+            um_key = ""
+        await self._persist_sidecar(
+            ctx.session_id, "user_message", um_key, msg
+        )
         self._bus.publish_user_message(
             ctx.session_id,
             run_id=record["run_id"],
@@ -1615,17 +1604,6 @@ class IngestPipeline:
             invocation_id=record["invocation_id"],
             recorded_at=record["recorded_at"],
         )
-
-    def user_messages_for_session(
-        self, session_id: str
-    ) -> list[dict[str, Any]]:
-        """Return the in-memory user-message ring (oldest first).
-
-        Replayed during WatchSession initial burst so reconnects keep
-        every operator turn visible on the Gantt user lane and the
-        Trajectory intervention list.
-        """
-        return list(self._user_messages_by_session.get(session_id, []))
 
     async def _on_run_completed(
         self, ctx: StreamContext, payload: Any, run_id: str

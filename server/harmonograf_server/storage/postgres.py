@@ -41,6 +41,7 @@ from harmonograf_server.storage.base import (
     Annotation,
     ContextWindowSample,
     GoldfiveEventRecord,
+    SidecarEventRecord,
     PayloadMeta,
     PayloadRecord,
     Session,
@@ -205,6 +206,14 @@ class PostgresStore(Store):
     ) -> Optional[Task]:
         raise NotImplementedError(_NOT_IMPLEMENTED)
 
+    async def update_task_assignee(
+        self,
+        plan_id: str,
+        task_id: str,
+        assignee_agent_id: str,
+    ) -> Optional[Task]:
+        raise NotImplementedError(_NOT_IMPLEMENTED)
+
     async def put_task_plan_revision(
         self, revision: TaskPlanRevision
     ) -> TaskPlanRevision:
@@ -241,6 +250,17 @@ class PostgresStore(Store):
         kind: Optional[str] = None,
         limit: Optional[int] = None,
     ) -> list[GoldfiveEventRecord]:
+        raise NotImplementedError(_NOT_IMPLEMENTED)
+
+    async def append_sidecar_event(self, record: SidecarEventRecord) -> None:
+        raise NotImplementedError(_NOT_IMPLEMENTED)
+
+    async def list_sidecar_events(
+        self,
+        session_id: str,
+        *,
+        kind: Optional[str] = None,
+    ) -> list[SidecarEventRecord]:
         raise NotImplementedError(_NOT_IMPLEMENTED)
 
     async def stats(self) -> Stats:

@@ -1,15 +1,10 @@
 """Tests for the ``TelemetryUp.refine_attempted`` / ``.refine_failed``
 ingest paths (goldfive#264).
 
-Mirrors the structure of ``test_invocation_cancelled_ingest.py``: each
-new envelope kind is dispatched, stashed on a per-session ring for
-reconnect replay, and published onto the bus as a typed delta.
-
-Not persisted in the ``goldfive_events`` table — the events arrive as
-dicts on the goldfive side and the ingest path for that table is
-strictly proto-serialized via the goldfive Event envelope. Reconnect
-replay rides on the in-memory rings, exposed via
-``pipe.refine_attempts_for_session`` / ``pipe.refine_failures_for_session``.
+Each new envelope kind is dispatched, persisted durably to the
+``sidecar_events`` table (the serialized telemetry proto), and published
+onto the bus as a typed delta. Reconnect / restart replay reads the
+persisted rows back via ``store.list_sidecar_events``.
 """
 
 from __future__ import annotations
@@ -166,43 +161,53 @@ async def test_refine_failed_publishes_delta(pipeline):
     assert p["recorded_at"] == 1_000_000.0
 
 
+async def _attempts(store):
+    out = []
+    for rec in await store.list_sidecar_events("sess_r", kind="refine_attempted"):
+        m = telemetry_pb2.RefineAttempted()
+        m.ParseFromString(rec.payload_bytes)
+        out.append(m)
+    return out
+
+
+async def _failures(store):
+    out = []
+    for rec in await store.list_sidecar_events("sess_r", kind="refine_failed"):
+        m = telemetry_pb2.RefineFailed()
+        m.ParseFromString(rec.payload_bytes)
+        out.append(m)
+    return out
+
+
 @pytest.mark.asyncio
 async def test_attempt_failure_paired_via_attempt_id(pipeline):
-    """Ingest doesn't merge attempted+failed (the frontend does — via
-    the deriver in ``lib/interventions.ts``). But the rings must
-    preserve both records ordered by arrival so the merge can run on
-    reconnect replay."""
-    pipe, _, _ = pipeline
+    """Ingest doesn't merge attempted+failed (the aggregator does). But
+    the persisted sidecar events must preserve both records ordered by
+    arrival so the merge can run on reconnect / restart replay."""
+    pipe, _, store = pipeline
     a = _make_attempted(attempt_id="att-1")
     f = _make_failed(attempt_id="att-1", sequence=15)
     await pipe.handle_message(_stream_ctx(), _wrap_attempted(a))
     await pipe.handle_message(_stream_ctx(), _wrap_failed(f))
-    attempts = pipe.refine_attempts_for_session("sess_r")
-    failures = pipe.refine_failures_for_session("sess_r")
+    attempts = await _attempts(store)
+    failures = await _failures(store)
     assert len(attempts) == 1
     assert len(failures) == 1
-    assert attempts[0]["attempt_id"] == "att-1"
-    assert failures[0]["attempt_id"] == "att-1"
+    assert attempts[0].attempt_id == "att-1"
+    assert failures[0].attempt_id == "att-1"
 
 
 @pytest.mark.asyncio
-async def test_refine_rings_bounded(pipeline):
-    """The rings cap at the configured max with oldest-dropped."""
-    pipe, _, _ = pipeline
-    pipe._refine_ring_max = 3
-    for i in range(5):
-        await pipe.handle_message(
-            _stream_ctx(),
-            _wrap_attempted(
-                _make_attempted(attempt_id=f"att-{i}", sequence=i)
-            ),
-        )
-    attempts = pipe.refine_attempts_for_session("sess_r")
-    assert [a["attempt_id"] for a in attempts] == [
-        "att-2",
-        "att-3",
-        "att-4",
-    ]
+async def test_refine_attempt_persist_is_idempotent(pipeline):
+    """Re-ingesting the same attempt (client reconnect replay) dedups on
+    the ``ra:{attempt_id}`` event_key — one persisted row, not two."""
+    pipe, _, store = pipeline
+    a = _make_attempted(attempt_id="att-dup")
+    await pipe.handle_message(_stream_ctx(), _wrap_attempted(a))
+    await pipe.handle_message(_stream_ctx(), _wrap_attempted(a))
+    attempts = await _attempts(store)
+    assert len(attempts) == 1
+    assert attempts[0].attempt_id == "att-dup"
 
 
 @pytest.mark.asyncio

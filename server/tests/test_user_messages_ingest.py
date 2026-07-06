@@ -1,14 +1,11 @@
 """Tests for the ``TelemetryUp.user_message`` ingest path
 (harmonograf user-message UX gap).
 
-Mirrors the structure of ``test_refine_events_ingest.py``: each new
-envelope kind is dispatched, stashed on a per-session ring for
-reconnect replay, and published onto the bus as a typed delta.
-
-Not persisted in any storage table — the records ride on an in-memory
-ring class identical to the refine_attempted / refine_failed rings.
-Replay during WatchSession initial burst keeps every operator turn
-visible across reconnects without a sqlite migration.
+Each new envelope kind is dispatched, persisted durably to the
+``sidecar_events`` table (the serialized telemetry proto), and published
+onto the bus as a typed delta. Replay during WatchSession initial burst
+reads the persisted rows back so every operator turn stays visible across
+reconnects and server restarts.
 """
 
 from __future__ import annotations
@@ -117,10 +114,10 @@ async def test_mid_turn_message_carries_invocation_id(pipeline):
 
 @pytest.mark.asyncio
 async def test_messages_for_session_replay_order(pipeline):
-    """The ingest ring exposes per-session records in arrival order so
-    WatchSession initial-burst replay re-delivers every operator turn
-    chronologically."""
-    pipe, _, _ = pipeline
+    """The persisted sidecar events expose per-session records in arrival
+    order so WatchSession initial-burst replay re-delivers every operator
+    turn chronologically."""
+    pipe, _, store = pipeline
     for i in range(3):
         await pipe.handle_message(
             _stream_ctx(),
@@ -131,23 +128,30 @@ async def test_messages_for_session_replay_order(pipeline):
                 )
             ),
         )
-    msgs = pipe.user_messages_for_session("sess_um")
-    assert [m["content"] for m in msgs] == ["turn 0", "turn 1", "turn 2"]
+    msgs = await _user_messages(store)
+    assert [m.content for m in msgs] == ["turn 0", "turn 1", "turn 2"]
 
 
 @pytest.mark.asyncio
-async def test_user_message_ring_bounded(pipeline):
-    """The ring caps at the configured max with oldest-dropped — same
-    bound contract as the refine rings."""
-    pipe, _, _ = pipeline
-    pipe._user_message_ring_max = 3
-    for i in range(5):
-        await pipe.handle_message(
-            _stream_ctx(),
-            _wrap(_make_user_message(sequence=i, content=f"msg-{i}")),
-        )
-    msgs = pipe.user_messages_for_session("sess_um")
-    assert [m["content"] for m in msgs] == ["msg-2", "msg-3", "msg-4"]
+async def test_user_message_persist_is_idempotent(pipeline):
+    """Re-ingesting the same user message (client reconnect replay) dedups
+    on the event_key — one persisted row, not two."""
+    pipe, _, store = pipeline
+    ts = _make_user_message(sequence=9, content="only once")
+    ts.emitted_at.seconds = 1234
+    await pipe.handle_message(_stream_ctx(), _wrap(ts))
+    await pipe.handle_message(_stream_ctx(), _wrap(ts))
+    msgs = await _user_messages(store)
+    assert [m.content for m in msgs] == ["only once"]
+
+
+async def _user_messages(store):
+    out = []
+    for rec in await store.list_sidecar_events("sess_um", kind="user_message"):
+        m = telemetry_pb2.UserMessageReceived()
+        m.ParseFromString(rec.payload_bytes)
+        out.append(m)
+    return out
 
 
 @pytest.mark.asyncio

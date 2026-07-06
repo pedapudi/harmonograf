@@ -349,41 +349,32 @@ class FrontendServicerMixin:
                     for ev in _synthesize_task_events(task):
                         yield frontend_pb2.SessionUpdate(goldfive_event=ev)
 
-            # 4b.1. Drifts — replay the in-memory drift ring so the
-            # synthetic-actor rows (user / goldfive) and trajectory drift
-            # markers reappear on reconnect. The ring is bounded and
-            # process-local (not persisted across server restarts); a
-            # full persistence layer is tracked as followup.
+            # 4b.1. Drifts — replay the persisted ``drift_detected`` rows
+            # from ``goldfive_events`` (same path as invocation_cancelled
+            # / delegation_observed below). The verbatim envelope carries
+            # every field — including condition_id / lifecycle /
+            # prev_severity — so condition grouping survives a reconnect
+            # AND a server restart, which the old process-local ring could
+            # not do.
             try:
-                drift_records = self._ingest.drifts_for_session(session_id)
+                drift_events = await self._store.list_goldfive_events(
+                    session_id, kind="drift_detected"
+                )
             except Exception as exc:  # noqa: BLE001
-                logger.debug("drifts_for_session failed: %s", exc)
-                drift_records = []
-            for dr in drift_records:
-                ev = goldfive_events_pb2.Event(run_id=dr.get("run_id", ""))
-                ev.drift_detected.kind = _drift_kind_string_to_pb(
-                    dr.get("kind", "") or ""
-                )
-                ev.drift_detected.severity = _drift_severity_string_to_pb(
-                    dr.get("severity", "") or ""
-                )
-                ev.drift_detected.detail = dr.get("detail", "") or ""
-                ev.drift_detected.current_task_id = dr.get("current_task_id", "") or ""
-                ev.drift_detected.current_agent_id = dr.get("current_agent_id", "") or ""
-                # Propagate annotation_id so reconnecting clients can dedup
-                # the drift row against the source user annotation on the
-                # initial burst just like they do for live arrivals
-                # (harmonograf#75).
-                ev.drift_detected.annotation_id = dr.get("annotation_id", "") or ""
-                # Propagate the goldfive-minted drift id (goldfive#199 /
-                # harmonograf#99) so reconnecting clients have the strict
-                # join key for autonomous-drift plan-revision merges.
-                ev.drift_detected.id = dr.get("id", "") or ""
-                ra = dr.get("recorded_at")
-                if isinstance(ra, (int, float)):
-                    ts = float_to_ts(float(ra))
-                    if ts is not None:
-                        ev.emitted_at.CopyFrom(ts)
+                logger.debug("list_goldfive_events(drift_detected) failed: %s", exc)
+                drift_events = []
+            for rec in drift_events:
+                try:
+                    ev = goldfive_events_pb2.Event()
+                    ev.ParseFromString(rec.payload_bytes)
+                except Exception as exc:  # noqa: BLE001 — proto edge cases
+                    logger.debug(
+                        "drift_detected replay parse failed session_id=%s seq=%s: %s",
+                        session_id,
+                        rec.sequence,
+                        exc,
+                    )
+                    continue
                 yield frontend_pb2.SessionUpdate(goldfive_event=ev)
 
             # 4b.2. Invocation cancellations — replay from the persisted
@@ -417,105 +408,77 @@ class FrontendServicerMixin:
                     continue
                 yield frontend_pb2.SessionUpdate(goldfive_event=ev)
 
-            # 4b.3. Refine attempts + failures (goldfive#264). Same ring
-            # rationale as cancels: dict-sourced, not persisted in
-            # ``goldfive_events``, but the operator UI relies on the
-            # paired RefineAttempted ↔ terminal correlation surviving a
-            # reconnect. Replayed in arrival order so the frontend's
-            # merge-by-attempt_id logic matches what it sees on the live
-            # tail — attempted before its terminal counterpart, never
-            # the other way around (goldfive's emitter holds the
-            # ordering invariant).
+            # 4b.3. Refine attempts + failures (goldfive#264). Replayed
+            # from the persisted ``sidecar_events`` table (the serialized
+            # RefineAttempted / RefineFailed protos) so the paired
+            # RefineAttempted ↔ terminal correlation survives a reconnect
+            # AND a server restart. ``list_sidecar_events`` returns rows in
+            # (recorded_at, insertion) order, so an attempt always precedes
+            # its terminal — the ordering the aggregator's merge-by-
+            # attempt_id relies on.
             try:
-                attempts = self._ingest.refine_attempts_for_session(
-                    session_id
+                attempts = await self._store.list_sidecar_events(
+                    session_id, kind="refine_attempted"
                 )
             except Exception as exc:  # noqa: BLE001
-                logger.debug("refine_attempts_for_session failed: %s", exc)
+                logger.debug("list_sidecar_events(refine_attempted) failed: %s", exc)
                 attempts = []
-            for ar in attempts:
-                rmsg = telemetry_pb2.RefineAttempted(
-                    run_id=ar.get("run_id", "") or "",
-                    sequence=int(ar.get("sequence", 0) or 0),
-                    session_id=session_id,
-                    attempt_id=ar.get("attempt_id", "") or "",
-                    drift_id=ar.get("drift_id", "") or "",
-                    trigger_kind=ar.get("trigger_kind", "") or "",
-                    trigger_severity=ar.get("trigger_severity", "") or "",
-                    current_task_id=ar.get("current_task_id", "") or "",
-                    current_agent_id=ar.get("current_agent_id", "") or "",
-                )
-                ts_val = ar.get("emitted_at")
-                if not isinstance(ts_val, (int, float)):
-                    ts_val = ar.get("recorded_at")
-                if isinstance(ts_val, (int, float)):
-                    ts = float_to_ts(float(ts_val))
-                    if ts is not None:
-                        rmsg.emitted_at.CopyFrom(ts)
+            for rec in attempts:
+                try:
+                    rmsg = telemetry_pb2.RefineAttempted()
+                    rmsg.ParseFromString(rec.payload_bytes)
+                except Exception as exc:  # noqa: BLE001 — proto edge cases
+                    logger.debug(
+                        "refine_attempted replay parse failed session_id=%s: %s",
+                        session_id,
+                        exc,
+                    )
+                    continue
                 yield frontend_pb2.SessionUpdate(refine_attempted=rmsg)
 
             try:
-                failures = self._ingest.refine_failures_for_session(
-                    session_id
+                failures = await self._store.list_sidecar_events(
+                    session_id, kind="refine_failed"
                 )
             except Exception as exc:  # noqa: BLE001
-                logger.debug("refine_failures_for_session failed: %s", exc)
+                logger.debug("list_sidecar_events(refine_failed) failed: %s", exc)
                 failures = []
-            for fr in failures:
-                fmsg = telemetry_pb2.RefineFailed(
-                    run_id=fr.get("run_id", "") or "",
-                    sequence=int(fr.get("sequence", 0) or 0),
-                    session_id=session_id,
-                    attempt_id=fr.get("attempt_id", "") or "",
-                    drift_id=fr.get("drift_id", "") or "",
-                    trigger_kind=fr.get("trigger_kind", "") or "",
-                    trigger_severity=fr.get("trigger_severity", "") or "",
-                    failure_kind=fr.get("failure_kind", "") or "",
-                    reason=fr.get("reason", "") or "",
-                    detail=fr.get("detail", "") or "",
-                    current_task_id=fr.get("current_task_id", "") or "",
-                    current_agent_id=fr.get("current_agent_id", "") or "",
-                )
-                ts_val = fr.get("emitted_at")
-                if not isinstance(ts_val, (int, float)):
-                    ts_val = fr.get("recorded_at")
-                if isinstance(ts_val, (int, float)):
-                    ts = float_to_ts(float(ts_val))
-                    if ts is not None:
-                        fmsg.emitted_at.CopyFrom(ts)
+            for rec in failures:
+                try:
+                    fmsg = telemetry_pb2.RefineFailed()
+                    fmsg.ParseFromString(rec.payload_bytes)
+                except Exception as exc:  # noqa: BLE001 — proto edge cases
+                    logger.debug(
+                        "refine_failed replay parse failed session_id=%s: %s",
+                        session_id,
+                        exc,
+                    )
+                    continue
                 yield frontend_pb2.SessionUpdate(refine_failed=fmsg)
 
             # 4b.4. User messages (harmonograf user-message UX gap).
-            # Same ring rationale as the refine attempts above:
-            # in-memory, not persisted in ``goldfive_events``, but the
-            # operator UI relies on the verbatim user text surviving
-            # a reconnect — otherwise refreshing during a session
-            # erases the operator's words from every view. Replayed
-            # in arrival order.
+            # Replayed from ``sidecar_events`` (the serialized
+            # UserMessageReceived proto) so the verbatim operator text
+            # survives a reconnect / restart — otherwise refreshing during
+            # a session erased the operator's words from every view.
             try:
-                user_msgs = self._ingest.user_messages_for_session(
-                    session_id
+                user_msgs = await self._store.list_sidecar_events(
+                    session_id, kind="user_message"
                 )
             except Exception as exc:  # noqa: BLE001
-                logger.debug("user_messages_for_session failed: %s", exc)
+                logger.debug("list_sidecar_events(user_message) failed: %s", exc)
                 user_msgs = []
-            for um in user_msgs:
-                umsg = telemetry_pb2.UserMessageReceived(
-                    run_id=um.get("run_id", "") or "",
-                    sequence=int(um.get("sequence", 0) or 0),
-                    session_id=session_id,
-                    content=um.get("content", "") or "",
-                    author=um.get("author", "user") or "user",
-                    mid_turn=bool(um.get("mid_turn", False)),
-                    invocation_id=um.get("invocation_id", "") or "",
-                )
-                ts_val = um.get("emitted_at")
-                if not isinstance(ts_val, (int, float)):
-                    ts_val = um.get("recorded_at")
-                if isinstance(ts_val, (int, float)):
-                    ts = float_to_ts(float(ts_val))
-                    if ts is not None:
-                        umsg.emitted_at.CopyFrom(ts)
+            for rec in user_msgs:
+                try:
+                    umsg = telemetry_pb2.UserMessageReceived()
+                    umsg.ParseFromString(rec.payload_bytes)
+                except Exception as exc:  # noqa: BLE001 — proto edge cases
+                    logger.debug(
+                        "user_message replay parse failed session_id=%s: %s",
+                        session_id,
+                        exc,
+                    )
+                    continue
                 yield frontend_pb2.SessionUpdate(user_message=umsg)
 
             # 4c. Context window samples — replay the most recent per-agent
@@ -908,7 +871,6 @@ class FrontendServicerMixin:
         records = await list_interventions(
             request.session_id,
             store=self._store,
-            drifts_provider=self._ingest,
             legacy_plan_attribution_window_ms=legacy_window_ms,
         )
         resp = frontend_pb2.ListInterventionsResponse()

@@ -20,22 +20,29 @@ These tests assert:
 from __future__ import annotations
 
 import asyncio
+import itertools
 from pathlib import Path
 
 import grpc
 import pytest
 import pytest_asyncio
 
+from harmonograf_server.pb import (  # noqa: F401 — grafts goldfive.v1 onto path
+    frontend_pb2,
+    service_pb2_grpc,
+)
+from goldfive.v1 import events_pb2 as goldfive_events_pb2
 from harmonograf_server.bus import SessionBus
 from harmonograf_server.control_router import ControlRouter
+from harmonograf_server.convert import (
+    _drift_kind_string_to_pb,
+    _drift_lifecycle_string_to_pb,
+    _drift_severity_string_to_pb,
+)
 from harmonograf_server.ingest import IngestPipeline
 from harmonograf_server.interventions import (
     InterventionRecord,
     list_interventions,
-)
-from harmonograf_server.pb import (
-    frontend_pb2,
-    service_pb2_grpc,
 )
 from harmonograf_server.rpc.telemetry import TelemetryServicer
 from harmonograf_server.storage import (
@@ -45,6 +52,7 @@ from harmonograf_server.storage import (
     AnnotationKind,
     AnnotationTarget,
     Framework,
+    GoldfiveEventRecord,
     Session,
     SessionStatus,
     Task,
@@ -58,15 +66,59 @@ from harmonograf_server.storage import (
 # Shared helpers
 # ---------------------------------------------------------------------------
 
+# Drifts are read by the aggregator from the persisted ``drift_detected``
+# rows in ``goldfive_events`` (durable across restart). These helpers seed
+# the same test drift dicts into the store as serialized envelopes so the
+# unit tests exercise the real storage-backed path.
+_seed_seq = itertools.count(1)
+
 
 class _StubDrifts:
-    """Duck-type of ``IngestPipeline.drifts_for_session``."""
+    """Holder for the per-session drift dicts a test wants seeded."""
 
     def __init__(self, drifts: dict[str, list[dict]]) -> None:
         self._drifts = drifts
 
-    def drifts_for_session(self, session_id: str) -> list[dict]:
-        return list(self._drifts.get(session_id, []))
+
+async def _seed_drift_dicts(store, drifts_by_session: dict[str, list[dict]]) -> None:
+    """Persist drift dicts as ``drift_detected`` goldfive events."""
+    for sid, drifts in drifts_by_session.items():
+        for dr in drifts:
+            ev = goldfive_events_pb2.Event(run_id=dr.get("run_id", "") or "")
+            d = ev.drift_detected
+            d.kind = _drift_kind_string_to_pb(dr.get("kind", "") or "")
+            d.severity = _drift_severity_string_to_pb(dr.get("severity", "") or "")
+            d.detail = dr.get("detail", "") or ""
+            d.current_task_id = dr.get("current_task_id", "") or ""
+            d.current_agent_id = dr.get("current_agent_id", "") or ""
+            if dr.get("annotation_id"):
+                d.annotation_id = dr["annotation_id"]
+            if dr.get("id"):
+                d.id = dr["id"]
+            if dr.get("condition_id"):
+                d.condition_id = dr["condition_id"]
+            if dr.get("lifecycle"):
+                d.lifecycle = _drift_lifecycle_string_to_pb(dr["lifecycle"])
+            if dr.get("prev_severity"):
+                d.prev_severity = _drift_severity_string_to_pb(dr["prev_severity"])
+            seq = next(_seed_seq)
+            await store.append_goldfive_event(
+                GoldfiveEventRecord(
+                    session_id=sid,
+                    run_id=dr.get("run_id", "") or "",
+                    kind="drift_detected",
+                    sequence=seq,
+                    recorded_at=float(dr.get("recorded_at", 0.0) or 0.0),
+                    payload_bytes=ev.SerializeToString(),
+                    event_id=f"{sid}:drift:{seq}",
+                )
+            )
+
+
+async def _list(sid, store, drifts: _StubDrifts, **kwargs):
+    """Seed the test's drifts into ``store`` then run the aggregator."""
+    await _seed_drift_dicts(store, drifts._drifts)
+    return await list_interventions(sid, store=store, **kwargs)
 
 
 @pytest_asyncio.fixture
@@ -168,7 +220,7 @@ async def test_list_interventions_merges_annotations_drifts_and_refines(store):
         )
     )
 
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
 
     assert [r.at for r in records] == sorted(r.at for r in records)
     sources = [r.source for r in records]
@@ -204,7 +256,7 @@ async def test_user_drift_kind_is_attributed_to_user_source(store):
             ]
         }
     )
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
     assert len(records) == 1
     assert records[0].source == "user"
     assert records[0].kind == "STEER"
@@ -243,7 +295,7 @@ async def test_real_operator_steer_drift_surfaces_in_intervention_list(store):
             ]
         }
     )
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
     assert len(records) == 1, (
         f"expected the operator STEER to surface; got "
         f"records={[(r.kind, r.body_or_reason) for r in records]!r}"
@@ -296,7 +348,7 @@ async def test_ordering_across_sources_is_by_timestamp(store):
             revision_index=1,
         )
     )
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
     assert [r.source for r in records] == ["drift", "goldfive", "user"]
 
 
@@ -317,7 +369,7 @@ async def test_drift_without_matching_revision_is_recorded(store):
             ]
         }
     )
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
     assert len(records) == 1
     assert records[0].outcome == "recorded"
 
@@ -365,7 +417,7 @@ async def test_cascade_cancel_counts_cancelled_tasks(store):
             revision_index=0,
         )
     )
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
     assert len(records) == 1
     assert records[0].outcome == "cascade_cancel:3_tasks"
 
@@ -402,7 +454,7 @@ async def test_plan_revision_with_matching_drift_is_not_double_counted(store):
             trigger_event_id="drift_refusal_1",
         )
     )
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
     # Exactly one row — the drift, enriched with plan_revised:r2.
     assert len(records) == 1
     assert records[0].source == "drift"
@@ -475,7 +527,7 @@ async def test_user_steer_annotation_plus_drift_plus_plan_collapse_to_one_card(s
         )
     )
 
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
 
     # Exactly one card — not three.
     assert len(records) == 1, f"expected 1 card, got {len(records)}: {records}"
@@ -537,7 +589,7 @@ async def test_autonomous_drift_keeps_own_card_alongside_user_annotation(store):
             ]
         }
     )
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
 
     # 2 cards: the merged user STEER + the autonomous looping_reasoning drift.
     assert len(records) == 2
@@ -582,7 +634,7 @@ async def test_user_steer_drift_without_annotation_id_keeps_separate_card(store)
             ]
         }
     )
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
     assert len(records) == 2  # annotation + orphan drift
     assert all(r.source == "user" for r in records)
 
@@ -645,7 +697,7 @@ async def test_user_steer_plan_revision_strict_id_merge(store):
         )
     )
 
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
 
     assert len(records) == 1, f"expected 1 card, got {len(records)}: {records}"
     card = records[0]
@@ -705,7 +757,7 @@ async def test_autonomous_drift_plan_revision_strict_id_merge(store):
             trigger_event_id="drift_loop_AUTO",
         )
     )
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
 
     assert len(records) == 1, f"expected 1 card, got {len(records)}: {records}"
     card = records[0]
@@ -754,7 +806,7 @@ async def test_no_trigger_id_no_merge_by_default(store):
         )
     )
     # Default window (0.0) → fallback disabled.
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
     # 2 cards: annotation + orphan plan row.
     assert len(records) == 2
     kinds = sorted(r.kind for r in records)
@@ -811,10 +863,10 @@ async def test_legacy_flag_enabled_via_config(store, caplog):
             # No trigger_event_id.
         )
     )
-    records = await list_interventions(
+    records = await _list(
         sid,
-        store=store,
-        drifts_provider=drifts,
+        store,
+        drifts,
         legacy_plan_attribution_window_ms=900_000.0,
     )
     # User annotation + drift merge via strict id (both have
@@ -890,7 +942,7 @@ async def test_legacy_flag_disabled_default(store):
         )
     )
     # Default (0.0) keeps the fallback disabled.
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
     # Two cards: the merged annotation+drift (strict-id via
     # annotation_id), PLUS the standalone plan-row (no
     # trigger_event_id so no strict merge; legacy window is
@@ -953,7 +1005,7 @@ async def test_autonomous_drift_and_mismatched_plan_keep_separate_cards(store):
         )
     )
 
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
     # Two cards: the drift (unmerged, outcome=recorded) and the plan as
     # its own entry.
     assert len(records) == 2
@@ -967,7 +1019,7 @@ async def test_empty_session_returns_empty_list(store):
     sid = "sess_empty"
     await _seed_session(store, sid)
     drifts = _StubDrifts({})
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
     assert records == []
 
 
@@ -994,7 +1046,6 @@ async def rpc_stack(store):
 
 async def test_list_interventions_rpc_round_trips(rpc_stack):
     store = rpc_stack["store"]
-    ingest = rpc_stack["ingest"]
     sid = "sess_rpc"
     await _seed_session(store, sid)
     await store.put_annotation(
@@ -1008,16 +1059,20 @@ async def test_list_interventions_rpc_round_trips(rpc_stack):
             body="please slow down",
         )
     )
-    # Inject a drift into the ingest ring so the RPC's drifts_provider
-    # (the real IngestPipeline) surfaces it without depending on a
-    # goldfive event stream.
-    ingest._drifts_by_session.setdefault(sid, []).append(
+    # Persist a drift_detected event so the RPC (which reads drifts from
+    # storage) surfaces it. Durable across restart — no in-memory ring.
+    await _seed_drift_dicts(
+        store,
         {
-            "kind": "looping_reasoning",
-            "severity": "warning",
-            "detail": "ring",
-            "recorded_at": 110.0,
-        }
+            sid: [
+                {
+                    "kind": "looping_reasoning",
+                    "severity": "warning",
+                    "detail": "ring",
+                    "recorded_at": 110.0,
+                }
+            ]
+        },
     )
 
     ch = grpc.aio.insecure_channel(f"127.0.0.1:{rpc_stack['port']}")
@@ -1117,7 +1172,7 @@ async def test_collapse_two_drifts_same_condition_id_yields_one_row(store):
         }
     )
 
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
 
     assert len(records) == 1, (
         f"expected collapse to one row; got {[(r.kind, r.at, r.detail if hasattr(r, 'detail') else r.body_or_reason) for r in records]!r}"
@@ -1178,7 +1233,7 @@ async def test_collapse_three_distinct_condition_ids_yields_three_rows(store):
         }
     )
 
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
     assert len(records) == 3
     for rec in records:
         assert rec.count == 1
@@ -1220,7 +1275,7 @@ async def test_collapse_empty_condition_id_passes_through_pre_318(store):
         }
     )
 
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
     assert len(records) == 2
     for rec in records:
         assert rec.condition_id == ""
@@ -1262,7 +1317,7 @@ async def test_collapse_severity_transition_warning_to_critical(store):
         }
     )
 
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
     assert len(records) == 1
     rec = records[0]
     assert rec.count == 2
@@ -1326,7 +1381,7 @@ async def test_collapse_donates_outcome_from_earlier_emit(store):
         )
     )
 
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
     assert len(records) == 1
     rec = records[0]
     assert rec.count == 2
@@ -1373,7 +1428,7 @@ async def test_record_to_pb_emits_collapse_fields(store):
         }
     )
 
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
     assert len(records) == 1
     pb = record_to_pb(records[0], types_pb2)
     assert pb.condition_id == "cond_pb"
@@ -1444,7 +1499,7 @@ async def test_collapse_iter1_escalation_scenario(store):
     assert len(raw_drifts) == 13
 
     drifts = _StubDrifts({sid: raw_drifts})
-    records = await list_interventions(sid, store=store, drifts_provider=drifts)
+    records = await _list(sid, store, drifts)
 
     # 9 rows, NOT 13 / 18.
     assert len(records) == 9, (
