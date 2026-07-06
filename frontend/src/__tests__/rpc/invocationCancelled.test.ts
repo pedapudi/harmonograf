@@ -7,7 +7,6 @@ import {
   EventSchema,
   InvocationCancelledSchema,
 } from '../../pb/goldfive/v1/events_pb';
-import { deriveInterventionsFromStore } from '../../lib/interventions';
 
 // Tests the WatchSession dispatch for the typed
 // ``goldfive.v1.InvocationCancelled`` payload variant on the goldfive
@@ -178,65 +177,6 @@ describe('applyInvocationCancelled', () => {
     });
   });
 
-  it('produces an InterventionRow with source=cancel via the deriver', () => {
-    const ev = mkCancelEvent({ emittedAtSecs: 1_010 });
-    const payload = ev.payload;
-    if (payload.case !== 'invocationCancelled') throw new Error('bad fixture');
-    applyInvocationCancelled(payload.value, ev, store, 1_000_000, 'sess-c');
-    const rows = deriveInterventionsFromStore(store, []);
-    expect(rows).toHaveLength(1);
-    const row = rows[0];
-    expect(row.source).toBe('cancel');
-    expect(row.kind).toBe('CANCELLED');
-    expect(row.severity).toBe('critical');
-    expect(row.driftId).toBe('drift-uuid-1');
-    expect(row.targetAgentId).toBe(
-      'presentation-orchestrated-abc:researcher_agent',
-    );
-    expect(row.atMs).toBe(10_000);
-    expect(row.bodyOrReason).toBe('assistant veered off task');
-    // triggerEventId stays empty — cancel rows do NOT merge into their
-    // triggering drift row; both coexist on the intervention list.
-    expect(row.triggerEventId).toBe('');
-  });
-
-  it('derives a default body when detail is empty', () => {
-    const ev = mkCancelEvent({ detail: '' });
-    const payload = ev.payload;
-    if (payload.case !== 'invocationCancelled') throw new Error('bad fixture');
-    applyInvocationCancelled(payload.value, ev, store, 0, 'sess-c');
-    const [row] = deriveInterventionsFromStore(store, []);
-    expect(row.bodyOrReason).toBe('cancelled (drift → off_topic)');
-  });
-
-  it('coexists with its triggering DriftRecord in the intervention list', () => {
-    // Append a drift with matching drift_id.
-    store.drifts.append({
-      kind: 'off_topic',
-      severity: 'critical',
-      detail: 'model veered',
-      taskId: 't1',
-      agentId: 'presentation-orchestrated-abc:researcher_agent',
-      recordedAtMs: 9_000,
-      annotationId: '',
-      driftId: 'drift-uuid-1',
-    });
-    const ev = mkCancelEvent({ emittedAtSecs: 1_010 });
-    const payload = ev.payload;
-    if (payload.case !== 'invocationCancelled') throw new Error('bad fixture');
-    applyInvocationCancelled(payload.value, ev, store, 1_000_000, 'sess-c');
-    const rows = deriveInterventionsFromStore(store, []);
-    // Both the drift row AND the cancel row appear — the cancel is
-    // deliberately NOT merged into the drift (they represent different
-    // facets: the drift is WHY, the cancel is WHAT happened).
-    const sources = rows.map((r) => r.source);
-    expect(sources).toContain('drift');
-    expect(sources).toContain('cancel');
-    const cancelRow = rows.find((r) => r.source === 'cancel')!;
-    // Backlink is preserved on the cancel row for hover / click-through
-    // to the drift detail drawer.
-    expect(cancelRow.driftId).toBe('drift-uuid-1');
-  });
 });
 
 describe('applyGoldfiveEvent invocationCancelled dispatch', () => {

@@ -1913,3 +1913,91 @@ async def test_all_seven_sources_end_to_end_rpc(rpc_stack):
     trans = next(iv for iv in resp.interventions if iv.source == "transition")
     assert trans.transition_to_status == "COMPLETED"
     assert trans.transition_source == "llm_report"
+
+
+async def test_refine_failure_overrides_success(store):
+    """When both a failure and a matching success plan exist for the same
+    attempt, the failed terminal wins (defensive)."""
+    sid = "sess_refine_override"
+    await _seed_session(store, sid, created_at=100.0)
+    await _seed_refine_attempted(
+        store, sid, recorded_at=120.0, attempt_id="att-5", drift_id="drift-5",
+        trigger_kind="looping_reasoning", trigger_severity="warning",
+    )
+    await _seed_refine_failed(
+        store, sid, recorded_at=121.0, attempt_id="att-5",
+        failure_kind="parse_error", reason="bad json",
+    )
+    await store.put_task_plan(
+        TaskPlan(
+            id="p5", session_id=sid, created_at=122.0, summary="", tasks=[],
+            edges=[], revision_reason="revised", revision_kind="looping_reasoning",
+            revision_index=2, trigger_event_id="drift-5",
+        )
+    )
+    records = await _list(sid, store, _StubDrifts({}))
+    refine = next(r for r in records if r.source == "refine")
+    assert refine.kind == "REFINE_FAILED:PARSE_ERROR"
+    assert refine.failure_kind == "parse_error"
+
+
+async def test_refine_orphan_failure_is_dropped(store):
+    """A RefineFailed with no matching attempt produces no refine row."""
+    sid = "sess_refine_orphan"
+    await _seed_session(store, sid, created_at=100.0)
+    await _seed_refine_failed(
+        store, sid, recorded_at=120.0, attempt_id="att-nope", failure_kind="llm_error",
+    )
+    records = await _list(sid, store, _StubDrifts({}))
+    assert [r for r in records if r.source == "refine"] == []
+
+
+async def test_refine_multiple_attempts_same_drift_each_own_row(store):
+    """Two attempts on the same drift each surface their own refine row."""
+    sid = "sess_refine_multi"
+    await _seed_session(store, sid, created_at=100.0)
+    for i, aid in enumerate(("att-a", "att-b")):
+        await _seed_refine_attempted(
+            store, sid, recorded_at=120.0 + i, attempt_id=aid, drift_id="drift-x",
+            trigger_kind="off_topic", trigger_severity="warning",
+        )
+    records = await _list(sid, store, _StubDrifts({}))
+    refines = [r for r in records if r.source == "refine"]
+    assert len(refines) == 2
+    assert {r.attempt_id for r in refines} == {"att-a", "att-b"}
+
+
+async def test_cancel_default_body_when_detail_empty(store):
+    """A cancel with no detail gets the '(reason → drift_kind)' directive."""
+    sid = "sess_cancel_body"
+    await _seed_session(store, sid, created_at=100.0)
+    await _seed_cancel(
+        store, sid, recorded_at=120.0, invocation_id="inv-1", agent_name="a",
+        reason="drift", drift_kind="off_topic",
+    )
+    records = await _list(sid, store, _StubDrifts({}))
+    cancel = next(r for r in records if r.source == "cancel")
+    assert cancel.body_or_reason == "cancelled (drift → off_topic)"
+
+
+async def test_transition_supersedes_and_cancellation_surface(store):
+    """supersedes_reroute → COMPLETED and cancellation → CANCELLED both
+    surface; a PENDING transition is filtered."""
+    sid = "sess_trans_more"
+    await _seed_session(store, sid, created_at=100.0)
+    await _seed_transition(
+        store, sid, recorded_at=120.0, task_id="t1", from_status="running",
+        to_status="completed", source="supersedes_reroute",
+    )
+    await _seed_transition(
+        store, sid, recorded_at=121.0, task_id="t2", from_status="running",
+        to_status="cancelled", source="cancellation",
+    )
+    await _seed_transition(
+        store, sid, recorded_at=122.0, task_id="t3", from_status="blocked",
+        to_status="pending", source="llm_report",
+    )
+    records = await _list(sid, store, _StubDrifts({}))
+    trans = sorted((r for r in records if r.source == "transition"), key=lambda r: r.at)
+    assert [r.transition_to_status for r in trans] == ["COMPLETED", "CANCELLED"]
+    assert trans[1].severity == "warning"

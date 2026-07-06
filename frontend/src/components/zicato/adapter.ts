@@ -819,7 +819,7 @@ export function buildJudges(store: SessionStore, agents: ZAgent[]): ZJudges {
 }
 
 /**
- * ticks → intervention markers per agent. deriveInterventionsFromStore grouped
+ * ticks → intervention markers per agent. Server-derived rows grouped
  * by targetAgentId (fallback the goldfive lane), [atMs/1000, kind]. Fallback: no
  * interventions → {}.
  */

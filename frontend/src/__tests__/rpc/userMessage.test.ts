@@ -4,7 +4,6 @@ import { TimestampSchema } from '@bufbuild/protobuf/wkt';
 import { SessionStore } from '../../gantt/index';
 import { applyUserMessage } from '../../rpc/goldfiveEvent';
 import { UserMessageReceivedSchema } from '../../pb/harmonograf/v1/telemetry_pb';
-import { deriveInterventionsFromStore } from '../../lib/interventions';
 import { USER_ACTOR_ID } from '../../theme/agentColors';
 
 // Tests the WatchSession dispatch for the new UserMessageReceived oneof
@@ -132,41 +131,5 @@ describe('applyUserMessage', () => {
     applyUserMessage(pb, store, 0);
     applyUserMessage(pb, store, 0);
     expect(store.userMessages.list()).toHaveLength(1);
-  });
-
-  it('produces an intervention row with source=user', () => {
-    const store = new SessionStore();
-    applyUserMessage(
-      mkUserMessagePb({
-        emittedAtSecs: 100,
-        content: 'forget solar panels. tell me about solar flares.',
-      }),
-      store,
-      50_000,
-    );
-    const rows = deriveInterventionsFromStore(store, []);
-    const userRows = rows.filter((r) => r.source === 'user');
-    expect(userRows).toHaveLength(1);
-    expect(userRows[0].kind).toBe('USER_MESSAGE');
-    expect(userRows[0].bodyOrReason).toBe(
-      'forget solar panels. tell me about solar flares.',
-    );
-    expect(userRows[0].author).toBe('alice');
-  });
-
-  it('renders mid-turn rows with a distinct USER_MESSAGE_INTERJECTION kind', () => {
-    const store = new SessionStore();
-    applyUserMessage(
-      mkUserMessagePb({
-        emittedAtSecs: 100,
-        midTurn: true,
-        content: 'interject!',
-      }),
-      store,
-      50_000,
-    );
-    const rows = deriveInterventionsFromStore(store, []);
-    const r = rows.find((row) => row.source === 'user');
-    expect(r?.kind).toBe('USER_MESSAGE_INTERJECTION');
   });
 });
