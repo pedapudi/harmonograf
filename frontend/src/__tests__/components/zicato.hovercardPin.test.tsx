@@ -10,7 +10,7 @@ import {
   displayedSpanId,
   useHoverController,
   type HoveredSpan,
-} from '../../components/zicato/SpanHovercardZ';
+} from '../../components/zicato/hoverController';
 
 const mkRect = (): DOMRect =>
   ({

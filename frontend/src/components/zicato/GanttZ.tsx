@@ -183,16 +183,22 @@ export function GanttZ({
   // one notch and feels like it reverts to the widest view. We instead keep the
   // latest window in a ref and zoom from THAT each tick, so N events = N steps.
   const wheelCfgRef = useRef({ plotW, padL, W, dom, onViewChange });
-  wheelCfgRef.current = { plotW, padL, W, dom, onViewChange };
-  // The live (possibly mid-burst) window + the last window WE pushed. When the
-  // committed view changes for any other reason (+/- buttons, minimap brush,
-  // drag-pan), `eff` differs from what we applied → resync the accumulator.
+  // The live (possibly mid-burst) window + the last window WE pushed.
   const liveViewRef = useRef<GanttView>(eff);
   const appliedRef = useRef<GanttView>(eff);
-  if (eff !== appliedRef.current) {
-    liveViewRef.current = eff;
-    appliedRef.current = eff;
-  }
+  // Keep the latest render values in refs for the native wheel handler,
+  // which reads them at event time (after commit) — so writing them in an
+  // effect rather than during render keeps the render pure. When the
+  // committed view changes for any reason other than our own wheel handler
+  // (+/- buttons, minimap brush, drag-pan), `eff` differs from what we last
+  // applied → resync the accumulator.
+  useEffect(() => {
+    wheelCfgRef.current = { plotW, padL, W, dom, onViewChange };
+    if (eff !== appliedRef.current) {
+      liveViewRef.current = eff;
+      appliedRef.current = eff;
+    }
+  });
 
   // Attached as a NON-PASSIVE native listener (a React onWheel is passive in
   // React 19 → preventDefault would no-op + warn) so the page never scrolls

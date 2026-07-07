@@ -55,11 +55,8 @@ import { InstrumentsViewZ } from './InstrumentsViewZ';
 import { FloatingDrawerZ, SteeringDetailBodyZ } from './FloatingDrawerZ';
 import { SteerSelectContext } from './steerContext';
 import { SpanHoverContext } from './hoverContext';
-import {
-  SpanHovercardZ,
-  useHoverController,
-  displayedSpanId,
-} from './SpanHovercardZ';
+import { SpanHovercardZ } from './SpanHovercardZ';
+import { useHoverController, displayedSpanId } from './hoverController';
 
 // ── Theme picker data tables (ported from compose.html 99-123) ───────────────
 

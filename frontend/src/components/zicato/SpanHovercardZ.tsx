@@ -17,7 +17,7 @@
 // extraction, so the card shows real data — not the adapter's pre-derived ZSpan
 // (kept in sync via a subscription bump in the console).
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react';
+import { useState, type ReactElement } from 'react';
 import type { Span } from '../../gantt/types';
 import { bareAgentName } from '../../gantt/index';
 import { actorDisplayLabel } from '../../theme/agentColors';
@@ -58,18 +58,21 @@ const GAP = 8;
  * The hovercard body. Positioning is computed against the container rect so the
  * card is absolutely placed within .zk-app-body. We prefer ABOVE the bar; if
  * there isn't room we flip BELOW. Horizontal placement clamps inside the
- * container. A useLayoutEffect re-measures our own height after first paint so
+ * container. A callback ref re-measures our own height after first paint so
  * the above/below flip uses the real card height, not a guess.
  */
 export function SpanHovercardZ(props: SpanHovercardZProps): ReactElement {
   const { span, anchor, containerRect } = props;
-  const cardRef = useRef<HTMLDivElement | null>(null);
   const [cardH, setCardH] = useState(96);
 
-  useLayoutEffect(() => {
-    const h = cardRef.current?.offsetHeight;
-    if (h && h !== cardH) setCardH(h);
-  });
+  // Measure our own height via a callback ref (runs in the commit phase,
+  // after layout) so the above/below flip uses the real card height, not
+  // a guess. The height-change guard prevents a measure→setState→measure
+  // loop; the functional update keeps the ref callback free of a cardH dep.
+  const measureRef = (node: HTMLDivElement | null): void => {
+    const h = node?.offsetHeight;
+    if (h) setCardH((prev) => (h !== prev ? h : prev));
+  };
 
   // Anchor coords relative to the (position:relative) container.
   const relLeft = anchor.left - containerRect.left;
@@ -127,7 +130,7 @@ export function SpanHovercardZ(props: SpanHovercardZProps): ReactElement {
 
   return (
     <div
-      ref={cardRef}
+      ref={measureRef}
       className="zk-hovercard"
       data-testid="zk-hovercard"
       data-span={span.id}
@@ -174,69 +177,4 @@ export function SpanHovercardZ(props: SpanHovercardZProps): ReactElement {
       <div className="zk-hovercard-hint">click for full detail</div>
     </div>
   );
-}
-
-// ── the hover-state controller (used by the console) ─────────────────────────
-
-/** What the console tracks for the currently-hovered span. */
-export interface HoveredSpan {
-  spanId: string;
-  rect: DOMRect;
-}
-
-/**
- * The span whose hovercard should be shown, given the selection + hover state.
- *
- * A SELECTED span (the user clicked it → drawer open) PINS its hovercard: it
- * wins over the transient hover and stays put until deselected. With nothing
- * selected we fall back to the hovered span (the original transient behaviour),
- * or null when neither is set.
- *
- * Kept pure (no React) so the console's pin logic is unit-testable in isolation.
- */
-export function displayedSpanId(
-  selectedSpanId: string | null,
-  hovered: HoveredSpan | null,
-): string | null {
-  return selectedSpanId ?? hovered?.spanId ?? null;
-}
-
-/**
- * A tiny stateful hook the console uses to debounce hover enter/leave with a
- * grace delay so the card doesn't vanish the instant the pointer slides off a
- * thin (4px) bar. Enter is immediate; leave is delayed by ~120ms and can be
- * cancelled by a re-enter. Timers are cleared on unmount.
- */
-export function useHoverController(): {
-  hovered: HoveredSpan | null;
-  report: (spanId: string, rect: DOMRect) => void;
-  clear: () => void;
-} {
-  const [hovered, setHovered] = useState<HoveredSpan | null>(null);
-  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const cancelLeave = (): void => {
-    if (leaveTimer.current != null) {
-      clearTimeout(leaveTimer.current);
-      leaveTimer.current = null;
-    }
-  };
-
-  const report = (spanId: string, rect: DOMRect): void => {
-    cancelLeave();
-    setHovered({ spanId, rect });
-  };
-
-  const clear = (): void => {
-    cancelLeave();
-    leaveTimer.current = setTimeout(() => {
-      setHovered(null);
-      leaveTimer.current = null;
-    }, 120);
-  };
-
-  // Clean up the pending timer on unmount.
-  useEffect(() => cancelLeave, []);
-
-  return { hovered, report, clear };
 }
