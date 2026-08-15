@@ -49,6 +49,7 @@ _WEB_STARTUP_TIMEOUT_S = 10.0
 async def _web_is_healthy(host: str, port: int) -> bool:
     """Return once the HTTP listener can serve Harmonograf health checks."""
     connect_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
+    writer = None
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(connect_host, port), timeout=0.5
@@ -63,7 +64,7 @@ async def _web_is_healthy(host: str, port: int) -> bool:
     except (TimeoutError, OSError):
         return False
     finally:
-        if "writer" in locals():
+        if writer is not None:
             writer.close()
             try:
                 await writer.wait_closed()
@@ -78,11 +79,15 @@ async def _wait_for_web_ready(
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         if task.done():
-            await task
-            raise RuntimeError("web server exited during startup")
+            break
         if await _web_is_healthy(host, port):
             return
         await asyncio.sleep(0.05)
+    # A dead server task is the more informative failure, even when it died
+    # in the final poll window; `await task` re-raises its real exception.
+    if task.done():
+        await task
+        raise RuntimeError("web server exited during startup")
     raise TimeoutError(f"web listener did not become healthy within {timeout_s:g}s")
 
 
@@ -194,6 +199,9 @@ class Harmonograf:
             self.servicer, self._grpc_server
         )
         grpc_bind = f"{self.cfg.host}:{self.cfg.grpc_port}"
+        # add_insecure_port raises RuntimeError when the bind fails (grpcio
+        # validates the core's port result); test_bootstrap relies on that to
+        # keep "started" implying a live native listener.
         self._grpc_server.add_insecure_port(grpc_bind)
         await self._grpc_server.start()
         logger.info("gRPC listening on %s", grpc_bind)

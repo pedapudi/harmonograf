@@ -7,9 +7,12 @@ that as a header value to hypercorn, which explodes with
 `TypeError: string argument without an encoding` on every browser
 gRPC-Web preflight.
 
-This module patches the method in place. Import it before any other
-code imports sonora.asgi so the patched method is live by the time a
-grpcASGI instance handles a request.
+This module patches class and module attributes in place, so import
+order relative to ``sonora.asgi`` does not matter — existing references
+to the class and to ``sonora.protocol`` see the patched versions. The
+only requirement is that this module is imported before any request is
+served; ``harmonograf_server.main`` importing it at module scope
+guarantees that.
 """
 
 from __future__ import annotations

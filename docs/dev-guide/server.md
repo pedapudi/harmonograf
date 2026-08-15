@@ -49,7 +49,7 @@ root. The construction path:
 
 2. **`Harmonograf.start()`**
    - Register the servicer on the native gRPC listener at
-     `cfg.grpc_port` (default 7531, env `SERVER_PORT`).
+     `cfg.grpc_port` (default 7531, CLI `--port`).
    - Register the same servicer on the sonora ASGI app and serve it on
      `cfg.web_port` (default 7532) for gRPC-Web and HTTP.
    - Start background tasks: heartbeat sweeper (`rpc/telemetry.py:111`) and
@@ -74,10 +74,10 @@ immediately, without any cross-process hop.
 
 **Port convention reminder:**
 
-| Listener | Default port | Env | Used by |
+| Listener | Default port | CLI flag | Used by |
 |---|---|---|---|
-| Native gRPC | 7531 | `SERVER_PORT`, `HARMONOGRAF_SERVER` | Agents via `harmonograf-client` |
-| gRPC-Web + HTTP | 7532 | — | Browser console, Connect-RPC, health probes |
+| Native gRPC | 7531 | `--port` | Agents via `harmonograf-client` (clients locate it via `HARMONOGRAF_SERVER`) |
+| gRPC-Web + HTTP | 7532 | `--web-port` | Browser console, Connect-RPC, health probes |
 | Vite dev server | 5173 | — | Developer workflow only |
 
 The composition root and its two listeners:

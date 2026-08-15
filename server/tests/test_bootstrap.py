@@ -166,6 +166,46 @@ async def test_start_rolls_back_when_cancelled_during_web_startup(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_start_fails_and_rolls_back_when_grpc_port_is_taken():
+    """A taken gRPC port must fail start() (grpcio raises on bind failure)
+    and roll back — never report a "started" server with no native gRPC
+    listener. Guards the readiness contract against a grpcio regression to
+    the old return-0-on-failure behavior."""
+    grpc_port = _free_port()
+    cfg = ServerConfig(
+        host="127.0.0.1",
+        grpc_port=grpc_port,
+        web_port=_free_port(),
+        store_backend="memory",
+        data_dir="",
+        grace_seconds=0.2,
+        metrics_interval_seconds=0.0,
+    )
+    app = await Harmonograf.from_config(cfg)
+    store_closed = False
+    original_close = app.store.close
+
+    async def close_store():
+        nonlocal store_closed
+        store_closed = True
+        await original_close()
+
+    app.store.close = close_store
+
+    blocker = socket.socket()
+    try:
+        blocker.bind(("127.0.0.1", grpc_port))
+        blocker.listen(1)
+        with pytest.raises(RuntimeError, match="[Ff]ailed to bind"):
+            await app.start()
+    finally:
+        blocker.close()
+
+    assert store_closed
+    _assert_port_released(cfg.web_port)
+
+
+@pytest.mark.asyncio
 async def test_harmonograf_run_exits_on_request_stop():
     cfg = ServerConfig(
         host="127.0.0.1",
