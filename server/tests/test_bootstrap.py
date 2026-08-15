@@ -12,8 +12,8 @@ import asyncio
 import socket
 
 import grpc
+import harmonograf_server.main as main_module
 import pytest
-
 from harmonograf_server.config import ServerConfig
 from harmonograf_server.main import Harmonograf
 from harmonograf_server.pb import frontend_pb2, service_pb2_grpc
@@ -23,6 +23,12 @@ def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def _assert_port_released(port: int) -> None:
+    with socket.socket() as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("127.0.0.1", port))
 
 
 @pytest.mark.asyncio
@@ -97,6 +103,69 @@ async def test_harmonograf_stop_is_idempotent():
 
 
 @pytest.mark.asyncio
+async def test_start_rolls_back_when_web_never_becomes_ready(monkeypatch):
+    cfg = ServerConfig(
+        host="127.0.0.1",
+        grpc_port=_free_port(),
+        web_port=_free_port(),
+        store_backend="memory",
+        data_dir="",
+        grace_seconds=0.2,
+        metrics_interval_seconds=0.0,
+    )
+    app = await Harmonograf.from_config(cfg)
+    store_closed = False
+    original_close = app.store.close
+
+    async def close_store():
+        nonlocal store_closed
+        store_closed = True
+        await original_close()
+
+    async def never_ready(*_args, **_kwargs):
+        raise TimeoutError("synthetic web startup timeout")
+
+    monkeypatch.setattr(app.store, "close", close_store)
+    monkeypatch.setattr(main_module, "_wait_for_web_ready", never_ready)
+
+    with pytest.raises(TimeoutError, match="synthetic web startup timeout"):
+        await app.start()
+
+    assert store_closed
+    assert app._web_task is not None and app._web_task.done()
+    assert app._sweeper_task is not None and app._sweeper_task.done()
+    _assert_port_released(cfg.grpc_port)
+    _assert_port_released(cfg.web_port)
+
+
+@pytest.mark.asyncio
+async def test_start_rolls_back_when_cancelled_during_web_startup(monkeypatch):
+    cfg = ServerConfig(
+        host="127.0.0.1",
+        grpc_port=_free_port(),
+        web_port=_free_port(),
+        store_backend="memory",
+        data_dir="",
+        grace_seconds=0.2,
+        metrics_interval_seconds=0.0,
+    )
+    app = await Harmonograf.from_config(cfg)
+
+    async def cancelled(*_args, **_kwargs):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(main_module, "_wait_for_web_ready", cancelled)
+
+    with pytest.raises(asyncio.CancelledError):
+        await app.start()
+
+    assert app._web_task is not None and app._web_task.done()
+    assert app._sweeper_task is not None and app._sweeper_task.done()
+    _assert_port_released(cfg.grpc_port)
+    _assert_port_released(cfg.web_port)
+
+
+@pytest.mark.asyncio
 async def test_harmonograf_run_exits_on_request_stop():
     cfg = ServerConfig(
         host="127.0.0.1",
@@ -127,7 +196,16 @@ def test_cli_parser_defaults():
     assert cfg.store_backend == "sqlite"
 
     cfg2 = config_from_args(
-        ["--store", "memory", "--port", "9000", "--web-port", "9001", "--host", "0.0.0.0"]
+        [
+            "--store",
+            "memory",
+            "--port",
+            "9000",
+            "--web-port",
+            "9001",
+            "--host",
+            "0.0.0.0",
+        ]
     )
     assert cfg2.store_backend == "memory"
     assert cfg2.grpc_port == 9000
@@ -136,6 +214,7 @@ def test_cli_parser_defaults():
 
 
 # ---- harmonograf#102: server tunables on ServerConfig + CLI ----------
+
 
 def test_server_config_tunable_defaults_match_pre_refactor_module_constants():
     """Ship the same defaults the module-level constants had before the
