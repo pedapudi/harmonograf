@@ -281,7 +281,7 @@ The transport is gRPC-Web under the hood. It connects to
 
 | Hook | Purpose | RPC |
 |---|---|---|
-| `useSessions` | Poll `ListSessions` with a configurable interval | `ListSessions` (unary) |
+| `useSessions` | Poll `ListSessions` with exact metadata predicates and a configurable interval | `ListSessions` (unary) |
 | `useAgentLive` | Subscribe to an agent's heartbeat + activity deltas | Via `useSessionWatch` |
 | `useSessionWatch` | Stream session deltas, push into `SessionStore` | `WatchSession` (server-stream) |
 | `usePayload` | Lazy fetch a payload by digest | `GetPayload` (unary) |
@@ -296,6 +296,12 @@ Helper functions in the same file:
   renderer.
 
 Proto/frontend type conversion lives in `frontend/src/rpc/convert.ts`.
+
+`lib/sessionRoute.ts` owns both single-session deep links and generic filtered
+picker state. `SessionsSyncer` parses the latter and sends it to
+`ListSessions`; integration-specific interpretation stays outside
+Harmonograf. Do not add domain-specific routes for external schedulers or
+evaluation systems.
 
 RPC hook → store → renderer fan-out for the watch flow:
 

@@ -35,16 +35,25 @@ class SessionSummary(_message.Message):
     def __init__(self, id: _Optional[str] = ..., title: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., ended_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., status: _Optional[_Union[_types_pb2.SessionStatus, str]] = ..., agent_count: _Optional[int] = ..., attention_count: _Optional[int] = ..., last_activity: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class ListSessionsRequest(_message.Message):
-    __slots__ = ("status_filter", "search", "limit", "offset")
+    __slots__ = ("status_filter", "search", "limit", "offset", "metadata_filter")
+    class MetadataFilterEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     STATUS_FILTER_FIELD_NUMBER: _ClassVar[int]
     SEARCH_FIELD_NUMBER: _ClassVar[int]
     LIMIT_FIELD_NUMBER: _ClassVar[int]
     OFFSET_FIELD_NUMBER: _ClassVar[int]
+    METADATA_FILTER_FIELD_NUMBER: _ClassVar[int]
     status_filter: _types_pb2.SessionStatus
     search: str
     limit: int
     offset: int
-    def __init__(self, status_filter: _Optional[_Union[_types_pb2.SessionStatus, str]] = ..., search: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ...) -> None: ...
+    metadata_filter: _containers.ScalarMap[str, str]
+    def __init__(self, status_filter: _Optional[_Union[_types_pb2.SessionStatus, str]] = ..., search: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ..., metadata_filter: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class ListSessionsResponse(_message.Message):
     __slots__ = ("sessions", "total_count")

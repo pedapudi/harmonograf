@@ -191,6 +191,15 @@ class FrontendServicerMixin:
         request: frontend_pb2.ListSessionsRequest,
         context: grpc.aio.ServicerContext,
     ) -> frontend_pb2.ListSessionsResponse:
+        if len(request.metadata_filter) > 16 or any(
+            not key or len(key) > 128 or len(value) > 512
+            for key, value in request.metadata_filter.items()
+        ):
+            await context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "metadata_filter accepts at most 16 non-empty keys "
+                "(128 characters) and 512-character values",
+            )
         status = _pb_session_status(request.status_filter)
         all_sessions = await self._store.list_sessions(status=status, limit=None)
         if request.search:
@@ -198,7 +207,18 @@ class FrontendServicerMixin:
             all_sessions = [
                 s
                 for s in all_sessions
-                if needle in s.id.lower() or needle in (s.title or "").lower()
+                if needle in s.id.lower()
+                or needle in (s.title or "").lower()
+                or any(needle in value.lower() for value in s.metadata.values())
+            ]
+        if request.metadata_filter:
+            all_sessions = [
+                session
+                for session in all_sessions
+                if all(
+                    session.metadata.get(key) == value
+                    for key, value in request.metadata_filter.items()
+                )
             ]
         total = len(all_sessions)
         offset = request.offset or 0

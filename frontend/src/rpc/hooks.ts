@@ -22,6 +22,7 @@ import {
 import { useAnnotationStore } from '../state/annotationStore';
 import { packLanes } from '../gantt/layout';
 import type { ListSessionsResponse } from '../pb/harmonograf/v1/frontend_pb.js';
+import type { SessionMetadataFilter } from '../lib/sessionRoute';
 import { SessionStatus as PbSessionStatus } from '../pb/harmonograf/v1/types_pb.js';
 import {
   applyGoldfiveEvent,
@@ -71,7 +72,14 @@ export interface SessionsState {
   error: string | null;
 }
 
-export function useSessions(pollIntervalMs = 5000): SessionsState {
+export function sessionListRequest(metadataFilter: SessionMetadataFilter) {
+  return { metadataFilter };
+}
+
+export function useSessions(
+  metadataFilter: SessionMetadataFilter = {},
+  pollIntervalMs = 5000,
+): SessionsState {
   const [state, setState] = useState<SessionsState>({
     sessions: [],
     loading: true,
@@ -85,7 +93,7 @@ export function useSessions(pollIntervalMs = 5000): SessionsState {
 
     const tick = async () => {
       try {
-        const resp = await client.listSessions({});
+        const resp = await client.listSessions(sessionListRequest(metadataFilter));
         if (cancelled) return;
         setState({ sessions: resp.sessions, loading: false, error: null });
       } catch (e) {
@@ -103,7 +111,7 @@ export function useSessions(pollIntervalMs = 5000): SessionsState {
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [pollIntervalMs]);
+  }, [metadataFilter, pollIntervalMs]);
 
   return state;
 }

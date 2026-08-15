@@ -34,6 +34,7 @@ message ListSessionsRequest {
   string search = 2;                // free text over title + metadata values
   int32 limit = 3;
   int32 offset = 4;
+  map<string, string> metadata_filter = 5; // exact predicates, ANDed
 }
 
 message ListSessionsResponse {
@@ -56,6 +57,9 @@ message SessionSummary {
 - `attention_count` drives the badge on the picker row.
 - `search` matches substrings in `Session.title` and the values of
   `Session.metadata`. Case-insensitive.
+- `metadata_filter` matches exact key/value pairs after the status and search
+  filters and before pagination. All predicates must match. Requests are
+  limited to 16 predicates, 128-character keys, and 512-character values.
 - `limit == 0` means "server default" (100 v0). Negative values → error.
 
 ## `WatchSession`

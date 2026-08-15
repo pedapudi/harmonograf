@@ -116,8 +116,9 @@ frontend-install:
 # force-include + static_site.py importlib.resources lookup).
 CONSOLE_DIR := $(ROOT)/server/harmonograf_server/_console
 
-# Build the frontend and stage it into the server package so the wheel ships
-# the UI. Run this before packaging the server (`uv build server`, etc.).
+# Build the frontend and refresh the checked-in server bundle. Commit the
+# result whenever frontend source changes so wheels and git-subdirectory
+# installs ship the same UI without requiring a JavaScript toolchain.
 # The server's static_site.py also auto-locates ../frontend/dist in a repo
 # checkout, so `make console` is only required for producing a distributable
 # wheel — local `make server-run` works without it.

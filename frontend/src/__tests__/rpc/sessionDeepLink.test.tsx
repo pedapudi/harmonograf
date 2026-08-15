@@ -10,7 +10,11 @@
 import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { sessionIdFromHash } from '../../lib/sessionRoute';
+import {
+  sessionIdFromHash,
+  sessionMetadataFilterFromHash,
+  sessionsHash,
+} from '../../lib/sessionRoute';
 import { useUiStore } from '../../state/uiStore';
 import { useSessionsStore } from '../../state/sessionsStore';
 import type { RpcSession } from '../../state/sessionsStore';
@@ -53,6 +57,19 @@ describe('sessionIdFromHash', () => {
     expect(sessionIdFromHash('#/stress')).toBeNull();
     expect(sessionIdFromHash('#/session/')).toBeNull();
     expect(sessionIdFromHash('')).toBeNull();
+  });
+});
+
+describe('session metadata filter route', () => {
+  it('round-trips exact generic metadata predicates', () => {
+    const filter = { 'workflow.id': 'nightly/42', region: 'us west' };
+    expect(sessionMetadataFilterFromHash(sessionsHash(filter))).toEqual(filter);
+  });
+
+  it('ignores unrelated query state and fails closed on invalid predicates', () => {
+    expect(sessionMetadataFilterFromHash('#/sessions?view=activity')).toEqual({});
+    expect(sessionMetadataFilterFromHash('#/sessions?metadata.=value')).toEqual({});
+    expect(sessionMetadataFilterFromHash('#/session/one')).toEqual({});
   });
 });
 
