@@ -72,12 +72,13 @@ export interface SessionsState {
   error: string | null;
 }
 
-export function sessionListRequest(metadataFilter: SessionMetadataFilter) {
-  return { metadataFilter };
-}
+// Stable default so omitting the filter never churns the effect deps below.
+// Callers passing a filter must likewise keep its identity stable across
+// renders (memoize it), or every render re-issues ListSessions.
+const NO_FILTER: SessionMetadataFilter = {};
 
 export function useSessions(
-  metadataFilter: SessionMetadataFilter = {},
+  metadataFilter: SessionMetadataFilter = NO_FILTER,
   pollIntervalMs = 5000,
 ): SessionsState {
   const [state, setState] = useState<SessionsState>({
@@ -93,7 +94,7 @@ export function useSessions(
 
     const tick = async () => {
       try {
-        const resp = await client.listSessions(sessionListRequest(metadataFilter));
+        const resp = await client.listSessions({ metadataFilter });
         if (cancelled) return;
         setState({ sessions: resp.sessions, loading: false, error: null });
       } catch (e) {

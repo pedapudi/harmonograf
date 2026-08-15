@@ -185,6 +185,8 @@ async def test_list_sessions_filters_exact_metadata_before_pagination(harness, s
 
     assert resp.total_count == 1
     assert [session.id for session in resp.sessions] == ["sess_meta_0"]
+
+
 async def test_list_sessions_searches_metadata_values(harness, stub):
     store = harness["store"]
     await store.create_session(
@@ -211,6 +213,19 @@ async def test_list_sessions_rejects_oversized_metadata_filter(stub):
         )
 
     assert exc.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+async def test_list_sessions_rejects_malformed_metadata_predicates(stub):
+    for bad in (
+        {"k" * 129: "value"},  # key over 128 chars
+        {"key": "v" * 513},  # value over 512 chars
+        {"": "value"},  # empty key
+    ):
+        with pytest.raises(grpc.aio.AioRpcError) as exc:
+            await stub.ListSessions(
+                frontend_pb2.ListSessionsRequest(metadata_filter=bad)
+            )
+        assert exc.value.code() == grpc.StatusCode.INVALID_ARGUMENT
 
 
 # ---- WatchSession ---------------------------------------------------------

@@ -1,21 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { Shell } from './components/shell/Shell';
 import { StressPage } from './gantt/StressPage';
 import { ZicatoConsole } from './components/zicato/ZicatoConsole';
 import { useUiStore } from './state/uiStore';
 import { sessionIdFromHash } from './lib/sessionRoute';
-
-// Minimal hash router. The stress harness is dev-only and intentionally not
-// linked anywhere user-facing. Visit /#/stress to open it.
-function useHashRoute(): string {
-  const [hash, setHash] = useState(() => window.location.hash || '#/');
-  useEffect(() => {
-    const onHash = () => setHash(window.location.hash || '#/');
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
-  }, []);
-  return hash;
-}
+import { useHashRoute } from './lib/useHashRoute';
 
 // Reads a `#/session/<id>` deep link and selects that session in the UI store.
 // Applies each distinct deep-link target exactly once — on the initial hash and
@@ -46,7 +35,9 @@ export default function App() {
   const hash = useHashRoute();
   useSessionDeepLink(hash); // keep ABOVE the branch — deep links select in both consoles
   const uiMode = useUiStore((s) => s.uiMode);
-  if (hash.startsWith('#/stress')) return <StressPage />; // dev route unaffected
+  // The stress harness is dev-only and intentionally not linked anywhere
+  // user-facing. Visit /#/stress to open it.
+  if (hash.startsWith('#/stress')) return <StressPage />;
   if (uiMode === 'zicato') return <ZicatoConsole />;
   return <Shell />;
 }

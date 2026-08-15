@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useSessions } from './hooks';
 import { useSessionsStore, sessionCreatedAtMs } from '../state/sessionsStore';
 import { useUiStore } from '../state/uiStore';
 import { sessionMetadataFilterFromHash } from '../lib/sessionRoute';
+import { useHashRoute } from '../lib/useHashRoute';
 
 // Always-mounted background component. Owns the single polling
 // subscription to ListSessions, mirrors the result into sessionsStore
@@ -10,12 +11,7 @@ import { sessionMetadataFilterFromHash } from '../lib/sessionRoute';
 // poll, and auto-selects the newest session the first time the picker
 // has no selection.
 export function SessionsSyncer() {
-  const [hash, setHash] = useState(() => window.location.hash);
-  useEffect(() => {
-    const update = () => setHash(window.location.hash);
-    window.addEventListener('hashchange', update);
-    return () => window.removeEventListener('hashchange', update);
-  }, []);
+  const hash = useHashRoute();
   const metadataFilter = useMemo(() => sessionMetadataFilterFromHash(hash), [hash]);
   const { sessions, loading, error } = useSessions(metadataFilter);
   const setSessions = useSessionsStore((s) => s.setSessions);

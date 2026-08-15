@@ -24,7 +24,10 @@ export type SessionMetadataFilter = Record<string, string>;
 export function sessionMetadataFilterFromHash(hash: string): SessionMetadataFilter {
   const query = /^#?\/sessions\?(.+)$/.exec(hash)?.[1];
   if (!query) return {};
-  const result: SessionMetadataFilter = {};
+  // Null prototype so keys named after Object.prototype members
+  // ("constructor", "__proto__", …) are ordinary entries: `in` detects only
+  // real duplicates and assignment cannot reach the prototype chain.
+  const result: SessionMetadataFilter = Object.create(null);
   for (const [name, value] of new URLSearchParams(query)) {
     if (!name.startsWith('metadata.')) continue;
     const key = name.slice('metadata.'.length);

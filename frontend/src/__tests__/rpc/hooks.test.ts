@@ -3,14 +3,7 @@ import {
   getSessionStore,
   sessionIsInactive,
   INACTIVITY_COMPLETED_MS,
-  sessionListRequest,
 } from '../../rpc/hooks';
-
-it('threads exact metadata predicates into ListSessions', () => {
-  expect(sessionListRequest({ workflow: 'nightly', region: 'west' })).toEqual({
-    metadataFilter: { workflow: 'nightly', region: 'west' },
-  });
-});
 
 // Note: convertTaskPlan / convertTask / taskStatusFromInt are module-private
 // inside src/rpc/hooks.ts. Testing them directly would require a production

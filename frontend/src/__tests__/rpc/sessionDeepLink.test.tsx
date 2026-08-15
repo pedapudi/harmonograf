@@ -71,6 +71,12 @@ describe('session metadata filter route', () => {
     expect(sessionMetadataFilterFromHash('#/sessions?metadata.=value')).toEqual({});
     expect(sessionMetadataFilterFromHash('#/session/one')).toEqual({});
   });
+
+  it('treats keys named after Object.prototype members as ordinary predicates', () => {
+    // Computed key: a literal `__proto__:` would set the prototype instead.
+    const filter = { constructor: 'x', toString: 'y', ['__proto__']: 'z' };
+    expect(sessionMetadataFilterFromHash(sessionsHash(filter))).toEqual(filter);
+  });
 });
 
 describe('App #/session/<id> deep link', () => {
