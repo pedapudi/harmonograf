@@ -47,15 +47,26 @@ root. The construction path:
    - Build a `TelemetryServicer(ingest, router, store, bus, data_dir)` at
      `rpc/telemetry.py:29`.
 
-2. **`Harmonograf.start()`** at `main.py:107`
-   - Open the sqlite store (or no-op for memory).
+2. **`Harmonograf.start()`**
    - Register the servicer on the native gRPC listener at
-     `cfg.grpc_port` (default 7531, env `SERVER_PORT`).
+     `cfg.grpc_port` (default 7531, CLI `--port`).
    - Register the same servicer on the sonora ASGI app and serve it on
-     `cfg.web_port` (default 5174, env `FRONTEND_PORT`) for gRPC-Web.
+     `cfg.web_port` (default 7532) for gRPC-Web and HTTP.
    - Start background tasks: heartbeat sweeper (`rpc/telemetry.py:111`) and
      retention sweeper (`retention.py`).
-   - Wait for shutdown signal.
+   - Return after native gRPC is listening and `/healthz` answers over HTTP.
+
+3. **`Harmonograf.run()`**
+   - Call `start()` and wait for `request_stop()` or a process signal.
+   - Call `stop()` to drain listeners, cancel background tasks, and close
+     storage.
+
+`from_config()` opens the storage backend. From that point, the application
+owns the store until `stop()` completes. `start()` is transactional: an error
+or cancellation while either listener starts calls `stop()` before propagating
+the original exception. Embedders can therefore treat a successful return as
+the readiness boundary. They do not need their own port polling or cleanup for
+partially started listeners.
 
 The two listeners share one `TelemetryServicer` instance — so a session
 opened by an agent (native gRPC) is visible to a browser (gRPC-Web)
@@ -63,10 +74,10 @@ immediately, without any cross-process hop.
 
 **Port convention reminder:**
 
-| Listener | Default port | Env | Used by |
+| Listener | Default port | CLI flag | Used by |
 |---|---|---|---|
-| Native gRPC | 7531 | `SERVER_PORT`, `HARMONOGRAF_SERVER` | Agents via `harmonograf-client` |
-| gRPC-Web (sonora) | 5174 | `FRONTEND_PORT` | Browser via Connect-RPC |
+| Native gRPC | 7531 | `--port` | Agents via `harmonograf-client` (clients locate it via `HARMONOGRAF_SERVER`) |
+| gRPC-Web + HTTP | 7532 | `--web-port` | Browser console, Connect-RPC, health probes |
 | Vite dev server | 5173 | — | Developer workflow only |
 
 The composition root and its two listeners:
