@@ -158,6 +158,61 @@ async def test_list_sessions_search_case_insensitive(harness, stub):
     assert {s.id for s in resp.sessions} == {"sess_x"}
 
 
+async def test_list_sessions_filters_exact_metadata_before_pagination(harness, stub):
+    store = harness["store"]
+    for index, metadata in enumerate(
+        (
+            {"job": "nightly", "region": "west"},
+            {"job": "nightly", "region": "east"},
+            {"job": "adhoc", "region": "west"},
+        )
+    ):
+        await store.create_session(
+            Session(
+                id=f"sess_meta_{index}",
+                title="",
+                created_at=float(index),
+                status=SessionStatus.LIVE,
+                metadata=metadata,
+            )
+        )
+
+    resp = await stub.ListSessions(
+        frontend_pb2.ListSessionsRequest(
+            metadata_filter={"job": "nightly", "region": "west"}, limit=1
+        )
+    )
+
+    assert resp.total_count == 1
+    assert [session.id for session in resp.sessions] == ["sess_meta_0"]
+async def test_list_sessions_searches_metadata_values(harness, stub):
+    store = harness["store"]
+    await store.create_session(
+        Session(
+            id="opaque",
+            title="unrelated",
+            created_at=1.0,
+            status=SessionStatus.LIVE,
+            metadata={"workflow": "Nightly Validation"},
+        )
+    )
+
+    resp = await stub.ListSessions(frontend_pb2.ListSessionsRequest(search="VALID"))
+
+    assert [session.id for session in resp.sessions] == ["opaque"]
+
+
+async def test_list_sessions_rejects_oversized_metadata_filter(stub):
+    with pytest.raises(grpc.aio.AioRpcError) as exc:
+        await stub.ListSessions(
+            frontend_pb2.ListSessionsRequest(
+                metadata_filter={f"key-{index}": "value" for index in range(17)}
+            )
+        )
+
+    assert exc.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
 # ---- WatchSession ---------------------------------------------------------
 
 

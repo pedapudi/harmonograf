@@ -15,3 +15,31 @@ export function sessionIdFromHash(hash: string): string | null {
     return raw;
   }
 }
+
+export type SessionMetadataFilter = Record<string, string>;
+
+// Parse generic exact metadata predicates from `#/sessions?metadata.<key>=<value>`.
+// URLSearchParams performs component decoding; malformed or oversized routes
+// fail closed to an empty filter.
+export function sessionMetadataFilterFromHash(hash: string): SessionMetadataFilter {
+  const query = /^#?\/sessions\?(.+)$/.exec(hash)?.[1];
+  if (!query) return {};
+  const result: SessionMetadataFilter = {};
+  for (const [name, value] of new URLSearchParams(query)) {
+    if (!name.startsWith('metadata.')) continue;
+    const key = name.slice('metadata.'.length);
+    if (!key || key in result || key.length > 128 || value.length > 512) return {};
+    result[key] = value;
+    if (Object.keys(result).length > 16) return {};
+  }
+  return result;
+}
+
+export function sessionsHash(filter: SessionMetadataFilter): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(filter).sort(([a], [b]) => a.localeCompare(b))) {
+    query.set(`metadata.${key}`, value);
+  }
+  const encoded = query.toString();
+  return encoded ? `#/sessions?${encoded}` : '#/';
+}

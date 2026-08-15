@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSessions } from './hooks';
 import { useSessionsStore, sessionCreatedAtMs } from '../state/sessionsStore';
 import { useUiStore } from '../state/uiStore';
+import { sessionMetadataFilterFromHash } from '../lib/sessionRoute';
 
 // Always-mounted background component. Owns the single polling
 // subscription to ListSessions, mirrors the result into sessionsStore
@@ -9,7 +10,14 @@ import { useUiStore } from '../state/uiStore';
 // poll, and auto-selects the newest session the first time the picker
 // has no selection.
 export function SessionsSyncer() {
-  const { sessions, loading, error } = useSessions();
+  const [hash, setHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const update = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', update);
+    return () => window.removeEventListener('hashchange', update);
+  }, []);
+  const metadataFilter = useMemo(() => sessionMetadataFilterFromHash(hash), [hash]);
+  const { sessions, loading, error } = useSessions(metadataFilter);
   const setSessions = useSessionsStore((s) => s.setSessions);
   const currentSessionId = useUiStore((s) => s.currentSessionId);
   const setCurrentSession = useUiStore((s) => s.setCurrentSession);
@@ -19,8 +27,11 @@ export function SessionsSyncer() {
   }, [sessions, error, loading, setSessions]);
 
   useEffect(() => {
-    if (currentSessionId) return;
     if (sessions.length === 0) return;
+    if (currentSessionId && Object.keys(metadataFilter).length === 0) return;
+    if (currentSessionId && sessions.some((session) => session.id === currentSessionId)) {
+      return;
+    }
     let newest = sessions[0];
     let newestMs = sessionCreatedAtMs(newest);
     for (const s of sessions) {
@@ -31,7 +42,7 @@ export function SessionsSyncer() {
       }
     }
     setCurrentSession(newest.id);
-  }, [sessions, currentSessionId, setCurrentSession]);
+  }, [sessions, currentSessionId, metadataFilter, setCurrentSession]);
 
   return null;
 }

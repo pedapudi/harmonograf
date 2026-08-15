@@ -81,6 +81,24 @@ Each row shows the title, agent count, session duration, relative last-activity
 timestamp, and — if any spans need attention — a red `N need attention` chip
 on the right. Click a row to pick it and close the modal.
 
+## Link to filtered navigation
+
+The ordinary picker can be initialized with exact session-metadata filters:
+
+```text
+/#/sessions?metadata.workflow.id=nightly-42&metadata.region=west
+```
+
+Keys and values use normal URL encoding. Every predicate must match; the
+viewer still opens one session at a time and all existing views retain their
+single-session time axis. This is useful for links from schedulers, test
+runners, deployment systems, and other integrations that stamp correlation
+labels when creating sessions. Harmonograf assigns no meaning to those keys.
+
+Session metadata should contain non-sensitive indexing labels. Put prompts,
+responses, and other potentially sensitive content in the normal payload
+channel rather than in URL-addressable labels.
+
 ## Attention badges
 
 The app bar's bell icon aggregates the attention count across every session

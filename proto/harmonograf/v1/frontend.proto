@@ -47,6 +47,8 @@ message ListSessionsRequest {
   string search = 2;
   int32 limit = 3;
   int32 offset = 4;
+  // Exact key/value predicates applied with AND semantics.
+  map<string, string> metadata_filter = 5;
 }
 
 message ListSessionsResponse {
