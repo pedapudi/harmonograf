@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   sessionIdFromHash,
-  sessionMetadataFilterFromHash,
+  sessionFilterRouteFromHash,
   sessionsHash,
 } from '../../lib/sessionRoute';
 import { useUiStore } from '../../state/uiStore';
@@ -62,20 +62,49 @@ describe('sessionIdFromHash', () => {
 
 describe('session metadata filter route', () => {
   it('round-trips exact generic metadata predicates', () => {
-    const filter = { 'workflow.id': 'nightly/42', region: 'us west' };
-    expect(sessionMetadataFilterFromHash(sessionsHash(filter))).toEqual(filter);
+    const predicates = [
+      { key: 'region', value: 'us west' },
+      { key: 'workflow.id', value: 'nightly/42' },
+    ];
+    expect(sessionFilterRouteFromHash(sessionsHash(predicates))).toEqual({
+      kind: 'valid',
+      predicates,
+    });
   });
 
-  it('ignores unrelated query state and fails closed on invalid predicates', () => {
-    expect(sessionMetadataFilterFromHash('#/sessions?view=activity')).toEqual({});
-    expect(sessionMetadataFilterFromHash('#/sessions?metadata.=value')).toEqual({});
-    expect(sessionMetadataFilterFromHash('#/session/one')).toEqual({});
+  it('is absent when the route carries no predicates', () => {
+    expect(sessionFilterRouteFromHash('#/sessions?view=activity')).toEqual({
+      kind: 'absent',
+    });
+    expect(sessionFilterRouteFromHash('#/session/one')).toEqual({ kind: 'absent' });
+    expect(sessionFilterRouteFromHash('#/')).toEqual({ kind: 'absent' });
+  });
+
+  it('is invalid (never absent) for malformed predicates', () => {
+    // "absent" would mean "list every session", so each malformed form must
+    // parse to the invalid state instead.
+    const invalidHashes = [
+      '#/sessions?metadata.=value', // empty key
+      '#/sessions?metadata.k=a&metadata.k=b', // duplicate key
+      `#/sessions?metadata.${'k'.repeat(129)}=v`, // oversized key
+      `#/sessions?metadata.k=${'v'.repeat(513)}`, // oversized value
+      `#/sessions?${Array.from({ length: 17 }, (_, i) => `metadata.k${i}=v`).join('&')}`,
+    ];
+    for (const hash of invalidHashes) {
+      expect(sessionFilterRouteFromHash(hash).kind, hash).toBe('invalid');
+    }
   });
 
   it('treats keys named after Object.prototype members as ordinary predicates', () => {
-    // Computed key: a literal `__proto__:` would set the prototype instead.
-    const filter = { constructor: 'x', toString: 'y', ['__proto__']: 'z' };
-    expect(sessionMetadataFilterFromHash(sessionsHash(filter))).toEqual(filter);
+    const predicates = [
+      { key: '__proto__', value: 'z' },
+      { key: 'constructor', value: 'x' },
+      { key: 'toString', value: 'y' },
+    ];
+    expect(sessionFilterRouteFromHash(sessionsHash(predicates))).toEqual({
+      kind: 'valid',
+      predicates,
+    });
   });
 });
 

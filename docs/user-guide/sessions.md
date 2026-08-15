@@ -91,7 +91,10 @@ The ordinary picker can be initialized with exact session-metadata filters:
 
 Keys and values use normal URL encoding. Every predicate must match; the
 viewer still opens one session at a time and all existing views retain their
-single-session time axis. This is useful for links from schedulers, test
+single-session time axis. A malformed filter link — an empty or duplicate
+key, a key over 128 characters, a value over 512 characters, or more than 16
+predicates — fails closed: the picker shows an empty list with an error
+instead of falling back to the unfiltered session list. This is useful for links from schedulers, test
 runners, deployment systems, and other integrations that stamp correlation
 labels when creating sessions. Harmonograf assigns no meaning to those keys.
 

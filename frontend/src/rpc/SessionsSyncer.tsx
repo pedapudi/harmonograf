@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { useSessions } from './hooks';
 import { useSessionsStore, sessionCreatedAtMs } from '../state/sessionsStore';
 import { useUiStore } from '../state/uiStore';
-import { sessionMetadataFilterFromHash } from '../lib/sessionRoute';
+import { sessionFilterRouteFromHash } from '../lib/sessionRoute';
 import { useHashRoute } from '../lib/useHashRoute';
 
 // Always-mounted background component. Owns the single polling
@@ -12,8 +12,8 @@ import { useHashRoute } from '../lib/useHashRoute';
 // has no selection.
 export function SessionsSyncer() {
   const hash = useHashRoute();
-  const metadataFilter = useMemo(() => sessionMetadataFilterFromHash(hash), [hash]);
-  const { sessions, loading, error } = useSessions(metadataFilter);
+  const filter = useMemo(() => sessionFilterRouteFromHash(hash), [hash]);
+  const { sessions, loading, error } = useSessions(filter);
   const setSessions = useSessionsStore((s) => s.setSessions);
   const currentSessionId = useUiStore((s) => s.currentSessionId);
   const setCurrentSession = useUiStore((s) => s.setCurrentSession);
@@ -23,8 +23,11 @@ export function SessionsSyncer() {
   }, [sessions, error, loading, setSessions]);
 
   useEffect(() => {
+    // An invalid filter failed closed in useSessions (empty list + error);
+    // never auto-select in that state.
+    if (filter.kind === 'invalid') return;
     if (sessions.length === 0) return;
-    if (currentSessionId && Object.keys(metadataFilter).length === 0) return;
+    if (currentSessionId && filter.kind === 'absent') return;
     if (currentSessionId && sessions.some((session) => session.id === currentSessionId)) {
       return;
     }
@@ -38,7 +41,7 @@ export function SessionsSyncer() {
       }
     }
     setCurrentSession(newest.id);
-  }, [sessions, currentSessionId, metadataFilter, setCurrentSession]);
+  }, [sessions, currentSessionId, filter, setCurrentSession]);
 
   return null;
 }

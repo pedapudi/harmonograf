@@ -298,8 +298,10 @@ Helper functions in the same file:
 Proto/frontend type conversion lives in `frontend/src/rpc/convert.ts`.
 
 `lib/sessionRoute.ts` owns both single-session deep links and generic filtered
-picker state. `SessionsSyncer` parses the latter and sends it to
-`ListSessions`; integration-specific interpretation stays outside
+picker state. The filter parser returns a discriminated
+`absent | valid | invalid` result; `SessionsSyncer` sends valid predicates to
+`ListSessions` and an invalid route fails closed (empty picker + error, no
+unfiltered request). Integration-specific interpretation stays outside
 Harmonograf. Do not add domain-specific routes for external schedulers or
 evaluation systems.
 

@@ -22,7 +22,7 @@ import {
 import { useAnnotationStore } from '../state/annotationStore';
 import { packLanes } from '../gantt/layout';
 import type { ListSessionsResponse } from '../pb/harmonograf/v1/frontend_pb.js';
-import type { SessionMetadataFilter } from '../lib/sessionRoute';
+import type { SessionFilterRoute } from '../lib/sessionRoute';
 import { SessionStatus as PbSessionStatus } from '../pb/harmonograf/v1/types_pb.js';
 import {
   applyGoldfiveEvent,
@@ -75,10 +75,13 @@ export interface SessionsState {
 // Stable default so omitting the filter never churns the effect deps below.
 // Callers passing a filter must likewise keep its identity stable across
 // renders (memoize it), or every render re-issues ListSessions.
-const NO_FILTER: SessionMetadataFilter = {};
+const NO_FILTER: SessionFilterRoute = { kind: 'absent' };
 
+// An `invalid` filter fails closed: the hook publishes an empty list plus an
+// error instead of issuing an unfiltered ListSessions, which would expose
+// every session.
 export function useSessions(
-  metadataFilter: SessionMetadataFilter = NO_FILTER,
+  filter: SessionFilterRoute = NO_FILTER,
   pollIntervalMs = 5000,
 ): SessionsState {
   const [state, setState] = useState<SessionsState>({
@@ -88,6 +91,22 @@ export function useSessions(
   });
 
   useEffect(() => {
+    if (filter.kind === 'invalid') {
+      const error = `invalid session filter link: ${filter.reason}`;
+      // Functional update returning the same reference when nothing changed:
+      // React then skips the re-render, so this effect stays quiescent even
+      // if a caller passes a fresh filter object every render.
+      setState((s) =>
+        s.error === error && !s.loading && s.sessions.length === 0
+          ? s
+          : { sessions: [], loading: false, error },
+      );
+      return;
+    }
+    const metadataFilter: Record<string, string> =
+      filter.kind === 'valid'
+        ? Object.fromEntries(filter.predicates.map((p) => [p.key, p.value]))
+        : {};
     let cancelled = false;
     let timer: number | null = null;
     const client = getHarmonografClient();
@@ -112,7 +131,7 @@ export function useSessions(
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [metadataFilter, pollIntervalMs]);
+  }, [filter, pollIntervalMs]);
 
   return state;
 }

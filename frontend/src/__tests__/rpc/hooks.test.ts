@@ -1,9 +1,33 @@
-import { describe, expect, it } from 'vitest';
+import { renderHook } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import {
   getSessionStore,
   sessionIsInactive,
+  useSessions,
   INACTIVITY_COMPLETED_MS,
 } from '../../rpc/hooks';
+
+const listSessions = vi.hoisted(() => vi.fn());
+vi.mock('../../rpc/client', () => ({
+  getHarmonografClient: () => ({ listSessions }),
+}));
+
+describe('useSessions with an invalid filter route', () => {
+  it('fails closed: no ListSessions request, empty list, error set', () => {
+    const invalid = {
+      kind: 'invalid',
+      reason: 'duplicate metadata key "k"',
+    } as const;
+    const { result, unmount } = renderHook(() => useSessions(invalid));
+    expect(listSessions).not.toHaveBeenCalled();
+    expect(result.current.sessions).toEqual([]);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBe(
+      'invalid session filter link: duplicate metadata key "k"',
+    );
+    unmount();
+  });
+});
 
 // Note: convertTaskPlan / convertTask / taskStatusFromInt are module-private
 // inside src/rpc/hooks.ts. Testing them directly would require a production
